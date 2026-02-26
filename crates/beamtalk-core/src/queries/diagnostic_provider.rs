@@ -224,23 +224,22 @@ mod tests {
     }
 
     #[test]
-    fn compute_diagnostics_emits_warning_for_captured_variable_mutation() {
-        // Test: count := 0. myBlock := [count := count + 1]
+    fn compute_diagnostics_no_warning_for_captured_variable_mutation_in_stored_block() {
+        // BT-856 (ADR 0041 Phase 3): Captured variable mutations in stored blocks are
+        // now supported via the Tier 2 stateful block protocol (BT-852). No warning needed.
         let source = "count := 0. myBlock := [count := count + 1]";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
 
         let diagnostics = compute_diagnostics(&module, parse_diags);
 
-        // Should have warning for captured variable mutation
-        let has_warning = diagnostics.iter().any(|d| {
-            d.message.contains("assignment to 'count'")
-                && d.message.contains("has no effect on outer scope")
-                && d.severity == crate::source_analysis::Severity::Warning
-        });
+        // Should NOT have a warning for captured variable mutation — Tier 2 handles it correctly
+        let has_stale_warning = diagnostics
+            .iter()
+            .any(|d| d.message.contains("has no effect on outer scope"));
         assert!(
-            has_warning,
-            "Expected captured variable mutation warning, got: {diagnostics:?}"
+            !has_stale_warning,
+            "Unexpected stale warning for captured variable mutation: {diagnostics:?}"
         );
     }
 

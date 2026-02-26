@@ -1,0 +1,162 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Beamtalk-native workspace API (BT-849 / ADR 0040 Phase 6).
+//
+// Tests that the Beamtalk-native message-send forms work correctly
+// alongside and as alternatives to the deprecated protocol ops and
+// REPL `:` shortcut commands.
+//
+// Native API:
+//   Workspace load: "path"   (replaces load-file protocol op / :load alias)
+//   Workspace classes         (replaces modules protocol op / :modules alias)
+//   Counter reload            (replaces reload protocol op / :reload alias)
+//   Beamtalk help: Class      (replaces docs protocol op / :help command)
+//   Beamtalk help: Class selector: #sel  (replaces docs with selector)
+//   Beamtalk version          (informational)
+//   Beamtalk allClasses       (class registry inspection)
+//   Beamtalk classNamed:      (class lookup by name)
+//   Beamtalk globals          (global namespace snapshot)
+
+// ===========================================================================
+// BEAMTALK VERSION
+// ===========================================================================
+
+// Beamtalk version returns a non-empty string
+v := (Beamtalk version) await
+// => _
+
+v isEmpty
+// => false
+
+// ===========================================================================
+// BEAMTALK ALLCLASSES
+// ===========================================================================
+
+// allClasses returns a list of class name symbols (atoms)
+classNames := (Beamtalk allClasses) await
+// => _
+
+// allClasses includes names of known stdlib classes
+classNames includes: #Integer
+// => true
+
+classNames includes: #String
+// => true
+
+classNames includes: #Actor
+// => true
+
+// ===========================================================================
+// BEAMTALK CLASSNAMED:
+// ===========================================================================
+
+// classNamed: returns the Integer class object
+(Beamtalk classNamed: #Integer) await
+// => Integer
+
+// classNamed: returns nil for unknown classes
+(Beamtalk classNamed: #NoSuchClassXyzzy) await
+// => nil
+
+// ===========================================================================
+// BEAMTALK GLOBALS
+// ===========================================================================
+
+// Beamtalk globals returns a Dictionary snapshot
+btGlobals := (Beamtalk globals) await
+// => _
+
+// globals includes core stdlib classes
+btGlobals includesKey: #Integer
+// => true
+
+btGlobals includesKey: #String
+// => true
+
+// ===========================================================================
+// BEAMTALK HELP: — native equivalent of :help / docs protocol op
+// ===========================================================================
+
+// Beamtalk help: returns documentation for a class
+helpText := (Beamtalk help: Integer) await
+// => _
+
+helpText isNil
+// => false
+
+// Beamtalk help:selector: returns documentation for a specific method
+methodHelpText := (Beamtalk help: Integer selector: #+) await
+// => _
+
+methodHelpText isNil
+// => false
+
+// help: and :help produce similar output (both show class header)
+// :help Integer also shows the class header
+:help Integer
+// => == Integer < Number ==_
+
+// ===========================================================================
+// WORKSPACE CLASSES — native equivalent of :modules / modules protocol op
+// ===========================================================================
+
+// Load a fixture class
+:load tests/e2e/fixtures/counter.bt
+// => _
+
+// Workspace classes includes the loaded Counter class
+wsClasses := (Workspace classes) await
+// => _
+
+wsClasses includes: Counter
+// => true
+
+// ===========================================================================
+// WORKSPACE LOAD: — native equivalent of :load / load-file protocol op
+// ===========================================================================
+
+// Load using native Workspace load: message send
+(Workspace load: "tests/e2e/fixtures/reload_counter.bt") await
+// => nil
+
+// After loading, the class is available and has a sourceFile
+ReloadCounter sourceFile
+// => tests/e2e/fixtures/reload_counter.bt
+
+// ===========================================================================
+// BEHAVIOUR RELOAD — native equivalent of :reload / reload protocol op
+// ===========================================================================
+
+// Spawn an actor before reload
+rc := ReloadCounter spawn
+// => #Actor<ReloadCounter,_>
+
+rc increment
+// => 1
+
+// Reload using native ClassName reload message send
+ReloadCounter reload
+// => ReloadCounter
+
+// Actor still works after reload
+rc increment
+// => 2
+
+// ===========================================================================
+// WORKSPACE GLOBALS — project namespace snapshot
+// ===========================================================================
+
+// Workspace globals includes Workspace, Beamtalk, Transcript
+wsGlobals := (Workspace globals) await
+// => _
+
+wsGlobals includesKey: #Workspace
+// => true
+
+wsGlobals includesKey: #Beamtalk
+// => true
+
+// Workspace globals also includes loaded user classes
+wsGlobals includesKey: #Counter
+// => true

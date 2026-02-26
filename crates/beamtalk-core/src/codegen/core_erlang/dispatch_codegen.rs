@@ -594,15 +594,22 @@ impl CoreErlangGenerator {
         }
         // BT-893: Instantiation selectors (new, new:, spawn, spawnWith:) must bypass
         // gen_server to avoid deadlock — route through class_self_new/class_self_spawn.
-        let class_name = self.class_name();
+        //
+        // BT-908: Use the process dictionary instead of hardcoded class name/module so that
+        // inherited class factory methods (e.g. `wrap:` from a parent) create an instance of
+        // the CALLING class, not the DEFINING class. The class gen_server process sets
+        // `beamtalk_class_name`, `beamtalk_class_module`, and `beamtalk_class_is_abstract` in
+        // its process dictionary during init (beamtalk_object_class:init/1). When a subclass
+        // inherits a factory method and invokes it, the subclass gen_server process is running,
+        // so the process dictionary reflects the subclass, not the parent.
         let module = self.module_name.clone();
         match selector_atom.as_str() {
             "new" | "new:" => {
                 let args_doc = self.capture_argument_list_doc(arguments)?;
                 let doc = docvec![
-                    Document::String(format!(
-                        "call 'beamtalk_class_instantiation':'class_self_new'('{class_name}', '{module}', ["
-                    )),
+                    "call 'beamtalk_class_instantiation':'class_self_new'(",
+                    "call 'erlang':'get'('beamtalk_class_name'), ",
+                    "call 'erlang':'get'('beamtalk_class_module'), [",
                     args_doc,
                     "])"
                 ];
@@ -611,9 +618,10 @@ impl CoreErlangGenerator {
             "spawn" | "spawnWith:" => {
                 let args_doc = self.capture_argument_list_doc(arguments)?;
                 let doc = docvec![
-                    Document::String(format!(
-                        "call 'beamtalk_class_instantiation':'class_self_spawn'('{class_name}', '{module}', ["
-                    )),
+                    "call 'beamtalk_class_instantiation':'class_self_spawn'(",
+                    "call 'erlang':'get'('beamtalk_class_name'), ",
+                    "call 'erlang':'get'('beamtalk_class_module'), ",
+                    "call 'erlang':'get'('beamtalk_class_is_abstract'), [",
                     args_doc,
                     "])"
                 ];

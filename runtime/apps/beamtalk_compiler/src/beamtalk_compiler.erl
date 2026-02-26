@@ -20,7 +20,7 @@
 -module(beamtalk_compiler).
 
 -export([
-    compile_expression/3,
+    compile_expression/3, compile_expression/4,
     compile/2,
     diagnostics/1,
     version/0,
@@ -44,6 +44,18 @@
     | {error, [binary()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars).
+
+%% @doc Compile a REPL expression with optional compilation options.
+%%
+%% Options:
+%%   class_superclass_index => #{binary() => binary()} — BT-907: cross-file superclass info
+-spec compile_expression(binary(), binary(), [binary()], map()) ->
+    {ok, binary(), [binary()]}
+    | {ok, class_definition, map()}
+    | {ok, method_definition, map()}
+    | {error, [binary()]}.
+compile_expression(Source, ModuleName, KnownVars, Options) ->
+    beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars, Options).
 
 %% @doc Compile a file/class definition.
 %%

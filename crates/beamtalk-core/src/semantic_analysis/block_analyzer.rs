@@ -83,22 +83,11 @@ impl Analyser {
                         ));
                     }
                 }
-                MutationKind::CapturedVariable { name } => {
-                    // Warning: Captured variable mutation in Stored blocks
-                    if matches!(context, BlockContext::Stored) {
-                        self.result.diagnostics.push(Diagnostic::warning(
-                            format!(
-                                "assignment to '{name}' has no effect on outer scope\n\
-                                 \n\
-                                 = help: closures capture variables by value\n\
-                                 = help: use control flow directly: `10 timesRepeat: [{name} := {name} + 1]`"
-                            ),
-                            mutation.span,
-                        ));
-                    }
-                }
-                MutationKind::LocalVariable { .. } => {
-                    // Local variable mutations are always allowed
+                MutationKind::CapturedVariable { .. } | MutationKind::LocalVariable { .. } => {
+                    // BT-856 (ADR 0041 Phase 3): Captured variable mutations in Stored/Passed
+                    // blocks are now supported via the Tier 2 stateful block protocol (BT-852).
+                    // State is threaded through StateAcc maps so mutations propagate correctly.
+                    // No diagnostic needed — this is valid and working behaviour.
                 }
             }
         }

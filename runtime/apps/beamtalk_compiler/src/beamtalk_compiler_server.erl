@@ -21,7 +21,7 @@
 %% Public API
 -export([
     start_link/0, start_link/1,
-    compile_expression/3,
+    compile_expression/3, compile_expression/4,
     compile/2,
     diagnostics/1,
     version/0,
@@ -65,7 +65,21 @@ start_link(Args) ->
     | {ok, method_definition, map()}
     | {error, [binary()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
-    gen_server:call(?MODULE, {compile_expression, Source, ModuleName, KnownVars}, 30000).
+    compile_expression(Source, ModuleName, KnownVars, #{}).
+
+%% @doc Compile a REPL expression with optional compilation options.
+%%
+%% Options:
+%%   class_superclass_index => #{binary() => binary()} — BT-907: cross-file superclass info
+-spec compile_expression(binary(), binary(), [binary()], map()) ->
+    {ok, binary(), [binary()]}
+    | {ok, class_definition, map()}
+    | {ok, method_definition, map()}
+    | {error, [binary()]}.
+compile_expression(Source, ModuleName, KnownVars, Options) ->
+    gen_server:call(
+        ?MODULE, {compile_expression, Source, ModuleName, KnownVars, Options}, 30000
+    ).
 
 %% @doc Compile a file/class definition.
 %% Options: #{path => binary(), stdlib_mode => boolean(), workspace_mode => boolean()}
@@ -117,9 +131,9 @@ init(_Args) ->
     Port = open_port(),
     {ok, #state{port = Port}}.
 
-handle_call({compile_expression, Source, ModuleName, KnownVars}, _From, State) ->
+handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From, State) ->
     Result = beamtalk_compiler_port:compile_expression(
-        State#state.port, Source, ModuleName, KnownVars
+        State#state.port, Source, ModuleName, KnownVars, Options
     ),
     {reply, Result, State};
 handle_call({compile, Source, Options}, _From, State) ->

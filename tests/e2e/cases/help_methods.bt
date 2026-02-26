@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Beamtalk help: and help:selector: methods (BT-847, ADR 0040 Phase 4).
+//
+// These tests require E2E because help: methods are on the BeamtalkInterface
+// singleton actor, accessible only through the Beamtalk workspace binding.
+// BUnit tests cannot access workspace bindings.
+
+// ===========================================================================
+// HELP: — CLASS-LEVEL DOCUMENTATION
+// ===========================================================================
+
+// help: with a class object returns formatted documentation
+helpResult := (Beamtalk help: Integer) await
+// => == Integer < Number ==_
+
+// Result is a non-empty string
+helpResult isEmpty
+// => false
+
+// Result includes "Instance methods:" section
+helpResult includesSubstring: "Instance methods:"
+// => true
+
+// ===========================================================================
+// HELP:SELECTOR: — METHOD-LEVEL DOCUMENTATION
+// ===========================================================================
+
+// help:selector: returns method documentation for a known method
+methodHelp := (Beamtalk help: Integer selector: #asString) await
+// => Integer >> asString_
+
+// Method help result is non-empty
+methodHelp isEmpty
+// => false
+
+// ===========================================================================
+// HELP: — ERROR: CLASS NOT FOUND
+// ===========================================================================
+
+// help: with unknown class name raises class_not_found error
+(Beamtalk help: #NoSuchClass) await
+// => ERROR: Class 'NoSuchClass' not found.
+
+// ===========================================================================
+// HELP:SELECTOR: — ERROR: METHOD NOT FOUND
+// ===========================================================================
+
+// help:selector: with unknown selector raises does_not_understand error
+(Beamtalk help: Integer selector: #noSuchMethod) await
+// => ERROR: does not understand noSuchMethod

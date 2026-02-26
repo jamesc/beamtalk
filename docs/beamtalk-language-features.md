@@ -695,32 +695,162 @@ Actor subclass: Counter
 
 ---
 
+## Workspace and Reflection API
+
+Beamtalk exposes workspace operations and system reflection as typed message sends
+(ADR 0040). Two singleton objects provide the primary interface:
+
+### `Beamtalk` — System reflection (BeamtalkInterface)
+
+Provides access to the class registry, documentation, and system namespace.
+Analogous to Pharo's `Smalltalk` image facade.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `version` | `String` | Beamtalk version string |
+| `allClasses` | `List` | All registered class names (symbols) |
+| `classNamed: #Name` | `Object` or `nil` | Look up a class by name |
+| `globals` | `Dictionary` | Snapshot of system namespace (class names → class objects) |
+| `help: aClass` | `String` | Class documentation: name, superclass, method signatures |
+| `help: aClass selector: #sel` | `String` | Documentation for a specific method |
+
+```beamtalk
+Beamtalk version
+// => "0.1.0"
+
+Beamtalk allClasses includes: #Integer
+// => true
+
+Beamtalk classNamed: #Counter
+// => Counter (or nil if not loaded)
+
+(Beamtalk globals) await at: #Integer
+// => Integer
+
+(Beamtalk help: Integer) await
+// => "== Integer < Number ==\n..."
+
+(Beamtalk help: Integer selector: #+) await
+// => "Integer >> +\n..."
+```
+
+### `Workspace` — Project operations (WorkspaceInterface)
+
+Provides file loading, testing, and actor introspection. Scoped to the running
+workspace. Analogous to Pharo's `Smalltalk` project facade.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `load: "path"` | `nil` or Error | Compile and load a `.bt` file or directory |
+| `classes` | `List` | All loaded user classes (those with a recorded source file) |
+| `testClasses` | `List` | Loaded classes that inherit from `TestCase` |
+| `globals` | `Dictionary` | Project namespace: singletons + loaded user classes |
+| `test` | `TestResult` | Run all loaded test classes |
+| `test: AClass` | `TestResult` | Run a specific test class |
+| `actors` | `List` | All live actors as object references |
+| `actorAt: pidStr` | `Object` or `nil` | Look up a live actor by pid string |
+| `actorsOf: AClass` | `List` | All live actors of the given class |
+| `bind: value as: #Name` | `Nil` | Register a value in the workspace namespace |
+| `unbind: #Name` | `Nil` | Remove a registered name from the namespace |
+
+```beamtalk
+(Workspace load: "examples/counter.bt") await
+// => nil  (Counter is now registered)
+
+(Workspace classes) await includes: Counter
+// => true
+
+(Workspace testClasses) await includes: CounterTest
+// => true
+
+(Workspace test: CounterTest) await failed
+// => 0  (all tests pass)
+
+(Workspace actors) await size
+// => 3  (number of live actors)
+```
+
+### Class-based reload via `Behaviour >> reload`
+
+Every class records the source file it was compiled from. You can reload a class
+directly via a message send — no file path needed:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `sourceFile` | `String` or `nil` | Path the class was compiled from; `nil` for stdlib/dynamic classes |
+| `reload` | `self` | Recompile from `sourceFile`, hot-swap BEAM module |
+
+```beamtalk
+Counter sourceFile
+// => "examples/counter.bt"
+
+Counter reload
+// => Counter  (recompiled and hot-swapped)
+
+Integer sourceFile
+// => nil  (stdlib built-in, no source file)
+
+Integer reload
+// => Error: Integer has no source file — stdlib classes cannot be reloaded
+```
+
+Hot-swap semantics follow BEAM conventions: live actors running the old code
+continue their current message; the next dispatch uses the new code.
+
+### REPL shortcuts (`:` commands) are thin wrappers
+
+The REPL `:` commands are convenience aliases that desugar to the native message sends:
+
+| REPL shortcut | Beamtalk native equivalent |
+|---------------|---------------------------|
+| `:load path` | `Workspace load: "path"` |
+| `:reload Counter` | `Counter reload` |
+| `:modules` | `Workspace classes` |
+| `:test` | `Workspace test` |
+| `:test CounterTest` | `Workspace test: CounterTest` |
+| `:help Counter` | `Beamtalk help: Counter` |
+| `:help Counter increment` | `Beamtalk help: Counter selector: #increment` |
+
+The native forms work from compiled code, scripts, and actor methods — not just
+the REPL.
+
+---
+
 ## Namespace and Class Visibility
 
 Beamtalk v0.1 uses a **flat global namespace** (ADR 0031). All classes are globally
 visible — no `import`, `export`, or namespace declaration is needed or available.
 
-### How `:load` works
+### How loading works
 
-When you use `:load path/to/file.bt` in the REPL:
+When you load a file — using `:load path/to/file.bt` or `Workspace load: "path/to/file.bt"`:
 
 1. The file is compiled to a BEAM module named `bt@class_name` (ADR 0016)
 2. The module's `on_load` hook registers each class with the class registry
-3. If a class with the same name already exists (from a previous `:load`), the new
+3. If a class with the same name already exists (from a previous load), the new
    definition **hot-reloads** the class — existing actors continue to run with the
    new code on their next message
+4. The class records its source file path for future `reload` calls
 
 ```beamtalk
+// Via : shortcut
 :load examples/counter.bt
 // => Loaded: Counter
+
+// Via native message send (works from compiled code too)
+(Workspace load: "examples/counter.bt") await
 
 c := Counter spawn
 c increment
 // => 1
 
-// Reloading the same file updates the class silently (same BEAM module)
-:load examples/counter.bt
-// => Loaded: Counter
+// Reload by class name (class-based, not file-based)
+Counter reload
+// => Counter
+
+// Or via : shortcut (desugars to Counter reload)
+:reload Counter
+// => Counter
 ```
 
 ### Class collision warnings
@@ -815,8 +945,8 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 | `await` | Block on future / `receive` |
 | Block | Erlang fun (closure) |
 | Image | Running node(s) |
-| Workspace | Connected REPL to live node |
-| Class browser | REPL introspection: `Beamtalk allClasses`, `:h Class` |
+| Workspace | Connected REPL to live node (`Workspace` singleton) |
+| Class browser | REPL introspection: `Beamtalk allClasses`, `Beamtalk help: Class` |
 
 ---
 
@@ -1124,18 +1254,19 @@ beamtalk test
 
 #### REPL Integration
 
-Run tests interactively from the REPL:
+Run tests interactively from the REPL using either `:` shortcuts or native message sends:
 
 ```text
 > :load stdlib/test/counter_test.bt
 Loaded CounterTest
 
-> CounterTest runAll
-Running 2 tests...
+> :test CounterTest
+Running 1 test class...
   ✓ testIncrement
   ✓ testMultipleIncrements
 2 passed, 0 failed
 
-> CounterTest run: #testIncrement
-  ✓ testIncrement
+// Equivalent native API — works from compiled code too:
+> (Workspace test: CounterTest) await failed
+// => 0
 ```

@@ -509,22 +509,14 @@ impl CoreErlangGenerator {
     ///
     /// - **Tier 2 (stateful):** blocks with captured variable mutations emit
     ///   `fun(Params..., StateAcc) -> {Result, NewStateAcc}`
-    /// - **Tier 1 (plain):** pure blocks (no captured mutations) emit
-    ///   `fun(Params...) -> Result` — zero overhead path unchanged
+    /// - **Plain fun:** pure blocks (no captured mutations) emit
+    ///   `fun(Params...) -> Result` — zero overhead for stateless blocks
     ///
     /// Captured mutations = variables written inside the block that were also
     /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
     /// Field writes (`self.x := ...`) and self-sends are handled separately:
     /// - Field writes are threaded via `gen_server` State at the method level (BT-860 for Tier 2).
     /// - Self-sends are pre-scanned via `generate_tier2_self_send_open` (BT-851).
-    ///
-    /// Tier 1 blocks handled by dedicated generators (whileTrue:, do:, collect:, etc.)
-    /// never reach this function — they call `generate_block_body()` directly.
-    /// BT-855: Returns the captured-mutation variables for a block (sorted for determinism).
-    ///
-    /// A "captured mutation" is a variable that is:
-    /// - Read from the outer scope before being locally defined (i.e., in `captured_reads`)
-    /// - Also written inside the block (i.e., in `local_writes`)
     ///
     /// Extracts a block literal from an expression, unwrapping parentheses.
     ///
@@ -569,7 +561,7 @@ impl CoreErlangGenerator {
             return self.generate_block_stateful(block, &captured_mutations);
         }
 
-        // Pure block: plain fun (Tier 1 optimization)
+        // Pure block: plain fun (no mutations to thread via Tier 2)
         self.push_scope();
 
         let mut param_parts: Vec<Document<'static>> = Vec::new();

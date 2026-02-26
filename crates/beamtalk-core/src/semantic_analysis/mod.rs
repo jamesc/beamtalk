@@ -101,22 +101,28 @@ pub struct BlockInfo {
     pub mutations: Vec<Mutation>,
 }
 
-/// Context in which a block is used.
+/// Context in which a block is used, routing between codegen tiers (ADR 0041).
+///
+/// - `ControlFlow` → **Tier 1** inline codegen (optimized pack/unpack)
+/// - `Stored` / `Passed` / `Other` / `Unknown` → **Tier 2** universal stateful protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BlockContext {
-    /// Block used as control flow (if/while condition).
+    /// Block in control flow position → **Tier 1** inline codegen.
+    /// Whitelisted selectors (whileTrue:, ifTrue:, do:, etc.) generate optimized
+    /// pack/unpack scaffolding directly.
     ControlFlow,
 
-    /// Block stored in a variable or field.
+    /// Block stored in a variable or field → **Tier 2** stateful protocol.
+    /// Captured variable mutations are threaded through `StateAcc` maps.
     Stored,
 
-    /// Block passed as argument to a message send.
+    /// Block passed as argument to a message send → **Tier 2** stateful protocol.
     Passed,
 
-    /// Other known context (e.g., immediate evaluation).
+    /// Other known context (e.g., immediate evaluation) → **Tier 2** by default.
     Other,
 
-    /// Context could not be determined.
+    /// Context could not be determined → **Tier 2** by default.
     Unknown,
 }
 
@@ -1432,8 +1438,11 @@ mod tests {
     }
 
     #[test]
-    fn test_captured_variable_mutation_in_stored_block_emits_warning() {
-        // Test: count := 0. myBlock := [count := count + 1] should emit warning
+    fn test_captured_variable_mutation_in_stored_block_no_warning() {
+        // BT-856 (ADR 0041 Phase 3): Captured variable mutations in stored blocks are
+        // now valid and supported via the Tier 2 stateful block protocol (BT-852).
+        // The old warning ("has no effect on outer scope") was incorrect — Tier 2
+        // threads state through StateAcc maps so mutations propagate correctly.
         let count_def = Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "count",
@@ -1479,17 +1488,12 @@ mod tests {
         let module = Module::new(vec![count_def, block_assignment], test_span());
         let result = analyse(&module);
 
-        // Should have 1 warning diagnostic for captured variable mutation
-        assert_eq!(result.diagnostics.len(), 1);
-        assert!(
-            result.diagnostics[0]
-                .message
-                .contains("assignment to 'count' has no effect on outer scope")
-        );
-        // Verify it's a warning, not an error
+        // Should have NO diagnostic — captured variable mutations in stored blocks are valid
         assert_eq!(
-            result.diagnostics[0].severity,
-            crate::source_analysis::Severity::Warning
+            result.diagnostics.len(),
+            0,
+            "Unexpected diagnostics: {:?}",
+            result.diagnostics
         );
     }
 

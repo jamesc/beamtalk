@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Coffee value-object subclass of Beverage for BT-908 fixture.
+// Exercises class method inheritance: `wrap:` is defined in Beverage
+// but should create a Coffee instance when called as `Coffee wrap:`.
+
+Beverage subclass: Coffee
+  state: flavor = "espresso"
+
+  flavor => self.flavor

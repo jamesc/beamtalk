@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for class method inheritance in file-compiled value-object subclasses (BT-908).
+//
+// Tests that `wrap:` — a class factory method defined in the parent class —
+// creates an instance of the CALLING class, not the DEFINING class.
+//
+// Root cause: BT-893 codegen for `self new:` in class methods hardcodes the
+// defining class name/module. When inherited by a subclass, this creates the
+// wrong type. Fix: use `erlang:get(beamtalk_class_name)` from the process
+// dictionary, which reflects the actual dispatching class.
+
+// @load tests/e2e/fixtures/beverage.bt
+// @load tests/e2e/fixtures/coffee.bt
+
+// ===========================================================================
+// BEVERAGE — DIRECT CLASS METHOD CALL (no inheritance)
+// ===========================================================================
+
+// Beverage wrap: creates a Beverage instance
+bev := Beverage wrap: "cold"
+// => _
+
+// The instance class must be Beverage, not Object
+bev class name
+// => Beverage
+
+// The value field is populated correctly
+bev value
+// => cold
+
+// ===========================================================================
+// COFFEE — INHERITED CLASS METHOD (wrap: from Beverage)
+// ===========================================================================
+
+// Coffee inherits wrap: from Beverage; must create a Coffee instance
+cof := Coffee wrap: "hot"
+// => _
+
+// Class must be Coffee, not Beverage (this was the bug: BT-893 codegen
+// hardcodes the defining class name, so Coffee wrap: returned a Beverage)
+cof class name
+// => Coffee
+
+// Inherited value field is accessible on the Coffee instance
+cof value
+// => hot
+
+// Coffee-specific flavor field has its default value
+cof flavor
+// => espresso

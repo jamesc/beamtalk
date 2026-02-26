@@ -3,28 +3,50 @@
 
 //! Block context detection for semantic analysis.
 //!
-//! This module determines the context in which blocks are used:
-//! - **`ControlFlow`**: Literal block in control flow position (whileTrue:, ifTrue:, etc.)
-//! - **`Stored`**: Block assigned to a variable
-//! - **`Passed`**: Block variable used as message argument
-//! - **`Other`**: Other known contexts
-//! - **`Unknown`**: Context could not be determined
+//! **DDD Context:** Semantic Analysis
+//!
+//! This module classifies blocks into contexts that route between codegen tiers
+//! (ADR 0041):
+//!
+//! - **`ControlFlow`** → **Tier 1** inline codegen (whileTrue:, ifTrue:, do:, etc.)
+//! - **`Stored`** → **Tier 2** stateful protocol (block assigned to a variable)
+//! - **`Passed`** → **Tier 2** stateful protocol (block variable as message argument)
+//! - **`Other`** → **Tier 2** (other known contexts)
+//! - **`Unknown`** → **Tier 2** (context could not be determined)
+//!
+//! The `is_control_flow_selector()` whitelist identifies Tier 1 optimization sites
+//! — it is not a correctness gate. New collection methods get Tier 2 state threading
+//! automatically without whitelist additions.
 
 use crate::ast::{Expression, MessageSelector};
 use crate::semantic_analysis::BlockContext;
 use crate::source_analysis::Span;
 
-/// Determines if a selector takes blocks for control flow.
+/// Identifies selectors that take literal blocks for Tier 1 inline codegen.
 ///
-/// Returns true if the argument at the given index is expected to be a
-/// literal block for control flow purposes.
+/// This function is a **Tier 1 optimization hint**, not a correctness gate.
+/// It identifies call sites where the compiler can generate optimized
+/// pack/unpack codegen (whileTrue:, do:, collect:, etc.) directly inline,
+/// bypassing the universal Tier 2 stateful block protocol.
+///
+/// After ADR 0041 Phase 3 (BT-856), state threading is universal — all blocks
+/// at unknown call sites use the Tier 2 protocol. The whitelist no longer
+/// determines *whether* state threading happens; it only identifies sites
+/// where Tier 1 optimized inline codegen is applicable.
+///
+/// New collection methods do NOT need to be added here to get state threading —
+/// they receive Tier 2 blocks automatically.
+///
+/// Returns true if the argument at the given index is a Tier 1 inline site
+/// (literal block for optimized control flow codegen).
 ///
 /// # Examples
 ///
 /// ```text
-/// is_control_flow_selector("whileTrue:", 0)  // true
-/// is_control_flow_selector("to:do:", 1)      // true
-/// is_control_flow_selector("at:put:", 0)     // false
+/// is_control_flow_selector("whileTrue:", 0)  // true  → Tier 1 inline codegen
+/// is_control_flow_selector("to:do:", 1)      // true  → Tier 1 inline codegen
+/// is_control_flow_selector("at:put:", 0)     // false → Tier 2 universal protocol
+/// is_control_flow_selector("myHOM:", 0)      // false → Tier 2 universal protocol
 /// ```
 pub(crate) fn is_control_flow_selector(selector: &str, arg_index: usize) -> bool {
     match selector {
@@ -73,8 +95,29 @@ pub(crate) fn selector_to_string(selector: &MessageSelector) -> String {
 
 /// Classifies the context of a block based on its position in the AST.
 ///
-/// This function determines whether a block is used for control flow, stored in
-/// a variable, passed as an argument, or used in some other context.
+/// This function routes blocks between **Tier 1** and **Tier 2** codegen:
+///
+/// - **`ControlFlow`** → **Tier 1** inline codegen (whileTrue:, do:, collect:,
+///   ifTrue:, etc.). The compiler generates optimized pack/unpack scaffolding
+///   directly. These blocks are compiled via `generate_block_body()` and never
+///   reach the universal Tier 2 path.
+///
+/// - **`Stored`** → **Tier 2** stateful protocol: blocks assigned to variables
+///   emit `fun(Args..., StateAcc) -> {Result, NewStateAcc}`. Captured variable
+///   mutations are threaded through `StateAcc` maps.
+///
+/// - **`Passed`** → **Tier 2** stateful protocol: block variables passed as
+///   arguments to message sends use the universal stateful calling convention.
+///
+/// - **`Other`** / **`Unknown`** → **Tier 2** by default; unknown sites use
+///   the universal protocol.
+///
+/// # ADR 0041 Phase 3 (BT-856)
+///
+/// After BT-852/BT-853, the Tier 2 protocol is universal. `classify_block()`
+/// is retained to route between Tier 1 (optimized inline) and Tier 2 (universal
+/// protocol) codegen. The whitelist (`is_control_flow_selector()`) is now an
+/// optimization hint — it identifies Tier 1 sites, not a correctness gate.
 ///
 /// # Key Distinctions
 ///
@@ -93,10 +136,10 @@ pub(crate) fn selector_to_string(selector: &MessageSelector) -> String {
 /// # Returns
 ///
 /// The `BlockContext` for this block:
-/// - `ControlFlow`: Literal block in control flow selector position
-/// - `Stored`: Block on RHS of assignment
-/// - `Passed`: Block variable passed as argument
-/// - `Other`: Valid context that doesn't match above (e.g., return value)
+/// - `ControlFlow`: Literal block in control flow selector position → Tier 1 codegen
+/// - `Stored`: Block on RHS of assignment → Tier 2 codegen
+/// - `Passed`: Block variable passed as argument → Tier 2 codegen
+/// - `Other`: Valid context that doesn't match above (e.g., return value) → Tier 2
 ///
 /// Note: `BlockContext::Unknown` is reserved for error recovery in the caller
 /// and is not returned by this function.
@@ -104,12 +147,17 @@ pub(crate) fn selector_to_string(selector: &MessageSelector) -> String {
 /// # Examples
 ///
 /// ```text
-/// // Control flow: literal block in whileTrue:
+/// // ControlFlow (Tier 1): literal block in whileTrue:
 /// // [x < 10] whileTrue: [x := x + 1]
-/// // The argument block [x := x + 1] is ControlFlow
+/// // The argument block [x := x + 1] → ControlFlow → Tier 1 inline codegen
 ///
-/// // Stored: block on RHS of assignment
-/// // myBlock := [x + 1]
+/// // Stored (Tier 2): block on RHS of assignment
+/// // myBlock := [count := count + 1]
+/// // → Stored → Tier 2: fun(StateAcc) -> {result, NewStateAcc}
+///
+/// // Passed (Tier 2): block variable as message argument
+/// // self myHOM: myBlock
+/// // → Passed → Tier 2 stateful calling convention
 /// ```
 #[allow(dead_code)] // Tested but not yet called from production code
 pub(crate) fn classify_block(

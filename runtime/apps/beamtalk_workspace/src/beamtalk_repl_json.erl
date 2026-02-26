@@ -404,7 +404,7 @@ format_error_message({class_not_found, ClassName}) ->
     iolist_to_binary([
         <<"Unknown class: ">>,
         NameBin,
-        <<". Use :modules to see loaded classes.">>
+        <<". Use Workspace classes or :modules to see loaded classes.">>
     ]);
 format_error_message({method_not_found, ClassName, Selector}) ->
     NameBin = to_binary(ClassName),
