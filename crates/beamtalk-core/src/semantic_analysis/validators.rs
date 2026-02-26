@@ -647,6 +647,7 @@ fn child_expressions(expr: &Expression) -> Vec<&Expression> {
             }
             children
         }
+        Expression::ArrayLiteral { elements, .. } => elements.iter().collect(),
         Expression::StringInterpolation { segments, .. } => segments
             .iter()
             .filter_map(|seg| {
@@ -891,6 +892,7 @@ mod tests {
     }
 
     /// `self.slot :=` nested inside a block within a Value subclass method is still an error.
+    /// `self.slot :=` nested inside a block within a Value subclass method is still an error.
     #[test]
     fn value_slot_assign_inside_block_is_error() {
         let src = "Value subclass: Point\n  state: x = 0\n  setX: v => [self.x := v] value";
@@ -905,6 +907,32 @@ mod tests {
             diagnostics.len(),
             1,
             "Expected 1 error for slot assignment inside block in value type, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+    }
+
+    /// Standalone method definition (`Point >> setX: v => self.x := v`) on a Value subclass
+    /// must be caught by the `module.method_definitions` path.
+    #[test]
+    fn value_standalone_method_slot_assign_is_error() {
+        // class declared separately; standalone method adds a mutating method to the value type
+        let src = "Value subclass: Point\n  state: x = 0\nPoint >> setX: v => self.x := v";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        assert_eq!(
+            module.method_definitions.len(),
+            1,
+            "Expected 1 standalone method definition"
+        );
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for standalone method slot assignment on value type, got: {diagnostics:?}"
         );
         assert_eq!(diagnostics[0].severity, Severity::Error);
     }
