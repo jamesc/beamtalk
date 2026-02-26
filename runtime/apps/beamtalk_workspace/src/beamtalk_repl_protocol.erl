@@ -35,6 +35,7 @@
     encode_inspect/2, encode_inspect/3,
     encode_docs/2,
     encode_describe/3,
+    encode_test_results/2,
     is_legacy/1,
     get_op/1,
     get_id/1,
@@ -456,6 +457,58 @@ encode_describe(Ops, Versions, Msg) ->
                 <<"status">> => [<<"done">>]
             })
     end.
+
+%% @doc Encode a test results response.
+%%
+%% Uses `["done", "test-error"]` status when any tests failed, `["done"]`
+%% otherwise. The `results` field contains a JSON map with `passed`,
+%% `failed`, `total`, `duration`, and `tests` keys.
+-spec encode_test_results(map(), protocol_msg()) -> binary().
+encode_test_results(
+    #{
+        '$beamtalk_class' := 'TestResult',
+        total := Total,
+        passed := Passed,
+        failed := Failed,
+        duration := Duration,
+        tests := Tests
+    },
+    Msg
+) ->
+    Status =
+        case Failed > 0 of
+            true -> [<<"done">>, <<"test-error">>];
+            false -> [<<"done">>]
+        end,
+    ResultMap = #{
+        <<"passed">> => Passed,
+        <<"failed">> => Failed,
+        <<"total">> => Total,
+        <<"duration">> => Duration,
+        <<"tests">> => [encode_test_entry(T) || T <- Tests]
+    },
+    Base = base_response(Msg),
+    jsx:encode(Base#{<<"status">> => Status, <<"results">> => ResultMap}).
+
+%% @private
+-spec encode_test_entry(map()) -> map().
+encode_test_entry(#{name := Name, status := pass}) ->
+    #{<<"name">> => atom_to_binary(Name, utf8), <<"status">> => <<"pass">>};
+encode_test_entry(#{name := Name, status := fail, error := Error}) ->
+    ErrorBin =
+        case is_binary(Error) of
+            true -> Error;
+            false -> iolist_to_binary(io_lib:format("~p", [Error]))
+        end,
+    #{
+        <<"name">> => atom_to_binary(Name, utf8),
+        <<"status">> => <<"fail">>,
+        <<"error">> => ErrorBin
+    };
+encode_test_entry(Entry) ->
+    %% Fallback for unexpected shapes
+    Name = maps:get(name, Entry, unknown),
+    #{<<"name">> => atom_to_binary(Name, utf8), <<"status">> => <<"unknown">>}.
 
 %%% Internal functions
 

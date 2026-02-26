@@ -153,12 +153,17 @@ pub fn save_workspace_metadata(metadata: &WorkspaceMetadata) -> Result<()> {
 }
 
 /// Generate a unique Erlang cookie for a workspace.
+///
+/// Uses URL-safe base64 (RFC 4648 §5) to avoid `+` and `/` characters,
+/// which Erlang's `-args_file` parser misinterprets as ERTS VM flags when
+/// they appear at the start of a token (e.g. `-setcookie +abc` treats `+abc`
+/// as an ERTS flag rather than the cookie value).
 pub fn generate_cookie() -> String {
     use rand::Rng;
     let mut rng = rand::rng();
     let mut bytes = vec![0u8; 24];
     rng.fill_bytes(&mut bytes);
-    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes)
+    base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE, &bytes)
 }
 
 /// Save workspace cookie with secure permissions (owner read/write only).
