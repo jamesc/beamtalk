@@ -634,18 +634,38 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
-        // Unpack captured-mutated vars from StateAcc
+        // Unpack captured-mutated vars from StateAcc.
+        // BT-909: Use maps:get/3 with the current outer value as fallback so the block
+        // remains callable even when StateAcc was not pre-seeded with the local state keys
+        // (e.g. when called through the runtime arity normalization wrapper).
         for var_name in captured_vars {
             let core_var = Self::to_core_erlang_var(var_name);
             let key = Self::local_state_key(var_name);
+            // Look up the outer binding BEFORE rebinding so the fallback refers to the
+            // value at block-definition time (not the newly introduced inner binding).
+            // If no outer binding exists (e.g. REPL mode where vars come from state dict),
+            // fall back to maps:get/2 (original behavior) to avoid referencing unbound vars.
+            let outer_binding = self.lookup_var(var_name).cloned();
             self.bind_var(var_name, &core_var);
-            docs.push(docvec![
-                "let ",
-                Document::String(core_var),
-                " = call 'maps':'get'('",
-                Document::String(key),
-                "', StateAcc) in "
-            ]);
+            if let Some(outer_var) = outer_binding {
+                docs.push(docvec![
+                    "let ",
+                    Document::String(core_var),
+                    " = call 'maps':'get'('",
+                    Document::String(key),
+                    "', StateAcc, ",
+                    Document::String(outer_var),
+                    ") in "
+                ]);
+            } else {
+                docs.push(docvec![
+                    "let ",
+                    Document::String(core_var),
+                    " = call 'maps':'get'('",
+                    Document::String(key),
+                    "', StateAcc) in "
+                ]);
+            }
         }
 
         // Generate body expressions with state threading
@@ -667,11 +687,10 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// %% For a stateful block: fun(X, StateAcc) -> {X + Count, StateAcc1}
-    /// let _BtBlock = fun(X, StateAcc) -> ... end in
+    /// let _BtBlock = fun(X, StateAcc) -> ... in
     /// fun(X) ->
-    ///     let {_WRes, _} = apply _BtBlock(X, CurrentState) in
-    ///     _WRes
-    /// end
+    ///     let _WT = apply _BtBlock(X, CurrentState) in
+    ///     let _WRes = call 'erlang':'element'(1, _WT) in _WRes
     /// ```
     ///
     /// The wrapper captures `CurrentState` from the enclosing scope so that reads of
@@ -679,7 +698,7 @@ impl CoreErlangGenerator {
     /// updated `StateAcc` is not propagated back to the Beamtalk caller.
     ///
     /// For **pure blocks** (no captured mutations), returns the plain Tier 1 block
-    /// `fun(Params...) -> Body end` unchanged and `is_stateful = false`.
+    /// `fun(Params...) -> Body` unchanged and `is_stateful = false`.
     ///
     /// For **stateful blocks** (captured mutations), returns the wrapper expression
     /// and `is_stateful = true`. Callers should emit a diagnostic warning because
@@ -791,14 +810,16 @@ impl CoreErlangGenerator {
         // let WStateAcc1 = call 'maps':'put'('__local__count', Count, WStateAcc0) in
         // ... (for each captured local)
         // fun(WArg1, ..., WArgN) ->
-        //     let _WTuple = apply _BtBlock(WArg1, ..., WArgN, WStateAccN) in
-        //     call 'erlang':'element'(1, _WTuple)
+        //     let _WT = apply _BtBlock(WArg1, ..., WArgN, WStateAccN) in
+        //     let _WRes = call 'erlang':'element'(1, _WT) in _WRes
         //
-        // Note 1: Core Erlang anonymous funs do NOT use `end` — the syntax is
-        //   `fun(Args) -> Body` with no closing keyword.
-        // Note 2: Core Erlang `let` only binds single variables — tuple destructuring
-        //   via `let {A, B} = ...` is not valid. Use erlang:element/2 instead.
-        let wrap_tuple = self.fresh_temp_var("WTuple");
+        // NOTE 1: `let {_WRes, _} = apply ...` is invalid Core Erlang inside a fun body
+        // (erlc rejects tuple patterns in let). Use element/2 extraction instead.
+        // NOTE 2: In Core Erlang, `fun (Params) -> Body` does NOT use `end` to
+        // terminate the fun — the Body expression ends the fun.
+
+        let wrap_tuple = self.fresh_temp_var("WT");
+        let wrap_result = self.fresh_temp_var("WRes");
         let wrapper_doc = docvec![
             "let ",
             Document::String(bt_block_var.clone()),
@@ -814,9 +835,12 @@ impl CoreErlangGenerator {
             Document::String(bt_block_var),
             " (",
             Document::Vec(apply_parts),
-            ") in call 'erlang':'element'(1, ",
+            ") in let ",
+            Document::String(wrap_result.clone()),
+            " = call 'erlang':'element'(1, ",
             Document::String(wrap_tuple),
-            ")",
+            ") in ",
+            Document::String(wrap_result),
         ];
 
         Ok((wrapper_doc, true))

@@ -4540,7 +4540,10 @@ fn test_bt855_generate_erlang_interop_wrapper_pure_returns_tier1() {
 fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
     // BT-855: generate_erlang_interop_wrapper on a stateful block returns (WrapperDoc, true).
     // The wrapper is:
-    //   let BtBlock = fun(X, StateAcc) -> ... in fun(X) -> let WTuple = apply BtBlock(X, State) in call 'erlang':'element'(1, WTuple)
+    //   let BtBlock = fun(X, StateAcc) -> ... in fun(X) ->
+    //       let _WT = apply BtBlock(X, State) in let WRes = call 'erlang':'element'(1, _WT) in WRes
+    // NOTE: `let {X, _} = apply ...` is invalid Core Erlang inside a fun body (erlc rejects
+    // tuple patterns in let). element/2 extraction is used instead.
     let mut generator = CoreErlangGenerator::new("test");
 
     // Stateful block: [:x | count := count + x]
@@ -4589,11 +4592,11 @@ fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
         output.contains("apply "),
         "Wrapper should apply the BtBlock. Got: {output}"
     );
-    // The wrapper should extract element 1 from the {Result, NewState} tuple via erlang:element/2
-    // (Core Erlang `let` only binds single variables; tuple destructuring uses erlang:element/2)
+    // The result is extracted via element/2 (not tuple-pattern let, which is invalid
+    // in Core Erlang inside a fun body).
     assert!(
-        output.contains("call 'erlang':'element'(1,"),
-        "Wrapper should extract result via erlang:element(1, ...). Got: {output}"
+        output.contains("'erlang':'element'(1,"),
+        "Wrapper should extract result via erlang:element/2. Got: {output}"
     );
     // The outer fun should NOT have StateAcc — it's a plain Erlang fun.
     // Find the last `in fun (` to locate the wrapper fun signature and confirm

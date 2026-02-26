@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-909: Actor that passes block variables (non-literal callables) to list ops.
+// This triggers the runtime arity normalization wrapper because the compiler
+// cannot statically determine the block's tier when it's referenced by identifier.
+
+Actor subclass: NonLiteralCallableActor
+
+  // collect: with a Tier-1 block stored in a variable
+  collectWithTier1Block =>
+    blk := [:x | x * 10].
+    #(1, 2, 3) collect: blk
+
+  // select: with a Tier-1 block stored in a variable
+  selectWithTier1Block =>
+    blk := [:x | x > 2].
+    #(1, 2, 3, 4, 5) select: blk
+
+  // do: with a Tier-2 (stateful) block stored in a variable.
+  // Mutations are silently dropped at the Erlang boundary (expected),
+  // but the call must not crash with badarity.
+  doWithTier2Block =>
+    total := 0.
+    blk := [:x | total := total + x].
+    #(1, 2, 3) do: blk.
+    "done"
