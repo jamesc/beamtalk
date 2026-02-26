@@ -167,7 +167,7 @@ handle_call({recent, []}, From, State) ->
     handle_call(recent, From, State);
 handle_call({clear, []}, From, State) ->
     handle_call(clear, From, State);
-handle_call({Selector, Args}, From, State) when is_atom(Selector) ->
+handle_call({Selector, Args}, From, State) when is_atom(Selector), is_list(Args) ->
     %% Unknown selector - try hierarchy walk for inherited methods (e.g. printString, class)
     SelfRef = State#state.self_ref,
     erlang:spawn(fun() ->
@@ -258,7 +258,7 @@ handle_cast({unsubscribe, Pid}, State) ->
     {noreply, remove_subscriber(Pid, State)};
 %% Actor protocol catch-all: try hierarchy walk for inherited methods
 handle_cast({Selector, Args, FuturePid}, State) when
-    is_pid(FuturePid), is_atom(Selector)
+    is_pid(FuturePid), is_atom(Selector), is_list(Args)
 ->
     SelfRef = State#state.self_ref,
     erlang:spawn(fun() ->

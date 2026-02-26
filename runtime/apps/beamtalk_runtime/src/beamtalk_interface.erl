@@ -194,7 +194,7 @@ handle_call({version, []}, _From, State) ->
     Version = State#beamtalk_interface_state.version,
     {reply, Version, State};
 %% Unknown selector - try hierarchy walk for inherited methods (e.g. printString, class, respondsTo:)
-handle_call({Selector, Args}, From, State) when is_atom(Selector) ->
+handle_call({Selector, Args}, From, State) when is_atom(Selector), is_list(Args) ->
     GenServerPid = self(),
     spawn(fun() ->
         Self = {beamtalk_object, 'BeamtalkInterface', ?MODULE, GenServerPid},
@@ -274,7 +274,7 @@ handle_cast({version, [], FuturePid}, State) when is_pid(FuturePid) ->
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
 handle_cast({Selector, Args, FuturePid}, State) when
-    is_pid(FuturePid), is_atom(Selector)
+    is_pid(FuturePid), is_atom(Selector), is_list(Args)
 ->
     %% Unknown selector - try hierarchy walk for inherited methods
     GenServerPid = self(),
