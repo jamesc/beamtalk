@@ -310,6 +310,8 @@ x := counter increment!           "COMPILER ERROR — cast has no return value"
 - Explicit `!` makes fire-and-forget semantics visible. No return value, no backpressure.
 - `!` echoes Erlang's `!` send operator, providing BEAM familiarity.
 
+**Deadlock avoidance:** Actor-to-actor synchronous calls (`.`) can deadlock if actor A calls actor B while B is calling A — both block waiting for a reply that can never arrive. This is the standard gen_server deadlock pattern. For actor-to-actor coordination, prefer `!` (fire-and-forget) by default. Use `.` only when the caller needs the reply and is not at risk of cyclic waits (e.g., a client calling a service, or an actor calling a stateless value computation). Self-sends within an actor method bypass gen_server entirely (direct dispatch), so they are always safe.
+
 ### Cascade Semantics: Pipelines for Value Objects
 
 Smalltalk cascades (`;`) send multiple messages to the same receiver. With immutable objects, the traditional cascade semantics are problematic — each message returns a new object, but the cascade discards intermediate results. `point withX: 5; withY: 10` under Smalltalk semantics sends both messages to the *original* `point`, losing the `withX:` result.
@@ -355,14 +357,14 @@ The type-dependency mirrors `;`'s existing behavior: even in Smalltalk, cascades
 
 #### Dynamic Receivers and Mid-Chain Type Changes
 
-For statically-known receivers, the compiler emits pipeline (value) or fan-out (actor) code directly. For dynamically-typed receivers (method parameters, collection elements), the generated code uses a runtime dispatch that checks `is_pid(Receiver)` at each cascade step:
+For statically-known receivers, the compiler emits pipeline (value) or fan-out (actor) code directly. For dynamically-typed receivers (method parameters, collection elements), the generated code checks `is_pid(Receiver)` **once at cascade entry** and selects either pipeline or fan-out for the entire chain:
 
-- **Pipeline step:** send message to the result of the previous step (value objects)
-- **Fan-out step:** send message to the original receiver (actors / pids)
+- **Pipeline (value receiver):** each message is sent to the result of the previous step
+- **Fan-out (actor/pid receiver):** all messages are sent to the original receiver
 
-If a pipeline cascade produces an actor at some step (e.g., `registry at: #counter` returns a pid), subsequent messages in the cascade are sent to that actor via gen_server — this is just normal dispatch. Each cascade step resolves its receiver through the standard dispatch path, so the pipeline/fan-out distinction is a compile-time optimization, not a semantic divergence. The runtime behavior is: "send each message to the result of the previous one; if the result is a pid, the message send goes through gen_server."
+The check happens once because the receiver type is consistent within a cascade — a value object cascade produces values, an actor cascade operates on the same pid. Mid-chain type changes (e.g., a value method returning an actor) would be unusual and are not supported within a single cascade; use explicit chaining with `.` for cross-type sequences.
 
-**Why fan-out is required for actors:** Actor cascade steps cannot use pipeline semantics because `gen_server:call` returns the method's reply value (e.g., the new state map), not the actor's pid. Pipeline on `counter increment; getValue` would send `getValue` to the state map (a plain Erlang map), not to the counter actor. Fan-out ensures all messages reach the same pid. For dynamic receivers where the compiler cannot determine the type, the runtime checks `is_pid(Receiver)` once at the cascade entry point and branches accordingly.
+**Why fan-out is required for actors:** `gen_server:call` returns the method's reply value (e.g., the new state map), not the actor's pid. Pipeline on `counter increment; getValue` would send `getValue` to the state map (a plain Erlang map), not to the counter actor. Fan-out ensures all messages reach the same pid.
 
 ### REPL Semantics
 
