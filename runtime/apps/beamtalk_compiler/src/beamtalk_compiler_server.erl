@@ -3,7 +3,7 @@
 
 %% @doc Gen_server wrapping the compiler OTP Port (ADR 0022, Phase 1).
 %%
-%% DDD Context: Compilation (Anti-Corruption Layer)
+%%% **DDD Context:** Compilation (Anti-Corruption Layer)
 %%
 %% Owns the port process and serializes compilation requests. The supervisor
 %% restarts this server (and thus re-opens the port) on crashes.

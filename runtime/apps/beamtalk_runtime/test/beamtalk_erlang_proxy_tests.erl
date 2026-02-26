@@ -3,7 +3,7 @@
 
 %% @doc Unit tests for beamtalk_erlang_proxy module (BT-676).
 %%
-%% **DDD Context:** Runtime — BEAM Interop
+%%% **DDD Context:** Runtime — BEAM Interop
 %%
 %% Tests ErlangModule proxy dispatch, Erlang class-side proxy,
 %% error wrapping, and printString formatting.

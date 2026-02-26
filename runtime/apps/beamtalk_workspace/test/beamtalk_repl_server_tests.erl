@@ -1,6 +1,6 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
-%% **DDD Context:** Language Service
+%%% **DDD Context:** REPL
 
 %%% @doc Unit tests for beamtalk_repl_server module
 %%%

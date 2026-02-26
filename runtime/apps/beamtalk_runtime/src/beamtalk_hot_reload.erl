@@ -3,7 +3,7 @@
 
 %% @doc Hot reload domain service for state migration during code upgrades.
 %%
-%% **DDD Context:** Hot Reload Context
+%%% **DDD Context:** Hot Reload Context
 %%
 %% This domain service implements the StateMigrator pattern from the DDD model.
 %% It centralizes code_change/3 logic for OTP hot code upgrade, providing a

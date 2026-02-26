@@ -13,7 +13,7 @@
 %% where ErlangArray is an opaque Erlang array record created by the
 %% `array` module.
 %%
-%% **DDD Context:** Runtime Context — Domain Service
+%%% **DDD Context:** Runtime Context — Domain Service
 -module(beamtalk_array_ops).
 
 -export([

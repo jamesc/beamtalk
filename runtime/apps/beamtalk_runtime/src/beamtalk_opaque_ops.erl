@@ -1,10 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
-%% **DDD Context:** Runtime
+%%% **DDD Context:** Runtime
 
 %% @doc Formatting helpers for opaque BEAM types (Pid, Port, Reference).
 %%
-%% **DDD Context:** Runtime
+%%% **DDD Context:** Runtime
 %%
 %% These types are opaque Erlang values with no direct binary conversion
 %% BIF. We use `erlang:pid_to_list/1` etc. and convert to binary with

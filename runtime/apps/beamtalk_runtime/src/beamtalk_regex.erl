@@ -3,7 +3,7 @@
 
 %%% @doc Regex class implementation — regular expressions via Erlang re module.
 %%%
-%% **DDD Context:** Runtime Context
+%%% **DDD Context:** Runtime Context
 %%%
 %%% Provides class-side constructors for compiling patterns and instance
 %%% methods for inspection. String-side regex operations (matchesRegex:,

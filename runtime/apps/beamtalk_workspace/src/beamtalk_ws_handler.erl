@@ -3,7 +3,7 @@
 
 %%% @doc WebSocket handler for Beamtalk REPL protocol (ADR 0020).
 %%%
-%% **DDD Context:** REPL
+%%% **DDD Context:** REPL
 %%%
 %%% Handles WebSocket connections from CLI, browser, and MCP clients.
 %%% Implements cookie-based authentication on first message before

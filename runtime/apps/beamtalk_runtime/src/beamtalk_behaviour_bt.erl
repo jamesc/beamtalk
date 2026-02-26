@@ -3,7 +3,7 @@
 
 %%% @doc Bootstrap stub for the 'Behaviour' class (ADR 0032 Phase 2, BT-734).
 %%%
-%% **DDD Context:** Object System
+%%% **DDD Context:** Object System
 %%%
 %%% This module acts as a minimal placeholder for the 'Behaviour' class,
 %%% registered during bootstrap before compiled stdlib modules load.

@@ -3,7 +3,7 @@
 
 %%% @doc JSON formatting for REPL protocol responses.
 %%%
-%%% **DDD Context:** Language Service
+%%% **DDD Context:** REPL
 %%%
 %%% Pure formatting logic extracted from beamtalk_repl_server.
 %%% Converts Erlang terms to JSON-encodable values and builds

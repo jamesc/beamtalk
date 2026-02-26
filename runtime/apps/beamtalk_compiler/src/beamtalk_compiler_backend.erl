@@ -3,7 +3,7 @@
 
 %% @doc Backend dispatch for the Beamtalk compiler (ADR 0022, Phase 5).
 %%
-%% DDD Context: Compilation (Anti-Corruption Layer)
+%%% **DDD Context:** Compilation (Anti-Corruption Layer)
 %%
 %% Returns the compiler backend. Port is the sole backend (ADR 0022).
 
