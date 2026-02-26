@@ -306,8 +306,23 @@ handle_call(get_session_bindings, _From, State) ->
     GenServerPid = self(),
     UserBindings = State#workspace_interface_state.user_bindings,
     {reply, handle_session_bindings(GenServerPid, UserBindings), State};
-handle_call({'load:', [Path]}, _From, State) ->
-    {reply, handle_load(Path), State};
+handle_call({'load:', [Path]}, From, State) ->
+    %% load: compiles a file — spawn to avoid blocking the gen_server mailbox
+    spawn(fun() ->
+        try handle_load(Path) of
+            Result -> gen_server:reply(From, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("load: handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                gen_server:reply(
+                    From, {error, beamtalk_error:with_message(Err, <<"Internal error in load:">>)}
+                )
+        end
+    end),
+    {noreply, State};
 handle_call({test, []}, From, State) ->
     %% test may take a long time — spawn to avoid blocking
     spawn(fun() ->
@@ -457,12 +472,24 @@ handle_cast({'unbind:', [Name], FuturePid}, State) when is_pid(FuturePid) ->
             end
     end;
 handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
-    case handle_load(Path) of
-        {error, Err} ->
-            beamtalk_future:reject(FuturePid, Err);
-        Result ->
-            beamtalk_future:resolve(FuturePid, Result)
-    end,
+    %% load: compiles a file — spawn to avoid blocking the gen_server mailbox
+    spawn(fun() ->
+        try handle_load(Path) of
+            {error, Err} ->
+                beamtalk_future:reject(FuturePid, Err);
+            Result ->
+                beamtalk_future:resolve(FuturePid, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("load: cast handler crashed", #{
+                    class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                beamtalk_future:reject(
+                    FuturePid, beamtalk_error:with_message(Err, <<"Internal error in load:">>)
+                )
+        end
+    end),
     {noreply, State};
 handle_cast({test, [], FuturePid}, State) when is_pid(FuturePid) ->
     spawn(fun() ->
