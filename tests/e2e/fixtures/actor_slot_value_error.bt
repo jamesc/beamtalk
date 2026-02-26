@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-916: Fixture that triggers a semantic compile error:
+// self.slot := inside a value type (Value subclass) method is not allowed.
+
+Value subclass: ImmutablePoint
+  state: x = 0
+  state: y = 0
+
+  // This should be a compile error: value types are immutable
+  badSetX: newX =>
+    self.x := newX

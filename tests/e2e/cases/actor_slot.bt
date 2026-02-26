@@ -1,0 +1,88 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for self.slot := assignment in actor methods (BT-916).
+//
+// These tests require E2E because:
+// - The @load-error directive (for compile-time error checking) is a REPL
+//   testing feature — BUnit tests execute already-compiled code and cannot
+//   trigger compile-time errors on new source files.
+// - REPL interaction tests (spawn, send, await) verify the full lifecycle
+//   including actor creation and stateful message dispatch.
+//
+// Compile-time warning for withSlot: bypass is covered by Rust unit tests
+// in semantic_analysis/validators.rs (BT-914) since compiler warnings are
+// not currently surfaced through the REPL load response.
+
+// ===========================================================================
+// VALUE TYPE: self.slot := IS A COMPILE ERROR
+// ===========================================================================
+
+// Loading a value type with self.slot := produces a clear compile error
+// @load-error tests/e2e/fixtures/actor_slot_value_error.bt => Cannot assign to slot
+
+// ===========================================================================
+// ACTOR SLOT ASSIGNMENT — REPL INTERACTION
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Basic slot assignment and retrieval
+// ---------------------------------------------------------------------------
+
+// @load tests/e2e/fixtures/counter.bt
+
+c := Counter spawn
+// => #Actor<Counter,_>
+
+c increment
+// => 1
+
+c increment
+// => 2
+
+c getValue
+// => 2
+
+// ---------------------------------------------------------------------------
+// Slot assignment persists across multiple messages
+// ---------------------------------------------------------------------------
+
+c2 := Counter spawn
+// => #Actor<Counter,_>
+
+c2 increment
+// => 1
+
+c2 increment
+// => 2
+
+c2 increment
+// => 3
+
+c2 getValue
+// => 3
+
+// ---------------------------------------------------------------------------
+// Each actor has independent state
+// ---------------------------------------------------------------------------
+
+a1 := Counter spawn
+// => #Actor<Counter,_>
+
+a2 := Counter spawn
+// => #Actor<Counter,_>
+
+a1 increment
+// => 1
+
+a1 increment
+// => 2
+
+a2 increment
+// => 1
+
+a1 getValue
+// => 2
+
+a2 getValue
+// => 1
