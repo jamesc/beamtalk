@@ -354,7 +354,12 @@ handle_help(ClassArg) ->
                 undefined ->
                     {error, make_class_not_found_error(ClassName)};
                 ClassPid ->
-                    format_class_help(ClassName, ClassPid)
+                    try
+                        format_class_help(ClassName, ClassPid)
+                    catch
+                        exit:{noproc, _} -> {error, make_class_not_found_error(ClassName)};
+                        exit:{timeout, _} -> {error, make_class_not_found_error(ClassName)}
+                    end
             end
     end.
 
@@ -375,14 +380,20 @@ handle_help_selector(ClassArg, SelectorArg) ->
                         {error, Err} ->
                             {error, Err};
                         SelectorAtom ->
-                            case beamtalk_method_resolver:resolve(ClassPid, SelectorAtom) of
-                                nil ->
-                                    {error, make_method_not_found_error(ClassName, SelectorAtom)};
-                                MethodObj when is_map(MethodObj) ->
-                                    DefiningClass = find_defining_class(ClassPid, SelectorAtom),
-                                    format_method_help(
-                                        ClassName, SelectorAtom, DefiningClass, MethodObj
-                                    )
+                            try
+                                case beamtalk_method_resolver:resolve(ClassPid, SelectorAtom) of
+                                    nil ->
+                                        {error,
+                                            make_method_not_found_error(ClassName, SelectorAtom)};
+                                    MethodObj when is_map(MethodObj) ->
+                                        DefiningClass = find_defining_class(ClassPid, SelectorAtom),
+                                        format_method_help(
+                                            ClassName, SelectorAtom, DefiningClass, MethodObj
+                                        )
+                                end
+                            catch
+                                exit:{noproc, _} -> {error, make_class_not_found_error(ClassName)};
+                                exit:{timeout, _} -> {error, make_class_not_found_error(ClassName)}
                             end
                     end
             end
@@ -424,7 +435,13 @@ ensure_atom(B) when is_binary(B) ->
         binary_to_existing_atom(B, utf8)
     catch
         error:badarg ->
-            {error, make_class_not_found_error(B)}
+            Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+            Err1 = beamtalk_error:with_selector(Err0, 'help:selector:'),
+            Err2 = beamtalk_error:with_message(
+                Err1,
+                iolist_to_binary([<<"Unknown selector: ">>, B])
+            ),
+            {error, Err2}
     end.
 
 %% @private Format class-level help output.
