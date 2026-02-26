@@ -440,11 +440,11 @@ Supervision trees, hot code reloading, and distributed Erlang all assume immutab
 
 **Positive — Team onboarding from the BEAM ecosystem.**
 
-If hiring from the Erlang/Elixir pool — the natural talent pool for a BEAM language — immutability is not a learning curve, it's the *absence* of one. BEAM developers already think in accumulators, folds, and process state. `inject:into:` is `lists:foldl` with Smalltalk syntax. `collect:` is `lists:map`. They'd be more confused by mutable semantics on BEAM than by immutability — "wait, this variable changes? On BEAM? How?" Immutability makes BeamTalk a Smalltalk-syntax gateway into the BEAM for operators who already have BEAM teams, rather than a Smalltalk that happens to run on BEAM.
+If hiring from the Erlang/Elixir pool — the natural talent pool for a BEAM language — immutability is not a learning curve, it's the *absence* of one. BEAM developers already think in accumulators, folds, and process state. `inject:into:` is `lists:foldl` with Smalltalk syntax. `collect:` is `lists:map`. They'd be more confused by mutable semantics on BEAM than by immutability — "wait, this variable changes? On BEAM? How?" Immutability makes BeamTalk a Smalltalk-syntax gateway into the BEAM for operators who already have BEAM teams, rather than a Smalltalk that happens to run on BEAM. The addition of `self.slot :=` and variable rebinding gives these developers an ergonomic shorthand they can use or ignore — the functional model they know is still there underneath.
 
 **Concern — Team onboarding from outside the BEAM ecosystem.**
 
-If hiring from Python/Ruby/JS backgrounds, the accumulation pattern learning curve is real. `inject:into:` instead of `result := result + each` is unfamiliar. However, this is the same curve that Elixir successfully navigated — Elixir hired heavily from the Ruby community and those developers learned `Enum.reduce` without the language collapsing. The question is whether BeamTalk's target audience is "Smalltalk developers who want BEAM" or "BEAM developers who want Smalltalk syntax." For the latter — the more likely early adopter pool — immutability is a feature, not a tax.
+With local variable rebinding (ADR 0041) and `self.slot :=` for actors (this ADR), the onboarding curve is significantly reduced. Developers from Python/Ruby/JS can write `result := result + each` in blocks and `self.count := self count + 1` in actor methods — familiar imperative patterns that compile to functional state threading under the hood. The purely functional style (`inject:into:`, `with*:` copies) remains available and idiomatic, but is no longer the *only* way. This is a gentler on-ramp than Elixir offered — Elixir required learning `Enum.reduce` with no mutable escape hatch, and still succeeded in hiring from the Ruby community.
 
 **Concern — Error messages at the immutability boundary.**
 
@@ -452,7 +452,7 @@ When a developer tries `self x := 5` in a value type method, the error message m
 
 **Concern — Library ecosystem.**
 
-If BeamTalk libraries are written by people who understand the immutable model, they'll be clean and composable. But if the ecosystem is small and libraries are ported from mutable-Smalltalk patterns, the operator may encounter poorly-adapted code that works around immutability in awkward ways. The quality of the ecosystem matters more than the quality of the core language for production use.
+With `self.slot :=` for actors and `with*:` for values, library authors have clear idioms for both mutable and immutable patterns. The risk of "poorly-adapted mutable-Smalltalk ports" is reduced — actor libraries can use familiar assignment syntax, while value-type libraries naturally compose through functional copies. The remaining concern is consistency: will the ecosystem converge on idiomatic patterns, or will some libraries use `self.slot :=` where `with*:` chains would be cleaner (and vice versa)? Style guides and stdlib examples will matter more than language enforcement here.
 
 ## Steelman Analysis
 
