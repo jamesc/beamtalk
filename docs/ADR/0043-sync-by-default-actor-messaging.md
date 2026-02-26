@@ -15,7 +15,7 @@ c increment await.        "async_send → Future process → await → value"
 c getValue await.         "same: Future process spawned, then immediately awaited"
 ```
 
-Under the hood, `beamtalk_message_dispatch:send/3` unconditionally calls `beamtalk_actor:async_send/4`, which spawns a `beamtalk_future` process, sends the message via `gen_server:cast`, and returns a `{beamtalk_future, Pid}` tuple. The caller must then `await` the future to extract the result.
+Under the hood, `beamtalk_message_dispatch:send/3` routes regular actor instance sends through `beamtalk_actor:async_send/4`, which spawns a `beamtalk_future` process, sends the message via `gen_server:cast`, and returns a `{beamtalk_future, Pid}` tuple. The caller must then `await` the future to extract the result. (Class objects and Metaclass instances already route synchronously; only regular actor instances pay the async tax.)
 
 This design was motivated by Principle 7 ("Async Actors, Sync Primitives") in `beamtalk-principles.md`:
 
@@ -33,7 +33,7 @@ In practice, this principle has been steadily eroded:
 
 ### The Cost of Mandatory Async
 
-Every synchronous actor interaction (the 95%+ common case) pays for async infrastructure it doesn't use:
+Every synchronous actor interaction (the overwhelmingly common case — nearly every actor send in tests and examples is immediately awaited) pays for async infrastructure it doesn't use:
 
 | Step | gen_server:call (sync) | Current async path |
 |------|----------------------|-------------------|
@@ -126,7 +126,11 @@ Synchronous actor-to-actor calls can deadlock if actor A calls actor B while B i
 - **Self-sends are always safe.** They bypass gen_server entirely (direct dispatch).
 - **Client→service is always safe.** A stateless caller invoking a service actor cannot deadlock.
 
-**Detection:** gen_server:call has a configurable timeout (default 5000ms). A deadlocked call will crash with `{timeout, {gen_server, call, ...}}` after 5 seconds, producing a clear crash dump. This is the same behavior Erlang/Elixir developers encounter daily — it's a known pattern, not a novel risk.
+**Indirect cycles:** Deadlocks can also arise through indirect chains — actor A calls B, B calls C, and C calls A. These multi-party deadlocks are harder to detect because no single call site reveals the cycle. This is a genuine risk in non-trivial actor graphs and a well-known OTP engineering challenge. Static analysis (detecting call chains at compile time) could help but is deferred.
+
+**Detection:** gen_server:call has a configurable timeout (default 5000ms). A deadlocked call will crash with `{timeout, {gen_server, call, ...}}` after 5 seconds. The timeout message identifies the stuck call but not the cycle — diagnosing indirect deadlocks requires tracing tools (`dbg`, `recon`). This is the same debugging experience Erlang/Elixir developers encounter daily — it's a known pattern, not a novel risk.
+
+**Failure propagation:** Under the current async model, if an actor crashes during a cast, the Future watcher receives a DOWN signal and rejects the Future — the caller's process is isolated from the crash. Under `gen_server:call`, if the callee crashes while processing a synchronous call, the caller receives an `exit` signal by default. If the caller is not trapping exits, it will also crash, potentially cascading up the call chain. This is a material change to failure semantics compared to the current model. Callers that need crash isolation should either trap exits or use `!` (cast) for non-critical interactions. In practice, OTP supervisors already handle this pattern — a supervised actor that crashes causes its caller to crash, the supervisor restarts both, and the system recovers. This is the standard OTP failure model.
 
 ### Timeouts
 
@@ -173,7 +177,7 @@ gen_server:cast(Pid, Request)        %% Async — fire-and-forget
 Pid ! Message                        %% Raw async send
 ```
 
-`gen_server:call` is the standard OTP pattern for request-response. It's used far more frequently than `cast` in production Erlang code. Erlang makes the programmer choose explicitly; BeamTalk makes sync the default and async the opt-in, which matches the actual usage distribution.
+`gen_server:call` is the standard OTP pattern for request-response and the recommended default ("when in doubt, use a call" — it provides natural backpressure and prevents mailbox overflow). Erlang makes the programmer choose explicitly; BeamTalk makes sync the default and async the opt-in, which matches the actual usage distribution.
 
 **Adopted:** The gen_server:call/cast split as the underlying mechanism. BeamTalk's `.`/`!` maps directly to this well-proven OTP pattern.
 
@@ -205,13 +209,18 @@ BeamTalk's `.` for sync calls is directly faithful to Smalltalk semantics. Addin
 ### Akka/Scala — Tell vs Ask
 
 ```scala
+// Akka Classic:
 actor ! message           // "tell" — async fire-and-forget
 actor ? message           // "ask" — returns Future[T]
+
+// Akka Typed (current recommended API):
+actorRef ! message                                         // tell — fire-and-forget
+actorRef.ask(ref => MyRequest("hello", ref))(timeout)      // ask — returns Future[T]
 ```
 
-Akka defaults to async (`!` is "tell", the preferred pattern). Sync requires `?` ("ask") which returns a Future. Akka's philosophy is explicitly async-first.
+Akka defaults to async (`!` is "tell", the preferred pattern). Sync requires "ask" which returns a Future — in Classic Akka via `?`, in Typed Akka via the `.ask()` extension method. Akka's philosophy is explicitly async-first.
 
-**Insight:** Akka uses `!` for async (fire-and-forget), which aligns with BeamTalk's proposed `!` for cast. The symbol choice is consistent across both languages, even though the defaults are inverted (Akka defaults async; BeamTalk defaults sync).
+**Insight:** Akka uses `!` for async (fire-and-forget), which aligns with BeamTalk's proposed `!` for cast. The symbol choice is consistent across both systems, even though the defaults are inverted (Akka defaults async; BeamTalk defaults sync).
 
 ### Pony — Async-Only Cross-Actor
 
@@ -228,13 +237,24 @@ Pony enforces async for all cross-actor communication. `fun` is local-only; `be`
 ### Gleam — Typed Actor Messaging
 
 ```gleam
-actor.send(subject, message)                   // Async — fire-and-forget
-actor.call(subject, message, timeout_ms)       // Sync — waits for reply
+actor.send(subject, message)                                      // Async — fire-and-forget
+actor.call(subject, waiting: timeout_ms, sending: make_message)   // Sync — waits for reply
 ```
 
-Gleam provides both patterns with type safety — the `Subject` type ensures messages match the actor's expected type. Async (`send`) is the simpler function; sync (`call`) requires an explicit timeout.
+Gleam provides both patterns with type safety — the `Subject` type ensures messages match the actor's expected type. Async (`send`) is the simpler function; sync (`call`) requires an explicit timeout and a message constructor function (so the reply channel can be injected into the message type).
 
 **Adopted:** The validation that both sync and async patterns are needed on BEAM. Gleam's timeout parameter on `call` is worth considering as a future enhancement for BeamTalk.
+
+### OTP 25+ — gen_server:send_request
+
+```erlang
+ReqId = gen_server:send_request(Pid, Request),   %% Async — returns request ID
+Result = gen_server:receive_response(ReqId, Timeout), %% Collect result later
+```
+
+OTP 25 introduced `gen_server:send_request/2` as a lightweight async call that does not spawn a process. The caller sends a request and later collects the response via `receive_response/2`. This enables parallel sends without Future process overhead — the caller fires off N requests, then collects N responses.
+
+**Not adopted as the default** because BeamTalk's ergonomic goal is that the common case (sync request-response) should require zero ceremony. `send_request` is a strong candidate for the **explicit parallel-send mechanism** deferred to a future ADR — it avoids Future process overhead while providing the fan-out pattern. When BeamTalk adds parallel send syntax, `send_request` may be the underlying mechanism.
 
 ### Summary
 
@@ -243,7 +263,7 @@ Gleam provides both patterns with type safety — the `Subject` type ensures mes
 | Erlang | Explicit choice | `gen_server:call` | `gen_server:cast` / `!` | Direct mapping |
 | Elixir | Explicit choice | `GenServer.call` | `GenServer.cast` | Direct mapping |
 | Smalltalk | Sync | `.` | `[...] fork` | `.` = sync preserved |
-| Akka | Async | `?` (ask) | `!` (tell) | `!` = async shared |
+| Akka | Async | `?` / `.ask()` | `!` (tell) | `!` = async shared |
 | Pony | Async only | N/A (local only) | `be` | Different model |
 | Gleam | Explicit choice | `call()` | `send()` | Both patterns available |
 
@@ -307,7 +327,7 @@ BeamTalk's proposal sits at the intersection of Smalltalk (sync default, `.` ter
 
 ### Why Sync-by-Default Wins
 
-**Against the Status Quo:** The BEAM veteran's "honest design" argument is the strongest. But honesty cuts both ways — the current implementation is dishonest about its own cost. Every "async" send immediately synchronizes via `await`. The Future process is spawned and consumed in the same expression 95%+ of the time. The system is paying async overhead to deliver sync behavior. Making sync the default is more honest about what the code actually does.
+**Against the Status Quo:** The BEAM veteran's "honest design" argument is the strongest. But honesty cuts both ways — the current implementation is dishonest about its own cost. Every "async" send immediately synchronizes via `await`. The Future process is spawned and consumed in the same expression the vast majority of the time. The system is paying async overhead to deliver sync behavior. Making sync the default is more honest about what the code actually does.
 
 The language designer's "unique differentiator" argument is appealing but misidentifies the differentiator. BeamTalk's uniqueness is Smalltalk syntax on BEAM with live development — not "everything is async." Erlang and Elixir already own the "async-first BEAM language" space. BeamTalk's value proposition is bringing Smalltalk's interactive, message-passing model to BEAM, and Smalltalk messages are synchronous.
 
@@ -358,7 +378,7 @@ c call increment.         "explicit sync"
 c cast increment.         "explicit async"
 ```
 
-**Rejected because:** Violates Smalltalk syntax — messages don't have `call`/`cast` prefixes. The verbosity defeats the purpose of a message-passing language. The 95%+ case is sync; forcing explicit annotation for the common path is hostile to ergonomics. Erlang requires explicit `gen_server:call` vs `gen_server:cast`, which is appropriate for a systems language but too verbose for a Smalltalk-inspired language where messages should be lightweight.
+**Rejected because:** Violates Smalltalk syntax — messages don't have `call`/`cast` prefixes. The verbosity defeats the purpose of a message-passing language. The overwhelmingly common case is sync; forcing explicit annotation for the common path is hostile to ergonomics. Erlang requires explicit `gen_server:call` vs `gen_server:cast`, which is appropriate for a systems language but too verbose for a Smalltalk-inspired language where messages should be lightweight.
 
 ### Alternative 4: Method-Level Declaration (Pony-Style)
 
@@ -393,12 +413,14 @@ Actor subclass: Counter
 - **Breaking change.** All `foo await` patterns must be rewritten. Tests, examples, and user code are affected. The migration is mechanical but touches many files.
 - **Principle 7 reversal.** This explicitly reverses a stated design principle. The principle must be updated, and the reasons for the reversal documented (this ADR).
 - **Fixed timeout.** gen_server:call's 5000ms default is not configurable from BeamTalk syntax (initially). Production systems may need BEAM interop for custom timeouts until a first-class syntax is added.
+- **Exit propagation change.** Under the current async model, actor crashes are isolated — the Future watcher rejects the Future, and the caller's process is unaffected. Under `gen_server:call`, a callee crash propagates as an exit signal to the caller. This is the standard OTP failure model (supervisors handle restarts), but it is a material change from the current crash isolation behavior. Callers that need crash isolation must either trap exits or use `!` (cast).
 
 ### Neutral
 
 - **Future class remains.** `beamtalk_future.erl` and `Future.bt` continue to exist for explicit async patterns (forking blocks, parallel computation). They are no longer on the actor message-send hot path.
 - **`beamtalk_message_dispatch:send/3` routing changes.** The dispatch layer must route actor sends through `sync_send/3` instead of `async_send/4` for `.` sends, and through a new cast path for `!` sends.
-- **Self-send behavior unchanged.** Self-sends already bypass gen_server via direct dispatch. The `.`/`!` distinction doesn't affect self-sends — they're always direct calls.
+- **Self-send behavior unchanged.** Self-sends already bypass gen_server via direct dispatch. `self increment.` remains a direct call to `Module:safe_dispatch`. `self increment!` is also a direct call but the return value is discarded — this is syntactic sugar, not a gen_server:cast, since self-sends never go through gen_server.
+- **Cascade semantics deferred.** Cascade (`;`) interaction with `.` vs `!` is deferred to ADR 0044. Until then, cascades use the existing async path. The parser does not need to handle `actor msg1; msg2!` until ADR 0044 specifies cascade+bang semantics.
 
 ## Implementation
 
@@ -443,12 +465,15 @@ Actor subclass: Counter
 **Runtime (`beamtalk_actor.erl`):**
 - `sync_send/3` already exists and uses `gen_server:call` — verify it handles all edge cases (lifecycle methods, dead actors, timeouts)
 - Add `cast_send/3` or extend existing infrastructure for structured casts
+- **Wire format:** The current `handle_cast` expects `{Selector, Args, FuturePid}` (3-tuple). New `!` casts must use a different format — either `{cast, Selector, Args}` (tagged 3-tuple) or `{Selector, Args}` (2-tuple, matching `handle_call` format). The `handle_cast` clause must be updated to accept the new format. During migration, both old (Future-bearing) and new (fire-and-forget) cast formats must be accepted.
 
 **REPL (`beamtalk_repl_eval.erl`):**
 - `maybe_await_future/1` remains during migration
 - Once all send paths use sync, `maybe_await_future/1` becomes a no-op for actor sends (Futures only appear from explicit async code)
 
 ### Phase 3: Migration and Testing (L)
+
+**Note:** Phase 2 changes the default send path to synchronous. Existing `actor method await` patterns will still work during migration (the sync send returns a value directly; `await` on a non-Future passes through). However, the migration must be done atomically with Phase 2 on the main branch to avoid a confusing mixed state. Tests that relied on Future-returning semantics (e.g., `f := counter increment. f await`) will break if `counter increment` returns a value instead of a Future.
 
 - Remove `await` from all stdlib tests that use `actor method await` → `actor method.`
 - Remove `await` from all e2e tests
@@ -494,6 +519,8 @@ To:
 ### Related ADRs
 - ADR 0005 (BEAM Object Model) — actors as gen_server processes
 - ADR 0006 (Unified Method Dispatch) — dispatch routing for actors vs value types
+- ADR 0015 (Signal-Time Exception Objects) — failure propagation and error handling under synchronous calls
+- ADR 0028 (BEAM Interop Strategy) — `.`/`!` protocol applies to foreign gen_servers via interop proxies
 - ADR 0039 (Syntax Pragmatism vs Smalltalk) — `!` as a pragmatic syntax extension
 - ADR 0042 (Immutable Value Objects) — independent but complementary; `.`/`!` syntax split out from that ADR
 
@@ -502,6 +529,7 @@ To:
 - Akka tell (`!`) vs ask (`?`) — `!` for async fire-and-forget is an established convention
 - Elixir GenServer — validation that sync (call) is the dominant OTP pattern
 - Pony behaviors — async-only cross-actor sends, alternative design point
+- `gen_server:send_request/2` (OTP 25+) — async call without process spawn, candidate for future parallel-send mechanism
 
 ### Related Issues
 - BT-840 — Auto-await futures in chained message sends (the BT-840 workaround that motivated this change)
