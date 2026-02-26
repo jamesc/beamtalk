@@ -840,4 +840,100 @@ mod tests {
         let result = build_class_module_index(&[bad_file], None, "my_app");
         assert!(result.is_ok());
     }
+
+    /// BT-906: Verify that `build_class_module_index` correctly maps actor classes
+    /// defined in subdirectories to their full subdirectory-qualified module names.
+    ///
+    /// When a package has `src/observer/event_bus.bt` defining `EventBus`, the index
+    /// must map `EventBus → bt@gang_of_four@observer@event_bus` (not the heuristic
+    /// fallback `bt@gang_of_four@event_bus` which drops the `observer@` segment).
+    #[test]
+    fn test_build_class_module_index_subdirectory_actor_class() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        let observer_path = src_path.join("observer");
+        fs::create_dir_all(&observer_path).unwrap();
+
+        write_test_file(
+            &observer_path.join("event_bus.bt"),
+            "Actor subclass: EventBus\n  notify: e => nil\n",
+        );
+
+        let source_files = vec![observer_path.join("event_bus.bt")];
+        let (index, _superclass) =
+            build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
+
+        assert_eq!(
+            index.get("EventBus").map(String::as_str),
+            Some("bt@gang_of_four@observer@event_bus"),
+            "EventBus in observer/ subdirectory must map to full subdirectory-qualified module name"
+        );
+    }
+
+    /// BT-906: Verify end-to-end that cross-file actor spawn uses the correct
+    /// subdirectory-qualified module path in the generated Core Erlang.
+    ///
+    /// When `src/main.bt` calls `EventBus spawn` and `EventBus` is defined in
+    /// `src/observer/event_bus.bt`, the generated Core Erlang must reference
+    /// `bt@gang_of_four@observer@event_bus` (not `bt@gang_of_four@event_bus`).
+    #[test]
+    fn test_cross_file_subdirectory_actor_spawn_uses_correct_module() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        let observer_path = src_path.join("observer");
+        fs::create_dir_all(&observer_path).unwrap();
+
+        // File 1: EventBus actor in observer/ subdirectory
+        write_test_file(
+            &observer_path.join("event_bus.bt"),
+            "Actor subclass: EventBus\n  notify: e => nil\n",
+        );
+
+        // File 2: main.bt that references EventBus spawn
+        write_test_file(
+            &src_path.join("main.bt"),
+            "Actor subclass: Main\n  run => EventBus spawn\n",
+        );
+
+        let build_dir = project_path.join("_build/dev/ebin");
+        fs::create_dir_all(&build_dir).unwrap();
+
+        let source_files = vec![observer_path.join("event_bus.bt"), src_path.join("main.bt")];
+        let (class_module_index, class_superclass_index) =
+            build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
+
+        // Build the class index — EventBus should map to observer subdir module
+        assert_eq!(
+            class_module_index.get("EventBus").map(String::as_str),
+            Some("bt@gang_of_four@observer@event_bus"),
+            "Index pass should map EventBus to subdirectory module"
+        );
+
+        // Compile main.bt with the index
+        let core_file = build_dir.join("bt@gang_of_four@main.core");
+        let options = default_options();
+        compile_file(
+            &src_path.join("main.bt"),
+            "bt@gang_of_four@main",
+            &core_file,
+            &options,
+            &class_module_index,
+            &class_superclass_index,
+        )
+        .unwrap();
+
+        let core_content = fs::read_to_string(&core_file).unwrap();
+
+        // The spawn call must reference the full subdirectory-qualified module name
+        assert!(
+            core_content.contains("bt@gang_of_four@observer@event_bus"),
+            "Spawn call should use observer@ subdirectory module. Generated Core Erlang:\n{core_content}"
+        );
+        assert!(
+            !core_content.contains("'bt@gang_of_four@event_bus'"),
+            "Should NOT use heuristic module name that drops observer@ segment. Generated:\n{core_content}"
+        );
+    }
 }
