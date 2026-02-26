@@ -309,7 +309,15 @@ handle_call({Selector, Args}, From, State) when is_atom(Selector) ->
     GenServerPid = self(),
     spawn(fun() ->
         Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
-        try beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'WorkspaceInterface') of
+        try
+            beamtalk_dispatch:lookup(
+                Selector,
+                Args,
+                Self,
+                #{'$beamtalk_class' => 'WorkspaceInterface'},
+                'WorkspaceInterface'
+            )
+        of
             {reply, Value, _NewState} ->
                 gen_server:reply(From, Value);
             {error, Error} ->
@@ -421,7 +429,15 @@ handle_cast({Selector, Args, FuturePid}, State) when
     GenServerPid = self(),
     spawn(fun() ->
         Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
-        try beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'WorkspaceInterface') of
+        try
+            beamtalk_dispatch:lookup(
+                Selector,
+                Args,
+                Self,
+                #{'$beamtalk_class' => 'WorkspaceInterface'},
+                'WorkspaceInterface'
+            )
+        of
             {reply, Value, _NewState} ->
                 beamtalk_future:resolve(FuturePid, Value);
             {error, Error} ->

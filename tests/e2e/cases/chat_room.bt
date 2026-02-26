@@ -28,7 +28,7 @@
 
 // Create a Message with default values
 Message new
-// => a Message
+// => _
 
 // Create a Message with custom values via new:
 msgArgs := #{#text => "Hello!", #sender => "Alice"}
