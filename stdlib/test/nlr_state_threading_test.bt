@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-854: Tests NLR state threading for value types.
+// Verifies that 4-tuple NLR throws ({$bt_nlr, Token, Value, State})
+// work correctly and that the {Result, State} method return format
+// is properly unwrapped by dispatch/3.
+
+TestCase subclass: NlrStateThreadingTest
+
+  testFindFirstReturnsCorrectValue =>
+    // NLR returns the matched element via ^each.
+    obj := NlrFieldMutation new.
+    result := obj findFirst: 3 in: #(1, 2, 3, 4, 5).
+    self assert: result equals: 3
+
+  testFindFirstNoMatchReturnsNil =>
+    // Normal (non-NLR) path: method returns nil via {nil, Self{N}}.
+    obj := NlrFieldMutation new.
+    result := obj findFirst: 100 in: #(1, 2, 3).
+    self assert: result equals: nil
+
+  testFindAndReturnSelfUpdatesField =>
+    // ^self returns the updated Self with field mutations from before the block.
+    obj := NlrFieldMutation new.
+    updated := obj findAndReturnSelf: 3 in: #(1, 2, 3, 4, 5).
+    self assert: (updated lastQuery) equals: 3
+
+  testDetectReturnsMatchingElement =>
+    // detect:in: uses a block predicate and returns the matched element via ^.
+    obj := NlrFieldMutation new.
+    result := obj detect: [:x | x > 2] in: #(1, 2, 3, 4, 5).
+    self assert: result equals: 3
+
+  testDetectNoMatchReturnsNil =>
+    // detect:in: returns nil when no element satisfies the predicate.
+    obj := NlrFieldMutation new.
+    result := obj detect: [:x | x > 100] in: #(1, 2, 3).
+    self assert: result equals: nil
+
+  testFindNoneNlrNeverFires =>
+    // Method has NLR infrastructure but ^ never fires.
+    // Tests the normal {Result, Self{N}} tuple return path.
+    obj := NlrFieldMutation new.
+    result := obj findNone: #(1, 2, 3).
+    self assert: result equals: nil
+
+  testFindAndReturnSelfNoMatchReturnsSelf =>
+    // Normal (non-NLR) path: findAndReturnSelf:in: returns self at end of method.
+    obj := NlrFieldMutation new.
+    updated := obj findAndReturnSelf: 100 in: #(1, 2, 3).
+    self assert: (updated lastQuery) equals: 100

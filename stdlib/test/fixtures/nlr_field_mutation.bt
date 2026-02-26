@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-854: Fixture for testing NLR state threading in value types.
+// When ^ fires inside a block, the throw now carries Self as state
+// in a 4-tuple: {$bt_nlr, Token, Value, Self{N}}.
+// The method returns {Result, Self{N}} which dispatch/3 unwraps.
+//
+// Note: Field mutations inside do: blocks for value types are not
+// yet supported (BT-860). Tests here use field mutations in the
+// method body BEFORE the block that contains ^.
+
+Object subclass: NlrFieldMutation
+  state: lastQuery = nil
+
+  // Field mutation happens before the block with ^.
+  // The NLR throw carries Self1 (with lastQuery set).
+  findFirst: item in: items =>
+    self.lastQuery := item.
+    items do: [:each |
+      each =:= item ifTrue: [^each]
+    ].
+    nil
+
+  // Returns self via ^, making field mutations visible to the caller.
+  // self.lastQuery is set before the block, then ^self returns the updated Self.
+  findAndReturnSelf: item in: items =>
+    self.lastQuery := item.
+    items do: [:each |
+      each =:= item ifTrue: [^self]
+    ].
+    self
+
+  // Normal NLR with no field mutations — exercises the tuple return format.
+  detect: aBlock in: items =>
+    items do: [:each |
+      (aBlock value: each) ifTrue: [^each]
+    ].
+    nil
+
+  // Tests the non-NLR path: the body returns {Result, Self{N}}.
+  findNone: items =>
+    items do: [:each |
+      false ifTrue: [^each]
+    ].
+    nil
+
+  lastQuery => self.lastQuery
