@@ -662,6 +662,42 @@ fn test_bt897_subdirectory_module_name_consistency() {
 }
 
 #[test]
+fn test_bt906_class_module_index_overrides_heuristic_for_spawn() {
+    // BT-906: When class_module_index contains an explicit mapping, it must be
+    // used for actor spawn — not the heuristic that drops subdirectory segments.
+    //
+    // Without the index, a generator with module_name="bt@my_pkg@main" would
+    // resolve `EventBus` → `bt@my_pkg@event_bus` (heuristic, no subdirectory).
+    // With the index, it must use the explicit entry `bt@gang_of_four@observer@event_bus`.
+    let mut generator = CoreErlangGenerator::new("bt@my_pkg@main");
+    generator.class_module_index.insert(
+        "EventBus".to_string(),
+        "bt@gang_of_four@observer@event_bus".to_string(),
+    );
+
+    let receiver = Expression::ClassReference {
+        name: Identifier::new("EventBus", Span::new(0, 8)),
+        span: Span::new(0, 8),
+    };
+    let selector = MessageSelector::Unary("spawn".into());
+    let arguments = vec![];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("call 'bt@gang_of_four@observer@event_bus':'spawn'()"),
+        "class_module_index must override the heuristic for actor spawn. Got: {output}",
+    );
+    assert!(
+        !output.contains("call 'bt@my_pkg@event_bus':'spawn'()"),
+        "Heuristic module path must NOT appear when index is present. Got: {output}",
+    );
+}
+
+#[test]
 fn test_generate_actor_new_error_methods() {
     // BT-217: Actor classes must export and generate new/0 and new/1 error methods
     // using structured #beamtalk_error{} records
