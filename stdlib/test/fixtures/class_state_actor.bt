@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-927: Test fixture for classState declaration and codegen.
+//
+// Provides an Actor subclass with classState variables for round-trip testing.
+// Tests: initial value, setter, getter, multiple independent class variables,
+// and independence from instance-level state mutations.
+
+Actor subclass: ClassStateActor
+  classState: counter = 0
+  classState: label = "unset"
+  state: value = 0
+
+  /// Return the class-level counter value.
+  class counter => self.counter
+
+  /// Set the class-level counter.
+  class counter: n => self.counter := n
+
+  /// Return the class-level label value.
+  class label => self.label
+
+  /// Set the class-level label.
+  class label: s => self.label := s
+
+  /// Increment the instance-level value (independent from class state).
+  increment => self.value := self.value + 1
+
+  /// Reset all class state to defaults.
+  class reset =>
+    self.counter := 0.
+    self.label := "unset"
