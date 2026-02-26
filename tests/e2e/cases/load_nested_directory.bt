@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Regression test: :load with files in subdirectories generates correct module names.
+//
+// Before the fix, actor classes in subdirectories (e.g. workers/task_worker.bt)
+// had their path component stripped by user_package_prefix in the Rust compiler.
+// The compiler generated spawn calls to bt@...@task_worker:spawn/0, but the
+// loaded BEAM module was registered as bt@...@workers@task_worker — so spawn
+// failed with {undef, bt@...@task_worker:spawn/0}.
+//
+// The fix: build_class_module_index/0 queries all registered class gen-servers
+// for their actual module names and passes the full class→module map to the
+// compiler, so references use the correct name (bt@...@workers@task_worker).
+
+// ===========================================================================
+// :load <directory with subdirectory>
+// ===========================================================================
+
+// Load a directory containing tag.bt (root) and workers/task_worker.bt (subdir)
+:load tests/e2e/fixtures/nested_dir/
+// => Loaded 2 files from tests/e2e/fixtures/nested_dir/
+
+// ===========================================================================
+// ROOT-LEVEL CLASS — VALUE TYPE WORKS AS BEFORE
+// ===========================================================================
+
+t := Tag new
+// => _
+
+t id
+// => 42
+
+// ===========================================================================
+// SUBDIRECTORY ACTOR CLASS — SPAWN WORKS (regression for subdir module naming)
+// ===========================================================================
+
+// Before the fix: Error: undef — spawn/0 called wrong module name
+w := TaskWorker spawn
+// => #Actor<TaskWorker,_>
+
+w getCount
+// => 0
+
+w increment
+// => 1
+
+w getCount
+// => 1
+
+w stop
+// => ok

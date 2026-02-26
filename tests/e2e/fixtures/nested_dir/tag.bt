@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tag - value type at the root level of a nested fixture directory.
+// Used by load_nested_directory.bt to verify that root-level classes still
+// load correctly when a directory also contains subdirectory files.
+
+Object subclass: Tag
+  state: id = 42
+
+  id => self.id

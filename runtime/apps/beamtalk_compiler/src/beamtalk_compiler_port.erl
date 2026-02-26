@@ -64,11 +64,12 @@ compile_expression(Port, Source, ModuleName, KnownVars) ->
 %% @doc Compile a REPL expression with optional compilation options.
 %%
 %% Options:
-%%   class_superclass_index => #{binary() => binary()} — BT-907: cross-file superclass info
+%%   class_superclass_index => #{binary() => binary()} — cross-file superclass info
+%%   class_module_index => #{binary() => binary()} — cross-directory module name mapping
 %%
-%% When class_superclass_index is provided, it is forwarded to the compiler port
-%% so that inline class definitions correctly resolve inherited types from
-%% already-loaded files.
+%% When provided, these indexes are forwarded to the compiler port so that
+%% inline class definitions correctly resolve inherited types and module names
+%% from already-loaded files.
 -spec compile_expression(port(), binary(), binary(), [binary()], map()) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
@@ -76,6 +77,7 @@ compile_expression(Port, Source, ModuleName, KnownVars) ->
     | {error, [binary()]}.
 compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
     SuperclassIndex = maps:get(class_superclass_index, Options, #{}),
+    ModuleIndex = maps:get(class_module_index, Options, #{}),
     Request0 = #{
         command => compile_expression,
         source => Source,
@@ -84,10 +86,16 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
     },
     %% BT-907: Include superclass index only when non-empty to keep the
     %% protocol backward-compatible with older port binaries.
-    Request =
+    Request1 =
         case map_size(SuperclassIndex) of
             0 -> Request0;
             _ -> Request0#{class_superclass_index => SuperclassIndex}
+        end,
+    %% Include module index for correct cross-directory class references.
+    Request =
+        case map_size(ModuleIndex) of
+            0 -> Request1;
+            _ -> Request1#{class_module_index => ModuleIndex}
         end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
