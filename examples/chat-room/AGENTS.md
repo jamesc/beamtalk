@@ -4,7 +4,7 @@ Multi-actor example: actors, inheritance, collections, and message passing.
 
 ## Workspace Structure
 
-```
+```text
 chat-room/
 ├── beamtalk.toml        # Package manifest
 ├── src/
