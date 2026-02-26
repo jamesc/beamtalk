@@ -4295,3 +4295,319 @@ fn test_cross_file_actor_subclass_with_index() {
         "With superclass index showing MyActor → Actor, should generate actor code. Got:\n{code}"
     );
 }
+
+// ============================================================================
+// BT-855: Erlang interop wrapper funs for stateful blocks at Erlang boundaries
+// ============================================================================
+
+#[test]
+fn test_bt855_erlang_interop_wrapper_pure_block_no_warning() {
+    // BT-855: A pure block passed to an Erlang call site should generate a plain
+    // Tier 1 fun with no wrapper and no warning.
+    //
+    // Beamtalk: `Erlang lists map: [:x | x + 1] to: items`
+    // Expected: `call 'lists':'map'(fun(X) -> X + 1 end, Items)` — no wrapper
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let inner_receiver = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Erlang", Span::new(0, 6)),
+            span: Span::new(0, 6),
+        }),
+        selector: MessageSelector::Unary("lists".into()),
+        arguments: vec![],
+        span: Span::new(0, 12),
+    };
+
+    // Pure block: [:x | x + 1]
+    let pure_block = Expression::Block(Block::new(
+        vec![BlockParameter::new("x", Span::new(1, 2))],
+        vec![Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "x",
+                Span::new(5, 6),
+            ))),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(9, 10))],
+            span: Span::new(5, 10),
+        }],
+        Span::new(0, 11),
+    ));
+
+    let selector = MessageSelector::Keyword(vec![
+        KeywordPart::new("map:", Span::new(13, 17)),
+        KeywordPart::new("to:", Span::new(20, 23)),
+    ]);
+    let arguments = vec![
+        pure_block,
+        Expression::Identifier(Identifier::new("items", Span::new(24, 29))),
+    ];
+
+    let doc = generator
+        .generate_message_send(&inner_receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    // Pure block — no wrapper, no extra let-binding for BtBlock
+    assert!(
+        output.contains("call 'lists':'map'("),
+        "Should emit direct Erlang call. Got: {output}"
+    );
+    assert!(
+        !output.contains("BtBlock"),
+        "Pure block should not generate BtBlock wrapper. Got: {output}"
+    );
+    // No warnings emitted for pure blocks
+    assert!(
+        generator.codegen_warnings.is_empty(),
+        "Pure block at Erlang boundary should not emit a warning. Got: {:?}",
+        generator.codegen_warnings
+    );
+}
+
+#[test]
+fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
+    // BT-855: A stateful block (one with captured variable mutations) passed to
+    // an Erlang call site must be wrapped so Erlang sees a plain fun(Args) -> Result
+    // without the StateAcc protocol. A warning is emitted because mutations are dropped.
+    //
+    // Beamtalk: `Erlang lists map: [:x | count := count + x] to: items`
+    // Expected wrapper:
+    //   let _ErlWrapper = let _BtBlock = fun(X, StateAcc) -> ... end in
+    //                     fun(X) -> let {_WRes, _} = apply _BtBlock(X, State) in _WRes end in
+    //   call 'lists':'map'(_ErlWrapper, Items)
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let inner_receiver = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Erlang", Span::new(0, 6)),
+            span: Span::new(0, 6),
+        }),
+        selector: MessageSelector::Unary("lists".into()),
+        arguments: vec![],
+        span: Span::new(0, 12),
+    };
+
+    // Stateful block: [:x | count := count + x]
+    // 'count' is read (captured from outer scope) and written (local_writes) → Tier 2
+    let stateful_block = Expression::Block(Block::new(
+        vec![BlockParameter::new("x", Span::new(1, 2))],
+        vec![Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new(
+                "count",
+                Span::new(5, 10),
+            ))),
+            value: Box::new(Expression::MessageSend {
+                receiver: Box::new(Expression::Identifier(Identifier::new(
+                    "count",
+                    Span::new(14, 19),
+                ))),
+                selector: MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Identifier(Identifier::new(
+                    "x",
+                    Span::new(22, 23),
+                ))],
+                span: Span::new(14, 23),
+            }),
+            span: Span::new(5, 23),
+        }],
+        Span::new(0, 24),
+    ));
+
+    let selector = MessageSelector::Keyword(vec![
+        KeywordPart::new("map:", Span::new(13, 17)),
+        KeywordPart::new("to:", Span::new(20, 23)),
+    ]);
+    let arguments = vec![
+        stateful_block,
+        Expression::Identifier(Identifier::new("items", Span::new(24, 29))),
+    ];
+
+    let doc = generator
+        .generate_message_send(&inner_receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    // Should still call 'lists':'map'
+    assert!(
+        output.contains("call 'lists':'map'("),
+        "Should emit direct Erlang call. Got: {output}"
+    );
+    // Should have a BtBlock binding for the Tier 2 block
+    assert!(
+        output.contains("BtBlock"),
+        "Stateful block should generate BtBlock wrapper. Got: {output}"
+    );
+    // Wrapper should apply the BtBlock with State
+    assert!(
+        output.contains("apply "),
+        "Wrapper should apply the BtBlock. Got: {output}"
+    );
+    // StateAcc should appear in the Tier 2 block signature
+    assert!(
+        output.contains("StateAcc"),
+        "Tier 2 block should have StateAcc parameter. Got: {output}"
+    );
+    // A warning should be emitted for the stateful boundary crossing
+    assert!(
+        !generator.codegen_warnings.is_empty(),
+        "Stateful block at Erlang boundary should emit a warning"
+    );
+    assert!(
+        generator
+            .codegen_warnings
+            .iter()
+            .any(|w| w.message.contains("lists")),
+        "Warning should mention the Erlang module. Got: {:?}",
+        generator.codegen_warnings
+    );
+}
+
+#[test]
+fn test_bt855_collect_pure_block_no_warning() {
+    // BT-855: `collect:` with a pure block should NOT emit a warning.
+    // Pure blocks compile to Tier 1 and are passed directly to lists:map.
+    let src = "
+Actor subclass: Processor
+  process: items =>
+    items collect: [:x | x + 1]
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module_with_warnings(&module, CodegenOptions::new("processor"));
+    let generated = result.expect("codegen should succeed");
+
+    // Pure block — no warnings
+    assert!(
+        generated.warnings.is_empty(),
+        "Pure block at collect: should not emit a warning. Got: {:?}",
+        generated.warnings
+    );
+    // The block should be passed directly to lists:map (Tier 1 path)
+    assert!(
+        generated.code.contains("'lists':'map'"),
+        "collect: should use lists:map. Got:\n{}",
+        generated.code
+    );
+    // No BtBlock wrapper for pure blocks
+    assert!(
+        !generated.code.contains("BtBlock"),
+        "Pure block should not have BtBlock wrapper. Got:\n{}",
+        generated.code
+    );
+}
+
+#[test]
+fn test_bt855_generate_erlang_interop_wrapper_pure_returns_tier1() {
+    // BT-855: generate_erlang_interop_wrapper on a pure block returns (Tier1Doc, false).
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let pure_block = Block::new(
+        vec![BlockParameter::new("x", Span::new(0, 1))],
+        vec![Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(Identifier::new(
+                "x",
+                Span::new(3, 4),
+            ))),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(7, 8))],
+            span: Span::new(3, 8),
+        }],
+        Span::new(0, 9),
+    );
+
+    let (doc, is_stateful) = generator
+        .generate_erlang_interop_wrapper(&pure_block)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(!is_stateful, "Pure block should return is_stateful=false");
+    assert!(
+        output.contains("fun ("),
+        "Should generate a fun. Got: {output}"
+    );
+    assert!(
+        !output.contains("BtBlock"),
+        "Pure block should not generate a BtBlock. Got: {output}"
+    );
+    assert!(
+        !output.contains("StateAcc"),
+        "Pure block wrapper should not have StateAcc. Got: {output}"
+    );
+}
+
+#[test]
+fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
+    // BT-855: generate_erlang_interop_wrapper on a stateful block returns (WrapperDoc, true).
+    // The wrapper is:
+    //   let BtBlock = fun(X, StateAcc) -> ... end in fun(X) -> let {WRes, _} = apply BtBlock(X, State) in WRes end
+    let mut generator = CoreErlangGenerator::new("test");
+
+    // Stateful block: [:x | count := count + x]
+    let stateful_block = Block::new(
+        vec![BlockParameter::new("x", Span::new(0, 1))],
+        vec![Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new(
+                "count",
+                Span::new(3, 8),
+            ))),
+            value: Box::new(Expression::MessageSend {
+                receiver: Box::new(Expression::Identifier(Identifier::new(
+                    "count",
+                    Span::new(12, 17),
+                ))),
+                selector: MessageSelector::Binary("+".into()),
+                arguments: vec![Expression::Identifier(Identifier::new(
+                    "x",
+                    Span::new(20, 21),
+                ))],
+                span: Span::new(12, 21),
+            }),
+            span: Span::new(3, 21),
+        }],
+        Span::new(0, 22),
+    );
+
+    let (doc, is_stateful) = generator
+        .generate_erlang_interop_wrapper(&stateful_block)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(is_stateful, "Stateful block should return is_stateful=true");
+    // Should bind the Tier 2 block to a temp var
+    assert!(
+        output.contains("BtBlock"),
+        "Wrapper should contain BtBlock binding. Got: {output}"
+    );
+    // The Tier 2 block should have StateAcc parameter
+    assert!(
+        output.contains("StateAcc"),
+        "Tier 2 block should have StateAcc parameter. Got: {output}"
+    );
+    // The wrapper fun should apply the BtBlock with State
+    assert!(
+        output.contains("apply "),
+        "Wrapper should apply the BtBlock. Got: {output}"
+    );
+    // The result tuple should destructure {WRes, _}
+    assert!(
+        output.contains('{') && output.contains(", _}"),
+        "Wrapper should destructure {{Result, _}} from the block apply. Got: {output}"
+    );
+    // The outer fun should NOT have StateAcc — it's a plain Erlang fun.
+    // Find the last `in fun (` to locate the wrapper fun signature and confirm
+    // it does not contain StateAcc as a formal parameter (not in variable names).
+    let wrapper_fun_start = output
+        .rfind(" in fun (")
+        .expect("wrapper output should contain 'in fun ('");
+    let after_fun_sig = &output[wrapper_fun_start + " in fun (".len()..];
+    // Extract just the function signature parameters: from after "fun (" to the first ")"
+    let close_paren_idx = after_fun_sig
+        .find(')')
+        .expect("wrapper fun signature should have closing paren");
+    let wrapper_params = &after_fun_sig[..close_paren_idx];
+    assert!(
+        !wrapper_params.contains("StateAcc"),
+        "Wrapper fun formal parameters should not have StateAcc. Got params: {wrapper_params}, full output: {output}"
+    );
+}
