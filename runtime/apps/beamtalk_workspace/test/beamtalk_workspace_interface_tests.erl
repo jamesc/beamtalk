@@ -184,12 +184,32 @@ actor_at_returns_nil_when_no_registry_test() ->
 %%% ===========================================================================
 
 unknown_selector_returns_error_test() ->
-    {ok, Pid} = beamtalk_workspace_interface:start_link(),
+    %% In a standalone eunit run Object/Actor aren't bootstrapped — register minimal
+    %% stubs so beamtalk_dispatch can walk the full hierarchy.  In CI (where the full
+    %% runtime is already started) start_link returns {already_started,_}, which we
+    %% treat as "already present, don't stop on cleanup".
+    MaybeStart = fun(Name, Info) ->
+        case beamtalk_object_class:start_link(Name, Info) of
+            {ok, Pid} -> {ok, Pid};
+            {error, {already_started, _}} -> already_running
+        end
+    end,
+    ObjectResult = MaybeStart('Object', #{name => 'Object', superclass => none}),
+    ActorResult = MaybeStart('Actor', #{name => 'Actor', superclass => 'Object'}),
 
+    {ok, Pid} = beamtalk_workspace_interface:start_link(),
     {error, Error} = gen_server:call(Pid, {foo, []}),
     ?assertMatch(#beamtalk_error{kind = does_not_understand, class = 'WorkspaceInterface'}, Error),
 
-    gen_server:stop(Pid).
+    gen_server:stop(Pid),
+    case ActorResult of
+        {ok, ActorPid} -> gen_server:stop(ActorPid);
+        already_running -> ok
+    end,
+    case ObjectResult of
+        {ok, ObjPid} -> gen_server:stop(ObjPid);
+        already_running -> ok
+    end.
 
 malformed_request_returns_error_test() ->
     {ok, Pid} = beamtalk_workspace_interface:start_link(),

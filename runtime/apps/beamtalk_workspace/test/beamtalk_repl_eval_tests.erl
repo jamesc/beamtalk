@@ -53,18 +53,18 @@ extract_assignment_invalid_variable_name_test() ->
 %%% Diagnostics formatting tests
 
 format_formatted_diagnostics_empty_test() ->
-    ?assertEqual(<<"Compilation failed">>, beamtalk_repl_eval:format_formatted_diagnostics([])).
+    ?assertEqual(<<"Compilation failed">>, beamtalk_repl_compiler:format_formatted_diagnostics([])).
 
 format_formatted_diagnostics_single_test() ->
     FormattedDiagnostics = [<<"Unexpected token">>],
     ?assertEqual(
         <<"Unexpected token">>,
-        beamtalk_repl_eval:format_formatted_diagnostics(FormattedDiagnostics)
+        beamtalk_repl_compiler:format_formatted_diagnostics(FormattedDiagnostics)
     ).
 
 format_formatted_diagnostics_multiple_test() ->
     FormattedDiagnostics = [<<"Error 1">>, <<"Error 2">>, <<"Error 3">>],
-    Result = beamtalk_repl_eval:format_formatted_diagnostics(FormattedDiagnostics),
+    Result = beamtalk_repl_compiler:format_formatted_diagnostics(FormattedDiagnostics),
     ?assert(binary:match(Result, <<"Error 1">>) =/= nomatch),
     ?assert(binary:match(Result, <<"Error 2">>) =/= nomatch),
     ?assert(binary:match(Result, <<"Error 3">>) =/= nomatch).
@@ -257,31 +257,33 @@ io_capture_reset_does_not_affect_unrelated_processes_test() ->
 %% === is_stdlib_path tests ===
 
 is_stdlib_path_relative_lib_test() ->
-    ?assert(beamtalk_repl_eval:is_stdlib_path("stdlib/src/Integer.bt")).
+    ?assert(beamtalk_repl_loader:is_stdlib_path("stdlib/src/Integer.bt")).
 
 is_stdlib_path_absolute_test() ->
-    ?assert(beamtalk_repl_eval:is_stdlib_path("/workspace/project/stdlib/src/Integer.bt")).
+    ?assert(beamtalk_repl_loader:is_stdlib_path("/workspace/project/stdlib/src/Integer.bt")).
 
 is_stdlib_path_non_lib_test() ->
-    ?assertNot(beamtalk_repl_eval:is_stdlib_path("src/MyClass.bt")).
+    ?assertNot(beamtalk_repl_loader:is_stdlib_path("src/MyClass.bt")).
 
 is_stdlib_path_non_lib_absolute_test() ->
-    ?assertNot(beamtalk_repl_eval:is_stdlib_path("/workspace/project/src/MyClass.bt")).
+    ?assertNot(beamtalk_repl_loader:is_stdlib_path("/workspace/project/src/MyClass.bt")).
 
 is_stdlib_path_lib_without_trailing_slash_test() ->
     %% "stdlib/src" alone (no trailing slash) is NOT a stdlib path
-    ?assertNot(beamtalk_repl_eval:is_stdlib_path("stdlib/src")).
+    ?assertNot(beamtalk_repl_loader:is_stdlib_path("stdlib/src")).
 
 is_stdlib_path_libs_prefix_test() ->
     %% "stdlib/srcs/" is NOT the same as "stdlib/src/"
-    ?assertNot(beamtalk_repl_eval:is_stdlib_path("stdlib/srcs/Integer.bt")).
+    ?assertNot(beamtalk_repl_loader:is_stdlib_path("stdlib/srcs/Integer.bt")).
 
 is_stdlib_path_embedded_lib_test() ->
     %% Path with /stdlib/src/ deeper in the tree
-    ?assert(beamtalk_repl_eval:is_stdlib_path("/home/user/projects/beamtalk/stdlib/src/String.bt")).
+    ?assert(
+        beamtalk_repl_loader:is_stdlib_path("/home/user/projects/beamtalk/stdlib/src/String.bt")
+    ).
 
 is_stdlib_path_empty_test() ->
-    ?assertNot(beamtalk_repl_eval:is_stdlib_path("")).
+    ?assertNot(beamtalk_repl_loader:is_stdlib_path("")).
 
 %%% strip_internal_bindings tests
 
@@ -499,7 +501,7 @@ inject_output_multiple_warnings_test() ->
 
 format_formatted_diagnostics_single_binary_with_newlines_test() ->
     FormattedDiagnostics = [<<"Line 1\nLine 2\nLine 3">>],
-    Result = beamtalk_repl_eval:format_formatted_diagnostics(FormattedDiagnostics),
+    Result = beamtalk_repl_compiler:format_formatted_diagnostics(FormattedDiagnostics),
     ?assertEqual(<<"Line 1\nLine 2\nLine 3">>, Result).
 
 %%% do_eval error edge cases
@@ -545,51 +547,51 @@ handle_load_empty_file_test() ->
 %%% is_internal_key/1 tests
 
 is_internal_key_double_underscore_test() ->
-    ?assert(beamtalk_repl_eval:is_internal_key('__repl_actor_registry__')).
+    ?assert(beamtalk_repl_compiler:is_internal_key('__repl_actor_registry__')).
 
 is_internal_key_single_underscore_test() ->
-    ?assertNot(beamtalk_repl_eval:is_internal_key('_error')).
+    ?assertNot(beamtalk_repl_compiler:is_internal_key('_error')).
 
 is_internal_key_regular_atom_test() ->
-    ?assertNot(beamtalk_repl_eval:is_internal_key(x)).
+    ?assertNot(beamtalk_repl_compiler:is_internal_key(x)).
 
 is_internal_key_empty_atom_test() ->
-    ?assertNot(beamtalk_repl_eval:is_internal_key('')).
+    ?assertNot(beamtalk_repl_compiler:is_internal_key('')).
 
 %%% register_classes/2 tests
 
 register_classes_no_function_test() ->
-    ?assertEqual(ok, beamtalk_repl_eval:register_classes([], lists)).
+    ?assertEqual(ok, beamtalk_repl_loader:register_classes([], lists)).
 
 %%% trigger_hot_reload/2 tests
 
 trigger_hot_reload_empty_classes_test() ->
-    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, [])).
+    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, [])).
 
 trigger_hot_reload_unknown_class_test() ->
     Classes = [#{name => <<"xyzzy_nonexistent_class_99999">>}],
-    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
 
 trigger_hot_reload_undefined_name_test() ->
     Classes = [#{name => undefined}],
-    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
 
 trigger_hot_reload_no_name_key_test() ->
     Classes = [#{}],
-    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
 
 trigger_hot_reload_list_name_test() ->
     Classes = [#{name => "xyzzy_nonexistent_class_88888"}],
-    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
 
 trigger_hot_reload_atom_name_test() ->
     Classes = [#{name => xyzzy_nonexistent_class_77777}],
-    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_module, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
 
 %%% activate_module/2 tests
 
 activate_module_nonexistent_test() ->
-    ?assertEqual(ok, beamtalk_repl_eval:activate_module(lists, [])).
+    ?assertEqual(ok, beamtalk_repl_loader:activate_module(lists, [])).
 
 %%% io_passthrough_loop tests
 
@@ -656,7 +658,7 @@ do_eval_with_registry_no_compiler_test() ->
 %%% format_formatted_diagnostics edge cases
 
 format_formatted_diagnostics_two_items_test() ->
-    Result = beamtalk_repl_eval:format_formatted_diagnostics([<<"A">>, <<"B">>]),
+    Result = beamtalk_repl_compiler:format_formatted_diagnostics([<<"A">>, <<"B">>]),
     ?assertEqual(<<"A\n\nB">>, Result).
 
 %%% extract_assignment edge cases
@@ -673,14 +675,14 @@ extract_assignment_no_space_v2_test() ->
 
 compile_expr_noproc_test() ->
     %% Covers exit:{noproc, _} clause (line 341-342)
-    Result = beamtalk_repl_eval:compile_expression_via_port("1+2", test_mod, #{}),
+    Result = beamtalk_repl_compiler:compile_expression_via_port("1+2", test_mod, #{}),
     ?assertMatch({error, _}, Result).
 
 compile_expr_noproc_with_env_test() ->
     %% compile_expression_via_port calls beamtalk_compiler which isn't started,
     %% so it hits exit:{noproc, _} rather than the timeout path.
     %% This test verifies the function handles a missing compiler gracefully.
-    Result = beamtalk_repl_eval:compile_expression_via_port("hello", test_mod2, #{x => 1}),
+    Result = beamtalk_repl_compiler:compile_expression_via_port("hello", test_mod2, #{x => 1}),
     ?assertMatch({error, _}, Result).
 
 %% ===================================================================
@@ -689,12 +691,12 @@ compile_expr_noproc_with_env_test() ->
 
 compile_file_noproc_test() ->
     %% Covers exit:{noproc, _} clause (line 380-381)
-    Result = beamtalk_repl_eval:compile_file_via_port("x := 1", "/test.bt", false, undefined),
+    Result = beamtalk_repl_compiler:compile_file_via_port("x := 1", "/test.bt", false, undefined),
     ?assertMatch({error, _}, Result).
 
 compile_file_noproc_stdlib_test() ->
     %% Covers stdlib_mode path too
-    Result = beamtalk_repl_eval:compile_file_via_port(
+    Result = beamtalk_repl_compiler:compile_file_via_port(
         "Object subclass: Foo", "/stdlib/src/Foo.bt", true, undefined
     ),
     ?assertMatch({error, _}, Result).
@@ -704,29 +706,29 @@ compile_file_noproc_stdlib_test() ->
 %% ===================================================================
 
 to_snake_case_simple_test() ->
-    ?assertEqual("counter", beamtalk_repl_eval:to_snake_case("counter")).
+    ?assertEqual("counter", beamtalk_repl_loader:to_snake_case("counter")).
 
 to_snake_case_camel_test() ->
-    ?assertEqual("counter", beamtalk_repl_eval:to_snake_case("Counter")).
+    ?assertEqual("counter", beamtalk_repl_loader:to_snake_case("Counter")).
 
 to_snake_case_multi_word_test() ->
-    ?assertEqual("scheme_symbol", beamtalk_repl_eval:to_snake_case("SchemeSymbol")).
+    ?assertEqual("scheme_symbol", beamtalk_repl_loader:to_snake_case("SchemeSymbol")).
 
 to_snake_case_three_words_test() ->
-    ?assertEqual("my_counter_actor", beamtalk_repl_eval:to_snake_case("MyCounterActor")).
+    ?assertEqual("my_counter_actor", beamtalk_repl_loader:to_snake_case("MyCounterActor")).
 
 to_snake_case_acronym_test() ->
     %% Acronyms: no underscores within consecutive uppercase
-    ?assertEqual("httprouter", beamtalk_repl_eval:to_snake_case("HTTPRouter")).
+    ?assertEqual("httprouter", beamtalk_repl_loader:to_snake_case("HTTPRouter")).
 
 to_snake_case_already_snake_test() ->
-    ?assertEqual("already_snake", beamtalk_repl_eval:to_snake_case("already_snake")).
+    ?assertEqual("already_snake", beamtalk_repl_loader:to_snake_case("already_snake")).
 
 to_snake_case_empty_test() ->
-    ?assertEqual([], beamtalk_repl_eval:to_snake_case([])).
+    ?assertEqual([], beamtalk_repl_loader:to_snake_case([])).
 
 to_snake_case_with_digits_test() ->
-    ?assertEqual("app2", beamtalk_repl_eval:to_snake_case("App2")).
+    ?assertEqual("app2", beamtalk_repl_loader:to_snake_case("App2")).
 
 %% ===================================================================
 %% handle_class_definition (BT-627)
@@ -952,23 +954,23 @@ trigger_hot_reload_with_list_name_test() ->
     %% Test the is_list(N) branch in trigger_hot_reload (line 455-457)
     %% Use a class name that doesn't exist as an atom to hit the badarg catch
     Classes = [#{name => "nonexistent_class_xyz_12345"}],
-    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_mod, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_mod, Classes)).
 
 trigger_hot_reload_undefined_name_v2_test() ->
     %% Test the undefined name branch (line 459)
     Classes = [#{name => undefined}],
-    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_mod, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_mod, Classes)).
 
 trigger_hot_reload_no_name_key_v2_test() ->
     %% Test when name key is missing (maps:get returns undefined)
     Classes = [#{}],
-    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_mod, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_mod, Classes)).
 
 trigger_hot_reload_atom_name_v2_test() ->
     %% Test the is_atom(N) branch (line 454)
     %% Use an atom that exists but has no instances
     Classes = [#{name => test_atom_class}],
-    ?assertEqual(ok, beamtalk_repl_eval:trigger_hot_reload(some_mod, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_mod, Classes)).
 
 %% ===================================================================
 %% is_stdlib_path edge cases (BT-627)
@@ -976,14 +978,14 @@ trigger_hot_reload_atom_name_v2_test() ->
 
 is_stdlib_path_abs_v2_test() ->
     ?assertEqual(
-        true, beamtalk_repl_eval:is_stdlib_path("/home/user/project/stdlib/src/Integer.bt")
+        true, beamtalk_repl_loader:is_stdlib_path("/home/user/project/stdlib/src/Integer.bt")
     ).
 
 is_stdlib_path_not_stdlib_test() ->
-    ?assertEqual(false, beamtalk_repl_eval:is_stdlib_path("/home/user/src/main.bt")).
+    ?assertEqual(false, beamtalk_repl_loader:is_stdlib_path("/home/user/src/main.bt")).
 
 is_stdlib_path_rel_lib_v2_test() ->
-    ?assertEqual(true, beamtalk_repl_eval:is_stdlib_path("stdlib/src/String.bt")).
+    ?assertEqual(true, beamtalk_repl_loader:is_stdlib_path("stdlib/src/String.bt")).
 
 %% ===================================================================
 %% should_purge_module edge cases (BT-627)
@@ -1195,7 +1197,7 @@ verify_class_present_undefined_skips_check_test() ->
     %% undefined means no verification needed (e.g., handle_load path)
     ?assertEqual(
         ok,
-        beamtalk_repl_eval:verify_class_present(
+        beamtalk_repl_loader:verify_class_present(
             undefined, [#{name => "Foo"}], "/some/path.bt"
         )
     ).
@@ -1204,14 +1206,14 @@ verify_class_present_found_test() ->
     ClassNames = [#{name => "Counter"}, #{name => "Timer"}],
     ?assertEqual(
         ok,
-        beamtalk_repl_eval:verify_class_present(
+        beamtalk_repl_loader:verify_class_present(
             'Counter', ClassNames, "/some/path.bt"
         )
     ).
 
 verify_class_present_not_found_test() ->
     ClassNames = [#{name => "OtherClass"}],
-    Result = beamtalk_repl_eval:verify_class_present(
+    Result = beamtalk_repl_loader:verify_class_present(
         'Counter', ClassNames, "/some/path.bt"
     ),
     ?assertEqual(
@@ -1220,7 +1222,7 @@ verify_class_present_not_found_test() ->
     ).
 
 verify_class_present_empty_classes_test() ->
-    Result = beamtalk_repl_eval:verify_class_present(
+    Result = beamtalk_repl_loader:verify_class_present(
         'Counter', [], "/some/path.bt"
     ),
     ?assertEqual(
