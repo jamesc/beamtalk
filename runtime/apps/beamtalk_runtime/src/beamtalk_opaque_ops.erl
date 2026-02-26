@@ -1,6 +1,5 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
-%%% **DDD Context:** Runtime
 
 %% @doc Formatting helpers for opaque BEAM types (Pid, Port, Reference).
 %%
