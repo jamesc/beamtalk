@@ -994,6 +994,22 @@ impl CoreErlangGenerator {
         ));
     }
 
+    /// BT-909: Emits a warning for a non-literal callable at an Erlang call boundary.
+    pub(super) fn warn_non_literal_callable_at_erlang_boundary(
+        &mut self,
+        erlang_target: &str,
+        span: Span,
+    ) {
+        self.add_codegen_warning(Diagnostic::warning(
+            format!(
+                "non-literal callable passed to Erlang {erlang_target} — if this is a \
+                 stateful block, mutations inside the block will be silently dropped \
+                 (runtime arity check inserted to prevent badarity crash)"
+            ),
+            span,
+        ));
+    }
+
     /// BT-833: Resets the Self version to 0 (call at the start of each value type method).
     pub(super) fn reset_self_version(&mut self) {
         self.self_version = 0;
