@@ -291,42 +291,11 @@ The `#beamtalk_object{}` record is the actor's "calling card" — it can be pass
 
 ### Message Send Semantics: Call vs Cast
 
-Actor message sends default to **synchronous calls** (`gen_server:call`), consistent with Smalltalk's synchronous message-send model. Asynchronous casts use `!` as a statement terminator:
-
-```smalltalk
-counter increment.                "Synchronous call (gen_server:call)"
-counter increment!                "Asynchronous cast (gen_server:cast)"
-
-counter add: 5.                   "Keyword message — sync call"
-counter add: 5!                   "Keyword message — async cast"
-
-counter at: key put: value.       "Multi-keyword — sync"
-counter at: key put: value!       "Multi-keyword — async cast"
-```
-
-**Rule:** `.` (period) terminates a synchronous call. `!` (bang) terminates an asynchronous cast.
-
-**Cast return semantics:** A cast (`!`) has no return value. It is a statement, not an expression. Using a cast in an expression context is a **compiler error**:
-
-```smalltalk
-counter increment!                "Valid — fire and forget"
-counter increment.                "Valid — sync call, result discarded"
-x := counter increment.           "Valid — x receives reply"
-x := counter increment!           "COMPILER ERROR — cast has no return value"
-```
-
-**Rationale:**
-- Smalltalk messages are synchronous. Defaulting to sync is faithful to the mental model.
-- Avoids JavaScript-style async/await infection where `Future` propagates through the entire codebase.
-- `gen_server:call` is Erlang's default interaction pattern — this aligns with BEAM idioms.
-- Explicit `!` makes fire-and-forget semantics visible. No return value, no backpressure.
-- `!` echoes Erlang's `!` send operator, providing BEAM familiarity.
-
-**Deadlock avoidance:** Actor-to-actor synchronous calls (`.`) can deadlock if actor A calls actor B while B is calling A — both block waiting for a reply that can never arrive. This is the standard gen_server deadlock pattern. For actor-to-actor coordination, prefer `!` (fire-and-forget) by default. Use `.` only when the caller needs the reply and is not at risk of cyclic waits (e.g., a client calling a service, or an actor calling a stateless value computation). Self-sends within an actor method bypass gen_server entirely (direct dispatch), so they are always safe.
+**See ADR 0043 (Sync-by-Default Actor Messaging).** The call/cast protocol (`.` for synchronous `gen_server:call`, `!` for fire-and-forget `gen_server:cast`) is specified in its own ADR, independent of the value/actor object model.
 
 ### Cascade Semantics
 
-**Deferred to ADR 0043.** Cascade semantics for immutable value objects are a significant design question — Smalltalk cascades (`;`) send multiple messages to the same receiver, but with immutable objects each message returns a new object, making traditional fan-out semantics problematic. The leading candidate is cascade-as-pipeline on value objects (each message sent to the *result* of the previous), which would give BeamTalk Elixir-style `|>` pipelines for free (BT-506). However, the type-dependent semantics (pipeline on values, fan-out on actors), dynamic receiver handling, and interaction with ADR 0039 deserve their own focused ADR.
+**Deferred to ADR 0044.** Cascade semantics for immutable value objects are a significant design question — Smalltalk cascades (`;`) send multiple messages to the same receiver, but with immutable objects each message returns a new object, making traditional fan-out semantics problematic. The leading candidate is cascade-as-pipeline on value objects (each message sent to the *result* of the previous), which would give BeamTalk Elixir-style `|>` pipelines for free (BT-506). However, the type-dependent semantics (pipeline on values, fan-out on actors), dynamic receiver handling, and interaction with ADR 0039 deserve their own focused ADR.
 
 For the initial implementation of ADR 0042, explicit chaining works correctly and unambiguously:
 
@@ -627,7 +596,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 - **Concurrency is natural.** Immutable data on the BEAM is the happy path — no copying overhead, no race conditions.
 - **Enables advanced runtime features.** Immutable state enables checkpoint, fork, replay, and time-travel debugging. Actor state transitions can be modeled as event sourcing.
 - **Compiler simplification** allows focus on differentiating features: liveness, image-based development, agentic AI runtime.
-- **`.` vs `!` for call/cast** makes concurrency semantics explicit with minimal syntax.
+- **Complements ADR 0043** (Sync-by-Default Actor Messaging) — the value/actor model pairs naturally with `.` (call) and `!` (cast) semantics.
 
 ### Negative
 
@@ -637,7 +606,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 - **ADR 0041 remains exercised.** Local rebinding inside blocks and actor slot assignments inside blocks both require state threading. The compiler is simpler than the status quo (no cross-method or cross-class state threading), but not as simple as full immutability would have been.
 - **Live patching of value object classes requires migration protocol.** Value objects have no process, so there is no `code_change` callback. An existing value object in the system after a class definition change (e.g., new slot added) is an instance of the old layout. For image-based development, a value migration protocol (analogous to database schema migrations) may be needed. This is a known constraint inherited from Erlang's data model — Erlang records have the same issue — and should be addressed in the image-based development ADR.
 - **Block escape at value/actor boundary.** A block that captures rebindable locals and is passed to an actor as a callback may execute asynchronously. ADR 0041's state threading works synchronously — the `StateAcc` is threaded through the call chain. If a block escapes to an async context, the captured state snapshot is frozen at escape time. This is the same semantics as Elixir closures (capture by value), and is correct, but may surprise developers who expect the rebinding to propagate across async boundaries.
-- **`!` safety is two-tier: compile-time + runtime.** For statically-known receiver types (assigned from a constructor, `self` in actor methods), the compiler already classifies classes as value or actor via `is_actor_class()` and can reject `!` on value types at compile time. For dynamically-typed receivers (parameters, collection elements), the dispatch layer checks `is_pid(Receiver)` at runtime and raises `#not_an_actor` if `!` is used on a value object. This is the same pattern as any unsupported message send — it fails at dispatch. No additional type system work (ADR 0025) is needed as a prerequisite.
+- **`!` (cast) safety is specified in ADR 0043.** The compile-time and runtime guards for `!` on value types are defined in ADR 0043 (Sync-by-Default Actor Messaging), leveraging the Value/Actor classification that this ADR introduces.
 
 ### Neutral
 
@@ -652,26 +621,24 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 
 - Compile one `Value subclass:` declaration with auto-generated getters and `with*:` methods
 - Verify the generated Core Erlang compiles and produces correct output
-- Compile one `Actor subclass:` with `self.slot :=`, `.` (call), and `!` (cast)
-- Verify `self.slot :=` compiles to `maps:put` and gen_server routing works for call/cast
+- Compile one `Actor subclass:` with `self.slot :=`
+- Verify `self.slot :=` compiles to `maps:put` and gen_server state management works
 - **Goal:** Prove the core codegen patterns work before rewriting all class compilation
 - **Effort:** S
 
 ### Phase 1: Language Model Changes (M)
 
-**Lexer:**
-- Add `!` (bang) as a recognized token (`TokenKind::Bang`). Currently `!` falls into the error branch of the lexer's main dispatch. Must be added to `token.rs` and handled in `lexer.rs`.
+**Lexer/Parser:**
+- `!` (bang) token and cast syntax are specified in ADR 0043 (Sync-by-Default Actor Messaging)
 
 **Parser:**
-- Recognize `!` as a statement terminator (cast syntax), distinct from `.` (call)
 - Support `Value subclass:` as a new declaration form (today value types use `Object subclass:`)
 - Reject instance variable assignment (`self.slot :=`) in value type methods with clear error message guiding toward `self withSlot:`. Allow `self.slot :=` in actor methods.
-- Detect cast-in-expression-context errors (`x := foo bar!`)
 
 **Semantic Analysis:**
 - Classify classes as Value or Actor based on declaration keyword (replacing the current `is_actor_class()` heuristic that walks the superclass chain)
 - Verify no slot mutation (`self.slot :=`) in value object methods
-- Verify `!` is only used on actor-type receivers (not value objects, not `ErlangModule` proxies)
+- `!` receiver validation is specified in ADR 0043
 - Update block mutation analysis (`block_analysis.rs`) to distinguish "slot write on value type" (prohibited) from "slot write on actor" (allowed)
 
 ### Phase 2: Codegen Changes (L)
@@ -685,8 +652,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 
 **Actor Codegen:**
 - Generate gen_server module with `handle_call`/`handle_cast` callbacks
-- Map `.` message sends to `gen_server:call`
-- Map `!` message sends to `gen_server:cast`
+- Call/cast routing (`.` vs `!`) is specified in ADR 0043
 - Compile `self.slot := expr` to `StateN = maps:put(slot, Expr, StateN-1)` — direct map operation, no dispatch
 - Actor methods receive state map, return `{reply, LastExpr, FinalState}`
 - Auto-generate getters and `with*:` as public API for actor state
@@ -694,18 +660,17 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 
 ### Phase 3: Runtime Changes (M)
 
-- Update `beamtalk_dispatch` to route calls vs casts based on message send type
+- Call/cast dispatch routing is specified in ADR 0043
 - Update actor framework to interpret method return values (new state vs early return via `^`)
 - Add `pid` method to `Actor` base class (extracts pid from `#beamtalk_object{}` record)
 - Verify REPL binding semantics are preserved (workspace rebinding still works)
-- Define `!` behavior in REPL context (casts produce no result for auto-await)
 - **Affected:** `beamtalk_dispatch.erl`, `beamtalk_actor.erl`, `beamtalk_repl_shell.erl`, `Actor.bt`
 
 ### Phase 4: Migration and Testing (L)
 
 - Update all existing stdlib classes to Value/Actor model (`Object subclass:` → `Value subclass:` where appropriate)
 - Replace `self.slot :=` patterns with `self withSlot:` patterns in **value type** methods (actors retain `self.slot :=`)
-- Comprehensive error message testing for rejected patterns (`self.slot :=` on value types, `!` on value objects)
+- Comprehensive error message testing for rejected patterns (`self.slot :=` on value types)
 - Verify all existing stdlib and e2e tests pass
 - Performance benchmarks for value object creation and `with*:` operations
 
@@ -742,13 +707,14 @@ Value type tests using instance variable assignment (`self.slot := value`) must 
 - ADR 0005 (BEAM Object Model) — formalized by this ADR; value type immutability made explicit
 - ADR 0006 (Unified Method Dispatch) — `is_actor_class()` heuristic replaced by explicit `Value`/`Actor` declaration
 - ADR 0013 (Class Variables, Class-Side Methods, Instantiation) — `state:` and `classState:` keywords retained; `Value subclass:` introduced as new declaration form
-- ADR 0025 (Gradual Typing) — `!` safety works without type system (compile-time class check + runtime pid guard); gradual typing will improve static coverage over time but is not a prerequisite
-- ADR 0028 (BEAM Interop) — `!` restricted to actor targets; immutability is compile-time only, not enforced at BEAM boundary
+- ADR 0025 (Gradual Typing) — gradual typing will improve static coverage over time but is not a prerequisite for Value/Actor classification
+- ADR 0028 (BEAM Interop) — immutability is compile-time only, not enforced at BEAM boundary
 - ADR 0035 (Field-Based Reflection API) — `fieldAt:put:` on value types raises `#immutable_value` at runtime (closes the deferred access control question); `fieldAt:`/`fieldNames` API unchanged
 - ADR 0038 (Subclass/ClassBuilder Protocol) — ClassBuilder must recognize `Value` as a root class
 - ADR 0037 (Collection Class Hierarchy) — collection classes (List, Array, Dictionary, Range) must be classified as Value or Actor; value-type collections using `self.slot :=` need migration to keyword constructors
-- ADR 0039 (Syntax Pragmatism vs Smalltalk) — cascade semantics deferred to ADR 0043; ADR 0039's fan-out semantics remain unchanged until then
-- ADR 0040 (Workspace-Native REPL Commands) — REPL binding semantics preserved; `!` defined for REPL context
+- ADR 0039 (Syntax Pragmatism vs Smalltalk) — cascade semantics deferred to ADR 0044; ADR 0039's fan-out semantics remain unchanged until then
+- ADR 0043 (Sync-by-Default Actor Messaging) — `.` vs `!` call/cast syntax split out from this ADR into its own focused decision
+- ADR 0040 (Workspace-Native REPL Commands) — REPL binding semantics preserved
 - ADR 0041 (Universal State-Threading Block Protocol) — scope narrowed to local rebinding and actor slot assignments through blocks; remains active and essential
 
 ### External References
@@ -761,5 +727,5 @@ Value type tests using instance variable assignment (`self.slot := value`) must 
 - Pony reference capabilities: value vs identity distinction at the type level
 
 ### Related Issues
-- BT-506 — pipeline operator; cascade-as-pipeline candidate deferred to ADR 0043
+- BT-506 — pipeline operator; cascade-as-pipeline candidate deferred to ADR 0044
 - BT-868, BT-900, BT-904, BT-894 — state-threading edge cases that motivated this decision
