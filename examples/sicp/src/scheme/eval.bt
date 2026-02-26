@@ -135,10 +135,10 @@ Object subclass: SchemeEval
     ].
     func class =:= Block ifTrue: [^func value: args].
     // SchemeLambda: extend closure environment with parameter bindings
-    callEnv := SchemeEnv new withParent: func closureEnv.
+    baseEnv := SchemeEnv new withParent: func closureEnv.
     paramPairs := func params zip: args.
-    paramPairs do: [:pair |
-      callEnv := callEnv define: (pair at: 1) value: (pair at: 2)
+    callEnv := paramPairs inject: baseEnv into: [:e :pair |
+      e define: (pair at: "key") value: (pair at: "value")
     ].
     self evalExpr: func body in: callEnv
 

@@ -10,6 +10,8 @@
 //   - Error: applying a non-procedure raises "Not a procedure: X" (BT-930)
 //
 // Run in the REPL:
+//   > :load src/scheme/lambda.bt
+//   > :load src/scheme/env.bt
 //   > :load src/scheme/eval.bt
 //   > :load test/scheme_test.bt
 //   > SchemeTest runAll
@@ -46,6 +48,24 @@ TestCase subclass: SchemeTest
     // (lambda (x) (* x x)) produces a procedure
     self assert: (eval eval: "(lambda (x) (* x x))") equals: "<procedure>"
 
+  testLambdaIdentity =>
+    eval := SchemeEval new.
+    // ((lambda (x) x) 5) — identity function
+    result := [eval eval: "((lambda (x) x) 5)"] on: Exception do: [:e | "ERROR: " ++ e message].
+    self assert: result equals: "5"
+
+  testLambdaApplication =>
+    eval := SchemeEval new.
+    // ((lambda (x) (* x x)) 5) applies the square lambda to 5
+    result := [eval eval: "((lambda (x) (* x x)) 5)"] on: Exception do: [:e | "ERROR: " ++ e message].
+    self assert: result equals: "25"
+
+  testLambdaMultipleParams =>
+    eval := SchemeEval new.
+    // ((lambda (a b) (+ a b)) 3 7) applies a two-param lambda
+    result := [eval eval: "((lambda (a b) (+ a b)) 3 7)"] on: Exception do: [:e | "ERROR: " ++ e message].
+    self assert: result equals: "10"
+
   testApplyNonProcedureRaisesError =>
     // (1 + 2) in Scheme treats 1 as the operator.
     // 1 is not a Block or SchemeLambda, so apply:args:in: must raise
@@ -55,11 +75,8 @@ TestCase subclass: SchemeTest
     result := [eval eval: "(1 + 2)"] on: Exception do: [:e | e message].
     self assert: result equals: "Not a procedure: 1"
 
-  testApplyNonProcedureString =>
-    // A string literal in operator position also raises a clear error.
-    // (define x "hello") then apply "hello" — here we just use a quoted string
-    // in operator position via a symbol lookup that returns a non-procedure.
-    // Test with a number in operator position for clarity.
+  testApplyNonProcedureOtherNumber =>
+    // Any non-procedure in operator position should give the same clear error.
     eval := SchemeEval new.
     result := [eval eval: "(42 1 2)"] on: Exception do: [:e | e message].
     self assert: result equals: "Not a procedure: 42"
