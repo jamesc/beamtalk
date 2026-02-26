@@ -92,22 +92,18 @@ is_internal_key(Key) when is_atom(Key) ->
 %% which already-loaded classes are value objects vs actors.
 -spec build_class_superclass_index() -> #{binary() => binary()}.
 build_class_superclass_index() ->
-    case ets:info(beamtalk_class_hierarchy) of
-        undefined ->
-            #{};
-        _ ->
-            lists:foldl(
-                fun
-                    ({_Class, none}, Acc) ->
-                        Acc;
-                    ({Class, Superclass}, Acc) when is_atom(Class), is_atom(Superclass) ->
-                        Acc#{atom_to_binary(Class, utf8) => atom_to_binary(Superclass, utf8)};
-                    (_, Acc) ->
-                        Acc
-                end,
-                #{},
-                ets:tab2list(beamtalk_class_hierarchy)
-            )
+    FoldFun = fun
+        ({_Class, none}, Acc) ->
+            Acc;
+        ({Class, Superclass}, Acc) when is_atom(Class), is_atom(Superclass) ->
+            Acc#{atom_to_binary(Class, utf8) => atom_to_binary(Superclass, utf8)};
+        (_, Acc) ->
+            Acc
+    end,
+    try
+        ets:foldl(FoldFun, #{}, beamtalk_class_hierarchy)
+    catch
+        error:badarg -> #{}
     end.
 
 %%% Internal functions

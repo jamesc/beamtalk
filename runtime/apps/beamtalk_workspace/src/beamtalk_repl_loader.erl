@@ -294,11 +294,17 @@ store_class_sources([], ClassModName, Expression, State) ->
     {FallbackName, NewState};
 store_class_sources(Classes, _ClassModName, Expression, State) ->
     StoreFun = fun(#{name := Name}, AccState) ->
-        beamtalk_repl_state:set_class_source(Name, Expression, AccState)
+        NameBin = normalize_class_source_key(Name),
+        beamtalk_repl_state:set_class_source(NameBin, Expression, AccState)
     end,
     [#{name := FirstName} | _] = Classes,
     NewState = lists:foldl(StoreFun, State, Classes),
-    {FirstName, NewState}.
+    {normalize_class_source_key(FirstName), NewState}.
+
+-spec normalize_class_source_key(atom() | binary() | list()) -> binary().
+normalize_class_source_key(Name) when is_binary(Name) -> Name;
+normalize_class_source_key(Name) when is_atom(Name) -> atom_to_binary(Name, utf8);
+normalize_class_source_key(Name) when is_list(Name) -> list_to_binary(Name).
 
 %% Extract trailing expression info from a class definition result (BT-885).
 -spec extract_trailing_info(map()) ->
