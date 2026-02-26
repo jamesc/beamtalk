@@ -12,7 +12,7 @@ use std::fmt::Write;
 
 use super::super::document::Document;
 use super::super::intrinsics::validate_block_arity_exact;
-use super::super::{CoreErlangGenerator, Result, block_analysis};
+use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use crate::docvec;
 
@@ -834,9 +834,88 @@ impl CoreErlangGenerator {
             }
             wrapped_doc
         } else {
-            // TODO(BT-909): Non-literal callables (identifiers/variables referencing
-            // a Tier-2 block) bypass wrapping here. Requires type-level tracking to fix.
-            self.expression_doc(body)?
+            // BT-909: Non-literal callable — emit a runtime arity check that wraps
+            // Tier-2 (arity 2) blocks to satisfy the arity-1 contract expected by
+            // lists:foreach / lists:map / lists:filter.
+            //
+            // Generated pattern (uses is_function/2 to avoid badarg on non-funs):
+            //   let _Callable = <expr> in
+            //   case call 'erlang':'is_function'(_Callable, 1) of
+            //     <'true'> when 'true' -> _Callable           -- arity-1, pass through
+            //     <'false'> when 'true' ->
+            //       case call 'erlang':'is_function'(_Callable, 2) of
+            //         <'true'> when 'true' -> fun (_WArg) ->  -- Tier-2, wrap it
+            //           let _T = apply _Callable (_WArg, <SeedState>) in
+            //           let _WRes = call 'erlang':'element'(1, _T) in _WRes
+            //         <'false'> when 'true' -> _Callable      -- not a fun, pass through
+            //       end
+            //   end
+            //
+            // NOTE 1: `let {_WRes, _} = apply ...` is invalid Core Erlang inside a fun
+            // body (erlc rejects tuple patterns in let). Use element/2 calls instead.
+            // NOTE 2: In Core Erlang, `fun (Params) -> Body` does NOT use `end` to
+            // terminate the fun — the Body expression ends the fun. Two `end`s close
+            // the two nested `case` expressions.
+            //
+            // SeedState is current_state_var() for Actor/Repl; for ValueType there is
+            // no State in scope so ~{}~ is bound to a fresh variable first.
+            self.warn_non_literal_callable_at_erlang_boundary(
+                &format!("'lists':'{operation}'"),
+                body.span(),
+            );
+            let callable_var = self.fresh_temp_var("Callable");
+            let raw_code = self.expression_doc(body)?;
+            let wrap_arg = self.fresh_temp_var("WArg");
+            let wrap_tuple = self.fresh_temp_var("T");
+            let wrap_res = self.fresh_temp_var("WRes");
+
+            // Seed StateAcc: for value types there is no State variable in scope.
+            // Bind ~{}~ to a fresh variable (mirroring generate_erlang_interop_wrapper)
+            // so ~{}~ is not used as a literal in an apply argument position.
+            let (state_preamble, state_var): (Document<'static>, String) =
+                if matches!(self.context, CodeGenContext::ValueType) {
+                    let sv = self.fresh_temp_var("EmptyState");
+                    let pre = docvec!["let ", Document::String(sv.clone()), " = ~{}~ in "];
+                    (pre, sv)
+                } else {
+                    (Document::Str(""), self.current_state_var())
+                };
+
+            // Use is_function/2 instead of fun_info to avoid exception on non-functions
+            docvec![
+                "let ",
+                Document::String(callable_var.clone()),
+                " = ",
+                raw_code,
+                " in case call 'erlang':'is_function'(",
+                Document::String(callable_var.clone()),
+                ", 1) of <'true'> when 'true' -> ",
+                Document::String(callable_var.clone()),
+                " <'false'> when 'true' -> ",
+                "case call 'erlang':'is_function'(",
+                Document::String(callable_var.clone()),
+                ", 2) of <'true'> when 'true' -> fun (",
+                Document::String(wrap_arg.clone()),
+                ") -> ",
+                state_preamble,
+                "let ",
+                Document::String(wrap_tuple.clone()),
+                " = apply ",
+                Document::String(callable_var.clone()),
+                " (",
+                Document::String(wrap_arg),
+                ", ",
+                Document::String(state_var),
+                ") in let ",
+                Document::String(wrap_res.clone()),
+                " = call 'erlang':'element'(1, ",
+                Document::String(wrap_tuple),
+                ") in ",
+                Document::String(wrap_res),
+                " <'false'> when 'true' -> ",
+                Document::String(callable_var),
+                " end end",
+            ]
         };
 
         Ok(docvec![
