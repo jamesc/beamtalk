@@ -376,18 +376,77 @@ sync_send(ActorPid, Selector, Args) ->
     case is_process_alive(ActorPid) of
         true ->
             try
-                gen_server:call(ActorPid, {Selector, Args})
+                %% BT-918: Generated handle_call/3 wraps replies as {ok, Result} or {error, Error}.
+                %% Unwrap here so callers receive the value directly.
+                %%
+                %% The {error, Error} case has two sub-forms due to the safe_dispatch layer:
+                %%   1. Error = #beamtalk_error{} — returned by dispatch_user_method try/catch
+                %%   2. Error = {ErlType, Value} — raw Erlang exception caught by safe_dispatch
+                %% We re-raise both forms as Erlang exceptions so the caller sees them correctly.
+                case gen_server:call(ActorPid, {Selector, Args}) of
+                    {ok, Result} ->
+                        Result;
+                    {error, {_ErlType, ErrorValue}} ->
+                        %% safe_dispatch caught an Erlang exception; re-raise the actual value
+                        error(beamtalk_exception_handler:ensure_wrapped(ErrorValue));
+                    {error, Error} ->
+                        error(beamtalk_exception_handler:ensure_wrapped(Error));
+                    DirectValue ->
+                        %% Backward compat: actors using beamtalk_actor:handle_call/3 directly
+                        %% (rather than the generated handle_call) return values unwrapped.
+                        DirectValue
+                end
             catch
                 exit:{noproc, _} ->
-                    actor_dead_error(Selector);
+                    raise_actor_dead(Selector);
                 exit:{normal, _} ->
-                    actor_dead_error(Selector);
+                    raise_actor_dead(Selector);
                 exit:{shutdown, _} ->
-                    actor_dead_error(Selector)
+                    raise_actor_dead(Selector);
+                exit:{timeout, _} ->
+                    raise_timeout(Selector);
+                exit:{_Reason, _} ->
+                    %% Catch-all for other exit reasons: {shutdown, Term}, killed,
+                    %% custom stop reasons, etc. All indicate the actor is unavailable.
+                    raise_actor_dead(Selector)
             end;
         false ->
-            actor_dead_error(Selector)
+            raise_actor_dead(Selector)
     end.
+
+%% @private
+%% @doc Raise a structured actor_dead error as an Erlang exception.
+%%
+%% Used by sync_send/3 to signal that the actor process is not available.
+%% The caller will see a beamtalk_error{kind = actor_dead} exception.
+-spec raise_actor_dead(atom()) -> no_return().
+raise_actor_dead(Selector) ->
+    Error = beamtalk_error:new(
+        actor_dead,
+        unknown,
+        Selector,
+        <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
+    ),
+    error(beamtalk_exception_handler:ensure_wrapped(Error)).
+
+%% @private
+%% @doc Raise a structured timeout error as an Erlang exception.
+%%
+%% Used by sync_send/3 when gen_server:call exceeds the timeout (default 5000ms).
+%% A timeout means the actor didn't respond in time, NOT that it's dead —
+%% it may be slow, overloaded, or deadlocked.
+-spec raise_timeout(atom()) -> no_return().
+raise_timeout(Selector) ->
+    Error = beamtalk_error:new(
+        timeout,
+        unknown,
+        Selector,
+        <<
+            "Actor did not respond within the timeout period. "
+            "The actor may be slow, overloaded, or deadlocked"
+        >>
+    ),
+    error(beamtalk_exception_handler:ensure_wrapped(Error)).
 
 %% @private
 %% @doc Construct a structured actor_dead error for the given selector.

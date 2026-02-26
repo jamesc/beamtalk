@@ -13,7 +13,7 @@
 %%%
 %%% | Receiver Type | Dispatch Path | Returns |
 %%% |---------------|---------------|---------|
-%%% | Actor record  | `beamtalk_actor:async_send/4` | Future |
+%%% | Actor record  | `beamtalk_actor:sync_send/3` | Value |
 %%% | Class object  | `beamtalk_object_class:class_send/3` | Value |
 %%% | Primitive     | `beamtalk_primitive:send/3` | Value |
 %%%
@@ -23,7 +23,7 @@
 %%% call 'beamtalk_message_dispatch':'send'(Receiver, 'selector', [Args])
 %%% ```
 %%%
-%%% See: ADR 0006 (Unified Method Dispatch), BT-430
+%%% See: ADR 0006 (Unified Method Dispatch), BT-430, ADR 0043 (BT-918)
 
 -module(beamtalk_message_dispatch).
 -export([send/3]).
@@ -37,14 +37,14 @@
 %% @doc Send a message to any receiver (actor, class object, primitive, or future).
 %%
 %% For futures, auto-awaits the value and re-dispatches (BT-840).
-%% For actors, creates a future and sends asynchronously.
+%% For actors, sends synchronously via gen_server:call (BT-918 / ADR 0043).
 %% For class objects, dispatches synchronously via class_send.
 %% For primitives, dispatches synchronously via beamtalk_primitive:send/3.
 -spec send(term(), atom(), list()) -> term().
 send({beamtalk_future, _} = Future, Selector, Args) ->
     %% BT-840: Auto-await futures in chained message sends.
-    %% This enables `actor method1 method2` to work — method1 returns a future,
-    %% which is awaited before method2 is dispatched on the resolved value.
+    %% This enables backward compat during migration — any residual futures
+    %% returned by old code paths are awaited before re-dispatching.
     Value = beamtalk_future:await(Future),
     send(Value, Selector, Args);
 send(Receiver, Selector, Args) ->
@@ -54,7 +54,7 @@ send(Receiver, Selector, Args) ->
                 'Metaclass' ->
                     %% ADR 0036 (BT-802): Metaclass objects dispatch synchronously via
                     %% the Metaclass → Class → Behaviour chain. They must NOT be treated
-                    %% as regular actor instances (which would return a Future PID).
+                    %% as regular actor instances.
                     beamtalk_primitive:send(Receiver, Selector, Args);
                 _ ->
                     case beamtalk_class_registry:is_class_object(Receiver) of
@@ -63,14 +63,14 @@ send(Receiver, Selector, Args) ->
                             beamtalk_object_class:class_send(ClassPid, Selector, Args);
                         false ->
                             Pid = element(4, Receiver),
-                            %% BT-886: Validate PID before creating a future.
+                            %% BT-886: Validate PID before dispatching.
                             %% When class registration is incomplete, the actor
                             %% record may contain an invalid PID (e.g., undefined).
                             case is_pid(Pid) of
                                 true ->
-                                    {beamtalk_future, FuturePid} = beamtalk_future:new(),
-                                    beamtalk_actor:async_send(Pid, Selector, Args, FuturePid),
-                                    {beamtalk_future, FuturePid};
+                                    %% BT-918 / ADR 0043: sync-by-default — use gen_server:call
+                                    %% so the send returns the value directly, not a Future.
+                                    beamtalk_actor:sync_send(Pid, Selector, Args);
                                 false ->
                                     ClassName = element(2, Receiver),
                                     Error = beamtalk_error:new(

@@ -30,36 +30,32 @@ actor_teardown(_) ->
 
 actor_test_() ->
     {setup, fun actor_setup/0, fun actor_teardown/1, [
-        {"actor dispatch returns future", fun actor_returns_future/0},
-        {"actor dispatch creates future pid", fun actor_future_is_pid/0},
+        %% BT-918 / ADR 0043: sync-by-default — actor dispatch returns value directly, not future
+        {"actor dispatch returns value directly (sync)", fun actor_returns_value_directly/0},
+        {"actor dispatch dead actor raises error", fun actor_dead_raises_error/0},
         {"class object dispatch returns value", fun class_object_returns_value/0}
     ]}.
 
-actor_returns_future() ->
-    %% Spawn a dummy process that discards messages (avoids noisy mailbox on self())
-    Dummy = spawn(fun() ->
-        receive
-            _ -> ok
-        end
-    end),
-    Obj = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_object, pid = Dummy},
-    %% Send returns a tagged future, not a direct value
-    Result = beamtalk_message_dispatch:send(Obj, 'testMsg', []),
-    ?assert(beamtalk_future:is_future(Result)),
-    exit(Dummy, kill).
+actor_returns_value_directly() ->
+    %% BT-918: Actor sends now use gen_server:call and return values directly.
+    %% Use a real gen_server (test_counter) since dummy procs don't handle gen_server calls.
+    {ok, Counter} = test_counter:start_link(0),
+    Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
+    %% Send returns the direct value, not a future
+    Result = beamtalk_message_dispatch:send(Obj, 'getValue', []),
+    ?assertNot(beamtalk_future:is_future(Result)),
+    gen_server:stop(Counter).
 
-actor_future_is_pid() ->
-    %% Future returned by actor dispatch should be a tagged future (not the actor pid)
-    Dummy = spawn(fun() ->
-        receive
-            _ -> ok
-        end
-    end),
-    Obj = #beamtalk_object{class = 'TestClass', class_mod = beamtalk_object, pid = Dummy},
-    Future = beamtalk_message_dispatch:send(Obj, 'someMsg', []),
-    ?assert(beamtalk_future:is_future(Future)),
-    ?assertNotEqual(Dummy, Future),
-    exit(Dummy, kill).
+actor_dead_raises_error() ->
+    %% BT-918: Sending to a dead actor raises an actor_dead exception.
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter),
+    timer:sleep(10),
+    Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
+        beamtalk_message_dispatch:send(Obj, 'getValue', [])
+    ).
 
 class_object_returns_value() ->
     ClassPid = beamtalk_class_registry:whereis_class('Object'),
