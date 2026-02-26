@@ -21,4 +21,17 @@
 ///
 /// See ADR 0028 §1 for full mapping rules.
 sealed ProtoObject subclass: ErlangModule
+
+  /// Forward an unknown message as an Erlang function call on the proxied module.
+  ///
+  /// Invoked automatically when any message is sent to an ErlangModule instance.
+  /// Maps the Beamtalk selector and arguments to `erlang:apply(Module, Fun, Args)`
+  /// according to the selector-to-function-name rules in ADR 0028 §1.
+  /// Compiled via `@intrinsic erlangApply` — no gen_server roundtrip.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Erlang lists) reverse: #(3, 2, 1)    // => [1, 2, 3]
+  /// (Erlang erlang) node                   // => :'nonode@nohost'
+  /// ```
   doesNotUnderstand: selector args: arguments => @intrinsic erlangApply

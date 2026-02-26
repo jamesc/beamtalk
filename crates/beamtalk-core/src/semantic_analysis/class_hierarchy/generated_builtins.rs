@@ -1082,7 +1082,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![
                 MethodInfo { selector: "next".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
                 MethodInfo { selector: "nextInteger:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![Some("Integer".into())] },
-                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
             class_methods: vec![
                 MethodInfo { selector: "next".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: true, return_type: Some("Float".into()), param_types: vec![] },

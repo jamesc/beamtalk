@@ -1,36 +1,92 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// TestCase - Base class for BUnit test cases (ADR 0014 Phase 2)
-//
-// TestCase provides the foundation for SUnit-style testing in Beamtalk.
-// Users subclass TestCase and write test methods (prefixed with "test").
-// Each test method creates a fresh instance, calls setUp, runs the test,
-// and calls tearDown.
-//
-// Example:
-//   TestCase subclass: CounterTest
-//     setUp => self.counter := Counter spawn
-//     testIncrement => self assert: (self.counter getValue await) equals: 1
+/// TestCase — Base class for BUnit test cases.
+///
+/// TestCase provides the foundation for SUnit-style testing in Beamtalk.
+/// Users subclass TestCase and define test methods (prefixed with `test`).
+/// Each test method runs in a fresh instance: `setUp` is called first,
+/// then the test method, then `tearDown`. See ADR 0014 Phase 2.
+///
+/// ## Examples
+/// ```beamtalk
+/// TestCase subclass: CounterTest
+///   setUp => self.counter := Counter spawn
+///   testIncrement =>
+///     self assert: (self.counter getValue await) equals: 1
+/// ```
 
 Object subclass: TestCase
-  // Lifecycle methods — override in subclasses for test fixtures
+
+  /// Prepare the test fixture. Called before each test method.
+  /// Override in subclasses to set up shared state or resources.
   setUp -> Nil => nil
+
+  /// Clean up after the test. Called after each test method.
+  /// Override in subclasses to release resources or reset state.
   tearDown -> Nil => nil
 
-  // Core assertions — pure Beamtalk implementations (ADR 0034 Phase 4)
+  /// Assert that `condition` is true, failing the test if it is false.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self assert: (1 + 1 =:= 2)    // passes
+  /// self assert: false              // fails
+  /// ```
   assert: condition: Boolean -> Nil =>
     condition ifFalse: [self fail: "Assertion failed: expected true, got {condition}"].
     nil
+
+  /// Assert that `condition` is false, failing the test if it is true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self deny: (1 =:= 2)           // passes
+  /// self deny: true                 // fails
+  /// ```
   deny: condition: Boolean -> Nil =>
     condition ifTrue: [self fail: "Denial failed: expected false, got {condition}"].
     nil
+
+  /// Assert that `actual` equals `expected`, failing the test if they differ.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self assert: (1 + 1) equals: 2   // passes
+  /// self assert: (1 + 1) equals: 3   // fails
+  /// ```
   assert: actual equals: expected -> Nil =>
     (actual =:= expected) ifFalse: [self fail: "Expected {expected}, got {actual}"].
     nil
+
+  /// Assert that evaluating `block` raises an error of kind `errorKind`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self should: [1 / 0] raise: ZeroDivisionError
+  /// ```
   should: block: Block raise: errorKind: Object -> Nil => @primitive "should:raise:"
+
+  /// Fail the test immediately with the given `message`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self fail: "This branch should not be reached"
+  /// ```
   fail: message: String -> Nil => @primitive "fail:"
 
-  // Class-side methods for running tests interactively (BT-440)
+  /// Run all test methods in this class and print a summary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// CounterTest runAll     // prints results to transcript
+  /// ```
   class runAll => @primitive "runAll"
+
+  /// Run the named test method in this class and print a summary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// CounterTest run: #testIncrement
+  /// ```
   class run: testName => @primitive "run:"

@@ -1,19 +1,48 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// TestRunner - Programmatic test execution returning structured results (BT-762)
-//
-// TestRunner provides class-side methods for discovering and running tests.
-// Unlike TestCase's runAll (which returns a formatted string), TestRunner
-// returns TestResult objects that agents can introspect programmatically.
-//
-// Example:
-//   TestRunner runAll                          // => TestResult for all test classes
-//   TestRunner run: CounterTest               // => TestResult for one class
-//   TestRunner run: CounterTest method: #testIncrement  // => TestResult for one method
+/// TestRunner — Programmatic test execution returning structured results.
+///
+/// TestRunner provides class-side methods for discovering and running tests.
+/// Unlike `TestCase runAll` (which prints a formatted string), TestRunner
+/// returns `TestResult` objects that agents and tools can introspect
+/// programmatically. See BT-762.
+///
+/// ## Examples
+/// ```beamtalk
+/// TestRunner runAll                           // => TestResult for all classes
+/// TestRunner run: CounterTest                 // => TestResult for one class
+/// TestRunner run: CounterTest method: #testIncrement  // => one method
+/// ```
 
 Object subclass: TestRunner
-  // Class-side methods for test execution — return TestResult objects
+
+  /// Run all test methods across all discovered TestCase subclasses.
+  /// Returns a TestResult aggregating the combined results.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result := TestRunner runAll
+  /// result hasPassed       // => true
+  /// ```
   class runAll => @primitive "runAll"
+
+  /// Run all test methods in the given TestCase subclass `testClass`.
+  /// Returns a TestResult for that class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result := TestRunner run: CounterTest
+  /// result summary         // => "3 tests, 3 passed (0.0s)"
+  /// ```
   class run: testClass => @primitive "run:"
+
+  /// Run a single named test method in `testClass`.
+  /// Returns a TestResult containing just that method's outcome.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result := TestRunner run: CounterTest method: #testIncrement
+  /// result hasPassed       // => true
+  /// ```
   class run: testClass method: testName => @primitive "run:method:"

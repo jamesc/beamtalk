@@ -1,26 +1,84 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// TestResult - Structured result from running tests (BT-762)
-//
-// TestResult wraps the structured map returned by beamtalk_test_case
-// into a first-class Beamtalk object that agents can introspect.
-//
-// TestResult instances are created by TestRunner — not directly by users.
-//
-// Example:
-//   result := TestRunner runAll
-//   result hasPassed    // => true or false
-//   result summary      // => "5 tests, 5 passed (0.1s)"
-//   result failures     // => [] or [{name: ..., error: ...}, ...]
+/// TestResult — Structured result from running a test suite.
+///
+/// TestResult wraps the structured map returned by `beamtalk_test_case`
+/// into a first-class Beamtalk object that agents and tools can introspect.
+/// Instances are created by TestRunner — not constructed directly by users.
+/// See BT-762.
+///
+/// ## Examples
+/// ```beamtalk
+/// result := TestRunner runAll
+/// result hasPassed    // => true or false
+/// result summary      // => "5 tests, 5 passed (0.1s)"
+/// result failures     // => [] or [#{ name => ..., error => ... }, ...]
+/// ```
 
 Object subclass: TestResult
-  // Accessors — @primitive methods implemented in beamtalk_test_runner.erl
+
+  /// Number of test methods that passed.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result passed      // => 5
+  /// ```
   passed -> Integer => @primitive "passed"
+
+  /// Number of test methods that failed or raised an error.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result failed      // => 0
+  /// ```
   failed -> Integer => @primitive "failed"
+
+  /// Total number of test methods that were run.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result total       // => 5
+  /// ```
   total -> Integer => @primitive "total"
+
+  /// Wall-clock duration of the test run in seconds.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result duration    // => 0.123
+  /// ```
   duration -> Float => @primitive "duration"
+
+  /// List of failure records. Each record is a Dictionary with keys
+  /// `name` (String) and `error` (String).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result failures    // => []
+  /// ```
   failures -> List => @primitive "failures"
+
+  /// True if all tests passed (i.e. `failed` is zero).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result hasPassed   // => true
+  /// ```
   hasPassed -> Boolean => @primitive "hasPassed"
+
+  /// Human-readable summary line.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result summary     // => "5 tests, 5 passed (0.1s)"
+  /// ```
   summary -> String => @primitive "summary"
+
+  /// Developer-readable representation of the result.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result printString // => "TestResult(5/5 passed)"
+  /// ```
   printString -> String => @primitive "printString"
