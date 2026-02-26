@@ -780,24 +780,18 @@ handle_method_definition_no_source_with_warnings_test() ->
     ?assertMatch({error, {compile_error, _}, <<>>, [<<"w1">>], _}, Result).
 
 handle_method_definition_with_source_compile_fail_test() ->
-    %% Test the path where class source exists but recompilation fails (line 273-276)
-    %% Store some class source, then try adding a method — compiler not available
+    %% Test the path where class source exists but recompilation fails.
+    %% BT-911: compile_for_method_reload wraps compiler exits — must return {error, ...},
+    %% never propagate as an exit that would kill the REPL process.
     State0 = beamtalk_repl_state:new(undefined, 0),
     State1 = beamtalk_repl_state:set_class_source(
         <<"TestClass">>, "Object subclass: TestClass", State0
     ),
     MethodInfo = #{class_name => <<"TestClass">>, selector => <<"doStuff">>},
-    %% Compiler not available — compile will exit with noproc, caught by the try/catch
-    %% in handle_method_definition which calls beamtalk_compiler:compile directly
-    Result =
-        (catch beamtalk_repl_eval:handle_method_definition(
-            MethodInfo, [], "doStuff [] := 42", State1
-        )),
-    %% May either return compile error or exit — both are acceptable
-    case Result of
-        {error, {compile_error, _}, <<>>, [], _} -> ok;
-        {'EXIT', _} -> ok
-    end.
+    Result = beamtalk_repl_eval:handle_method_definition(
+        MethodInfo, [], "doStuff [] := 42", State1
+    ),
+    ?assertMatch({error, {compile_error, _}, <<>>, [], _}, Result).
 
 %% ===================================================================
 %% maybe_await_future timeout and flush paths (BT-627)

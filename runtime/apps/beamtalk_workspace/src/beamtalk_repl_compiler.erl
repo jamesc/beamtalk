@@ -17,6 +17,7 @@
     compile_expression/3,
     compile_file/4,
     compile_for_codegen/3,
+    compile_for_method_reload/2,
     format_formatted_diagnostics/1,
     is_internal_key/1,
     build_class_superclass_index/0
@@ -105,6 +106,36 @@ build_class_superclass_index() ->
     catch
         error:badarg -> #{}
     end.
+
+%% @doc Compile Beamtalk source and Core Erlang for method reload (BT-911).
+%%
+%% Wraps both beamtalk_compiler:compile/2 and compile_core_erlang/1 inside
+%% wrap_compiler_errors so that a compiler crash (exit, throw, error) returns
+%% {error, {compile_error, Msg}} instead of propagating a fatal exit that would
+%% kill the REPL process.
+-spec compile_for_method_reload(binary(), map()) ->
+    {ok, binary(), atom(), list(), [binary()]} | {error, term()}.
+compile_for_method_reload(SourceBin, Options) ->
+    wrap_compiler_errors(
+        fun() ->
+            case beamtalk_compiler:compile(SourceBin, Options) of
+                {ok,
+                    #{core_erlang := CoreErlang, module_name := ModNameBin, classes := Classes} =
+                        CR} ->
+                    Warnings = maps:get(warnings, CR, []),
+                    ModName = binary_to_atom(ModNameBin, utf8),
+                    case beamtalk_compiler:compile_core_erlang(CoreErlang) of
+                        {ok, _CompiledMod, Binary} ->
+                            {ok, Binary, ModName, Classes, Warnings};
+                        {error, Reason} ->
+                            {error, {compile_error, format_core_error(Reason)}}
+                    end;
+                {error, Diagnostics} ->
+                    {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
+            end
+        end,
+        wrapped
+    ).
 
 %%% Internal functions
 

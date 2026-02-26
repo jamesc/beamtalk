@@ -423,6 +423,10 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
     end.
 
 %% Recompile a class with a new method definition.
+%%
+%% BT-911: Delegates to beamtalk_repl_compiler:compile_for_method_reload/2 which
+%% wraps all compiler calls in wrap_compiler_errors, preventing compiler crashes
+%% from propagating as exits that would kill the REPL process.
 -spec recompile_with_method(
     string(), binary(), binary(), string(), [binary()], beamtalk_repl_state:state()
 ) ->
@@ -439,13 +443,11 @@ recompile_with_method(ClassSource, ClassNameBin, SelectorBin, Expression, Warnin
             0 -> Options0;
             _ -> Options0#{class_superclass_index => SuperclassIndex}
         end,
-    case beamtalk_compiler:compile(SourceBin, Options) of
-        {ok, #{core_erlang := CoreErlang, module_name := ModNameBin, classes := Classes} = CR} ->
-            RecompileWarnings = maps:get(warnings, CR, []),
+    case beamtalk_repl_compiler:compile_for_method_reload(SourceBin, Options) of
+        {ok, Binary, ModName, Classes, RecompileWarnings} ->
             AllWarnings = Warnings ++ RecompileWarnings,
-            ModName = binary_to_atom(ModNameBin, utf8),
-            compile_and_load_method(
-                CoreErlang,
+            load_recompiled_method(
+                Binary,
                 ModName,
                 Classes,
                 ClassNameBin,
@@ -454,19 +456,18 @@ recompile_with_method(ClassSource, ClassNameBin, SelectorBin, Expression, Warnin
                 AllWarnings,
                 State
             );
-        {error, Diagnostics} ->
-            ErrorMsg = iolist_to_binary(io_lib:format("Compile error: ~p", [Diagnostics])),
-            {error, {compile_error, ErrorMsg}, <<>>, Warnings, State}
+        {error, Reason} ->
+            {error, Reason, <<>>, Warnings, State}
     end.
 
-%% Compile Core Erlang and load a recompiled method-patched class.
--spec compile_and_load_method(
+%% Load a recompiled method-patched class binary into BEAM.
+-spec load_recompiled_method(
     binary(), atom(), list(), binary(), binary(), string(), [binary()], beamtalk_repl_state:state()
 ) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
-compile_and_load_method(
-    CoreErlang,
+load_recompiled_method(
+    Binary,
     ModName,
     Classes,
     ClassNameBin,
@@ -475,28 +476,22 @@ compile_and_load_method(
     AllWarnings,
     State
 ) ->
-    case beamtalk_compiler:compile_core_erlang(CoreErlang) of
-        {ok, _CompiledMod, Binary} ->
-            case code:load_binary(ModName, "", Binary) of
-                {module, ModName} ->
-                    activate_module(ModName, Classes),
-                    NewState = beamtalk_repl_state:set_class_source(
-                        ClassNameBin, CombinedSource, State
-                    ),
-                    Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
-                    {ok, Result, <<>>, AllWarnings, NewState};
-                {error, LoadReason} ->
-                    ClassAtoms = class_name_atoms(Classes),
-                    case beamtalk_class_registry:drain_pending_load_errors_by_names(ClassAtoms) of
-                        [{_ClassName, StructuredError} | _] ->
-                            {error, StructuredError, <<>>, AllWarnings, State};
-                        [] ->
-                            {error, {load_error, LoadReason}, <<>>, AllWarnings, State}
-                    end
-            end;
-        {error, Reason} ->
-            ErrorMsg = iolist_to_binary(io_lib:format("Core compile error: ~p", [Reason])),
-            {error, {compile_error, ErrorMsg}, <<>>, AllWarnings, State}
+    case code:load_binary(ModName, "", Binary) of
+        {module, ModName} ->
+            activate_module(ModName, Classes),
+            NewState = beamtalk_repl_state:set_class_source(
+                ClassNameBin, CombinedSource, State
+            ),
+            Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
+            {ok, Result, <<>>, AllWarnings, NewState};
+        {error, LoadReason} ->
+            ClassAtoms = class_name_atoms(Classes),
+            case beamtalk_class_registry:drain_pending_load_errors_by_names(ClassAtoms) of
+                [{_ClassName, StructuredError} | _] ->
+                    {error, StructuredError, <<>>, AllWarnings, State};
+                [] ->
+                    {error, {load_error, LoadReason}, <<>>, AllWarnings, State}
+            end
     end.
 
 %% Convert a list of class info maps to a list of existing atoms (BT-738).
