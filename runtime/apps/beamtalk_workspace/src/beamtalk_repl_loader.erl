@@ -438,10 +438,17 @@ recompile_with_method(ClassSource, ClassNameBin, SelectorBin, Expression, Warnin
     %% BT-907: Include superclass index so cross-file inheritance resolves correctly.
     SuperclassIndex = beamtalk_repl_compiler:build_class_superclass_index(),
     Options0 = #{stdlib_mode => false, workspace_mode => true},
-    Options =
+    Options1 =
         case map_size(SuperclassIndex) of
             0 -> Options0;
             _ -> Options0#{class_superclass_index => SuperclassIndex}
+        end,
+    %% Include module index for correct cross-directory class references.
+    ModuleIndex = beamtalk_repl_compiler:build_class_module_index(),
+    Options =
+        case map_size(ModuleIndex) of
+            0 -> Options1;
+            _ -> Options1#{class_module_index => ModuleIndex}
         end,
     case beamtalk_repl_compiler:compile_for_method_reload(SourceBin, Options) of
         {ok, Binary, ModName, Classes, RecompileWarnings} ->

@@ -20,7 +20,8 @@
     compile_for_method_reload/2,
     format_formatted_diagnostics/1,
     is_internal_key/1,
-    build_class_superclass_index/0
+    build_class_superclass_index/0,
+    build_class_module_index/0
 ]).
 
 %% Exported for testing (only in test builds)
@@ -107,6 +108,39 @@ build_class_superclass_index() ->
         error:badarg -> #{}
     end.
 
+%% @doc Build a class→module index from all registered class gen-servers.
+%%
+%% When a class lives in a subdirectory (e.g. src/singleton/app_logger.bt),
+%% the Rust compiler's user_package_prefix loses the subdirectory segment. By passing
+%% a full class→module map, compiled_module_name/2 uses the correct module name
+%% (e.g. bt@gang_of_four@singleton@app_logger) instead of guessing bt@gang_of_four@app_logger.
+-spec build_class_module_index() -> #{binary() => binary()}.
+build_class_module_index() ->
+    ClassPids =
+        try
+            beamtalk_class_registry:all_classes()
+        catch
+            _:_ -> []
+        end,
+    lists:foldl(
+        fun(Pid, Acc) ->
+            try
+                ClassName = gen_server:call(Pid, class_name, 1000),
+                ModuleName = gen_server:call(Pid, module_name, 1000),
+                case {ClassName, ModuleName} of
+                    {CN, MN} when is_atom(CN), is_atom(MN) ->
+                        Acc#{atom_to_binary(CN, utf8) => atom_to_binary(MN, utf8)};
+                    _ ->
+                        Acc
+                end
+            catch
+                _:_ -> Acc
+            end
+        end,
+        #{},
+        ClassPids
+    ).
+
 %% @doc Compile Beamtalk source and Core Erlang for method reload (BT-911).
 %%
 %% Wraps both beamtalk_compiler:compile/2 and compile_core_erlang/1 inside
@@ -150,10 +184,16 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
         not is_internal_key(K)
     ],
     SuperclassIndex = build_class_superclass_index(),
-    CompileOpts =
+    CompileOpts0 =
         case map_size(SuperclassIndex) of
             0 -> #{};
             _ -> #{class_superclass_index => SuperclassIndex}
+        end,
+    ModuleIndex = build_class_module_index(),
+    CompileOpts =
+        case map_size(ModuleIndex) of
+            0 -> CompileOpts0;
+            _ -> CompileOpts0#{class_module_index => ModuleIndex}
         end,
     wrap_compiler_errors(
         fun() ->
@@ -253,10 +293,16 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride) ->
     Options1 = apply_module_name_override(Options0, ModuleNameOverride),
     Options2 = apply_source_path(Options1, Path),
     SuperclassIndex = build_class_superclass_index(),
-    Options =
+    Options3 =
         case map_size(SuperclassIndex) of
             0 -> Options2;
             _ -> Options2#{class_superclass_index => SuperclassIndex}
+        end,
+    ModuleIndex = build_class_module_index(),
+    Options =
+        case map_size(ModuleIndex) of
+            0 -> Options3;
+            _ -> Options3#{class_module_index => ModuleIndex}
         end,
     wrap_compiler_errors(
         fun() ->

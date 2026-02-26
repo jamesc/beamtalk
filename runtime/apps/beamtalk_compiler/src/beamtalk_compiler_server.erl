@@ -187,6 +187,8 @@ do_compile(Port, Source, Options) ->
     SourcePath = maps:get(source_path, Options, undefined),
     %% BT-905: Optional class superclass index for cross-file value-object inheritance
     ClassSuperclassIndex = maps:get(class_superclass_index, Options, #{}),
+    %% Optional class module index for correct cross-directory module names
+    ClassModuleIndex = maps:get(class_module_index, Options, #{}),
     Request0 = #{
         command => compile,
         source => Source,
@@ -203,10 +205,15 @@ do_compile(Port, Source, Options) ->
             undefined -> Request1;
             _ -> Request1#{source_path => SourcePath}
         end,
-    Request =
+    Request3 =
         case map_size(ClassSuperclassIndex) of
             0 -> Request2;
             _ -> Request2#{class_superclass_index => ClassSuperclassIndex}
+        end,
+    Request =
+        case map_size(ClassModuleIndex) of
+            0 -> Request3;
+            _ -> Request3#{class_module_index => ClassModuleIndex}
         end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of

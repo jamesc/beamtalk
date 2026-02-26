@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TaskWorker - actor in a subdirectory of a nested fixture directory.
+// Used by load_nested_directory.bt to regression-test that actors loaded
+// from subdirectories generate the correct BEAM module name so that
+// spawn/0 resolves correctly (bt@...@workers@task_worker, not bt@...@task_worker).
+
+Actor subclass: TaskWorker
+  state: count = 0
+
+  increment => self.count := self.count + 1
+  getCount => self.count
