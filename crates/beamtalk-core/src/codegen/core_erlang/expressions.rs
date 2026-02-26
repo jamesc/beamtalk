@@ -641,6 +641,115 @@ impl CoreErlangGenerator {
         Ok(docvec![header, Document::Vec(docs)])
     }
 
+    /// BT-855: Generates an Erlang-compatible wrapper for a block at an Erlang call site.
+    ///
+    /// Erlang/Elixir code does not know about the Beamtalk state-threading protocol.
+    /// When a Beamtalk block is passed to an Erlang call site (e.g. `lists:map/2`),
+    /// this function generates a wrapper that strips the `StateAcc` protocol:
+    ///
+    /// ```erlang
+    /// %% For a stateful block: fun(X, StateAcc) -> {X + Count, StateAcc1}
+    /// let _BtBlock = fun(X, StateAcc) -> ... end in
+    /// fun(X) ->
+    ///     let {_WRes, _} = apply _BtBlock(X, CurrentState) in
+    ///     _WRes
+    /// end
+    /// ```
+    ///
+    /// The wrapper captures `CurrentState` from the enclosing scope so that reads of
+    /// captured variables succeed. Mutations made inside the block are dropped — the
+    /// updated `StateAcc` is not propagated back to the Beamtalk caller.
+    ///
+    /// For **pure blocks** (no captured mutations), returns the plain Tier 1 block
+    /// `fun(Params...) -> Body end` unchanged and `is_stateful = false`.
+    ///
+    /// For **stateful blocks** (captured mutations), returns the wrapper expression
+    /// and `is_stateful = true`. Callers should emit a diagnostic warning because
+    /// mutations will be silently dropped.
+    pub(super) fn generate_erlang_interop_wrapper(
+        &mut self,
+        block: &Block,
+    ) -> Result<(Document<'static>, bool)> {
+        use crate::codegen::core_erlang::block_analysis::analyze_block;
+
+        let analysis = analyze_block(block);
+
+        // Captured mutations: variables read from outer scope AND written in block.
+        // This matches the Tier 2 promotion check in generate_block().
+        let captured_mutations: Vec<String> = analysis
+            .local_writes
+            .intersection(&analysis.captured_reads)
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+
+        if captured_mutations.is_empty() {
+            // Pure block — plain Tier 1 fun, no wrapping needed.
+            return Ok((self.generate_block(block)?, false));
+        }
+
+        // Stateful block — generate Tier 2 block, then wrap it to strip the protocol.
+        let bt_block_var = self.fresh_temp_var("BtBlock");
+        let current_state = self.current_state_var();
+
+        // Generate the Tier 2 block: fun(Params..., StateAcc) -> {Result, NewStateAcc}
+        let tier2_doc = self.generate_block_stateful(block, &captured_mutations)?;
+
+        // Fresh parameter names for the wrapper fun (separate scope from the Tier 2 block).
+        let n_params = block.parameters.len();
+        let wrap_params: Vec<String> = (0..n_params).map(|_| self.fresh_temp_var("WArg")).collect();
+        let wrap_result = self.fresh_temp_var("WRes");
+
+        // Build wrapper parameter list: "WArg1, WArg2, ..."
+        let mut param_parts: Vec<Document<'static>> = Vec::new();
+        for (i, p) in wrap_params.iter().enumerate() {
+            if i > 0 {
+                param_parts.push(Document::Str(", "));
+            }
+            param_parts.push(Document::String(p.clone()));
+        }
+
+        // Build apply arguments: "WArg1, ..., WArgN, CurrentState"
+        let mut apply_parts: Vec<Document<'static>> = Vec::new();
+        for (i, p) in wrap_params.iter().enumerate() {
+            if i > 0 {
+                apply_parts.push(Document::Str(", "));
+            }
+            apply_parts.push(Document::String(p.clone()));
+        }
+        if !wrap_params.is_empty() {
+            apply_parts.push(Document::Str(", "));
+        }
+        apply_parts.push(Document::String(current_state));
+
+        // Emit:
+        // let _BtBlock = fun(Params..., StateAcc) -> ... end in
+        // fun(WArg1, ..., WArgN) ->
+        //     let {_WRes, _} = apply _BtBlock(WArg1, ..., WArgN, CurrentState) in
+        //     _WRes
+        // end
+        let wrapper_doc = docvec![
+            "let ",
+            Document::String(bt_block_var.clone()),
+            " = ",
+            tier2_doc,
+            " in fun (",
+            Document::Vec(param_parts),
+            ") -> let {",
+            Document::String(wrap_result.clone()),
+            ", _} = apply ",
+            Document::String(bt_block_var),
+            " (",
+            Document::Vec(apply_parts),
+            ") in ",
+            Document::String(wrap_result),
+            " end",
+        ];
+
+        Ok((wrapper_doc, true))
+    }
+
     /// BT-851: Generates the body of a Tier 2 stateful block with state threading.
     fn generate_block_stateful_body(
         &mut self,

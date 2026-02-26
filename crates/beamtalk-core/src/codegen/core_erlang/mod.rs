@@ -387,6 +387,42 @@ impl CodegenOptions {
 /// # Ok::<(), beamtalk_core::codegen::core_erlang::CodeGenError>(())
 /// ```
 pub fn generate_module(module: &Module, options: CodegenOptions) -> Result<String> {
+    generate_module_with_warnings(module, options).map(|m| m.code)
+}
+
+/// BT-855: Result of code generation including diagnostic warnings.
+///
+/// Returned by [`generate_module_with_warnings`]. Callers that need to surface
+/// warnings (e.g., stateful blocks at Erlang boundaries) should use that function.
+/// Callers that only need the generated code can use [`generate_module`] instead.
+#[derive(Debug)]
+pub struct GeneratedModule {
+    /// The generated Core Erlang code.
+    pub code: String,
+    /// Diagnostic warnings emitted during code generation.
+    ///
+    /// Examples:
+    /// - A stateful Beamtalk block was passed to an Erlang call site — mutations
+    ///   inside the block will be silently dropped since Erlang cannot propagate
+    ///   the updated `StateAcc` back to the Beamtalk caller.
+    pub warnings: Vec<String>,
+}
+
+/// Generates Core Erlang for a module, returning the code and any diagnostic warnings.
+///
+/// Like [`generate_module`] but also returns warnings emitted during generation.
+/// Use this when you need to surface warnings (e.g., for IDE diagnostics or compiler output).
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if:
+/// - The module uses unsupported features
+/// - Code generation encounters an internal error
+/// - Formatting fails
+pub fn generate_module_with_warnings(
+    module: &Module,
+    options: CodegenOptions,
+) -> Result<GeneratedModule> {
     let mut generator = if let Some(bindings) = options.bindings {
         CoreErlangGenerator::with_bindings(&options.module_name, bindings)
     } else {
@@ -415,7 +451,10 @@ pub fn generate_module(module: &Module, options: CodegenOptions) -> Result<Strin
         generator.generate_value_type_module(module)?
     };
 
-    Ok(doc.to_pretty_string())
+    Ok(GeneratedModule {
+        code: doc.to_pretty_string(),
+        warnings: generator.codegen_warnings,
+    })
 }
 
 /// Generates Core Erlang for a REPL expression.
@@ -740,6 +779,12 @@ pub(super) struct CoreErlangGenerator {
     /// from self-sends within the same class. Populated by `scan_class_for_tier2_blocks`
     /// before method body generation.
     tier2_method_info: std::collections::HashMap<String, Vec<usize>>,
+    /// BT-855: Diagnostic warnings emitted during code generation.
+    ///
+    /// Collected during generation and returned to callers via
+    /// [`generate_module_with_warnings`]. Examples include stateful blocks
+    /// passed to Erlang call sites where mutations will be silently dropped.
+    pub(super) codegen_warnings: Vec<String>,
 }
 
 impl CoreErlangGenerator {
@@ -772,6 +817,7 @@ impl CoreErlangGenerator {
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
             tier2_method_info: std::collections::HashMap::new(),
+            codegen_warnings: Vec::new(),
         }
     }
 
@@ -804,6 +850,7 @@ impl CoreErlangGenerator {
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
             tier2_method_info: std::collections::HashMap::new(),
+            codegen_warnings: Vec::new(),
         }
     }
 
@@ -913,6 +960,13 @@ impl CoreErlangGenerator {
     pub(super) fn next_self_var(&mut self) -> String {
         self.self_version += 1;
         format!("Self{}", self.self_version)
+    }
+
+    /// BT-855: Records a diagnostic warning for the current module.
+    ///
+    /// Warnings are returned to callers via [`generate_module_with_warnings`].
+    pub(super) fn add_codegen_warning(&mut self, msg: String) {
+        self.codegen_warnings.push(msg);
     }
 
     /// BT-833: Resets the Self version to 0 (call at the start of each value type method).

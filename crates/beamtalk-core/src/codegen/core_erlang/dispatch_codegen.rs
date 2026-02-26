@@ -364,6 +364,11 @@ impl CoreErlangGenerator {
     /// (e.g. `printString`, `asString`) — these must go through runtime dispatch
     /// so the proxy's inherited protocol methods are called, not a non-existent
     /// Erlang function.
+    ///
+    /// BT-855: Block arguments are automatically wrapped via
+    /// [`generate_erlang_interop_wrapper`] to strip the Tier 2 `StateAcc` protocol.
+    /// A diagnostic warning is emitted when a stateful block (one with captured
+    /// mutations) crosses the Erlang boundary, since mutations will be dropped.
     fn generate_direct_erlang_call(
         &mut self,
         module_name: &str,
@@ -391,12 +396,55 @@ impl CoreErlangGenerator {
             MessageSelector::Keyword(parts) => {
                 // Extract function name from first keyword (before the colon)
                 let function_name = parts[0].keyword.trim_end_matches(':');
-                let args_doc = self.capture_argument_list_doc(arguments)?;
-                let doc = docvec![
+
+                // BT-855: Process arguments individually so Block arguments can be
+                // wrapped via generate_erlang_interop_wrapper before crossing the
+                // Erlang boundary. Non-block arguments pass through unchanged.
+                let mut preamble_docs: Vec<Document<'static>> = Vec::new();
+                let mut arg_parts: Vec<Document<'static>> = Vec::new();
+
+                for (i, arg) in arguments.iter().enumerate() {
+                    if i > 0 {
+                        arg_parts.push(Document::Str(", "));
+                    }
+                    if let Expression::Block(block) = arg {
+                        let (wrapped_doc, is_stateful) =
+                            self.generate_erlang_interop_wrapper(block)?;
+                        if is_stateful {
+                            self.add_codegen_warning(format!(
+                                "stateful block passed to Erlang \
+                                 '{module_name}':'{function_name}' — mutations inside \
+                                 the block will be silently dropped (Erlang cannot \
+                                 propagate the updated StateAcc back to the Beamtalk caller)"
+                            ));
+                        }
+                        // Bind the wrapper to a temp var to avoid repeating complex exprs.
+                        let wrapper_var = self.fresh_temp_var("ErlWrapper");
+                        preamble_docs.push(docvec![
+                            "let ",
+                            Document::String(wrapper_var.clone()),
+                            " = ",
+                            wrapped_doc,
+                            " in "
+                        ]);
+                        arg_parts.push(Document::String(wrapper_var));
+                    } else {
+                        arg_parts.push(self.expression_doc(arg)?);
+                    }
+                }
+
+                let call_doc = docvec![
                     Document::String(format!("call '{module_name}':'{function_name}'(")),
-                    args_doc,
+                    Document::Vec(arg_parts),
                     ")"
                 ];
+
+                let doc = if preamble_docs.is_empty() {
+                    call_doc
+                } else {
+                    docvec![Document::Vec(preamble_docs), call_doc]
+                };
+
                 Ok(Some(doc))
             }
             MessageSelector::Binary(_) => {

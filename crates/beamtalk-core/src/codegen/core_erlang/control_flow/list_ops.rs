@@ -819,7 +819,23 @@ impl CoreErlangGenerator {
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
+
+        // BT-855: When the body is a stateful block (captured mutations), wrap it so
+        // Erlang receives a plain fun(Args) -> Result without the StateAcc protocol.
+        // Mutations inside the block are dropped (Erlang cannot propagate NewStateAcc).
+        let body_code = if let Expression::Block(block) = body {
+            let (wrapped_doc, is_stateful) = self.generate_erlang_interop_wrapper(block)?;
+            if is_stateful {
+                self.add_codegen_warning(format!(
+                    "stateful block passed to Erlang 'lists':'{operation}' — mutations inside \
+                     the block will be silently dropped (Erlang cannot propagate the updated \
+                     StateAcc back to the Beamtalk caller)"
+                ));
+            }
+            wrapped_doc
+        } else {
+            self.expression_doc(body)?
+        };
 
         Ok(docvec![
             format!("let {list_var} = "),
