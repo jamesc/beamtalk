@@ -21,6 +21,8 @@
     base_protocol_response/1
 ]).
 
+-include_lib("kernel/include/logger.hrl").
+
 %% @doc Handle complete/docs/describe ops.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"complete">>, Params, Msg, SessionPid) ->
@@ -135,6 +137,11 @@ handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
                     )
             end
     end;
+handle(<<"test">>, Params, Msg, _SessionPid) ->
+    ClassName = maps:get(<<"class">>, Params, undefined),
+    run_test_op(ClassName, Msg);
+handle(<<"test-all">>, _Params, Msg, _SessionPid) ->
+    run_test_op(undefined, Msg);
 handle(<<"describe">>, _Params, Msg, _SessionPid) ->
     Ops = describe_ops(),
     BeamtalkVsnBin =
@@ -148,6 +155,65 @@ handle(<<"describe">>, _Params, Msg, _SessionPid) ->
         <<"beamtalk">> => BeamtalkVsnBin
     },
     beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg).
+
+%%% Test op helpers
+
+%% @private
+%% @doc Execute a test run and encode the result.
+%%
+%% When ClassName is undefined, runs all discovered TestCase subclasses.
+%% When ClassName is a binary, runs tests for that specific class.
+-spec run_test_op(binary() | undefined, beamtalk_repl_protocol:protocol_msg()) -> binary().
+run_test_op(undefined, Msg) ->
+    try
+        TestResult = beamtalk_test_runner:run_all(),
+        beamtalk_repl_protocol:encode_test_results(TestResult, Msg)
+    catch
+        error:#{error := #beamtalk_error{} = Err} ->
+            beamtalk_repl_protocol:encode_error(
+                Err, Msg, fun beamtalk_repl_json:format_error_message/1
+            );
+        _Class:Reason ->
+            ?LOG_ERROR("test-all op failed: ~p", [Reason]),
+            Err0 = beamtalk_error:new(runtime_error, 'TestRunner'),
+            Err1 = beamtalk_error:with_message(
+                Err0, iolist_to_binary(io_lib:format("Test run failed: ~p", [Reason]))
+            ),
+            beamtalk_repl_protocol:encode_error(
+                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+            )
+    end;
+run_test_op(ClassName, Msg) when is_binary(ClassName) ->
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassName) of
+        {error, badarg} ->
+            beamtalk_repl_protocol:encode_error(
+                make_class_not_found_error(ClassName),
+                Msg,
+                fun beamtalk_repl_json:format_error_message/1
+            );
+        {ok, ClassAtom} ->
+            try
+                TestResult = beamtalk_test_runner:run_class_by_name(ClassAtom),
+                beamtalk_repl_protocol:encode_test_results(TestResult, Msg)
+            catch
+                error:#{error := #beamtalk_error{} = Err} ->
+                    beamtalk_repl_protocol:encode_error(
+                        Err, Msg, fun beamtalk_repl_json:format_error_message/1
+                    );
+                _Class:Reason ->
+                    ?LOG_ERROR("test op failed for ~s: ~p", [ClassName, Reason]),
+                    Err0 = beamtalk_error:new(runtime_error, 'TestRunner'),
+                    Err1 = beamtalk_error:with_message(
+                        Err0,
+                        iolist_to_binary(
+                            io_lib:format("Test run failed for ~s: ~p", [ClassName, Reason])
+                        )
+                    ),
+                    beamtalk_repl_protocol:encode_error(
+                        Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+                    )
+            end
+    end.
 
 %%% Internal helpers
 
@@ -501,6 +567,8 @@ describe_ops() ->
         <<"eval">> => #{<<"params">> => [<<"code">>]},
         <<"stdin">> => #{<<"params">> => [<<"value">>]},
         <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
+        <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>]},
+        <<"test-all">> => #{<<"params">> => []},
         <<"docs">> => #{
             <<"params">> => [<<"class">>],
             <<"optional">> => [<<"selector">>],

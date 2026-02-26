@@ -375,7 +375,11 @@ handle_op(Op, Params, Msg, SessionPid) when
 ->
     beamtalk_repl_ops_session:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
-    Op =:= <<"complete">>; Op =:= <<"describe">>; Op =:= <<"show-codegen">>
+    Op =:= <<"complete">>;
+    Op =:= <<"describe">>;
+    Op =:= <<"show-codegen">>;
+    Op =:= <<"test">>;
+    Op =:= <<"test-all">>
 ->
     beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
 handle_op(<<"docs">>, Params, Msg, SessionPid) ->
