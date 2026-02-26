@@ -262,6 +262,11 @@ fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> Anal
         &mut result.diagnostics,
     );
     validators::check_empty_method_bodies(module, &mut result.diagnostics);
+    validators::check_value_slot_assignment(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
 
     // Phase 6: Module-level validation (BT-349)
     let module_diags = module_validator::validate_single_class(module);

@@ -263,6 +263,20 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Actor")
     }
 
+    /// Returns true if the named class is Value or a subclass of Value (ADR 0042).
+    ///
+    /// Value subclasses use immutable value semantics — `self.slot :=` is a
+    /// compile error inside their methods. Use `self withSlot: newValue` instead.
+    #[must_use]
+    pub fn is_value_subclass(&self, class_name: &str) -> bool {
+        if class_name == "Value" {
+            return true;
+        }
+        self.superclass_chain(class_name)
+            .iter()
+            .any(|s| s.as_str() == "Value")
+    }
+
     /// Returns true if `class_name` is a numeric type (Integer, Float, Number,
     /// or any subclass thereof, e.g. Character which inherits from Integer).
     #[must_use]
@@ -2287,6 +2301,44 @@ mod tests {
 
         // MyActor should resolve through to Actor
         assert!(h.is_actor_subclass("MyActor"));
+    }
+
+    // --- is_value_subclass tests (ADR 0042) ---
+
+    #[test]
+    fn value_itself_is_value_subclass() {
+        let h = ClassHierarchy::with_builtins();
+        assert!(h.is_value_subclass("Value"));
+    }
+
+    #[test]
+    fn object_is_not_value_subclass() {
+        let h = ClassHierarchy::with_builtins();
+        assert!(!h.is_value_subclass("Object"));
+    }
+
+    #[test]
+    fn actor_is_not_value_subclass() {
+        let h = ClassHierarchy::with_builtins();
+        assert!(!h.is_value_subclass("Actor"));
+    }
+
+    #[test]
+    fn user_value_subclass_detected() {
+        let mut h = ClassHierarchy::with_builtins();
+        let mut index = HashMap::new();
+        index.insert("Point".to_string(), "Value".to_string());
+        h.add_external_superclasses(&index);
+        assert!(h.is_value_subclass("Point"));
+    }
+
+    #[test]
+    fn user_object_subclass_is_not_value_subclass() {
+        let mut h = ClassHierarchy::with_builtins();
+        let mut index = HashMap::new();
+        index.insert("Plain".to_string(), "Object".to_string());
+        h.add_external_superclasses(&index);
+        assert!(!h.is_value_subclass("Plain"));
     }
 
     #[test]
