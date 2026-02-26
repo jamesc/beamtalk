@@ -60,7 +60,7 @@ Value subclass: Point
 point := Point x: 3 y: 4.
 ```
 
-**Syntax note:** Today, value types use `Object subclass:` with `state:` declarations. This ADR introduces `Value subclass:` as the explicit declaration form. `Value` becomes a new root class in the hierarchy between `Object` and user value classes. The `state:` keyword is retained as the universal slot declaration for both value types and actors — the `Value` vs `Actor` superclass determines immutability semantics, not the declaration keyword.
+**Syntax note:** Today, value types use `Object subclass:` with `state:` declarations. This ADR introduces `Value subclass:` as the explicit declaration form. `Value` becomes a new root class in the hierarchy between `Object` and user value classes. The `state:` keyword is retained as the universal slot declaration for both value types and actors — the `Value` vs `Actor` superclass determines immutability semantics, not the declaration keyword. This is deliberate: `state:` declares "the named data this object holds," which is the same concept regardless of mutability. Whether those slots are immutable (value types) or mutable (actors) is determined by the class kind, not the declaration keyword — just as Smalltalk's `instanceVariableNames:` doesn't change meaning based on whether the class uses mutable or copy-on-write semantics. Introducing separate keywords (`slots:` vs `state:`) was considered and rejected as unnecessary churn: the `Value`/`Actor` superclass already provides a clear, visible signal at the declaration site.
 
 **Class-level state:** `classState:` declares class-level mutable state (it lives in the class object's gen_server state), regardless of whether the class is a Value or Actor type:
 
@@ -122,7 +122,7 @@ self x := 5.        "COMPILER ERROR — no instance variable assignment on value
 self withX: 5       "Returns new object"
 ```
 
-**Reflection API:** `fieldAt:put:` on value types raises `#immutable_value` at runtime. Immutability is enforced both at compile time (`self.slot :=` rejected by semantic analysis) and at runtime (reflection API raises error). The compile-time check catches the common case; the runtime check catches the reflection path.
+**Reflection API:** `fieldAt:put:` on value types raises a `#beamtalk_error{type => immutable_value}` at runtime. On actors, `fieldAt:put:` works normally (actors have mutable state). Immutability is enforced both at compile time (`self.slot :=` rejected by semantic analysis) and at runtime (reflection API raises error on value types). The compile-time check catches the common case; the runtime check catches the reflection path.
 
 #### Local Variable Rebinding
 
@@ -199,7 +199,7 @@ The compiler auto-generates the same `with*:`/getter pattern for actor slots as 
 
 The gen_server framework uses two rules to interpret method results:
 
-1. **Last expression (no `^`):** The result is the reply to the caller. The compiler tracks the current state version through `with*:` chains — the most recent state map derived from `self` becomes the new gen_server state. If the method doesn't derive a new state (pure query), the original state is preserved.
+1. **Last expression (no `^`):** The result is the reply to the caller. The compiler tracks the current state version through sequential self-sends — each self-send dispatches and returns `{reply, Result, NewState}`, and the codegen uses `NewState` as input to the next self-send. The most recent state becomes the new gen_server state. If the method doesn't contain self-sends that modify state (pure query), the original state is preserved. This is standard variable binding through return values, not cascade semantics — each self-send is an independent expression that produces a new value.
 
 2. **Early return (`^`):** The `^` expression is the reply to the caller. The gen_server state is updated to whatever state version existed at the `^` point — any mutations before `^` are preserved, the early return does not discard them.
 
