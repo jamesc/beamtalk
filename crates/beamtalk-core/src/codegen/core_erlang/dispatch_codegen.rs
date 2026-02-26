@@ -158,6 +158,13 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
 
+        // BT-915: Boolean conditionals (ifTrue:, ifFalse:, ifTrue:ifFalse:) in actor context
+        // with field mutations. Generates inline case expressions that thread state correctly
+        // through both branches.
+        if let Some(doc) = self.try_generate_boolean_protocol(receiver, selector, arguments)? {
+            return Ok(doc);
+        }
+
         // Special case: spawn, spawnWith:, await, awaitForever, await:
         if let Some(doc) = self.try_handle_spawn_await(receiver, selector, arguments)? {
             return Ok(doc);
@@ -1040,6 +1047,9 @@ impl CoreErlangGenerator {
                         | "inject:into:"
                         | "on:do:"
                         | "ensure:"
+                        | "ifTrue:"
+                        | "ifFalse:"
+                        | "ifTrue:ifFalse:"
                 )
             }
             Expression::MessageSend {

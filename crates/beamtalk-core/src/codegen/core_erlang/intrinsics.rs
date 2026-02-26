@@ -1157,6 +1157,77 @@ impl CoreErlangGenerator {
             MessageSelector::Binary(_) => Ok(None),
         }
     }
+    /// BT-915: Tries to generate inline code for Boolean conditionals with field mutation
+    /// state threading.
+    ///
+    /// Handles `ifTrue:`, `ifFalse:`, and `ifTrue:ifFalse:` in actor context when at
+    /// least one block argument contains field mutations (`self.slot :=`).
+    ///
+    /// - Returns `Ok(Some(doc))` generating `{Result, NewState}` tuple when mutations detected
+    /// - Returns `Ok(None)` otherwise (fall through to `beamtalk_message_dispatch:send`)
+    pub(in crate::codegen::core_erlang) fn try_generate_boolean_protocol(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        use super::CodeGenContext;
+        use super::block_analysis;
+
+        // Only applies in actor context (field mutations are only tracked there)
+        if self.context != CodeGenContext::Actor {
+            return Ok(None);
+        }
+
+        let selector_name = match selector {
+            MessageSelector::Keyword(parts) => {
+                parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
+            }
+            _ => return Ok(None),
+        };
+
+        match selector_name.as_str() {
+            "ifTrue:" if arguments.len() == 1 => {
+                if let Expression::Block(block) = &arguments[0] {
+                    let analysis = block_analysis::analyze_block(block);
+                    if self.needs_mutation_threading(&analysis) {
+                        let doc = self.generate_if_true_with_mutations(receiver, block)?;
+                        return Ok(Some(doc));
+                    }
+                }
+            }
+            "ifFalse:" if arguments.len() == 1 => {
+                if let Expression::Block(block) = &arguments[0] {
+                    let analysis = block_analysis::analyze_block(block);
+                    if self.needs_mutation_threading(&analysis) {
+                        let doc = self.generate_if_false_with_mutations(receiver, block)?;
+                        return Ok(Some(doc));
+                    }
+                }
+            }
+            "ifTrue:ifFalse:" if arguments.len() == 2 => {
+                if let (Expression::Block(true_block), Expression::Block(false_block)) =
+                    (&arguments[0], &arguments[1])
+                {
+                    let true_analysis = block_analysis::analyze_block(true_block);
+                    let false_analysis = block_analysis::analyze_block(false_block);
+                    if self.needs_mutation_threading(&true_analysis)
+                        || self.needs_mutation_threading(&false_analysis)
+                    {
+                        let doc = self.generate_if_true_if_false_with_mutations(
+                            receiver,
+                            true_block,
+                            false_block,
+                        )?;
+                        return Ok(Some(doc));
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
