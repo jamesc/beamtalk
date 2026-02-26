@@ -49,6 +49,7 @@
 //!                     Literal::Integer(4),
 //!                     Span::new(9, 10)
 //!                 )],
+//!                 is_cast: false,
 //!                 span: Span::new(5, 10),
 //!             }),
 //!             span: Span::new(0, 10),
