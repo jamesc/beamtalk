@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Command Pattern — TextBuffer (receiver)
+// Intent: Encapsulate a request as an object, letting you parameterise clients
+// with different requests, queue or log requests, and support undoable operations.
+//
+// TextBuffer holds text content. Commands operate on it by calling insertAt:text:
+// and deleteFrom:length:. Because value objects are immutable, both methods return
+// a new TextBuffer — CommandHistory stores the successive snapshots.
+
+Object subclass: TextBuffer
+  state: text = ""
+
+  /// Create a buffer pre-populated with the given string.
+  class withText: t =>
+    self new: #{text => t}
+
+  /// Return the current text content of the buffer.
+  text => self.text
+
+  /// Return a new buffer with str inserted at position pos (1-based).
+  insertAt: pos text: str =>
+    pos < 1 ifTrue: [self error: "insertAt:text: pos must be >= 1"]
+    before := self.text take: pos - 1
+    after  := self.text drop: pos - 1
+    TextBuffer withText: before ++ str ++ after
+
+  /// Return a new buffer with len characters removed starting at pos (1-based).
+  deleteFrom: pos length: len =>
+    pos < 1 ifTrue: [self error: "deleteFrom:length: pos must be >= 1"]
+    len < 0 ifTrue: [self error: "deleteFrom:length: len must be >= 0"]
+    before := self.text take: pos - 1
+    after  := self.text drop: pos - 1 + len
+    TextBuffer withText: before ++ after

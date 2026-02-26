@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Composite Pattern — FsFile and FsDir
+
+TestCase subclass: FsEntryTest
+
+  testFileNameAndSize =>
+    f := FsFile name: "readme.txt" size: 42
+    self assert: f name equals: "readme.txt"
+    self assert: f size equals: 42
+
+  testFileDescribe =>
+    f := FsFile name: "main.bt" size: 100
+    self assert: (f describe: "") equals: "main.bt (100 bytes)"
+
+  testFileDescribeWithIndent =>
+    f := FsFile name: "lib.bt" size: 50
+    self assert: (f describe: "  ") equals: "  lib.bt (50 bytes)"
+
+  testEmptyDirSize =>
+    d := FsDir name: "empty"
+    self assert: d size equals: 0
+
+  testDirWithOneFile =>
+    f := FsFile name: "a.bt" size: 10
+    d := (FsDir name: "src") add: f
+    self assert: d size equals: 10
+
+  testDirWithMultipleFiles =>
+    f1 := FsFile name: "a.bt" size: 100
+    f2 := FsFile name: "b.bt" size: 200
+    d := ((FsDir name: "src") add: f1) add: f2
+    self assert: d size equals: 300
+
+  testNestedDirs =>
+    leaf := FsFile name: "x.bt" size: 50
+    inner := (FsDir name: "inner") add: leaf
+    outer := (FsDir name: "outer") add: inner
+    self assert: outer size equals: 50
+
+  testDirDescribeFlat =>
+    f := FsFile name: "main.bt" size: 120
+    d := (FsDir name: "src") add: f
+    result := d describe: ""
+    self assert: result equals: "src/ (120 bytes)\n  main.bt (120 bytes)"
+
+  testDirIsImmutable =>
+    d1 := FsDir name: "src"
+    d2 := d1 add: (FsFile name: "a.bt" size: 1)
+    self assert: d1 size equals: 0
+    self assert: d2 size equals: 1

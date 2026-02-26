@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Template Method Pattern — DataExporter (abstract base)
+// Intent: Define the skeleton of an algorithm in a base-class method, deferring
+// specific steps to subclasses. The overall structure stays fixed; only the
+// customisable steps change.
+//
+// export: is the template method. It calls header, formatRow:, and footer in
+// order. Subclasses (CsvExporter, HtmlExporter) implement those three hooks.
+
+Object subclass: DataExporter
+
+  /// Template method — fixed algorithm skeleton.
+  /// Do not override this in subclasses; override the hooks below instead.
+  export: rows =>
+    formatted := rows collect: [:row | self formatRow: row]
+    self header ++ formatted join ++ self footer
+
+  /// Hook: text placed before all rows. Subclasses must override.
+  header =>
+    self subclassResponsibility
+
+  /// Hook: text placed after all rows. Subclasses must override.
+  footer =>
+    self subclassResponsibility
+
+  /// Hook: format a single row (a List of cell strings). Subclasses must override.
+  formatRow: row =>
+    self subclassResponsibility

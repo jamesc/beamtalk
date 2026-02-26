@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Factory Method Pattern — RectangleFactory (concrete creator)
+
+ShapeFactory subclass: RectangleFactory
+  state: width  = 1.0
+  state: height = 1.0
+
+  /// Create a factory configured to produce rectangles with the given dimensions.
+  class width: w height: h =>
+    self new: #{width => w, height => h}
+
+  /// Produce a Rectangle with this factory's configured width and height.
+  createShape => Rectangle width: self.width height: self.height

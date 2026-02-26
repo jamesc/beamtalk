@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Observer Pattern — EventBus (subject)
+// Intent: Define a one-to-many dependency so that when one object changes state,
+// all its dependents are notified automatically.
+//
+// EventBus is an Actor (a BEAM process) so its subscriber list can be safely
+// shared and mutated across the system. Observers are any actors that respond
+// to receive:.
+//
+// Usage:
+//   bus     := EventBus spawn.
+//   watcher := EventCollector spawn.
+//   bus subscribe: watcher.
+//   bus notify: "order.placed".
+//   watcher eventCount   // => 1
+
+Actor subclass: EventBus
+  state: subscribers = #()
+
+  /// Register an observer. It will receive all future notifications.
+  subscribe: observer =>
+    self.subscribers := self.subscribers add: observer
+    self
+
+  /// Deregister an observer. It will receive no further notifications.
+  unsubscribe: observer =>
+    self.subscribers := self.subscribers reject: [:s | s == observer]
+    self
+
+  /// Send event to every current subscriber by calling receive: on each.
+  notify: event =>
+    self.subscribers do: [:s | s receive: event]
+    self
+
+  /// Return the number of currently registered subscribers.
+  subscriberCount => self.subscribers size

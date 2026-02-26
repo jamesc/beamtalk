@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Singleton Pattern — AppLogger
+// Intent: Ensure a class has only one instance and provide a global point of access.
+//
+// In Beamtalk/BEAM the idiomatic Singleton is a named actor process.
+// Spawn AppLogger once at application startup and share the actor reference.
+// Because the reference is a PID there is exactly one instance per node,
+// enforced by the BEAM scheduler — no synchronisation boilerplate needed.
+//
+// Usage:
+//   logger := AppLogger spawn.        // spawn once; share this reference
+//   logger log: "app started".
+//   logger log: "processing request".
+//   logger size       // => 2
+//   logger entries    // => #("app started", "processing request")
+
+Actor subclass: AppLogger
+  state: entries = #()
+
+  /// Append a message to the log.
+  log: message =>
+    self.entries := self.entries add: message
+    self
+
+  /// Return all log entries in the order they were received.
+  entries => self.entries
+
+  /// Number of log entries recorded so far.
+  size => self.entries size
+
+  /// Remove all entries (e.g., between test runs).
+  clear =>
+    self.entries := #()
+    self

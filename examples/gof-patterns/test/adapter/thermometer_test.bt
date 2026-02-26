@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Adapter Pattern — CelsiusToFahrenheitAdapter
+
+TestCase subclass: ThermometerTest
+
+  testCelsiusThermometerReads =>
+    t := CelsiusThermometer withCelsius: 100.0
+    self assert: t readCelsius equals: 100.0
+
+  testFreezingPointConversion =>
+    source  := CelsiusThermometer withCelsius: 0.0
+    adapter := CelsiusToFahrenheitAdapter wrap: source
+    self assert: adapter readFahrenheit equals: (32 / 1)
+
+  testBoilingPointConversion =>
+    source  := CelsiusThermometer withCelsius: 100.0
+    adapter := CelsiusToFahrenheitAdapter wrap: source
+    self assert: adapter readFahrenheit equals: (212 / 1)
+
+  testBodyTemperatureConversion =>
+    source  := CelsiusThermometer withCelsius: 37.0
+    adapter := CelsiusToFahrenheitAdapter wrap: source
+    self assert: adapter readFahrenheit equals: 98.6
+
+  testAdapterExposesReadCelsius =>
+    source  := CelsiusThermometer withCelsius: 25.0
+    adapter := CelsiusToFahrenheitAdapter wrap: source
+    self assert: adapter readCelsius equals: 25.0

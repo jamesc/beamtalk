@@ -1,0 +1,74 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Observer Pattern — EventBus and EventCollector
+//
+// Actor-to-actor sends are asynchronous — bus notify: sends to col via cast.
+// Use the sync barrier pattern to ensure all messages are processed:
+//   1. `bus subscriberCount await` — round-trip on bus ensures notify: completed
+//   2. `col events await`           — round-trip on col ensures receive: completed
+
+TestCase subclass: EventBusTest
+
+  testSubscribeAndNotify =>
+    bus := EventBus spawn
+    col := EventCollector spawn
+    bus subscribe: col
+    bus notify: "hello"
+    bus subscriberCount await
+    col events await
+    self assert: (col eventCount await) equals: 1
+    self assert: ((col events await) first) equals: "hello"
+    bus stop
+    col stop
+
+  testMultipleNotifications =>
+    bus := EventBus spawn
+    col := EventCollector spawn
+    bus subscribe: col
+    bus notify: "a"
+    bus notify: "b"
+    bus notify: "c"
+    bus subscriberCount await
+    col events await
+    self assert: (col eventCount await) equals: 3
+    bus stop
+    col stop
+
+  testUnsubscribeStopsNotifications =>
+    bus := EventBus spawn
+    col := EventCollector spawn
+    bus subscribe: col
+    bus notify: "before"
+    bus unsubscribe: col
+    bus notify: "after"
+    bus subscriberCount await
+    col events await
+    self assert: (col eventCount await) equals: 1
+    self assert: ((col events await) first) equals: "before"
+    bus stop
+    col stop
+
+  testMultipleSubscribers =>
+    bus := EventBus spawn
+    c1  := EventCollector spawn
+    c2  := EventCollector spawn
+    bus subscribe: c1
+    bus subscribe: c2
+    bus notify: "event"
+    bus subscriberCount await
+    c1 events await
+    c2 events await
+    self assert: (c1 eventCount await) equals: 1
+    self assert: (c2 eventCount await) equals: 1
+    bus stop
+    c1 stop
+    c2 stop
+
+  testNoSubscribersNoError =>
+    bus := EventBus spawn
+    col := EventCollector spawn
+    bus notify: "ghost"
+    self assert: (col eventCount await) equals: 0
+    bus stop
+    col stop
