@@ -391,6 +391,24 @@ Swift distinguishes between value types (`struct`) and reference types (`class`)
 
 **Adopted:** The distinction between value types (copied, immutable in effect) and reference types (identity-bearing, mutable). Swift's `mutating` is analogous to BeamTalk's `with*:` — both create new values, just with different syntax.
 
+### C# — struct vs class, async/await, LINQ (Anders Hejlsberg)
+
+C# is the closest mainstream precedent for Beamtalk's overall design philosophy. Anders Hejlsberg's career-long pattern — making platform complexity accessible through type-level distinctions with excellent compiler guidance — directly parallels what Beamtalk does with BEAM.
+
+**Value vs reference types (ADR 0042).** C#'s `struct` vs `class` is the same fundamental insight as `Value subclass:` vs `Actor subclass:`. Structs are value types — copied, no identity, stack-allocated. Classes are reference types — shared, identity-bearing, heap-allocated. The developer chooses once at the declaration site; the compiler enforces the consequences. C# spent years refining diagnostics for struct/class misuse (boxing warnings, readonly struct guidance, `in` parameter suggestions). Beamtalk should invest similarly in error messages at the Value/Actor boundary.
+
+**Adopted:** The declaration-site choice pattern. The developer picks `Value` or `Actor` once; the compiler handles implications. C# proved this scales — millions of developers understand struct vs class without understanding the memory model underneath.
+
+**Sync-first, async opt-in (ADR 0043).** C# shipped sync-by-default and added `async/await` in C# 5.0 — years later, when the need was clear. The design principle: synchronous is the natural mental model; async is opt-in complexity. Beamtalk's `.` (sync) vs `!` (async) follows the same principle. C#'s lesson: making everything async by default (as Beamtalk currently does with Futures) forces every developer to pay the cognitive cost of concurrency, even when they don't need it.
+
+**Adopted:** Sync-by-default with explicit async opt-in. C#'s `async/await` is the gold standard for this pattern; Beamtalk's `.`/`!` is simpler (no function colouring) but follows the same philosophy.
+
+**Pipeline expressions (ADR 0044).** LINQ is cascade-as-pipeline for C# — each method chains on the result, not the original receiver. LINQ works in expression context (capture the result), not as statement-level mutation. This matches exactly where Beamtalk's pipeline cascade is most powerful: inside blocks and HOMs where the result flows through without rebinding. Anders would say pipeline cascade is an expression-level feature, not a mutation substitute.
+
+**Insight adopted:** Focus pipeline cascade on expression contexts (blocks, HOMs, construction) where the result flows naturally. Don't try to make it a statement-level mutation substitute — that's where the rebinding problem bites.
+
+**Tooling as language feature.** Anders's deepest conviction: a language feature is only as good as its IDE support. C#/TypeScript invest heavily in auto-complete, inline diagnostics, and quick-fixes. For Beamtalk, this means: auto-complete for `with*:` methods, inline diagnostics for Value/Actor misuse, quick-fixes that suggest the right pattern (e.g., "Did you mean `self withX: 5`?"). The language design is sound; the developer experience must match.
+
 ### Pony — Reference Capabilities
 
 Pony uses reference capabilities (`iso`, `val`, `ref`, `box`, `trn`, `tag`) to distinguish mutable from immutable data at the type level. Closures copy captured variables — mutation doesn't propagate.
@@ -742,6 +760,10 @@ Value type tests using instance variable assignment (`self.slot := value`) must 
 - Gleam: immutable-by-default language on BEAM, strict immutability validated at scale
 - Elixir: rebinding as ergonomic immutability, successful Ruby-to-BEAM developer transition
 - Swift value types: struct vs class distinction, `mutating` keyword as analogous pattern
+- C# struct vs class (Anders Hejlsberg): declaration-site value/reference type choice with compiler enforcement — closest mainstream precedent for Actor/Value split
+- C# async/await: sync-by-default, async opt-in — same philosophy as `.` vs `!` (ADR 0043)
+- C# LINQ: pipeline cascade in expression context — validates blocks/HOMs as the sweet spot for cascade (ADR 0044)
+- GemStone/S: production Smalltalk solves shared state via transactions (MVCC), not processes — no production Smalltalk uses process-per-object
 - Erlang/OTP gen_server: functional state transition model adopted for actors
 - Pony reference capabilities: value vs identity distinction at the type level
 
