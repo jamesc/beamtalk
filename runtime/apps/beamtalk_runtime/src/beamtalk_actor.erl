@@ -346,8 +346,9 @@ cast_send(ActorPid, Selector, Args) ->
 %% - `stop` - gracefully stops the actor process, returns ok
 %%
 %% For all other messages, checks if the actor is alive first:
-%% - If alive, sends via gen_server:call (normal sync path)
-%% - If dead, returns `{error, #beamtalk_error{kind = actor_dead}}`
+%% - If alive, sends via gen_server:call and unwraps the result
+%% - If dead, raises `#beamtalk_error{kind = actor_dead}`
+%% - If timeout, raises `#beamtalk_error{kind = timeout}`
 -spec sync_send(pid(), atom(), list()) -> term().
 sync_send(ActorPid, isAlive, []) ->
     is_process_alive(ActorPid);
