@@ -33,15 +33,8 @@ cd examples/getting-started
 beamtalk repl
 ```
 
-## Loading Examples
-
-```
-> :load src/hello.bt
-> :load src/counter.bt
-> c := Counter spawn
-> c increment
-> c getValue
-```
+All source files in `src/` load automatically when you start the REPL.
+To run the tests: `:load "test/"`
 
 ## Beamtalk Syntax Basics
 

@@ -9,19 +9,19 @@ cd examples/getting-started
 beamtalk repl
 ```
 
+All source files in `src/` load automatically when you start the REPL.
+
 ## Examples
 
 ### hello.bt — Minimal class
 
 ```text
-> :load src/hello.bt
 > Hello new
 ```
 
 ### counter.bt — Stateful actor
 
 ```text
-> :load src/counter.bt
 > c := Counter spawn
 > c increment
 > c increment
@@ -29,12 +29,9 @@ beamtalk repl
 2
 ```
 
-Tests live under `test/` — run them with `:load test/counter_test.bt`, `:load test/hello_test.bt`, etc.
-
 ### hanoi.bt — Recursion and multi-keyword messages
 
 ```text
-> :load src/hanoi.bt
 > h := Hanoi new
 > h solve: 3 from: 'A' to: 'C' via: 'B'
 ```
@@ -42,23 +39,16 @@ Tests live under `test/` — run them with `:load test/counter_test.bt`, `:load 
 ### logging_counter.bt — Inheritance and `super`
 
 ```text
-> :load src/counter.bt
-> :load src/logging_counter.bt
 > lc := LoggingCounter spawn
 > lc increment
 > lc getValue
 ```
 
-### stream.bt — Lazy pipelines
+## Running Tests
 
 ```text
-> :load src/stream.bt
-```
-
-### protoobject_proxy.bt — Transparent proxy pattern
-
-```text
-> :load src/protoobject_proxy.bt
+> :load "test/"
+> CounterTest runAll
 ```
 
 ## What's Next?

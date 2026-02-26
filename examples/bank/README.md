@@ -31,27 +31,10 @@ cd examples/bank
 beamtalk repl
 ```
 
+All source files in `src/` load automatically when you start the REPL.
+To run the tests: `:load "test/"`
+
 ## REPL Walkthrough
-
-Load the bank classes:
-
-```text
-> :load src/account.bt
-> :load src/transaction.bt
-> :load src/bank.bt
-> :load src/transfer_agent.bt
-```
-
-Typed variant:
-
-```text
-> :load src/typed_account.bt
-> typed := TypedAccount spawn
-> typed deposit: 100
-100
-> typed balance
-100
-```
 
 ### Create a bank and open accounts
 

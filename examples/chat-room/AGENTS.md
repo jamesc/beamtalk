@@ -27,14 +27,8 @@ cd examples/chat-room
 beamtalk repl
 ```
 
-## Loading the Example
-
-```text
-> :load src/message.bt
-> :load src/chat_room.bt
-> :load src/chat_member.bt
-> :load src/moderator.bt
-```
+All source files in `src/` load automatically when you start the REPL.
+To run the tests: `:load "test/"`
 
 ## Key Concepts
 
