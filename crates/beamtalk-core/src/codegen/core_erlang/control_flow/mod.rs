@@ -39,6 +39,11 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// let _Val = <value> in let StateAccN = maps:put('varname', _Val, StateAcc{N-1}) in
     /// ```
+    ///
+    /// BT-912: When the RHS is a Tier 2 block call returning `{Result, NewStateAcc}`,
+    /// unpacks the tuple and uses `NewStateAcc` for `maps:put` so that mutations made
+    /// by the called block (e.g. captured variable updates) are preserved in the
+    /// threading state rather than discarded.
     pub(super) fn generate_local_var_assignment_in_loop(
         &mut self,
         expr: &Expression,
@@ -52,17 +57,6 @@ impl CoreErlangGenerator {
                     format!("StateAcc{}", self.state_version())
                 };
 
-                // Capture value expression (ADR 0018 bridge)
-                let value_code = self.expression_doc(value)?;
-
-                // Increment state version for the new state
-                let _ = self.next_state_var();
-                let new_state = if self.in_loop_body {
-                    self.current_state_var()
-                } else {
-                    format!("State{}", self.state_version())
-                };
-
                 // BT-790: In REPL mode, use the plain variable name as the key
                 // (no __local__ prefix) since there are no actor fields to collide with.
                 // This ensures reads (`maps:get('x', StateAcc)`) match writes
@@ -72,6 +66,59 @@ impl CoreErlangGenerator {
                     id.name.clone()
                 } else {
                     Self::local_state_key(&id.name).into()
+                };
+
+                // BT-912: If the RHS is a Tier 2 block call, it returns {Result, NewStateAcc}.
+                // Unpack the tuple so that:
+                //   - `Val` is bound to `Result` (not the whole tuple)
+                //   - `maps:put` uses `NewStateAcc` (preserving the block's captured mutations)
+                //     rather than the old `StateAcc` (which would discard them).
+                if self.is_tier2_value_call(value) {
+                    let t2_tuple = self.fresh_temp_var("T2");
+                    let t2_state = self.fresh_temp_var("T2St");
+                    let value_code = self.expression_doc(value)?;
+
+                    let _ = self.next_state_var();
+                    let new_state = if self.in_loop_body {
+                        self.current_state_var()
+                    } else {
+                        format!("State{}", self.state_version())
+                    };
+
+                    return Ok(docvec![
+                        "let ",
+                        Document::String(t2_tuple.clone()),
+                        " = ",
+                        value_code,
+                        " in let ",
+                        Document::String(val_var.clone()),
+                        " = call 'erlang':'element'(1, ",
+                        Document::String(t2_tuple.clone()),
+                        ") in let ",
+                        Document::String(t2_state.clone()),
+                        " = call 'erlang':'element'(2, ",
+                        Document::String(t2_tuple),
+                        ") in let ",
+                        Document::String(new_state),
+                        " = call 'maps':'put'('",
+                        state_key.to_string(),
+                        "', ",
+                        Document::String(val_var.clone()),
+                        ", ",
+                        Document::String(t2_state),
+                        ") in ",
+                    ]);
+                }
+
+                // Capture value expression (ADR 0018 bridge)
+                let value_code = self.expression_doc(value)?;
+
+                // Increment state version for the new state
+                let _ = self.next_state_var();
+                let new_state = if self.in_loop_body {
+                    self.current_state_var()
+                } else {
+                    format!("State{}", self.state_version())
                 };
 
                 return Ok(docvec![

@@ -1567,6 +1567,17 @@ impl CoreErlangGenerator {
                             }
                             // Note: field_writes-only blocks are NOT yet supported
                             // for Tier 2 (requires different key scheme). See BT-852.
+                        } else if let Expression::Identifier(arg_id) = arg {
+                            // BT-912: If the argument is an identifier that is a known Tier 2
+                            // block parameter of the current method, treat it as a Tier 2 HOM
+                            // argument with no captured mutations. This handles nested HOMs where
+                            // one method delegates a Tier 2 block to another (e.g.
+                            // `outerEachItem: aBlock => self eachItem: aBlock`). The block was
+                            // already compiled as Tier 2 by the outer caller; we need to ensure
+                            // the returned state is threaded back through the delegation chain.
+                            if self.tier2_block_params.contains(arg_id.name.as_str()) {
+                                tier2_args.push((i, vec![]));
+                            }
                         }
                     }
                     if !tier2_args.is_empty() {
