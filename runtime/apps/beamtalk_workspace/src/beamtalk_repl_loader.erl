@@ -403,7 +403,8 @@ reload_class_file_impl(Path, ExpectedClassName) ->
     string(), string(), binary() | undefined, atom() | undefined
 ) -> ok | {error, term()}.
 reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
-    case beamtalk_repl_compiler:compile_file(Source, Path, false, ModuleNameOverride) of
+    StdlibMode = is_stdlib_path(Path),
+    case beamtalk_repl_compiler:compile_file(Source, Path, StdlibMode, ModuleNameOverride) of
         {ok, Binary, ClassNames, ModuleName} ->
             case verify_class_present(ExpectedClassName, ClassNames, Path) of
                 ok ->
