@@ -1189,11 +1189,15 @@ impl CoreErlangGenerator {
             }
             let method_docs_doc = Document::Vec(method_docs_parts);
 
-            // BT-877: Detect raising `new` pattern to emit isConstructible.
-            // Only emit `false` — omit the key for constructible classes so the
-            // runtime can fall back to lazy computation (which also checks
-            // whether the class exports spawn/0, etc.).
-            let has_raising_new = Self::has_raising_new(class);
+            // BT-877: Detect non-constructible classes at compile time.
+            // Emit `isConstructible = false` for: abstract classes, actors, and
+            // classes with `new => self error: "..."`. For all others, omit the key
+            // so the runtime can fall back to lazy computation — this is needed
+            // because primitive classes (String, Integer, etc.) have raising new/0
+            // in Erlang, not in Beamtalk AST.
+            let is_non_constructible = class.is_abstract
+                || self.context == CodeGenContext::Actor
+                || Self::has_raising_new(class);
 
             // BT-837: Build ClassBuilder state map and call register/1
             let class_doc = docvec![
@@ -1252,7 +1256,7 @@ impl CoreErlangGenerator {
                         "'methodDocs' => ~{",
                         method_docs_doc,
                         "}~",
-                        if has_raising_new {
+                        if is_non_constructible {
                             docvec![",", line(), "'isConstructible' => 'false'"]
                         } else {
                             Document::Nil
