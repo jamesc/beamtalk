@@ -51,25 +51,23 @@ Adopt **immutable value semantics** as the default for all BeamTalk objects. Mut
 
 #### Declaration and Construction
 
-Value objects are declared with `slots:` and constructed via auto-generated keyword constructors:
+Value objects are declared with `state:` and constructed via auto-generated keyword constructors:
 
 ```smalltalk
 Value subclass: Point
-  slots: x = 0, y = 0
+  state: x = 0, y = 0
 
 point := Point x: 3 y: 4.
 ```
 
-**Syntax note:** Today, value types use `Object subclass:` with `state:` declarations. This ADR renames `state:` to `slots:` as the universal slot declaration keyword for both value types and actors, and introduces `Value subclass:` as the explicit declaration form. `Value` becomes a new root class in the hierarchy between `Object` and user value classes.
+**Syntax note:** Today, value types use `Object subclass:` with `state:` declarations. This ADR introduces `Value subclass:` as the explicit declaration form. `Value` becomes a new root class in the hierarchy between `Object` and user value classes. The `state:` keyword is retained as the universal slot declaration for both value types and actors — the `Value` vs `Actor` superclass determines immutability semantics, not the declaration keyword.
 
-The `slots:` keyword aligns with Smalltalk tradition (Pharo's Slot framework) and is neutral on mutability — a slot is a named position in an object, whether immutable (value types) or mutable (actors). The `Value` vs `Actor` superclass determines immutability semantics. The reflection API is renamed to match: `slotAt:`, `slotAt:put:`, `slotNames` (superseding ADR 0035's `fieldAt:`, `fieldAt:put:`, `fieldNames`).
-
-**Class-level slots:** The existing `classState:` keyword is renamed to `classSlots:` for vocabulary consistency. Class slots are mutable (they live in the class object's gen_server state), regardless of whether the class is a Value or Actor type:
+**Class-level state:** `classState:` declares class-level mutable state (it lives in the class object's gen_server state), regardless of whether the class is a Value or Actor type:
 
 ```smalltalk
 Value subclass: Point
-  classSlots: instanceCount = 0
-  slots: x = 0, y = 0
+  classState: instanceCount = 0
+  state: x = 0, y = 0
 
   class create: x y: y =>
     self.instanceCount := self.instanceCount + 1.
@@ -124,7 +122,7 @@ self x := 5.        "COMPILER ERROR — no instance variable assignment on value
 self withX: 5       "Returns new object"
 ```
 
-**Reflection API:** `slotAt:put:` on value types raises `#immutable_value` at runtime (renamed from `fieldAt:put:` in ADR 0035). Immutability is enforced both at compile time (`self.slot :=` rejected by semantic analysis) and at runtime (reflection API raises error). The compile-time check catches the common case; the runtime check catches the reflection path.
+**Reflection API:** `fieldAt:put:` on value types raises `#immutable_value` at runtime. Immutability is enforced both at compile time (`self.slot :=` rejected by semantic analysis) and at runtime (reflection API raises error). The compile-time check catches the common case; the runtime check catches the reflection path.
 
 #### Local Variable Rebinding
 
@@ -173,11 +171,11 @@ This is not part of the initial implementation but is a natural extension.
 
 #### Declaration and State
 
-Actors are declared with `slots:` and default values. State is initialized when the actor is spawned:
+Actors are declared with `state:` and default values. State is initialized when the actor is spawned:
 
 ```smalltalk
 Actor subclass: Counter
-  slots: value = 0
+  state: value = 0
 
 counter := Counter new.          "Spawns a gen_server process"
 ```
@@ -188,7 +186,7 @@ Actor methods are pure functions on the state map. They express state transition
 
 ```smalltalk
 Actor subclass: Counter
-  slots: value = 0
+  state: value = 0
 
   increment => self withValue: self value + 1
   decrement => self withValue: self value - 1
@@ -237,7 +235,7 @@ Since actor methods are functions on the state map, sequential updates bind inte
 
 ```smalltalk
 Actor subclass: Account
-  slots: balance = 0, transactions = List new
+  state: balance = 0, transactions = List new
 
   deposit: amount =>
     | s1 |
@@ -550,7 +548,7 @@ Use a trait or protocol to opt into mutability:
 ```smalltalk
 Value subclass: Point
   uses: Mutable
-  slots: x = 0, y = 0
+  state: x = 0, y = 0
 ```
 
 **Rejected because:** This is just Alternative 4 with extra syntax. The compiler still needs to handle mutable and immutable paths. The complexity isn't eliminated, it's disguised.
@@ -561,7 +559,7 @@ Allow specific value classes to opt into mutable instance variables via a declar
 
 ```smalltalk
 mutable Object subclass: Builder
-  slots: parts = List new
+  state: parts = List new
 
   addPart: part => self.parts := self.parts add: part
 ```
@@ -604,7 +602,6 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 - **Potential verbosity.** Deep state updates on nested value objects require `with*:` chains: `person withAddress: (person address withCity: 'Portland')`. Lens-like patterns may be needed for ergonomics.
 - **Breaking change from current behavior.** Existing code that uses mutable instance variables must be rewritten to use `with*:` functional setters.
 - **ADR 0041 remains exercised.** Local rebinding inside blocks still requires state threading. The compiler is simpler than full mutable-object semantics (no self-send analysis, no conditional mutation reconciliation), but not as simple as full immutability would have been.
-- **`state:` → `slots:`, `classState:` → `classSlots:`, and `fieldAt:` → `slotAt:` renames.** These are breaking changes to the declaration syntax (ADR 0013) and reflection API (ADR 0035). Existing code using `state:`, `classState:`, or `fieldAt:` must be updated. Bundled with this ADR to avoid multiple separate breaking changes.
 - **Live patching of value object classes requires migration protocol.** Value objects have no process, so there is no `code_change` callback. An existing value object in the system after a class definition change (e.g., new slot added) is an instance of the old layout. For image-based development, a value migration protocol (analogous to database schema migrations) may be needed. This is a known constraint inherited from Erlang's data model — Erlang records have the same issue — and should be addressed in the image-based development ADR.
 - **Block escape at value/actor boundary.** A block that captures rebindable locals and is passed to an actor as a callback may execute asynchronously. ADR 0041's state threading works synchronously — the `StateAcc` is threaded through the call chain. If a block escapes to an async context, the captured state snapshot is frozen at escape time. This is the same semantics as Elixir closures (capture by value), and is correct, but may surprise developers who expect the rebinding to propagate across async boundaries.
 - **`!` safety is two-tier: compile-time + runtime.** For statically-known receiver types (assigned from a constructor, `self` in actor methods), the compiler already classifies classes as value or actor via `is_actor_class()` and can reject `!` on value types at compile time. For dynamically-typed receivers (parameters, collection elements), the dispatch layer checks `is_pid(Receiver)` at runtime and raises `#not_an_actor` if `!` is used on a value object. This is the same pattern as any unsupported message send — it fails at dispatch. No additional type system work (ADR 0025) is needed as a prerequisite.
@@ -635,8 +632,6 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 **Parser:**
 - Recognize `!` as a statement terminator (cast syntax), distinct from `.` (call)
 - Support `Value subclass:` as a new declaration form (today value types use `Object subclass:`)
-- Rename `state:` → `slots:` as the declaration keyword for both value types and actors
-- Rename `classState:` → `classSlots:` as the class-level declaration keyword
 - Reject instance variable assignment (`self.slot :=`) in value type methods with clear error message guiding toward `self withSlot:`
 - Detect cast-in-expression-context errors (`x := foo bar!`)
 
@@ -649,7 +644,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 ### Phase 2: Codegen Changes (L)
 
 **Value Object Codegen:**
-- Generate immutable map-based objects from `Value subclass:` + `slots:` declarations
+- Generate immutable map-based objects from `Value subclass:` + `state:` declarations
 - Auto-generate getters and `with*:` functional setters for each declared slot
 - Auto-generate keyword constructors
 - Remove slot-write codegen for value types (no `self.slot :=` → `maps:put` paths)
@@ -675,9 +670,6 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 ### Phase 4: Migration and Testing (L)
 
 - Update all existing stdlib classes to Value/Actor model (`Object subclass:` → `Value subclass:` where appropriate)
-- Rename `state:` → `slots:` in all class declarations (stdlib, tests, examples)
-- Rename `classState:` → `classSlots:` in all class declarations
-- Rename `fieldAt:` → `slotAt:`, `fieldAt:put:` → `slotAt:put:`, `fieldNames` → `slotNames` in runtime and stdlib
 - Replace `self.slot :=` patterns with `self withSlot:` patterns in all value type methods
 - Comprehensive error message testing for rejected patterns (`self.slot :=` on value types, `!` on value objects)
 - Verify all existing stdlib and e2e tests pass
@@ -689,14 +681,13 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 
 Current value types (Point, Color, etc.) already behave mostly as immutable values. Migration involves:
 1. Change class declaration from `Object subclass:` to `Value subclass:`
-2. Rename `state:` → `slots:` in declarations
-3. Remove any setter methods (replaced by auto-generated `with*:`)
-4. Replace `self x := val` with return of `self withX: val`
+2. Remove any setter methods (replaced by auto-generated `with*:`)
+3. Replace `self x := val` with return of `self withX: val`
 
 ### Existing Actors
 
 Current actors already use gen_server. Migration involves:
-1. Change class declaration to `Actor subclass:` with `slots:`
+1. Change class declaration to `Actor subclass:` with `state:`
 2. Ensure methods return new state (via `with*:` methods) rather than mutating slots
 3. Replace `self x := val. self y := val2.` with `(self withX: val) withY: val2`
 
@@ -709,9 +700,7 @@ Tests using instance variable assignment (`self.slot := value`) must be rewritte
 | `self.count := self.count + 1` | `self withCount: self count + 1` (return as new state) | Instance variable → functional setter |
 | `self.x := val. self.y := val2` | `(self withX: val) withY: val2` | Sequential slot updates → chain |
 | `self.value := self.value + delta` | `self withValue: self value + delta` | Actor state transition |
-| `Object subclass: Point` | `Value subclass: Point` | Declaration keyword change |
-| `Object subclass: Point` with `state:` | `Value subclass: Point` with `slots:` | Superclass + declaration keyword |
-| `classState: count = 0` | `classSlots: count = 0` | Class-level declaration keyword |
+| `Object subclass: Point` | `Value subclass: Point` | Superclass declaration change |
 | `result := 0. items do: [:each \| result := result + each]` | Unchanged — local rebinding still works | Or use `inject:into:` for idiomatic style |
 
 ## References
@@ -719,10 +708,10 @@ Tests using instance variable assignment (`self.slot := value`) must be rewritte
 ### Related ADRs
 - ADR 0005 (BEAM Object Model) — formalized by this ADR; value type immutability made explicit
 - ADR 0006 (Unified Method Dispatch) — `is_actor_class()` heuristic replaced by explicit `Value`/`Actor` declaration
-- ADR 0013 (Class Variables, Class-Side Methods, Instantiation) — `state:` renamed to `slots:` for all class declarations
+- ADR 0013 (Class Variables, Class-Side Methods, Instantiation) — `state:` and `classState:` keywords retained; `Value subclass:` introduced as new declaration form
 - ADR 0025 (Gradual Typing) — `!` safety works without type system (compile-time class check + runtime pid guard); gradual typing will improve static coverage over time but is not a prerequisite
 - ADR 0028 (BEAM Interop) — `!` restricted to actor targets; immutability is compile-time only, not enforced at BEAM boundary
-- ADR 0035 (Field-Based Reflection API) — **partially superseded**: `fieldAt:`/`fieldNames` renamed to `slotAt:`/`slotNames`; closes the deferred `slotAt:put:` access control for value types (compile-time + runtime enforcement)
+- ADR 0035 (Field-Based Reflection API) — `fieldAt:put:` on value types raises `#immutable_value` at runtime (closes the deferred access control question); `fieldAt:`/`fieldNames` API unchanged
 - ADR 0038 (Subclass/ClassBuilder Protocol) — ClassBuilder must recognize `Value` as a root class
 - ADR 0037 (Collection Class Hierarchy) — collection classes (List, Array, Dictionary, Range) must be classified as Value or Actor; `Range` init pattern using `self.slot :=` needs migration to keyword constructor
 - ADR 0039 (Syntax Pragmatism vs Smalltalk) — cascade semantics deferred to ADR 0043; ADR 0039's fan-out semantics remain unchanged until then
