@@ -68,8 +68,8 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0039](0039-syntax-pragmatism-vs-smalltalk.md) | Syntax Pragmatism vs Smalltalk | Implemented | 2026-02-24 |
 | [0040](0040-workspace-native-repl-commands.md) | Workspace-Native REPL Commands, Facade/Dictionary Split, and Class-Based Reload | Accepted | 2026-02-24 |
 | [0041](0041-universal-state-threading-block-protocol.md) | Universal State-Threading Block Protocol | Accepted | 2026-02-24 |
-| [0042](0042-immutable-value-objects-actor-mutable-state.md) | Immutable Value Objects and Actor-Only Mutable State | Proposed | 2026-02-25 |
-| [0043](0043-sync-by-default-actor-messaging.md) | Sync-by-Default Actor Messaging | Proposed | 2026-02-26 |
+| [0042](0042-immutable-value-objects-actor-mutable-state.md) | Immutable Value Objects and Actor-Only Mutable State | Accepted | 2026-02-26 |
+| [0043](0043-sync-by-default-actor-messaging.md) | Sync-by-Default Actor Messaging | Accepted | 2026-02-26 |
 
 ## Creating New ADRs
 
