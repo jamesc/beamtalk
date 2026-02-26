@@ -1,0 +1,73 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the TransferAgent actor.
+//
+// TransferAgent fires withdraw: and deposit: messages to accounts internally
+// without awaiting them. After calling transfer:from:to:, we use sync barriers
+// on each account (a round-trip call) to ensure those messages have been
+// processed before asserting balances.
+//
+// Run in the REPL:
+//   > :load src/account.bt
+//   > :load src/transfer_agent.bt
+//   > :load test/transfer_test.bt
+//   > TransferTest runAll
+
+TestCase subclass: TransferTest
+
+  testBasicTransfer =>
+    alice := Account spawn.
+    bob := Account spawn.
+    (alice deposit: 1000) await.
+    (bob deposit: 500) await.
+    agent := TransferAgent spawn.
+    (agent transfer: 250 from: alice to: bob) await.
+    // Sync barriers: ensure account messages were processed
+    alice balance await.
+    bob balance await.
+    self assert: (alice balance await) equals: 750.
+    self assert: (bob balance await) equals: 750
+
+  testTransferRecordsLastAmount =>
+    alice := Account spawn.
+    bob := Account spawn.
+    (alice deposit: 1000) await.
+    agent := TransferAgent spawn.
+    (agent transfer: 300 from: alice to: bob) await.
+    self assert: (agent getLastAmount await) equals: 300
+
+  testMultipleTransfers =>
+    alice := Account spawn.
+    bob := Account spawn.
+    (alice deposit: 1000) await.
+    agent := TransferAgent spawn.
+    (agent transfer: 100 from: alice to: bob) await.
+    alice balance await.
+    bob balance await.
+    (agent transfer: 200 from: alice to: bob) await.
+    alice balance await.
+    bob balance await.
+    self assert: (alice balance await) equals: 700.
+    self assert: (bob balance await) equals: 300.
+    // getLastAmount reflects the most recent transfer
+    self assert: (agent getLastAmount await) equals: 200
+
+  testTransferInBothDirections =>
+    alice := Account spawn.
+    bob := Account spawn.
+    (alice deposit: 500) await.
+    (bob deposit: 500) await.
+    agent := TransferAgent spawn.
+    (agent transfer: 100 from: alice to: bob) await.
+    alice balance await.
+    bob balance await.
+    (agent transfer: 50 from: bob to: alice) await.
+    alice balance await.
+    bob balance await.
+    self assert: (alice balance await) equals: 450.
+    self assert: (bob balance await) equals: 550
+
+  testDefaultLastAmountIsZero =>
+    agent := TransferAgent spawn.
+    self assert: (agent getLastAmount await) equals: 0

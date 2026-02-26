@@ -1,0 +1,9 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "getting_started"
+version = "0.1.0"
+description = "Getting started with Beamtalk: hello world, counter, Towers of Hanoi, and more"
+
+[dependencies]

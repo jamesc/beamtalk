@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Bank actor.
+//
+// Run in the REPL:
+//   > :load src/account.bt
+//   > :load src/bank.bt
+//   > :load test/bank_test.bt
+//   > BankTest runAll
+
+TestCase subclass: BankTest
+
+  testOpenAccountReturnsAccount =>
+    bank := Bank spawn.
+    acct := (bank openAccount: "Alice") await.
+    self assert: (acct balance await) equals: 0
+
+  testAccountForReturnsExistingAccount =>
+    bank := Bank spawn.
+    (bank openAccount: "Alice") await.
+    acct := (bank accountFor: "Alice") await.
+    self assert: (acct balance await) equals: 0
+
+  testOpenAccountSetsOwner =>
+    bank := Bank spawn.
+    acct := (bank openAccount: "Bob") await.
+    self assert: (acct getOwner await) equals: "Bob"
+
+  testAccountForUnknownNameRaisesError =>
+    bank := Bank spawn.
+    self should: [(bank accountFor: "Nobody") await] raise: #user_error
+
+  testMultipleAccounts =>
+    bank := Bank spawn.
+    alice := (bank openAccount: "Alice") await.
+    bob := (bank openAccount: "Bob") await.
+    (alice deposit: 1000) await.
+    (bob deposit: 500) await.
+    self assert: (alice balance await) equals: 1000.
+    self assert: (bob balance await) equals: 500
+
+  testAccountForReturnsSameActor =>
+    // accountFor: returns the same actor reference each time
+    bank := Bank spawn.
+    (bank openAccount: "Alice") await.
+    first := (bank accountFor: "Alice") await.
+    second := (bank accountFor: "Alice") await.
+    // Deposit via first reference, read via second
+    (first deposit: 42) await.
+    self assert: (second balance await) equals: 42
+
+  testOpenAccountReturnsFreshAccount =>
+    // Each openAccount: creates a new Account actor
+    bank := Bank spawn.
+    (bank openAccount: "Alice") await.
+    (bank openAccount: "Bob") await.
+    alice := (bank accountFor: "Alice") await.
+    bob := (bank accountFor: "Bob") await.
+    (alice deposit: 100) await.
+    self assert: (alice balance await) equals: 100.
+    self assert: (bob balance await) equals: 0

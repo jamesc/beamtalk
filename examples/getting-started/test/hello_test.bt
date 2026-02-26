@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Hello value type.
+//
+// Run in the REPL:
+//   > :load src/hello.bt
+//   > :load test/hello_test.bt
+//   > HelloTest runAll
+
+TestCase subclass: HelloTest
+
+  testGreeting =>
+    self assert: Hello new greeting equals: "Hello, World!"
+
+  testTwoInstancesHaveSameGreeting =>
+    // Value types have no shared state — both instances return the same greeting
+    self assert: Hello new greeting equals: Hello new greeting
+
+  testClassIsHello =>
+    // Hello is a value type — class name is the symbol #Hello
+    self assert: Hello new class name equals: #Hello

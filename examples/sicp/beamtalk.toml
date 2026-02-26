@@ -1,0 +1,9 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "sicp"
+version = "0.1.0"
+description = "SICP Scheme compiler written in Beamtalk"
+
+[dependencies]

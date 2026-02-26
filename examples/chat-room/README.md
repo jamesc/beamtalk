@@ -22,19 +22,20 @@ This example demonstrates Beamtalk's core features through an interactive chat r
 | `chat_member.bt` | `ChatMember` | Actor | Actor references, inbox, room field |
 | `moderator.bt` | `Moderator` | Actor | Inheritance, `super` calls, mute/kick |
 
-## Quick Start
+## Starting the Workspace
 
 ```bash
-$ beamtalk repl
+cd examples/chat-room
+beamtalk repl
 ```
 
 ### Step 1: Load all classes
 
 ```beamtalk
-> :load examples/chat-room/message.bt
-> :load examples/chat-room/chat_room.bt
-> :load examples/chat-room/chat_member.bt
-> :load examples/chat-room/moderator.bt
+> :load src/message.bt
+> :load src/chat_room.bt
+> :load src/chat_member.bt
+> :load src/moderator.bt
 ```
 
 ### Step 2: Create the room and members

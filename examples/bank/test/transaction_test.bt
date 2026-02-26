@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Transaction value type.
+//
+// Run in the REPL:
+//   > :load src/transaction.bt
+//   > :load test/transaction_test.bt
+//   > TransactionTest runAll
+
+TestCase subclass: TransactionTest
+
+  testDefaultAmount =>
+    self assert: Transaction new getAmount equals: 0
+
+  testDefaultFrom =>
+    self assert: Transaction new getFrom equals: ""
+
+  testDefaultTo =>
+    self assert: Transaction new getTo equals: ""
+
+  testDefaultStatus =>
+    self assert: Transaction new getStatus equals: "pending"
+
+  testDefaultTimestampIsNil =>
+    self assert: Transaction new getTimestamp equals: nil
+
+  testNewWithAmount =>
+    txn := Transaction new: #{#amount => 250}.
+    self assert: txn getAmount equals: 250
+
+  testNewWithFromAndTo =>
+    txn := Transaction new: #{#from => "Alice", #to => "Bob"}.
+    self assert: txn getFrom equals: "Alice".
+    self assert: txn getTo equals: "Bob"
+
+  testNewWithStatus =>
+    txn := Transaction new: #{#status => "completed"}.
+    self assert: txn getStatus equals: "completed"
+
+  testNewWithAllFields =>
+    txn := Transaction new: #{
+      #amount => 500,
+      #from => "Alice",
+      #to => "Bob",
+      #status => "completed"
+    }.
+    self assert: txn getAmount equals: 500.
+    self assert: txn getFrom equals: "Alice".
+    self assert: txn getTo equals: "Bob".
+    self assert: txn getStatus equals: "completed"
+
+  testTwoInstancesAreIndependent =>
+    // Value types — no shared mutable state
+    txn1 := Transaction new: #{#amount => 100, #from => "Alice"}.
+    txn2 := Transaction new: #{#amount => 200, #from => "Bob"}.
+    self assert: txn1 getAmount equals: 100.
+    self assert: txn2 getAmount equals: 200

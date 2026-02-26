@@ -24,22 +24,28 @@ and transferring money requires coordinating two actors.
 | `Transaction` | Value | Immutable transfer record |
 | `TransferAgent` | Actor | Coordinates two-account transfers |
 
+## Starting the Workspace
+
+```bash
+cd examples/bank
+beamtalk repl
+```
+
 ## REPL Walkthrough
 
-Start a REPL session and load the bank classes:
+Load the bank classes:
 
 ```
-$ beamtalk repl
-> :load examples/bank/account.bt
-> :load examples/bank/transaction.bt
-> :load examples/bank/bank.bt
-> :load examples/bank/transfer_agent.bt
+> :load src/account.bt
+> :load src/transaction.bt
+> :load src/bank.bt
+> :load src/transfer_agent.bt
 ```
 
 Typed variant:
 
 ```
-> :load examples/bank/typed_account.bt
+> :load src/typed_account.bt
 > typed := TypedAccount spawn
 > typed deposit: 100
 100
