@@ -89,11 +89,13 @@ TestCase subclass: ActorConditionalMutationsTest
   testConditionalAsLastExpression =>
     // Verify conditional as the last expression in a method
     c := ConditionalMutationCounter spawn.
-    // flag=true returns {Result, NewState} which gets unpacked by method body
+    // flag=true returns the assigned value (5) and mutates state
     result := (c conditionalLast: true) await.
+    self assert: result equals: 5.
     self assert: (c getCount await) equals: 5.
     (c reset) await.
-    // flag=false returns nil
+    // flag=false returns nil and leaves state unchanged
     result2 := (c conditionalLast: false) await.
+    self assert: result2 equals: nil.
     self assert: (c getCount await) equals: 0
 
