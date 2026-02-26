@@ -737,6 +737,18 @@ Value type tests using instance variable assignment (`self.slot := value`) must 
 | `Object subclass: Point` | `Value subclass: Point` | Superclass declaration change |
 | `result := 0. items do: [:each \| result := result + each]` | Unchanged — local rebinding still works | Or use `inject:into:` for idiomatic style |
 
+## Implementation Tracking
+
+**Epic:** [BT-913](https://linear.app/beamtalk/issue/BT-913) — Immutable Value Objects, Actor Mutable State, and Sync-by-Default Messaging (ADR 0042 + ADR 0043)
+
+| Stage | Issues | Status |
+|-------|--------|--------|
+| **Stage 1: self.slot := in actors** | BT-914 (semantic), BT-915 (codegen), BT-916 (tests) | Planned |
+| **Stage 2: Sync-by-default .** | BT-917 (cast runtime), BT-918 (sync switch), BT-919 (! parser), BT-920 (! codegen), BT-921 (migration) | Planned |
+| **Stage 3: Value subclass:** | BT-922 (parser), BT-923 (codegen), BT-924 (immutability), BT-925 (stdlib migration), BT-926 (tests/docs) | Planned |
+
+**Recommended start:** BT-914 (Stage 1, no dependencies)
+
 ## References
 
 ### Related ADRs

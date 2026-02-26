@@ -534,3 +534,19 @@ To:
 ### Related Issues
 - BT-840 — Auto-await futures in chained message sends (the BT-840 workaround that motivated this change)
 - BT-507 — Future combinators (deferred; Futures remain for explicit async patterns)
+
+## Implementation Tracking
+
+**Epic:** [BT-913](https://linear.app/beamtalk/issue/BT-913) — shared with ADR 0042
+
+ADR 0043 is implemented as **Stage 2** of the combined ADR 0042+0043 epic:
+
+| Issue | Title | Status |
+|-------|-------|--------|
+| BT-917 | Runtime: cast_send/3 and fire-and-forget handle_cast wire format | Planned |
+| BT-918 | Switch default actor dispatch from async to sync (gen_server:call) | Planned |
+| BT-919 | Lexer/Parser: add ! (bang) token and cast statement syntax | Planned |
+| BT-920 | Codegen: generate cast_send for ! (bang) sends | Planned |
+| BT-921 | Migration: remove await patterns, update docs for sync-by-default | Planned |
+
+**Depends on:** Stage 1 (self.slot := in actors) completing first.
