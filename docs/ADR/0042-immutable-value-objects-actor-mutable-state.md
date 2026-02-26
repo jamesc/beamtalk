@@ -39,13 +39,13 @@ The state-threading complexity exists entirely because we try to make category 2
 
 ## Decision
 
-Adopt **immutable value semantics** as the default for all BeamTalk objects. Mutable state is confined to **actor processes** (BEAM processes / OTP gen_servers).
+Adopt **immutable value semantics** as the default for all BeamTalk objects. Mutable state is confined to **actor processes** (BEAM processes / OTP gen_servers), where `self.slot :=` is allowed and compiles to direct `maps:put` on the state map.
 
 ### Two Kinds of Entities
 
-1. **Value Objects** — Immutable. Every "mutating" message returns a new object. These compile directly to BEAM terms (maps, tuples, lists) with no transformation.
+1. **Value Objects** — Immutable. Every "mutating" message returns a new object. `self.slot :=` is a compile error. These compile directly to BEAM terms (maps) with no transformation.
 
-2. **Actors** — BEAM processes wrapping a gen_server. The only place where mutable state exists. State transitions are expressed functionally (methods return new state), but the process itself maintains identity over time.
+2. **Actors** — BEAM processes wrapping a gen_server. `self.slot :=` is allowed inside actor methods, compiling to direct `maps:put` on the state map. Auto-generated `with*:` methods serve as the public API for external callers. The gen_server manages state persistence across method invocations.
 
 ### Value Object Semantics
 
@@ -110,17 +110,19 @@ For **actors**, the same `with*:` methods exist but the dispatch framework media
 
 **Equality:** Value objects use **structural equality**. Two `Point` instances with the same `x` and `y` are equal (`=:=`). This follows naturally from the Erlang map representation — internally `#{'$beamtalk_class' => 'Point', '__class_mod__' => ..., x => 3, y => 4}`, where all metadata keys are identical for instances of the same class, so structural equality reduces to slot-value comparison. For value objects, `==` (loose equality) and `=:=` (strict equality) both compare structurally. Actors use **process identity** — two actors with identical state are different objects if they are different processes.
 
-#### No Instance Variable Assignment
+#### No Instance Variable Assignment on Value Types
 
-There is no `:=` assignment to instance variables. Period. If you want a modified version of an object, you create a new one:
+Value types prohibit `:=` assignment to instance variables. If you want a modified version, you create a new one:
 
 ```smalltalk
-"This does not exist:"
+"In a Value subclass method:"
 self x := 5.        "COMPILER ERROR — no instance variable assignment on value type"
 
 "Instead:"
 self withX: 5       "Returns new object"
 ```
+
+Actors DO allow `self.slot :=` — see "Actor Semantics" below.
 
 **Reflection API:** `fieldAt:put:` on value types raises a `#beamtalk_error{type => immutable_value}` at runtime. On actors, `fieldAt:put:` works normally (actors have mutable state). Immutability is enforced both at compile time (`self.slot :=` rejected by semantic analysis) and at runtime (reflection API raises error on value types). The compile-time check catches the common case; the runtime check catches the reflection path.
 
@@ -180,77 +182,89 @@ Actor subclass: Counter
 counter := Counter new.          "Spawns a gen_server process"
 ```
 
-#### Methods as State Transitions
+#### Methods and State Mutation
 
-Actor methods are pure functions on the state map. They express state transitions by returning a new version of the state:
+Inside actor methods, slots are updated directly with `:=`. Each assignment compiles to `maps:put` on the state map — no dispatch call, no intermediate variables:
 
 ```smalltalk
 Actor subclass: Counter
   state: value = 0
 
-  increment => self withValue: self value + 1
-  decrement => self withValue: self value - 1
+  increment => self.value := self.value + 1
+  decrement => self.value := self.value - 1
   getValue  => ^self value
 ```
 
-The compiler auto-generates the same `with*:`/getter pattern for actor slots as for value object slots.
+The compiler auto-generates `with*:` methods as the **public API** for external callers. Inside actor methods, direct slot assignment is preferred:
+
+- **Cheaper:** `self.slot := expr` compiles to `maps:put(slot, Expr, StateN)` — a direct map operation. `self withSlot: expr` is a self-send through dispatch, requiring `{reply, Result, NewState}` tuple unpacking.
+- **Safer:** With `self.slot :=`, the state map always reflects all assignments. With `with*:` chains, forgetting to capture an intermediate variable silently loses state updates — a data-loss footgun with no compile-time or runtime error:
+
+```smalltalk
+"FOOTGUN — with*: chain, uncaptured intermediate silently loses balance update:"
+deposit: amount =>
+  self withBalance: self balance + amount.            "← result discarded!"
+  self withTransactions: (self transactions add: amount)  "operates on ORIGINAL state"
+
+"SAFE — direct slot assignment, impossible to lose an update:"
+deposit: amount =>
+  self.balance := self.balance + amount.
+  self.transactions := self.transactions add: amount
+```
 
 #### Return Value and State Update Rules
 
 The gen_server framework uses two rules to interpret method results:
 
-1. **Last expression (no `^`):** The result is the reply to the caller. The compiler tracks the current state version through sequential self-sends — each self-send dispatches and returns `{reply, Result, NewState}`, and the codegen uses `NewState` as input to the next self-send. The most recent state becomes the new gen_server state. If the method doesn't contain self-sends that modify state (pure query), the original state is preserved. This is standard variable binding through return values, not cascade semantics — each self-send is an independent expression that produces a new value.
+1. **Last expression (no `^`):** The result is the reply to the caller. The gen_server state is the accumulated result of all `self.slot :=` assignments in the method body. If the method contains no slot assignments (pure query), the original state is preserved.
 
-2. **Early return (`^`):** The `^` expression is the reply to the caller. The gen_server state is updated to whatever state version existed at the `^` point — any mutations before `^` are preserved, the early return does not discard them.
+2. **Early return (`^`):** The `^` expression is the reply to the caller. State accumulated up to the `^` point is preserved — any slot assignments before `^` are kept.
 
-Under the hood, the compiler tracks state through the existing `{reply, Result, NewState}` return tuples from self-sends — the same mechanism used today for self-send state threading. When an actor method calls `self withValue: 5`, this is a self-send that goes through `Module:dispatch`, which returns `{reply, NewMap, NewMap}`. The codegen unpacks this: the result goes to the user variable, and `NewState` becomes the next `StateN` in the compiler's state tracking chain. The generated `handle_call` always receives an explicit `{reply, Result, StateN}` tuple. **This is not local-variable analysis** — the compiler does not need to infer which local variable "represents state." State flows through the dispatch return path, exactly as today.
+Under the hood, `self.slot := expr` compiles to `StateN = maps:put(slot, Expr, StateN-1)` — sequential state variable renaming within the method body. The generated `handle_call` returns `{reply, LastExpr, FinalState}`.
 
 ```smalltalk
-"State transition — last expression is new state map:"
-increment => self withValue: self value + 1
-"self withValue: is a self-send → dispatch returns {reply, NewState, NewState}"
-"Generated handle_call reply: {reply, NewState, NewState}"
+"State mutation — last expression is the reply:"
+increment => self.value := self.value + 1
+"Compiles to: State1 = maps:put(value, maps:get(value, State0) + 1, State0)"
+"Generated: {reply, NewValue, State1}"
 
 "Query — ^ returns a value, state unchanged:"
 getValue => ^self value
-"No self-sends that modify state → State is unchanged"
-"Generated: {reply, Value, OriginalState}"
+"Generated: {reply, Value, State0}"
 
-"Mixed — mutate then return a non-state value:"
+"Mixed — mutate then return a specific value:"
 incrementAndGetOld =>
-  | old s1 |
+  | old |
   old := self value.
-  s1 := self withValue: self value + 1.
+  self.value := self.value + 1.
   ^old
-"self withValue: dispatch returns {reply, NewMap, State1}"
-"s1 = NewMap, compiler tracks State1"
-"^old throws {$bt_nlr, Token, old, State1} — state updated to State1"
+"State updated to State1, old value returned"
+"^old throws {$bt_nlr, Token, old, State1}"
 ```
 
-**Why this eliminates self-send dependency analysis:** Under the status quo, `self name: 'foo'. self age: 42.` requires the compiler to detect the data dependency between sequential slot mutations. Under ADR 0042, each self-send goes through dispatch and returns `{reply, Result, NewState}` — the state is threaded through the return path automatically. No dependency analysis is needed because each self-send explicitly receives and returns state through the dispatch protocol.
+**Self-sends within actor methods** still go through `Module:dispatch`, which returns `{reply, Result, NewState}`. The compiler threads the new state forward. But for simple slot updates, direct `self.slot :=` avoids the dispatch round-trip entirely.
+
+**Why this eliminates self-send dependency analysis:** Under the status quo, `self name: 'foo'. self age: 42.` requires the compiler to detect the data dependency between sequential slot mutations. Under ADR 0042, direct slot assignments (`self.slot :=`) compile to sequential `maps:put` calls with explicit state variable threading — no dependency analysis needed. Self-sends to other methods (`self someMethod`) go through dispatch and return `{reply, Result, NewState}`, which the compiler threads automatically.
 
 #### Sequential State Updates in Actor Methods
 
-Since actor methods are functions on the state map, sequential updates bind intermediate results:
+Multi-step state updates are straightforward — each line updates state directly:
 
 ```smalltalk
 Actor subclass: Account
   state: balance = 0, transactions = List new
 
   deposit: amount =>
-    | s1 |
-    s1 := self withBalance: self balance + amount.
-    s1 withTransactions: (s1 transactions add: amount)
-```
+    self.balance := self.balance + amount.
+    self.transactions := self.transactions add: amount
 
-For complex updates, `inject:into:` threads state through iterations:
-
-```smalltalk
   depositAll: amounts =>
-    amounts inject: self into: [:state :amount |
-      state withBalance: state balance + amount
+    amounts do: [:amount |
+      self.balance := self.balance + amount
     ]
 ```
+
+Slot assignments inside blocks are handled by ADR 0041's state-threading protocol — the same mechanism that threads local variable rebindings through blocks. The `self.slot :=` is syntactic sugar for updating the state map variable, which ADR 0041 threads through the block like any other captured local.
 
 #### `self` and Actor Identity
 
@@ -258,7 +272,7 @@ Inside an actor method, `self` is a `#beamtalk_object{class, class_mod, pid}` re
 
 ```smalltalk
 "Inside the actor method:"
-increment => self withValue: self value + 1   "self.value reads from state map"
+increment => self.value := self.value + 1      "direct state map update"
 notifyOther: other => other update: self pid!  "self pid returns the actor's pid"
 
 "Outside — counter is a pid, message goes through gen_server:"
@@ -475,6 +489,14 @@ If BeamTalk libraries are written by people who understand the immutable model, 
 | **BEAM veteran** | "Single-assignment is the Erlang way. Every BEAM developer already thinks in accumulators and folds. Rebinding adds compiler complexity (ADR 0041 state threading through blocks) for a feature your core audience doesn't need. Keep it simple — `inject:into:` is just `lists:foldl`." |
 | **Compiler engineer** | "Without rebinding, you don't need ADR 0041's state threading at all — blocks are pure closures with zero overhead. No `StateAcc`, no pack/unpack, no tuple returns. The compiler is maximally simple. Every line of state-threading code is a line that can have bugs." |
 
+### Best Argument for Alternative 4: Functional-Only Actor State (with\*: chains only)
+
+| Cohort | Their strongest argument |
+|--------|------------------------|
+| **Language designer** | "Allowing `self.slot :=` in actors but not value types creates two mental models for state. A developer has to remember which kind of class they're in before knowing whether assignment works. Uniform `with*:` everywhere is one rule: 'everything is a new value.' That's simpler to teach, simpler to reason about, and avoids the slippery slope toward mutable-everything." |
+| **BEAM veteran** | "Erlang gen_servers are pure functional state machines — `handle_call(Msg, From, State) -> {reply, Reply, NewState}`. That's the BEAM way. Introducing `self.slot :=` inside actors is syntactic sugar that hides the functional reality. When debugging, the developer will see state variable renaming in the Core Erlang output anyway. Leaky abstraction." |
+| **Compiler engineer** | "Direct `self.slot :=` inside actor methods means the compiler needs to track which slots have been modified and generate the correct `StateN` chain. That's a simpler form of state threading, but it's still state threading. With `with*:` only, the compiler doesn't need to track slot assignments at all — each `with*:` is a self-send and the dispatch protocol handles state. The compiler is dumber and that's good." |
+
 ### Best Argument for Alternative 2: Process-Per-Object
 
 | Cohort | Their strongest argument |
@@ -490,21 +512,23 @@ If BeamTalk libraries are written by people who understand the immutable model, 
 
 2. **The Kotlin/Swift analogy breaks down.** Those languages have mutable memory — the compiler transforms are source-to-source within a mutable execution model. On BEAM, every "mutation" is a data structure copy. The compilation target is fundamentally different, not just harder.
 
-3. **ADR 0041's investment is preserved and active.** The implementation continues to serve local rebinding through blocks — the bounded problem it was designed for. The unbounded problems (self-send chains, conditional slot mutations, deep call chains) are eliminated by immutable objects.
+3. **ADR 0041's investment is preserved and active.** The implementation continues to serve local rebinding and actor slot assignments through blocks — the bounded problem it was designed for. The unbounded problems (cross-method self-send chains, cross-class state propagation, deep call chains) are eliminated for value types (immutable) and bounded for actors (gen_server method boundary).
 
 **Against Alternative 3 (Full Immutability, No Rebinding):** The consistency argument is decisive. The REPL must allow rebinding for interactive exploration. If compiled code prohibits rebinding, code cannot move between REPL and class definitions without rewriting. Elixir faced this exact choice and chose rebinding everywhere — it was essential to the Ruby-to-BEAM transition. BeamTalk faces the same transition with Smalltalk developers and must make the same choice. Additionally, ADR 0041's state-threading infrastructure is already implemented, making local rebinding through blocks a solved problem with near-zero marginal cost.
+
+**Against Alternative 4 (with\*:-only actors):** The language designer's "two mental models" concern is the strongest argument. However, the two models reflect a genuine semantic difference: value types ARE immutable data, actors ARE mutable processes. Using the same syntax (`with*:`) for both hides a real distinction — on a value type, `withX: 5` creates a new object; on an actor, it mutates state and returns a value. That's the same syntax with different semantics, which is arguably worse than different syntax for different semantics. The compiler engineer's argument is technically correct but misses the safety point: `with*:` chains have a silent data-loss footgun where uncaptured intermediates discard state updates. The state-tracking for `self.slot :=` is strictly simpler than tracking `with*:` self-sends through dispatch — it's sequential `maps:put`, not dispatch round-trips. The BEAM veteran's "leaky abstraction" concern is valid but applies equally to `with*:` — both compile to state variable renaming in Core Erlang. The question is which surface syntax leads to fewer bugs, and `self.slot :=` wins by eliminating the uncaptured-intermediate footgun entirely.
 
 **Against Alternative 2 (Process-Per-Object):** The Smalltalk purist's argument is philosophically compelling but practically disqualifying. `Point x: 3 y: 4` allocating a process is a ~1000x overhead for the most common operation in any program. No optimization can close that gap — processes require mailboxes, reduction counting, and GC roots. This is not a performance concern; it's a category error.
 
 ### Tension Points
 
-- **Smalltalk fidelity vs. platform alignment.** Reasonable people disagree on whether BeamTalk should prioritize "feels like Smalltalk" or "works naturally on BEAM." This ADR chooses platform alignment with Smalltalk ergonomics: local rebinding preserves the feel of Smalltalk's mutable temporaries, while immutable objects align with BEAM's strengths. The strongest counter: "if `self x := 5` doesn't work, it's not Smalltalk — it's Erlang in a trench coat."
+- **Smalltalk fidelity vs. platform alignment.** Reasonable people disagree on whether BeamTalk should prioritize "feels like Smalltalk" or "works naturally on BEAM." This ADR chooses a pragmatic middle: actors support `self.slot :=` (Smalltalk-familiar), value types are immutable (BEAM-native). The strongest counter: "if `self x := 5` works in actors but not value types, you've created a confusing inconsistency — in Smalltalk, all objects work the same way."
 
-- **"Smalltalk-inspired" vs. "Smalltalk."** This ADR moves BeamTalk from "Smalltalk on BEAM" toward "Smalltalk-inspired language on BEAM." That's a positioning shift, not just a technical one. It affects marketing, documentation, community expectations, and which developers the language attracts. The Erlang/Elixir community may find it more natural; the Smalltalk community may find it alienating. Local rebinding softens this — method bodies still *feel* like Smalltalk, even if the object model is different.
+- **"Smalltalk-inspired" vs. "Smalltalk."** This ADR moves BeamTalk from "Smalltalk on BEAM" toward "Smalltalk-inspired language on BEAM." That's a positioning shift, not just a technical one. It affects marketing, documentation, community expectations, and which developers the language attracts. The Erlang/Elixir community may find it more natural; the Smalltalk community may find it alienating. Actor `self.slot :=` softens this — actors feel like Smalltalk objects, and value types feel like Erlang terms with Smalltalk syntax.
 
 - **Where rebinding ends and mutation begins.** Local rebinding is semantically immutable (shadowing), but it *looks* like mutation (`x := x + 1`). This is a feature for onboarding (familiar syntax) but a potential source of confusion when developers expect reference semantics. The key distinction — rebinding a local doesn't affect other references to the old value — must be taught clearly.
 
-- **ADR 0041 scope: asset, not burden.** ADR 0041's state-threading infrastructure handles exactly the remaining mutable-semantics need (local rebinding through blocks). It no longer needs to solve self-send chains, conditional slot mutations, or deep call-chain propagation. This is a significant scope reduction — from "thread all mutable state everywhere" to "thread local rebindings through blocks" — which makes the infrastructure easier to maintain and less likely to produce edge-case bugs.
+- **ADR 0041 scope: asset, not burden.** ADR 0041's state-threading infrastructure handles the remaining mutable-semantics needs: local rebinding through blocks and actor slot assignments through blocks. It no longer needs to solve cross-method self-send chains, cross-class state propagation, or deep call-chain threading. This is a significant scope reduction — from "thread all mutable state everywhere" to "thread local rebindings and actor slots through blocks within a single method body" — which makes the infrastructure easier to maintain and less likely to produce edge-case bugs.
 
 ## Alternatives Considered
 
@@ -535,11 +559,19 @@ items do: [:each | result := result + each].   "ERROR — cannot rebind local"
 
 **Rejected because:** This creates an inconsistency with the REPL, which must allow rebinding for interactive exploration. Code that works in the REPL would break when moved to a class definition — a pedagogical cliff that Elixir deliberately avoided and that BeamTalk cannot afford. Additionally, ADR 0041's state-threading infrastructure is already implemented, making local rebinding through blocks a solved problem with near-zero additional compiler cost. The purity gain is not worth the consistency loss.
 
-### Alternative 4: Hybrid — Value Objects + Mutable Actor Fields
+### Alternative 4: Functional-Only Actor State (with\*: chains, no self.slot :=)
 
-Allow actors to have traditional mutable instance variable assignment (`self x := 5`) while keeping value objects immutable.
+Require actors to express all state transitions through auto-generated `with*:` functional setters. Prohibit `self.slot :=` inside actor methods — all state updates use the same `with*:` pattern as value types:
 
-**Rejected because:** This reintroduces all the state-threading complexity for actor methods. Self-sends in actor methods would need dependency analysis. Blocks in actor methods that mutate slots would need state threading. The compiler simplification benefit is lost.
+```smalltalk
+"with*: only — multi-step update requires intermediate variable:"
+deposit: amount =>
+  | s1 |
+  s1 := self withBalance: self balance + amount.
+  s1 withTransactions: (s1 transactions add: amount)
+```
+
+**Rejected because:** The `with*:` chain pattern for actors has a silent data-loss footgun: forgetting to capture an intermediate variable (`self withBalance: ...` instead of `s1 := self withBalance: ...`) silently discards the state update with no compile-time or runtime error. This violates the goal of eliminating hidden complexity and surprising edge cases. Additionally, `self withSlot: expr` on an actor is a self-send through dispatch — it returns `{reply, Result, NewState}` and requires tuple unpacking — which is slower than `self.slot := expr` compiling to a direct `maps:put`. The functional purity buys nothing for actors: the gen_server already serializes state transitions, so there is no concurrency benefit from treating methods as pure functions. Direct slot assignment (`self.slot :=`) is both cheaper (no dispatch) and safer (impossible to lose an update) than `with*:` chains for actor-internal state mutation.
 
 ### Alternative 5: Trait/Protocol-Based Mutability
 
@@ -588,8 +620,9 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 ### Positive
 
 - **Eliminates compile-time state threading for value objects entirely.** Value objects are immutable data — they map directly to BEAM terms. No `StateAcc`, no pack/unpack, no dual codegen paths.
-- **Eliminates state-threading for actor methods.** Actor methods are pure functions on state maps. The gen_server framework handles state persistence. No self-send analysis needed.
-- **Blocks are safe and composable.** No instance variable mutation in blocks. Local rebinding through blocks is handled by ADR 0041's proven infrastructure. HOMs work universally.
+- **Dramatically simplifies actor state codegen.** Actor `self.slot :=` compiles to direct `maps:put` — no dispatch round-trip, no `{reply}` tuple unpacking. Self-send dependency analysis is eliminated: sequential slot assignments are sequential `maps:put` calls with explicit state variable threading.
+- **Eliminates the with\*: intermediate-capture footgun for actors.** Direct slot assignment makes it impossible to silently lose a state update by forgetting to capture an intermediate variable.
+- **Blocks are safe and composable.** Slot assignments in actor blocks use ADR 0041's state-threading protocol (same as local rebinding). Value type blocks have no mutation concern. HOMs work universally.
 - **Higher-order messages work universally.** Blocks can be freely passed, stored, and executed. Local rebinding through blocks uses ADR 0041's universal protocol — no whitelist, no special cases.
 - **Concurrency is natural.** Immutable data on the BEAM is the happy path — no copying overhead, no race conditions.
 - **Enables advanced runtime features.** Immutable state enables checkpoint, fork, replay, and time-travel debugging. Actor state transitions can be modeled as event sourcing.
@@ -598,17 +631,17 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 
 ### Negative
 
-- **Not faithful Smalltalk.** No mutable instance variables. Common Smalltalk patterns involving slot assignment (`self x := 5`) require adaptation to `with*:` methods. The "it's just Smalltalk" story weakens.
-- **Potential verbosity.** Deep state updates on nested value objects require `with*:` chains: `person withAddress: (person address withCity: 'Portland')`. Lens-like patterns may be needed for ergonomics.
-- **Breaking change from current behavior.** Existing code that uses mutable instance variables must be rewritten to use `with*:` functional setters.
-- **ADR 0041 remains exercised.** Local rebinding inside blocks still requires state threading. The compiler is simpler than full mutable-object semantics (no self-send analysis, no conditional mutation reconciliation), but not as simple as full immutability would have been.
+- **Two state models.** Value types prohibit `self.slot :=` while actors allow it. This is a genuine semantic split — in Smalltalk, all objects work the same way. Developers must know whether they're in a Value or Actor class before knowing whether slot assignment works. The `Value`/`Actor` superclass makes this visible at the declaration site, but it's still a rule to learn.
+- **Potential verbosity for nested value updates.** Deep state updates on nested value objects require `with*:` chains: `person withAddress: (person address withCity: 'Portland')`. Lens-like patterns may be needed for ergonomics.
+- **Breaking change from current behavior.** Existing value type code that uses mutable instance variables must be rewritten to use `with*:` functional setters. Actor code using `self.slot :=` is unaffected.
+- **ADR 0041 remains exercised.** Local rebinding inside blocks and actor slot assignments inside blocks both require state threading. The compiler is simpler than the status quo (no cross-method or cross-class state threading), but not as simple as full immutability would have been.
 - **Live patching of value object classes requires migration protocol.** Value objects have no process, so there is no `code_change` callback. An existing value object in the system after a class definition change (e.g., new slot added) is an instance of the old layout. For image-based development, a value migration protocol (analogous to database schema migrations) may be needed. This is a known constraint inherited from Erlang's data model — Erlang records have the same issue — and should be addressed in the image-based development ADR.
 - **Block escape at value/actor boundary.** A block that captures rebindable locals and is passed to an actor as a callback may execute asynchronously. ADR 0041's state threading works synchronously — the `StateAcc` is threaded through the call chain. If a block escapes to an async context, the captured state snapshot is frozen at escape time. This is the same semantics as Elixir closures (capture by value), and is correct, but may surprise developers who expect the rebinding to propagate across async boundaries.
 - **`!` safety is two-tier: compile-time + runtime.** For statically-known receiver types (assigned from a constructor, `self` in actor methods), the compiler already classifies classes as value or actor via `is_actor_class()` and can reject `!` on value types at compile time. For dynamically-typed receivers (parameters, collection elements), the dispatch layer checks `is_pid(Receiver)` at runtime and raises `#not_an_actor` if `!` is used on a value object. This is the same pattern as any unsupported message send — it fails at dispatch. No additional type system work (ADR 0025) is needed as a prerequisite.
 
 ### Neutral
 
-- **ADR 0041 remains active and essential.** ADR 0041's universal state-threading protocol is largely implemented and continues to serve its purpose: threading local variable rebindings through blocks. The scope is narrower than under the status quo — only local variable rebinding needs threading, not instance variable mutation or self-send chains — but the infrastructure is exercised by any block that rebinds a captured local. This is exactly the bounded problem ADR 0041 was designed for.
+- **ADR 0041 remains active and essential.** ADR 0041's universal state-threading protocol is largely implemented and continues to serve its purpose: threading local variable rebindings and actor slot assignments through blocks. The scope is narrower than under the status quo — no cross-method or cross-class state threading — but the infrastructure is exercised by any block that rebinds a captured local or assigns to an actor slot. This is exactly the bounded problem ADR 0041 was designed for.
 - **ADR 0005 alignment.** ADR 0005 (BEAM Object Model) already distinguishes value types from actors. This ADR formalizes the immutability constraint that was implicit in ADR 0005's design.
 - **Collection protocol completeness is important but not critical.** With local rebinding, developers can always fall back to `do:` with accumulator rebinding. However, `inject:into:`, `collect:`, `select:`, `reject:`, and `detect:` should still be comprehensive — idiomatic functional patterns are cleaner than imperative accumulation and should be the encouraged style.
 - **Auto-generated `with*:` methods are load-bearing.** Without them, immutability is tedious boilerplate. The compiler must generate them reliably for all declared slots.
@@ -619,8 +652,8 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 
 - Compile one `Value subclass:` declaration with auto-generated getters and `with*:` methods
 - Verify the generated Core Erlang compiles and produces correct output
-- Compile one `Actor subclass:` with `.` (call) and `!` (cast) message sends
-- Verify the gen_server routing works for both call and cast
+- Compile one `Actor subclass:` with `self.slot :=`, `.` (call), and `!` (cast)
+- Verify `self.slot :=` compiles to `maps:put` and gen_server routing works for call/cast
 - **Goal:** Prove the core codegen patterns work before rewriting all class compilation
 - **Effort:** S
 
@@ -632,7 +665,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 **Parser:**
 - Recognize `!` as a statement terminator (cast syntax), distinct from `.` (call)
 - Support `Value subclass:` as a new declaration form (today value types use `Object subclass:`)
-- Reject instance variable assignment (`self.slot :=`) in value type methods with clear error message guiding toward `self withSlot:`
+- Reject instance variable assignment (`self.slot :=`) in value type methods with clear error message guiding toward `self withSlot:`. Allow `self.slot :=` in actor methods.
 - Detect cast-in-expression-context errors (`x := foo bar!`)
 
 **Semantic Analysis:**
@@ -654,8 +687,9 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 - Generate gen_server module with `handle_call`/`handle_cast` callbacks
 - Map `.` message sends to `gen_server:call`
 - Map `!` message sends to `gen_server:cast`
-- Actor methods receive state map as `self`, return new state map
-- Auto-generate getters and `with*:` for actor state
+- Compile `self.slot := expr` to `StateN = maps:put(slot, Expr, StateN-1)` — direct map operation, no dispatch
+- Actor methods receive state map, return `{reply, LastExpr, FinalState}`
+- Auto-generate getters and `with*:` as public API for actor state
 - **Affected:** `actor_codegen.rs`, `mod.rs`, `beamtalk_dispatch.erl`
 
 ### Phase 3: Runtime Changes (M)
@@ -670,7 +704,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 ### Phase 4: Migration and Testing (L)
 
 - Update all existing stdlib classes to Value/Actor model (`Object subclass:` → `Value subclass:` where appropriate)
-- Replace `self.slot :=` patterns with `self withSlot:` patterns in all value type methods
+- Replace `self.slot :=` patterns with `self withSlot:` patterns in **value type** methods (actors retain `self.slot :=`)
 - Comprehensive error message testing for rejected patterns (`self.slot :=` on value types, `!` on value objects)
 - Verify all existing stdlib and e2e tests pass
 - Performance benchmarks for value object creation and `with*:` operations
@@ -686,20 +720,19 @@ Current value types (Point, Color, etc.) already behave mostly as immutable valu
 
 ### Existing Actors
 
-Current actors already use gen_server. Migration involves:
+Current actors already use gen_server. Migration is minimal:
 1. Change class declaration to `Actor subclass:` with `state:`
-2. Ensure methods return new state (via `with*:` methods) rather than mutating slots
-3. Replace `self x := val. self y := val2.` with `(self withX: val) withY: val2`
+2. Existing `self.slot :=` patterns continue to work — no rewrite needed
 
 ### Existing Tests
 
-Tests using instance variable assignment (`self.slot := value`) must be rewritten. Local variable rebinding continues to work, so many test patterns are unaffected. A migration guide with common pattern translations should accompany this change:
+Value type tests using instance variable assignment (`self.slot := value`) must be rewritten. Actor tests using `self.slot :=` are unaffected. Local variable rebinding continues to work, so many test patterns are unaffected. A migration guide with common pattern translations should accompany this change:
 
 | Current Pattern | New Pattern | Notes |
 |---|---|---|
-| `self.count := self.count + 1` | `self withCount: self count + 1` (return as new state) | Instance variable → functional setter |
-| `self.x := val. self.y := val2` | `(self withX: val) withY: val2` | Sequential slot updates → chain |
-| `self.value := self.value + delta` | `self withValue: self value + delta` | Actor state transition |
+| `self.count := self.count + 1` (in Value) | `self withCount: self count + 1` | Value type → functional setter |
+| `self.x := val. self.y := val2` (in Value) | `(self withX: val) withY: val2` | Value type sequential → chain |
+| `self.value := self.value + delta` (in Actor) | Unchanged — `self.slot :=` allowed in actors | No migration needed |
 | `Object subclass: Point` | `Value subclass: Point` | Superclass declaration change |
 | `result := 0. items do: [:each \| result := result + each]` | Unchanged — local rebinding still works | Or use `inject:into:` for idiomatic style |
 
@@ -713,10 +746,10 @@ Tests using instance variable assignment (`self.slot := value`) must be rewritte
 - ADR 0028 (BEAM Interop) — `!` restricted to actor targets; immutability is compile-time only, not enforced at BEAM boundary
 - ADR 0035 (Field-Based Reflection API) — `fieldAt:put:` on value types raises `#immutable_value` at runtime (closes the deferred access control question); `fieldAt:`/`fieldNames` API unchanged
 - ADR 0038 (Subclass/ClassBuilder Protocol) — ClassBuilder must recognize `Value` as a root class
-- ADR 0037 (Collection Class Hierarchy) — collection classes (List, Array, Dictionary, Range) must be classified as Value or Actor; `Range` init pattern using `self.slot :=` needs migration to keyword constructor
+- ADR 0037 (Collection Class Hierarchy) — collection classes (List, Array, Dictionary, Range) must be classified as Value or Actor; value-type collections using `self.slot :=` need migration to keyword constructors
 - ADR 0039 (Syntax Pragmatism vs Smalltalk) — cascade semantics deferred to ADR 0043; ADR 0039's fan-out semantics remain unchanged until then
 - ADR 0040 (Workspace-Native REPL Commands) — REPL binding semantics preserved; `!` defined for REPL context
-- ADR 0041 (Universal State-Threading Block Protocol) — scope narrowed to local rebinding through blocks; remains active and essential
+- ADR 0041 (Universal State-Threading Block Protocol) — scope narrowed to local rebinding and actor slot assignments through blocks; remains active and essential
 
 ### External References
 - Alan Kay on Erlang: acknowledgment that Erlang captures the message-passing spirit of Smalltalk
