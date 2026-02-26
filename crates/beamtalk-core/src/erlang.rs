@@ -79,6 +79,8 @@ pub use crate::codegen::core_erlang::{
     generate_module_with_warnings, generate_repl_expression, generate_repl_expressions,
     generate_test_expression, primitive_bindings,
 };
+// Re-export Diagnostic so callers can inspect GeneratedModule::warnings
+pub use crate::source_analysis::Diagnostic;
 
 // Re-export from Shared Kernel (ast.rs) — not from codegen
 pub use crate::ast::to_module_name;

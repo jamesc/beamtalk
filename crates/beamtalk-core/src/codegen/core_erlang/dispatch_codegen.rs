@@ -407,13 +407,14 @@ impl CoreErlangGenerator {
                     if i > 0 {
                         arg_parts.push(Document::Str(", "));
                     }
-                    if let Expression::Block(block) = arg {
+                    if let Some(block) = Self::extract_block_literal(arg) {
                         let (wrapped_doc, is_stateful) =
                             self.generate_erlang_interop_wrapper(block)?;
                         if is_stateful {
-                            self.warn_stateful_block_at_erlang_boundary(&format!(
-                                "'{module_name}':'{function_name}'"
-                            ));
+                            self.warn_stateful_block_at_erlang_boundary(
+                                &format!("'{module_name}':'{function_name}'"),
+                                block.span,
+                            );
                         }
                         // Bind the wrapper to a temp var to avoid repeating complex exprs.
                         let wrapper_var = self.fresh_temp_var("ErlWrapper");

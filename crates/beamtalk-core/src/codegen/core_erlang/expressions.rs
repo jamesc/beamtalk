@@ -526,6 +526,22 @@ impl CoreErlangGenerator {
     /// - Read from the outer scope before being locally defined (i.e., in `captured_reads`)
     /// - Also written inside the block (i.e., in `local_writes`)
     ///
+    /// Extracts a block literal from an expression, unwrapping parentheses.
+    ///
+    /// Returns `Some(&Block)` for `Expression::Block` and for
+    /// `Expression::Parenthesized` wrappers around a block (recursively).
+    /// Returns `None` for all other expression kinds (identifiers, message sends, etc.).
+    ///
+    /// Used by Erlang interop sites to detect block arguments regardless of whether
+    /// the caller wrote `[:x | x + 1]` or `([:x | x + 1])`.
+    pub(super) fn extract_block_literal(expr: &Expression) -> Option<&Block> {
+        match expr {
+            Expression::Block(block) => Some(block),
+            Expression::Parenthesized { expression, .. } => Self::extract_block_literal(expression),
+            _ => None,
+        }
+    }
+
     /// This is the Tier 2 promotion check: non-empty → stateful block, empty → pure block.
     /// Centralised here so both `generate_block` and `generate_erlang_interop_wrapper`
     /// use identical logic and cannot drift independently.

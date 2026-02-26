@@ -823,13 +823,19 @@ impl CoreErlangGenerator {
         // BT-855: When the body is a stateful block (captured mutations), wrap it so
         // Erlang receives a plain fun(Args) -> Result without the StateAcc protocol.
         // Mutations inside the block are dropped (Erlang cannot propagate NewStateAcc).
-        let body_code = if let Expression::Block(block) = body {
+        // BT-855 follow-up: Also unwrap parenthesized block literals (e.g. `([:x | ...])`).
+        let body_code = if let Some(block) = Self::extract_block_literal(body) {
             let (wrapped_doc, is_stateful) = self.generate_erlang_interop_wrapper(block)?;
             if is_stateful {
-                self.warn_stateful_block_at_erlang_boundary(&format!("'lists':'{operation}'"));
+                self.warn_stateful_block_at_erlang_boundary(
+                    &format!("'lists':'{operation}'"),
+                    block.span,
+                );
             }
             wrapped_doc
         } else {
+            // TODO(BT-909): Non-literal callables (identifiers/variables referencing
+            // a Tier-2 block) bypass wrapping here. Requires type-level tracking to fix.
             self.expression_doc(body)?
         };
 

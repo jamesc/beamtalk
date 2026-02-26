@@ -111,6 +111,7 @@ pub use util::to_module_name;
 
 use crate::ast::{Block, Expression, MessageSelector, Module};
 use crate::docvec;
+use crate::source_analysis::{Diagnostic, Span};
 use document::{Document, INDENT, line, nest};
 use primitive_bindings::PrimitiveBindingTable;
 use state_codegen::StateThreading;
@@ -401,11 +402,12 @@ pub struct GeneratedModule {
     pub code: String,
     /// Diagnostic warnings emitted during code generation.
     ///
-    /// Examples:
+    /// Each entry is a structured [`Diagnostic`] with severity, source span, and
+    /// message. Examples:
     /// - A stateful Beamtalk block was passed to an Erlang call site — mutations
     ///   inside the block will be silently dropped since Erlang cannot propagate
     ///   the updated `StateAcc` back to the Beamtalk caller.
-    pub warnings: Vec<String>,
+    pub warnings: Vec<Diagnostic>,
 }
 
 /// Generates Core Erlang for a module, returning the code and any diagnostic warnings.
@@ -784,7 +786,7 @@ pub(super) struct CoreErlangGenerator {
     /// Collected during generation and returned to callers via
     /// [`generate_module_with_warnings`]. Examples include stateful blocks
     /// passed to Erlang call sites where mutations will be silently dropped.
-    pub(super) codegen_warnings: Vec<String>,
+    pub(super) codegen_warnings: Vec<Diagnostic>,
 }
 
 impl CoreErlangGenerator {
@@ -962,11 +964,11 @@ impl CoreErlangGenerator {
         format!("Self{}", self.self_version)
     }
 
-    /// BT-855: Records a diagnostic warning for the current module.
+    /// BT-855: Records a structured diagnostic warning for the current module.
     ///
     /// Warnings are returned to callers via [`generate_module_with_warnings`].
-    pub(super) fn add_codegen_warning(&mut self, msg: String) {
-        self.codegen_warnings.push(msg);
+    pub(super) fn add_codegen_warning(&mut self, diag: Diagnostic) {
+        self.codegen_warnings.push(diag);
     }
 
     /// BT-855: Emits the standard warning for a stateful block at an Erlang call boundary.
@@ -976,11 +978,19 @@ impl CoreErlangGenerator {
     ///
     /// `erlang_target` is a human-readable call target, e.g. `"'lists':'map'"` or
     /// `"'mymod':'myfun'"`.
-    pub(super) fn warn_stateful_block_at_erlang_boundary(&mut self, erlang_target: &str) {
-        self.add_codegen_warning(format!(
-            "stateful block passed to Erlang {erlang_target} — mutations inside \
-             the block will be silently dropped (Erlang cannot propagate the updated \
-             StateAcc back to the Beamtalk caller)"
+    /// `span` is the source span of the block literal that crosses the boundary.
+    pub(super) fn warn_stateful_block_at_erlang_boundary(
+        &mut self,
+        erlang_target: &str,
+        span: Span,
+    ) {
+        self.add_codegen_warning(Diagnostic::warning(
+            format!(
+                "stateful block passed to Erlang {erlang_target} — mutations inside \
+                 the block will be silently dropped (Erlang cannot propagate the updated \
+                 StateAcc back to the Beamtalk caller)"
+            ),
+            span,
         ));
     }
 

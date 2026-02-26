@@ -4457,7 +4457,7 @@ fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
         generator
             .codegen_warnings
             .iter()
-            .any(|w| w.contains("lists")),
+            .any(|w| w.message.contains("lists")),
         "Warning should mention the Erlang module. Got: {:?}",
         generator.codegen_warnings
     );
