@@ -10,7 +10,7 @@
 //! hierarchy. These are registered before any user-defined classes.
 //!
 //! Most class definitions are auto-generated from `lib/*.bt` by `beamtalk build-stdlib`.
-//! Only runtime-only classes without `.bt` source files (e.g., `Future`) are
+//! Only runtime-only classes without `.bt` source files (e.g., `Future`, `Value`) are
 //! defined manually here.
 
 use super::ClassInfo;
@@ -48,7 +48,7 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
 /// built-ins like `Future`.
 pub(super) fn is_builtin_class(name: &str) -> bool {
     // Runtime-only classes (no lib/*.bt source file)
-    name == "Future" || generated::is_generated_builtin_class(name)
+    name == "Future" || name == "Value" || generated::is_generated_builtin_class(name)
 }
 
 /// Returns true if the given class name has runtime shadowing protection.
@@ -78,6 +78,26 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             name: "Future".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    // Value — root class for immutable value objects (ADR 0042).
+    // Parser support for `Value subclass:` comes in Stage 3. This entry
+    // allows `is_value_subclass()` to resolve the hierarchy correctly once
+    // users write `Value subclass: MyClass`.
+    classes.insert(
+        "Value".into(),
+        ClassInfo {
+            name: "Value".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
             is_abstract: false,
             is_typed: false,
             state: vec![],
