@@ -1197,12 +1197,12 @@ class_name_atoms(Classes) ->
     lists:filtermap(
         fun
             (#{name := Name}) when is_list(Name) ->
-                case beamtalk_repl_server:safe_to_existing_atom(list_to_binary(Name)) of
+                case beamtalk_repl_errors:safe_to_existing_atom(list_to_binary(Name)) of
                     {ok, Atom} -> {true, Atom};
                     {error, badarg} -> false
                 end;
             (#{name := Name}) when is_binary(Name) ->
-                case beamtalk_repl_server:safe_to_existing_atom(Name) of
+                case beamtalk_repl_errors:safe_to_existing_atom(Name) of
                     {ok, Atom} -> {true, Atom};
                     {error, badarg} -> false
                 end;
