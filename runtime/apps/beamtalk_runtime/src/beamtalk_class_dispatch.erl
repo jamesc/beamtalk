@@ -298,7 +298,9 @@ find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
                 true ->
                     AncestorModule =
                         try
-                            gen_server:call(AncestorPid, module_name, 5000)
+                            %% BT-893: Use module_name/1 (not gen_server:call directly) so
+                            %% the self-call guard fires if AncestorPid happens to be self().
+                            beamtalk_object_class:module_name(AncestorPid)
                         catch
                             Class2:Reason2 ->
                                 ?LOG_WARNING(

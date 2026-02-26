@@ -152,12 +152,22 @@ superclass(ClassPid) ->
     gen_server:call(ClassPid, superclass).
 
 %% @doc Get the class name.
+%%
+%% BT-893: If called from within the class gen_server itself (self-call), read
+%% from the process dictionary instead of gen_server:call to avoid calling_self.
 -spec class_name(pid()) -> class_name().
+class_name(ClassPid) when ClassPid =:= self() ->
+    get(beamtalk_class_name);
 class_name(ClassPid) ->
     gen_server:call(ClassPid, class_name).
 
 %% @doc Get the module name.
+%%
+%% BT-893: If called from within the class gen_server itself (self-call), read
+%% from the process dictionary instead of gen_server:call to avoid calling_self.
 -spec module_name(pid()) -> atom().
+module_name(ClassPid) when ClassPid =:= self() ->
+    get(beamtalk_class_module);
 module_name(ClassPid) ->
     gen_server:call(ClassPid, module_name).
 
