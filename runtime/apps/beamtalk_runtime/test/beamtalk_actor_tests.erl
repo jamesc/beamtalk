@@ -1508,3 +1508,71 @@ sync_send_to_dead_actor_test() ->
     timer:sleep(10),
     Result = beamtalk_actor:sync_send(Counter, getValue, []),
     ?assertMatch({error, #beamtalk_error{kind = actor_dead}}, Result).
+
+%%% ============================================================================
+%%% BT-917: cast_send/3 and fire-and-forget handle_cast wire format tests
+%%% ============================================================================
+
+cast_send_to_live_actor_returns_ok_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    %% cast_send always returns ok
+    Result = beamtalk_actor:cast_send(Counter, increment, []),
+    ?assertEqual(ok, Result),
+    %% Give actor time to process the cast
+    timer:sleep(20),
+    %% Verify state was updated
+    ?assertEqual(1, gen_server:call(Counter, {getValue, []})),
+    gen_server:stop(Counter).
+
+cast_send_to_dead_actor_returns_ok_test() ->
+    {ok, Counter} = test_counter:start_link(0),
+    gen_server:stop(Counter),
+    timer:sleep(10),
+    %% Fire-and-forget: silently drops message if actor is dead
+    Result = beamtalk_actor:cast_send(Counter, increment, []),
+    ?assertEqual(ok, Result).
+
+cast_send_state_mutation_test() ->
+    {ok, Counter} = test_counter:start_link(10),
+    %% Send multiple fire-and-forget increments
+    ok = beamtalk_actor:cast_send(Counter, increment, []),
+    ok = beamtalk_actor:cast_send(Counter, increment, []),
+    ok = beamtalk_actor:cast_send(Counter, increment, []),
+    timer:sleep(30),
+    ?assertEqual(13, gen_server:call(Counter, {getValue, []})),
+    gen_server:stop(Counter).
+
+handle_cast_fire_and_forget_dispatches_test() ->
+    %% Directly test the {cast, Selector, Args} wire format via gen_server:cast
+    {ok, Counter} = test_counter:start_link(5),
+    gen_server:cast(Counter, {cast, increment, []}),
+    timer:sleep(20),
+    ?assertEqual(6, gen_server:call(Counter, {getValue, []})),
+    gen_server:stop(Counter).
+
+handle_cast_fire_and_forget_result_discarded_test() ->
+    %% {cast, Selector, Args} with a method that returns a value — result is discarded
+    {ok, Counter} = test_counter:start_link(42),
+    gen_server:cast(Counter, {cast, getValue, []}),
+    timer:sleep(20),
+    %% Actor still alive and state unchanged
+    ?assertEqual(42, gen_server:call(Counter, {getValue, []})),
+    gen_server:stop(Counter).
+
+handle_cast_backward_compat_with_future_test() ->
+    %% Old {Selector, Args, FuturePid} format still works
+    {ok, Counter} = test_counter:start_link(0),
+    Future = beamtalk_future:new(),
+    gen_server:cast(Counter, {increment, [], Future}),
+    ?assertEqual(nil, beamtalk_future:await(Future)),
+    ?assertEqual(1, gen_server:call(Counter, {getValue, []})),
+    gen_server:stop(Counter).
+
+handle_cast_fire_and_forget_unknown_selector_logs_and_continues_test() ->
+    %% Unknown selector in fire-and-forget: logs warning, actor continues
+    {ok, Counter} = test_counter:start_link(7),
+    gen_server:cast(Counter, {cast, unknownMethod, []}),
+    timer:sleep(20),
+    %% Actor still alive and state unchanged
+    ?assertEqual(7, gen_server:call(Counter, {getValue, []})),
+    gen_server:stop(Counter).
