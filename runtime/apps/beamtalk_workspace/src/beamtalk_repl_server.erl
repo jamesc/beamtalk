@@ -11,11 +11,15 @@
 %%% and protocol request dispatch.
 %%%
 %%% Op handlers are delegated to domain-specific modules (BT-705):
-%%% - beamtalk_repl_ops_eval: eval, clear, bindings
-%%% - beamtalk_repl_ops_load: load-file, load-source, reload, modules
+%%% - beamtalk_repl_ops_eval: eval, clear (deprecated), bindings (deprecated)
+%%% - beamtalk_repl_ops_load: load-file (deprecated), load-source, reload (deprecated), modules (deprecated)
 %%% - beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
 %%% - beamtalk_repl_ops_session: sessions, clone, close, health, shutdown
-%%% - beamtalk_repl_ops_dev: complete, docs, describe, show-codegen
+%%% - beamtalk_repl_ops_dev: complete, docs (deprecated), describe, show-codegen
+%%%
+%%% Deprecated ops (BT-849 / ADR 0040 Phase 6) are superseded by Beamtalk-native
+%%% message sends but remain functional for WebSocket client backward compatibility.
+%%% See ADR 0040 for migration guidance.
 
 -module(beamtalk_repl_server).
 -behaviour(gen_server).
@@ -321,16 +325,39 @@ handle_protocol_request(Msg, SessionPid) ->
 
 %% @private
 %% @doc Dispatch protocol ops to domain-specific handler modules (BT-705).
-handle_op(Op, Params, Msg, SessionPid) when
-    Op =:= <<"eval">>; Op =:= <<"clear">>; Op =:= <<"bindings">>
-->
+%%
+%% Deprecated ops (BT-849 / ADR 0040 Phase 6): load-file, reload, modules,
+%% bindings, clear, docs. These ops remain functional for WebSocket client
+%% backward compatibility (ADR 0017) but are superseded by Beamtalk-native
+%% message sends. WebSocket clients should migrate to sending eval requests.
+handle_op(<<"eval">>, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops_eval:handle(<<"eval">>, Params, Msg, SessionPid);
+handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"clear">>; Op =:= <<"bindings">> ->
+    %% DEPRECATED: Use `:clear` and `:bindings` REPL shortcuts (session-local only).
+    ?LOG_WARNING(
+        "Deprecated protocol op '~s' used by WebSocket client. "
+        "These ops are session-local only and cannot be replaced by "
+        "Beamtalk-native message sends.",
+        [Op]
+    ),
     beamtalk_repl_ops_eval:handle(Op, Params, Msg, SessionPid);
+handle_op(<<"load-source">>, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops_load:handle(<<"load-source">>, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
-    Op =:= <<"load-file">>;
-    Op =:= <<"load-source">>;
-    Op =:= <<"reload">>;
-    Op =:= <<"modules">>
+    Op =:= <<"load-file">>; Op =:= <<"reload">>; Op =:= <<"modules">>
 ->
+    %% DEPRECATED: Use Beamtalk-native API instead:
+    %%   load-file → Workspace load: "path"
+    %%   reload    → ClassName reload
+    %%   modules   → Workspace classes
+    ?LOG_WARNING(
+        "Deprecated protocol op '~s' used by WebSocket client. "
+        "Migrate to Beamtalk-native API: "
+        "load-file → Workspace load: \"path\", "
+        "reload → ClassName reload, "
+        "modules → Workspace classes.",
+        [Op]
+    ),
     beamtalk_repl_ops_load:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"actors">>;
@@ -348,12 +375,19 @@ handle_op(Op, Params, Msg, SessionPid) when
 ->
     beamtalk_repl_ops_session:handle(Op, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
-    Op =:= <<"complete">>;
-    Op =:= <<"docs">>;
-    Op =:= <<"describe">>;
-    Op =:= <<"show-codegen">>
+    Op =:= <<"complete">>; Op =:= <<"describe">>; Op =:= <<"show-codegen">>
 ->
     beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
+handle_op(<<"docs">>, Params, Msg, SessionPid) ->
+    %% DEPRECATED: Use Beamtalk help: instead.
+    %%   docs → Beamtalk help: ClassName
+    %%   docs with selector → Beamtalk help: ClassName selector: #selector
+    ?LOG_WARNING(
+        "Deprecated protocol op 'docs' used by WebSocket client. "
+        "Migrate to: Beamtalk help: ClassName or Beamtalk help: ClassName selector: #selector.",
+        []
+    ),
+    beamtalk_repl_ops_dev:handle(<<"docs">>, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, _SessionPid) when Op =:= <<"unload">> ->
     %% BT-785: :unload removed — suggest removeFromSystem instead
     Module = maps:get(<<"module">>, Params, <<>>),
