@@ -1164,12 +1164,15 @@ async_message_to_dead_actor_rejects_future_test() ->
     ).
 
 sync_message_to_dead_actor_returns_error_test() ->
+    %% BT-918: sync_send to a dead actor now raises an actor_dead exception (not returns error tuple).
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter, normal, 1000),
     timer:sleep(10),
 
-    Result = beamtalk_actor:sync_send(Counter, getValue, []),
-    ?assertMatch({error, #beamtalk_error{kind = actor_dead, selector = getValue}}, Result).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead, selector = getValue}},
+        beamtalk_actor:sync_send(Counter, getValue, [])
+    ).
 
 %%% ===========================================================================
 %%% register_spawned callback tests (BT-391)
@@ -1503,11 +1506,14 @@ sync_send_monitor_test() ->
     gen_server:stop(Counter).
 
 sync_send_to_dead_actor_test() ->
+    %% BT-918: sync_send to a dead actor raises an actor_dead exception (not returns error tuple).
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
     timer:sleep(10),
-    Result = beamtalk_actor:sync_send(Counter, getValue, []),
-    ?assertMatch({error, #beamtalk_error{kind = actor_dead}}, Result).
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
+        beamtalk_actor:sync_send(Counter, getValue, [])
+    ).
 
 %%% ============================================================================
 %%% BT-917: cast_send/3 and fire-and-forget handle_cast wire format tests

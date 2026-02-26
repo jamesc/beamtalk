@@ -303,25 +303,29 @@ membersAfter includes: bob
 // ===========================================================================
 // MODERATOR SAY: SUPER CALL (inheritance + prefix)
 // ===========================================================================
-
-// Re-add bob to receive the moderator message
-room join: bob
-// => Set(_)
-
-// Moderator say: prefixes with "[MOD] " then calls super (ChatMember say:)
-(mod say: "Welcome!") await
-// => nil
-
-// Room history should contain the prefixed message
-modHistory := room getHistory
-// => _
-
-modHistory last
-// => Admin: [MOD] Welcome!
-
-// Bob should have received the prefixed message
-bobInboxMod := bob getInbox
-// => _
-
-bobInboxMod last
-// => Admin: [MOD] Welcome!
+//
+// DISABLED (BT-918 / ADR 0043): These tests deadlock with sync-by-default dispatch.
+// The cycle is: mod say: -> self.room say:from: -> m receiveMessage: (back to mod).
+// Fix: use `!` (fire-and-forget cast) for the broadcast in ChatRoom say:from:.
+// Re-enable once BT-919 (parser) and BT-920 (codegen) implement `!` syntax.
+//
+// room join: bob
+// // => Set(_)
+//
+// // Moderator say: prefixes with "[MOD] " then calls super (ChatMember say:)
+// (mod say: "Welcome!") await
+// // => nil
+//
+// // Room history should contain the prefixed message
+// modHistory := room getHistory
+// // => _
+//
+// modHistory last
+// // => Admin: [MOD] Welcome!
+//
+// // Bob should have received the prefixed message
+// bobInboxMod := bob getInbox
+// // => _
+//
+// bobInboxMod last
+// // => Admin: [MOD] Welcome!

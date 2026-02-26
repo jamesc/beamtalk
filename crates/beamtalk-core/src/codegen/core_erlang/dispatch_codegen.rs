@@ -19,7 +19,7 @@
 //!
 //! 2. **Runtime dispatch**: All other messages go through the unified entry point
 //!    `beamtalk_message_dispatch:send/3` (BT-430), which routes to:
-//!    - **Actors** (`beamtalk_object` records): Async via `beamtalk_actor:async_send` with futures
+//!    - **Actors** (`beamtalk_object` records): Sync via `beamtalk_actor:sync_send/3` (BT-918 / ADR 0043)
 //!    - **Class objects**: Sync via `beamtalk_object_class:class_send/3`
 //!    - **Primitives** (everything else): Sync via `beamtalk_primitive:send/3`
 //!
@@ -197,8 +197,9 @@ impl CoreErlangGenerator {
     /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3` (BT-430).
     ///
     /// This is the fallback path for messages that don't match any compiler intrinsic.
-    /// Routes through the unified entry point which handles actors (async with futures),
-    /// class objects (sync), and primitives (sync).
+    /// Routes through the unified entry point which handles actors (sync via `gen_server:call`),
+    /// class objects (sync), and primitives (sync). Returns a value directly — no Future
+    /// wrapping (BT-918 / ADR 0043).
     fn generate_runtime_dispatch(
         &mut self,
         receiver: &Expression,

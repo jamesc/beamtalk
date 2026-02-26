@@ -141,11 +141,18 @@ await(Future) ->
 %% Returns the value if resolved, throws {future_rejected, Reason} if rejected,
 %% or throws #beamtalk_error{kind = timeout} if the timeout expires.
 %% Accepts both tagged futures and raw pids (for internal actor use).
--spec await(future() | pid(), timeout()) -> term().
+%%
+%% BT-918 / ADR 0043: With sync-by-default, actor sends return values directly
+%% (not futures). To preserve backward compat during the migration period, any
+%% non-future, non-pid value is returned as-is rather than crashing.
+-spec await(future() | pid() | term(), timeout()) -> term().
 await({beamtalk_future, Pid}, Timeout) ->
     await_pid(Pid, Timeout);
 await(Pid, Timeout) when is_pid(Pid) ->
-    await_pid(Pid, Timeout).
+    await_pid(Pid, Timeout);
+await(Value, _Timeout) ->
+    %% Non-future value — already resolved, return as-is.
+    Value.
 
 %% @doc Block the calling process until the future is resolved or rejected.
 %% Waits indefinitely with no timeout. Use this for operations that may take
