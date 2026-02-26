@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-854: Fixture for testing NLR state threading in value types.
+// BT-854/BT-857: Fixture for testing NLR state threading in value types.
 // When ^ fires inside a block, the throw now carries Self as state
 // in a 4-tuple: {$bt_nlr, Token, Value, Self{N}}.
 // The method returns {Result, Self{N}} which dispatch/3 unwraps.
@@ -44,5 +44,15 @@ Object subclass: NlrFieldMutation
       false ifTrue: [^each]
     ].
     nil
+
+  // BT-857: Returns true if any element satisfies aBlock (early return via ^).
+  // Field mutation (lastQuery := size) happens before the block that may ^.
+  // Verifies NLR state preservation: anySatisfy: pattern (bool return).
+  anySatisfy: aBlock in: items =>
+    self.lastQuery := items size.
+    items do: [:each |
+      (aBlock value: each) ifTrue: [^true]
+    ].
+    false
 
   lastQuery => self.lastQuery

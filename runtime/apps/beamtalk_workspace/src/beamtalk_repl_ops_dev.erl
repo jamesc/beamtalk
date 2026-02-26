@@ -47,7 +47,7 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
     end;
 handle(<<"docs">>, Params, Msg, _SessionPid) ->
     ClassBin = maps:get(<<"class">>, Params, <<>>),
-    case beamtalk_repl_server:safe_to_existing_atom(ClassBin) of
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
         {error, badarg} ->
             beamtalk_repl_protocol:encode_error(
                 make_class_not_found_error(ClassBin),
@@ -125,7 +125,7 @@ handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
                         end,
                     jsx:encode(Result1);
                 {error, ErrorReason, Warnings} ->
-                    WrappedReason = beamtalk_repl_server:ensure_structured_error(ErrorReason),
+                    WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
                     beamtalk_repl_protocol:encode_error(
                         WrappedReason,
                         Msg,
@@ -314,7 +314,7 @@ classify_receiver(<<>>, _Bindings) ->
     undefined;
 classify_receiver(<<H, _/binary>> = Receiver, _Bindings) when H >= $A, H =< $Z ->
     %% Starts with uppercase — treat as a class object; complete class-side methods
-    case beamtalk_repl_server:safe_to_existing_atom(Receiver) of
+    case beamtalk_repl_errors:safe_to_existing_atom(Receiver) of
         {ok, ClassName} ->
             case
                 try
@@ -349,7 +349,7 @@ classify_receiver(<<$", _/binary>>, _Bindings) ->
     end;
 classify_receiver(Receiver, Bindings) ->
     %% Lowercase identifier — look up in session bindings to find the class
-    case beamtalk_repl_server:safe_to_existing_atom(Receiver) of
+    case beamtalk_repl_errors:safe_to_existing_atom(Receiver) of
         {ok, VarAtom} ->
             case maps:find(VarAtom, Bindings) of
                 {ok, #beamtalk_object{class = ClassName}} ->

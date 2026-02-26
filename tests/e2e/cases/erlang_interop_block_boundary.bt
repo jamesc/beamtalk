@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-857: E2E tests for blocks at the Erlang interop boundary (ADR 0041 Phase 5).
+//
+// Covers two scenarios from the Erlang Interop Boundary acceptance criteria:
+//   1. Pure block passed to lists:map — correct result, no state overhead
+//   2. Stateful block passed to lists:foreach — mutations dropped (documented behaviour)
+//
+// Note: The compiler warning for stateful blocks at the Erlang boundary is tested
+// at the unit test level (see tests.rs BT-855 tests), because codegen warnings
+// are not currently plumbed through the REPL eval response path.
+
+// ===========================================================================
+// PURE BLOCK TO lists:map — CORRECT RESULT
+// ===========================================================================
+//
+// A pure block (no captured mutations) passed to lists:map via the Erlang
+// interop path. The wrapper fun for a pure block is the Tier 1 fun itself
+// (no StateAcc stripping needed). The result is the mapped list.
+
+Erlang lists map: [:x | x * 2] with: #(1, 2, 3)
+// => [2,4,6]
+
+// Unary predicate — filter via lists:filter (BT-855: pure block, no wrapper overhead)
+Erlang lists filter: [:x | x > 2] with: #(1, 2, 3, 4, 5)
+// => [3,4,5]
+
+// ===========================================================================
+// STATEFUL BLOCK TO lists:foreach — MUTATIONS DROPPED
+// ===========================================================================
+//
+// A stateful block (captures and mutates `count`) is passed to lists:foreach.
+// The compiler generates an Erlang wrapper fun that:
+//   - Captures the current StateAcc at creation time (count = 0)
+//   - Calls the Beamtalk block with each element
+//   - Discards the updated StateAcc (_State is ignored)
+// Result: lists:foreach returns ok, but `count` stays 0 because the mutations
+// inside the wrapper fun are dropped (Erlang cannot propagate StateAcc back).
+
+count := 0
+// => 0
+
+Erlang lists foreach: [:x | count := count + x] with: #(1, 2, 3)
+// => _
+
+count
+// => 0

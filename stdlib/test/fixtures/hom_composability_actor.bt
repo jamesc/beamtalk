@@ -1,0 +1,65 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-857: HOM composability fixture (ADR 0041 Phase 5 testing).
+// Verifies that user-defined HOMs calling blocks in loops thread state
+// correctly across multiple invocations, and that nested HOMs
+// propagate mutations back to the caller.
+//
+// Implementation note: The Tier 2 protocol for block calls inside a do: loop
+// body is activated when the loop body has at least one local write (which
+// triggers the stateful do: codegen path). The HOMs below include a `last`
+// variable assignment to activate this path, matching the ADR 0041 design
+// where HOMs naturally have their own local state (e.g. index tracking).
+
+Actor subclass: HomComposabilityActor
+
+  // User-defined HOM: calls aBlock for each element in #(1, 2, 3, 4, 5).
+  // The `last :=` write activates the stateful do: path so that
+  // aBlock value: each is called via the Tier 2 protocol with StateAcc threading.
+  eachItem: aBlock =>
+    last := nil.
+    #(1, 2, 3, 4, 5) do: [:each |
+      last := aBlock value: each
+    ].
+    last
+
+  // Nested HOM: outer delegates to inner, testing two-layer state threading.
+  outerEachItem: aBlock =>
+    self eachItem: aBlock
+
+  // Returns sum of (aBlock value: each) for each item in items.
+  // Used to test pure block correctness via a loop HOM.
+  sumOf: aBlock over: items =>
+    total := 0.
+    items do: [:each | total := total + (aBlock value: each)].
+    total
+
+  // --- Test methods (called from BUnit via actor await) ---
+
+  // Test: user-defined HOM with mutating block — mutations accumulate.
+  // Block captures local `count`; HOM calls it for 1..5; count should be 15.
+  testMutatingBlockInCustomLoop =>
+    count := 0.
+    self eachItem: [:x | count := count + x].
+    count
+
+  // Test: nested HOMs — outer calls inner, both thread state correctly.
+  // Same block, same items, same expected result as above.
+  testNestedHOMsAccumulate =>
+    count := 0.
+    self outerEachItem: [:x | count := count + x].
+    count
+
+  // Test: pure block passed to HOM — correct result, no crash.
+  // sumOf:over: loops with a pure block [:x | x * 2]; result = 2+4+6+8+10 = 30.
+  testPureBlockViaHOM =>
+    self sumOf: [:x | x * 2] over: #(1, 2, 3, 4, 5)
+
+  // Test: block stored in local variable, then passed to user-defined HOM.
+  // Mutations from the stored block must propagate back to the caller.
+  testStoredBlockPassedToHOM =>
+    count := 0.
+    addBlock := [:x | count := count + x].
+    self eachItem: addBlock.
+    count

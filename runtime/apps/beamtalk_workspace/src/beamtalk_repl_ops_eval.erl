@@ -32,7 +32,7 @@ handle(<<"eval">>, Params, Msg, SessionPid) ->
                         Result, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings
                     );
                 {error, ErrorReason, Output, Warnings} ->
-                    WrappedReason = beamtalk_repl_server:ensure_structured_error(ErrorReason),
+                    WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
                     beamtalk_repl_protocol:encode_error(
                         WrappedReason,
                         Msg,

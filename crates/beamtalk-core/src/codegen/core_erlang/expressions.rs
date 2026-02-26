@@ -726,17 +726,32 @@ impl CoreErlangGenerator {
         for var_name in &captured_mutations {
             let next_state = self.fresh_temp_var("WStateAcc");
             let key = Self::local_state_key(var_name);
-            let core_var = self
-                .lookup_var(var_name)
-                .cloned()
-                .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+
+            // BT-857: Generate code to fetch the captured variable.
+            // If the variable is bound in the local scope, use it directly.
+            // Otherwise, fetch it from the current State map (for REPL/Actor contexts).
+            let var_ref = if let Some(bound_var) = self.lookup_var(var_name).cloned() {
+                docvec![Document::String(bound_var)]
+            } else {
+                // Variable not in scope — fetch from State map
+                // In REPL context, captured mutations are stored in State (the bindings map)
+                let state_var = self.current_state_var();
+                docvec![
+                    "call 'maps':'get'('",
+                    Document::String(var_name.clone()),
+                    "', ",
+                    Document::String(state_var),
+                    ")"
+                ]
+            };
+
             seed_docs.push(docvec![
                 "let ",
                 Document::String(next_state.clone()),
                 " = call 'maps':'put'('",
                 Document::String(key),
                 "', ",
-                Document::String(core_var),
+                var_ref,
                 ", ",
                 Document::String(seed_state),
                 ") in "
@@ -747,7 +762,6 @@ impl CoreErlangGenerator {
         // Fresh parameter names for the wrapper fun (separate scope from the Tier 2 block).
         let n_params = block.parameters.len();
         let wrap_params: Vec<String> = (0..n_params).map(|_| self.fresh_temp_var("WArg")).collect();
-        let wrap_result = self.fresh_temp_var("WRes");
 
         // Build wrapper parameter list: "WArg1, WArg2, ..."
         let mut param_parts: Vec<Document<'static>> = Vec::new();
@@ -772,14 +786,19 @@ impl CoreErlangGenerator {
         apply_parts.push(Document::String(seed_state));
 
         // Emit:
-        // let _BtBlock = fun(Params..., StateAcc) -> ... end in
+        // let _BtBlock = fun(Params..., StateAcc) -> ... in
         // let WStateAcc0 = ~{}~ in  (if ValueType)
         // let WStateAcc1 = call 'maps':'put'('__local__count', Count, WStateAcc0) in
         // ... (for each captured local)
         // fun(WArg1, ..., WArgN) ->
-        //     let {_WRes, _} = apply _BtBlock(WArg1, ..., WArgN, WStateAccN) in
-        //     _WRes
-        // end
+        //     let _WTuple = apply _BtBlock(WArg1, ..., WArgN, WStateAccN) in
+        //     call 'erlang':'element'(1, _WTuple)
+        //
+        // Note 1: Core Erlang anonymous funs do NOT use `end` — the syntax is
+        //   `fun(Args) -> Body` with no closing keyword.
+        // Note 2: Core Erlang `let` only binds single variables — tuple destructuring
+        //   via `let {A, B} = ...` is not valid. Use erlang:element/2 instead.
+        let wrap_tuple = self.fresh_temp_var("WTuple");
         let wrapper_doc = docvec![
             "let ",
             Document::String(bt_block_var.clone()),
@@ -789,15 +808,15 @@ impl CoreErlangGenerator {
             Document::Vec(seed_docs),
             "fun (",
             Document::Vec(param_parts),
-            ") -> let {",
-            Document::String(wrap_result.clone()),
-            ", _} = apply ",
+            ") -> let ",
+            Document::String(wrap_tuple.clone()),
+            " = apply ",
             Document::String(bt_block_var),
             " (",
             Document::Vec(apply_parts),
-            ") in ",
-            Document::String(wrap_result),
-            " end",
+            ") in call 'erlang':'element'(1, ",
+            Document::String(wrap_tuple),
+            ")",
         ];
 
         Ok((wrapper_doc, true))

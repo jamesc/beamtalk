@@ -25,7 +25,7 @@ handle(<<"load-file">>, Params, Msg, SessionPid) ->
                 Classes, Msg, fun beamtalk_repl_json:term_to_json/1, Warnings
             );
         {error, Reason} ->
-            WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
+            WrappedReason = beamtalk_repl_errors:ensure_structured_error(Reason),
             beamtalk_repl_protocol:encode_error(
                 WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1
             )
@@ -48,7 +48,7 @@ handle(<<"load-source">>, Params, Msg, SessionPid) ->
                         Classes, Msg, fun beamtalk_repl_json:term_to_json/1, Warnings
                     );
                 {error, Reason} ->
-                    WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
+                    WrappedReason = beamtalk_repl_errors:ensure_structured_error(Reason),
                     beamtalk_repl_protocol:encode_error(
                         WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1
                     )
@@ -58,7 +58,7 @@ handle(<<"reload">>, Params, Msg, SessionPid) ->
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
     case maps:get(<<"path">>, Params, undefined) of
         undefined when ModuleBin =/= <<>> ->
-            case beamtalk_repl_server:safe_to_existing_atom(ModuleBin) of
+            case beamtalk_repl_errors:safe_to_existing_atom(ModuleBin) of
                 {ok, ModuleAtom} ->
                     {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
                     case beamtalk_repl_modules:get_module_info(ModuleAtom, Tracker) of
@@ -163,7 +163,7 @@ collect_load_warnings(Classes) ->
     ClassNames = lists:filtermap(
         fun
             (#{name := N}) when N =/= "" ->
-                case beamtalk_repl_server:safe_to_existing_atom(list_to_binary(N)) of
+                case beamtalk_repl_errors:safe_to_existing_atom(list_to_binary(N)) of
                     {ok, Atom} -> {true, Atom};
                     {error, badarg} -> false
                 end;
@@ -205,7 +205,7 @@ do_reload(Path, ModuleAtom, Msg, SessionPid) ->
                 Classes, ActorCount, MigrationFailures, Msg, Warnings
             );
         {error, Reason} ->
-            WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
+            WrappedReason = beamtalk_repl_errors:ensure_structured_error(Reason),
             beamtalk_repl_protocol:encode_error(
                 WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1
             )
@@ -253,12 +253,12 @@ resolve_module_atoms(undefined, Classes) ->
                 "" ->
                     false;
                 Name when is_list(Name) ->
-                    case beamtalk_repl_server:safe_to_existing_atom(list_to_binary(Name)) of
+                    case beamtalk_repl_errors:safe_to_existing_atom(list_to_binary(Name)) of
                         {ok, Atom} -> {true, Atom};
                         {error, badarg} -> false
                     end;
                 Name when is_binary(Name) ->
-                    case beamtalk_repl_server:safe_to_existing_atom(Name) of
+                    case beamtalk_repl_errors:safe_to_existing_atom(Name) of
                         {ok, Atom} -> {true, Atom};
                         {error, badarg} -> false
                     end;

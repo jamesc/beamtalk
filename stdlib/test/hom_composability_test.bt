@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-857: Tests for HOM composability (ADR 0041 Phase 5).
+//
+// What is tested here:
+// - Pure blocks passed to user-defined HOMs produce correct results (Tier 1 path)
+//
+// What requires BT-912 (Tier 2 block StateAcc threading through loop body):
+// - Mutating blocks via HOMs (testMutatingBlockViaMutatingHOM)
+// - Nested HOMs with mutating blocks (testNestedHOMsThreadState)
+// - Stored blocks passed to HOMs (testStoredBlockPassedToCustomHOM)
+//
+// The BT-912 scenario: when `last := aBlock value: each` is in a stateful do:
+// loop body, the Tier 2 block's NewStateAcc is discarded by codegen, so
+// mutations to captured variables (e.g., `count`) are not propagated back.
+
+TestCase subclass: HomComposabilityTest
+
+  // Test: pure block passed to user-defined HOM — no state overhead, correct result.
+  // sumOf:over: with [:x | x * 2] over #(1,2,3,4,5) = 30.
+  testPureBlockViaHOMCorrectResult =>
+    actor := HomComposabilityActor spawn.
+    self assert: ((actor testPureBlockViaHOM) await) equals: 30
+
