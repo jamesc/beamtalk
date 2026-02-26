@@ -826,11 +826,7 @@ impl CoreErlangGenerator {
         let body_code = if let Expression::Block(block) = body {
             let (wrapped_doc, is_stateful) = self.generate_erlang_interop_wrapper(block)?;
             if is_stateful {
-                self.add_codegen_warning(format!(
-                    "stateful block passed to Erlang 'lists':'{operation}' — mutations inside \
-                     the block will be silently dropped (Erlang cannot propagate the updated \
-                     StateAcc back to the Beamtalk caller)"
-                ));
+                self.warn_stateful_block_at_erlang_boundary(&format!("'lists':'{operation}'"));
             }
             wrapped_doc
         } else {

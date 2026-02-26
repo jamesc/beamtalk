@@ -4454,7 +4454,10 @@ fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
         "Stateful block at Erlang boundary should emit a warning"
     );
     assert!(
-        generator.codegen_warnings[0].contains("lists"),
+        generator
+            .codegen_warnings
+            .iter()
+            .any(|w| w.contains("lists")),
         "Warning should mention the Erlang module. Got: {:?}",
         generator.codegen_warnings
     );
@@ -4591,10 +4594,15 @@ fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
         output.contains('{') && output.contains(", _}"),
         "Wrapper should destructure {{Result, _}} from the block apply. Got: {output}"
     );
-    // The outer fun should NOT have StateAcc — it's a plain Erlang fun
-    // Check that the wrapper fun signature only has one param (not StateAcc)
+    // The outer fun should NOT have StateAcc — it's a plain Erlang fun.
+    // Find the last `in fun (` to locate the wrapper fun signature and confirm
+    // it does not contain StateAcc.
+    let wrapper_fun_start = output
+        .rfind(" in fun (")
+        .expect("wrapper output should contain 'in fun ('");
+    let wrapper_sig = &output[wrapper_fun_start..];
     assert!(
-        !output.ends_with("StateAcc)"),
-        "Wrapper fun should not have StateAcc as final parameter. Got: {output}"
+        !wrapper_sig.contains("StateAcc"),
+        "Wrapper fun should not have StateAcc as parameter. Got: {output}"
     );
 }

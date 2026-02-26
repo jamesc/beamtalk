@@ -520,19 +520,29 @@ impl CoreErlangGenerator {
     ///
     /// Tier 1 blocks handled by dedicated generators (whileTrue:, do:, collect:, etc.)
     /// never reach this function — they call `generate_block_body()` directly.
-    pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
+    /// BT-855: Returns the captured-mutation variables for a block (sorted for determinism).
+    ///
+    /// A "captured mutation" is a variable that is:
+    /// - Read from the outer scope before being locally defined (i.e., in `captured_reads`)
+    /// - Also written inside the block (i.e., in `local_writes`)
+    ///
+    /// This is the Tier 2 promotion check: non-empty → stateful block, empty → pure block.
+    /// Centralised here so both `generate_block` and `generate_erlang_interop_wrapper`
+    /// use identical logic and cannot drift independently.
+    pub(super) fn captured_mutations_for_block(block: &Block) -> Vec<String> {
         use crate::codegen::core_erlang::block_analysis::analyze_block;
-
         let analysis = analyze_block(block);
-
-        // Captured mutations: variables read from outer scope AND written in block
-        let captured_mutations: Vec<String> = analysis
+        analysis
             .local_writes
             .intersection(&analysis.captured_reads)
             .cloned()
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
-            .collect();
+            .collect()
+    }
+
+    pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
+        let captured_mutations = Self::captured_mutations_for_block(block);
 
         // BT-852: Blocks with captured local mutations use Tier 2 stateful calling convention.
         // Field-write-only blocks (self.x := ...) are NOT yet promoted to Tier 2 here because
@@ -670,19 +680,8 @@ impl CoreErlangGenerator {
         &mut self,
         block: &Block,
     ) -> Result<(Document<'static>, bool)> {
-        use crate::codegen::core_erlang::block_analysis::analyze_block;
-
-        let analysis = analyze_block(block);
-
-        // Captured mutations: variables read from outer scope AND written in block.
-        // This matches the Tier 2 promotion check in generate_block().
-        let captured_mutations: Vec<String> = analysis
-            .local_writes
-            .intersection(&analysis.captured_reads)
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect();
+        // Use the shared helper to ensure consistent Tier 2 promotion logic.
+        let captured_mutations = Self::captured_mutations_for_block(block);
 
         if captured_mutations.is_empty() {
             // Pure block — plain Tier 1 fun, no wrapping needed.

@@ -969,6 +969,21 @@ impl CoreErlangGenerator {
         self.codegen_warnings.push(msg);
     }
 
+    /// BT-855: Emits the standard warning for a stateful block at an Erlang call boundary.
+    ///
+    /// Both `generate_simple_list_op` and `generate_direct_erlang_call` call this helper
+    /// to ensure consistent warning messages across all Erlang interop sites.
+    ///
+    /// `erlang_target` is a human-readable call target, e.g. `"'lists':'map'"` or
+    /// `"'mymod':'myfun'"`.
+    pub(super) fn warn_stateful_block_at_erlang_boundary(&mut self, erlang_target: &str) {
+        self.add_codegen_warning(format!(
+            "stateful block passed to Erlang {erlang_target} — mutations inside \
+             the block will be silently dropped (Erlang cannot propagate the updated \
+             StateAcc back to the Beamtalk caller)"
+        ));
+    }
+
     /// BT-833: Resets the Self version to 0 (call at the start of each value type method).
     pub(super) fn reset_self_version(&mut self) {
         self.self_version = 0;
