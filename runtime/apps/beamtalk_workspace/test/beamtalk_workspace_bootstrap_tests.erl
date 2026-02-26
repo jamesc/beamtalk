@@ -94,7 +94,8 @@ bootstrap_sets_class_variables_test_() ->
                         ok;
                     _ClassPid ->
                         ExpectedObj =
-                            {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, TPid},
+                            {beamtalk_object, 'TranscriptStream', 'bt@stdlib@transcript_stream',
+                                TPid},
                         ?assertEqual(
                             ExpectedObj,
                             gen_server:call(

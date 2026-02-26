@@ -13,7 +13,7 @@ use super::document::{Document, INDENT, line, nest};
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
-use crate::ast::{MethodKind, Module};
+use crate::ast::{Expression, MethodKind, Module};
 use crate::docvec;
 
 impl CoreErlangGenerator {
@@ -31,6 +31,7 @@ impl CoreErlangGenerator {
     /// - `spawn/0` and `spawn/1` return `#beamtalk_object{class, class_mod, pid}` records
     /// - Message sends extract the pid using `call 'erlang':'element'(4, Obj)`
     /// - This enables reflection (`obj class`) and proper object semantics
+    #[allow(clippy::too_many_lines)]
     pub(super) fn generate_actor_module(&mut self, module: &Module) -> Result<Document<'static>> {
         // BT-213: Set context to Actor for this module
         self.context = CodeGenContext::Actor;
@@ -48,10 +49,20 @@ impl CoreErlangGenerator {
         // Module header with expanded exports per BT-29
         // BT-217: Add 'new'/0 and 'new'/1 exports for error methods
         // BT-242: Add 'has_method'/1 export for reflection
-        let base_exports = "'start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
-                            'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, \
-                            'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
-                            'superclass'/0";
+        let has_primitive_methods = Self::class_has_primitive_instance_methods(module);
+
+        let dispatch_3_export = if has_primitive_methods {
+            ", 'dispatch'/3"
+        } else {
+            ""
+        };
+
+        let base_exports = format!(
+            "'start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
+             'code_change'/3, 'terminate'/2, 'dispatch'/4{dispatch_3_export}, 'safe_dispatch'/3, \
+             'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
+             'superclass'/0"
+        );
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
@@ -109,6 +120,7 @@ impl CoreErlangGenerator {
         };
 
         push_fn(self.generate_start_link_doc())?;
+        push_fn(self.generate_start_link_named_doc())?;
 
         if is_abstract {
             push_fn(self.generate_abstract_spawn_error_method()?)?;
@@ -135,6 +147,9 @@ impl CoreErlangGenerator {
         }
 
         push_fn(self.generate_dispatch(module)?)?;
+        if has_primitive_methods {
+            push_fn(self.generate_primitive_dispatch_3_doc())?;
+        }
         push_fn(self.generate_method_table(module)?)?;
         // has_method/1 — no trailing newline needed
         docs.push(self.generate_has_method(module)?);
@@ -161,6 +176,26 @@ impl CoreErlangGenerator {
         docs.push(Document::Str("end\n"));
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Returns true if the class has any instance methods with a selector-based `@primitive` body.
+    ///
+    /// Used to decide whether to generate `dispatch/3` in the actor module.
+    /// Selector-based primitives (quoted, e.g. `@primitive "show:"`) generate calls to
+    /// `Module:dispatch/3` at runtime; structural intrinsics (unquoted) do not.
+    fn class_has_primitive_instance_methods(module: &Module) -> bool {
+        module.classes.first().is_some_and(|c| {
+            c.methods.iter().any(|m| {
+                m.body.len() == 1
+                    && matches!(
+                        &m.body[0],
+                        Expression::Primitive {
+                            is_quoted: true,
+                            ..
+                        }
+                    )
+            })
+        })
     }
 
     /// Sets up class identity and sealed method selectors from the module's class definition.

@@ -108,8 +108,9 @@ counterRefs := (Workspace actorsOf: Counter) await
 lastCounter := counterRefs last
 // => #Actor<Counter,_>
 
+// Actor ordering depends on map internals — only verify the actor responds
 lastCounter getValue
-// => 0
+// => _
 
 // ===========================================================================
 // WORKSPACE ACTOR AT — NOT FOUND
