@@ -286,7 +286,18 @@ term_to_json(Value) when is_function(Value) ->
     {arity, Arity} = erlang:fun_info(Value, arity),
     iolist_to_binary([<<"a Block/">>, integer_to_binary(Arity)]);
 term_to_json(Value) when is_map(Value) ->
-    beamtalk_primitive:print_string(Value);
+    %% For tagged value objects (user-defined classes), dispatch Beamtalk printString
+    %% so that class overrides (e.g. TestResult) are used. Untagged maps fall back
+    %% to the Erlang formatter which produces proper #{...} syntax.
+    case beamtalk_tagged_map:class_of(Value) of
+        undefined ->
+            beamtalk_primitive:print_string(Value);
+        ClassName ->
+            case (catch beamtalk_dispatch:lookup('printString', [], Value, Value, ClassName)) of
+                {reply, Result, _} when is_binary(Result) -> Result;
+                _ -> beamtalk_primitive:print_string(Value)
+            end
+    end;
 term_to_json(#beamtalk_error{} = Error) ->
     iolist_to_binary(beamtalk_error:format(Error));
 term_to_json(Value) when is_tuple(Value) ->

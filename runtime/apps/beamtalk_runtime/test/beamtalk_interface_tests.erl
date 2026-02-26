@@ -64,6 +64,19 @@ register_test_classes() ->
     },
     ensure_class_started('Integer', IntegerInfo),
 
+    %% Register Actor class (superclass of BeamtalkInterface)
+    ActorInfo = #{
+        name => 'Actor',
+        module => 'bt@stdlib@actor',
+        superclass => 'Object',
+        instance_methods => #{},
+        instance_variables => []
+    },
+    ensure_class_started('Actor', ActorInfo),
+
+    %% Register BeamtalkInterface class
+    ensure_class_started('BeamtalkInterface', beamtalk_interface:class_info()),
+
     %% Register Counter class (example user class)
     CounterInfo = #{
         name => 'Counter',

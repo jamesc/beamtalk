@@ -193,14 +193,40 @@ handle_call({'help:selector:', [ClassArg, SelectorArg]}, _From, State) ->
 handle_call({version, []}, _From, State) ->
     Version = State#beamtalk_interface_state.version,
     {reply, Version, State};
-%% Unknown selector - return structured error
-handle_call({UnknownSelector, _Args}, _From, State) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'BeamtalkInterface'),
-    Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"To list available selectors, use: Beamtalk methods">>
-    ),
-    {reply, {error, Error2}, State};
+%% Unknown selector - try hierarchy walk for inherited methods (e.g. printString, class, respondsTo:)
+handle_call({Selector, Args}, From, State) when is_atom(Selector), is_list(Args) ->
+    GenServerPid = self(),
+    spawn(fun() ->
+        Self = {beamtalk_object, 'BeamtalkInterface', ?MODULE, GenServerPid},
+        try
+            beamtalk_dispatch:lookup(
+                Selector,
+                Args,
+                Self,
+                #{'$beamtalk_class' => 'BeamtalkInterface'},
+                'BeamtalkInterface'
+            )
+        of
+            {reply, Value, _NewState} ->
+                gen_server:reply(From, Value);
+            {error, Error} ->
+                gen_server:reply(From, {error, Error})
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("BeamtalkInterface dispatch handler crashed", #{
+                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'BeamtalkInterface'),
+                gen_server:reply(
+                    From,
+                    {error,
+                        beamtalk_error:with_selector(
+                            beamtalk_error:with_message(Err, <<"Internal error">>), Selector
+                        )}
+                )
+        end
+    end),
+    {noreply, State};
 %% Unknown call format
 handle_call(Request, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'BeamtalkInterface'),
@@ -247,15 +273,40 @@ handle_cast({version, [], FuturePid}, State) when is_pid(FuturePid) ->
     Result = State#beamtalk_interface_state.version,
     beamtalk_future:resolve(FuturePid, Result),
     {noreply, State};
-handle_cast({UnknownSelector, _Args, FuturePid}, State) when
-    is_pid(FuturePid), is_atom(UnknownSelector)
+handle_cast({Selector, Args, FuturePid}, State) when
+    is_pid(FuturePid), is_atom(Selector), is_list(Args)
 ->
-    Error0 = beamtalk_error:new(does_not_understand, 'BeamtalkInterface'),
-    Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"To list available selectors, use: Beamtalk methods">>
-    ),
-    beamtalk_future:reject(FuturePid, Error2),
+    %% Unknown selector - try hierarchy walk for inherited methods
+    GenServerPid = self(),
+    spawn(fun() ->
+        Self = {beamtalk_object, 'BeamtalkInterface', ?MODULE, GenServerPid},
+        try
+            beamtalk_dispatch:lookup(
+                Selector,
+                Args,
+                Self,
+                #{'$beamtalk_class' => 'BeamtalkInterface'},
+                'BeamtalkInterface'
+            )
+        of
+            {reply, Value, _NewState} ->
+                beamtalk_future:resolve(FuturePid, Value);
+            {error, Error} ->
+                beamtalk_future:reject(FuturePid, Error)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("BeamtalkInterface dispatch handler crashed", #{
+                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'BeamtalkInterface'),
+                beamtalk_future:reject(
+                    FuturePid,
+                    beamtalk_error:with_selector(
+                        beamtalk_error:with_message(Err, <<"Internal error">>), Selector
+                    )
+                )
+        end
+    end),
     {noreply, State};
 handle_cast(Msg, State) ->
     ?LOG_WARNING("BeamtalkInterface received unexpected cast", #{message => Msg}),

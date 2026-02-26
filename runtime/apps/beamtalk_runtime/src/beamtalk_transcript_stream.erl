@@ -31,6 +31,7 @@
 -behaviour(gen_server).
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %% API
 -export([start_link/0, start_link/1, start_link/2, spawn/0, spawn/1]).
@@ -166,6 +167,39 @@ handle_call({recent, []}, From, State) ->
     handle_call(recent, From, State);
 handle_call({clear, []}, From, State) ->
     handle_call(clear, From, State);
+handle_call({Selector, Args}, From, State) when is_atom(Selector), is_list(Args) ->
+    %% Unknown selector - try hierarchy walk for inherited methods (e.g. printString, class)
+    SelfRef = State#state.self_ref,
+    erlang:spawn(fun() ->
+        try
+            beamtalk_dispatch:lookup(
+                Selector,
+                Args,
+                SelfRef,
+                #{'$beamtalk_class' => 'TranscriptStream'},
+                'TranscriptStream'
+            )
+        of
+            {reply, Value, _NewState} ->
+                gen_server:reply(From, Value);
+            {error, Error} ->
+                gen_server:reply(From, {error, Error})
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("TranscriptStream dispatch handler crashed", #{
+                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'TranscriptStream'),
+                gen_server:reply(
+                    From,
+                    {error,
+                        beamtalk_error:with_selector(
+                            beamtalk_error:with_message(Err, <<"Internal error">>), Selector
+                        )}
+                )
+        end
+    end),
+    {noreply, State};
 handle_call(Request, _From, State) ->
     Error0 = beamtalk_error:new(does_not_understand, 'TranscriptStream'),
     Error1 = beamtalk_error:with_selector(Error0, Request),
@@ -222,16 +256,39 @@ handle_cast({subscribe, Pid}, State) ->
     {noreply, add_subscriber(Pid, State)};
 handle_cast({unsubscribe, Pid}, State) ->
     {noreply, remove_subscriber(Pid, State)};
-%% Actor protocol catch-all: reject Future for unknown selectors
-handle_cast({UnknownSelector, _Args, FuturePid}, State) when
-    is_pid(FuturePid), is_atom(UnknownSelector)
+%% Actor protocol catch-all: try hierarchy walk for inherited methods
+handle_cast({Selector, Args, FuturePid}, State) when
+    is_pid(FuturePid), is_atom(Selector), is_list(Args)
 ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Transcript'),
-    Error1 = beamtalk_error:with_selector(Error0, UnknownSelector),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"Supported methods: show:, cr, recent, clear, subscribe, unsubscribe">>
-    ),
-    beamtalk_future:reject(FuturePid, Error2),
+    SelfRef = State#state.self_ref,
+    erlang:spawn(fun() ->
+        try
+            beamtalk_dispatch:lookup(
+                Selector,
+                Args,
+                SelfRef,
+                #{'$beamtalk_class' => 'TranscriptStream'},
+                'TranscriptStream'
+            )
+        of
+            {reply, Value, _NewState} ->
+                beamtalk_future:resolve(FuturePid, Value);
+            {error, Error} ->
+                beamtalk_future:reject(FuturePid, Error)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("TranscriptStream dispatch handler crashed", #{
+                    selector => Selector, class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'TranscriptStream'),
+                beamtalk_future:reject(
+                    FuturePid,
+                    beamtalk_error:with_selector(
+                        beamtalk_error:with_message(Err, <<"Internal error">>), Selector
+                    )
+                )
+        end
+    end),
     {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.

@@ -303,13 +303,21 @@ handle_call({test, []}, From, State) ->
     spawn_call_worker(From, test, fun handle_test/0, State);
 handle_call({'test:', [TestClass]}, From, State) ->
     spawn_call_worker(From, 'test:', fun() -> handle_test_class(TestClass) end, State);
-handle_call({Selector, Args}, From, State) when is_atom(Selector) ->
+handle_call({Selector, Args}, From, State) when is_atom(Selector), is_list(Args) ->
     %% Unknown selector — try hierarchy walk for inherited methods
     %% (e.g. class, respondsTo:, methods from Object/Actor)
     GenServerPid = self(),
     spawn(fun() ->
         Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
-        try beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'WorkspaceInterface') of
+        try
+            beamtalk_dispatch:lookup(
+                Selector,
+                Args,
+                Self,
+                #{'$beamtalk_class' => 'WorkspaceInterface'},
+                'WorkspaceInterface'
+            )
+        of
             {reply, Value, _NewState} ->
                 gen_server:reply(From, Value);
             {error, Error} ->
@@ -415,13 +423,21 @@ handle_cast({test, [], FuturePid}, State) when is_pid(FuturePid) ->
 handle_cast({'test:', [TestClass], FuturePid}, State) when is_pid(FuturePid) ->
     spawn_cast_worker(FuturePid, 'test:', fun() -> handle_test_class(TestClass) end, State);
 handle_cast({Selector, Args, FuturePid}, State) when
-    is_pid(FuturePid), is_atom(Selector)
+    is_pid(FuturePid), is_atom(Selector), is_list(Args)
 ->
     %% Unknown selector — try hierarchy walk (Object/Actor methods)
     GenServerPid = self(),
     spawn(fun() ->
         Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
-        try beamtalk_dispatch:lookup(Selector, Args, Self, #{}, 'WorkspaceInterface') of
+        try
+            beamtalk_dispatch:lookup(
+                Selector,
+                Args,
+                Self,
+                #{'$beamtalk_class' => 'WorkspaceInterface'},
+                'WorkspaceInterface'
+            )
+        of
             {reply, Value, _NewState} ->
                 beamtalk_future:resolve(FuturePid, Value);
             {error, Error} ->
