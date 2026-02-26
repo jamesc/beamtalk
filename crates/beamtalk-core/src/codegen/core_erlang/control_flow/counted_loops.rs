@@ -74,26 +74,30 @@ impl CoreErlangGenerator {
         body: &Expression,
     ) -> Result<Document<'static>> {
         // Generate: let N = <receiver> in
+        //           let BodyFun = <body> in
         //           letrec 'repeat'/1 = fun (I) ->
         //               case call 'erlang':'=<'(I, N) of
-        //                 'true' -> let _ = <body> in apply 'repeat'/1 (I+1)
+        //                 'true' -> let _ = apply BodyFun () in
+        //                           apply 'repeat'/1 (I+1)
         //                 'false' -> 'nil'
         //               end
         //           in apply 'repeat'/1 (1)
 
         let n_var = self.fresh_temp_var("temp");
+        let body_var = self.fresh_temp_var("BodyFun");
         let receiver_code = self.expression_doc(receiver)?;
         let body_code = self.expression_doc(body)?;
 
         Ok(docvec![
             format!("let {n_var} = "),
             receiver_code,
+            format!(" in let {body_var} = "),
+            body_code,
             " in letrec 'repeat'/1 = fun (I) -> ",
             format!("case call 'erlang':'=<'(I, {n_var}) of "),
-            "<'true'> when 'true' -> ",
-            "let _ = ",
-            body_code,
-            " in apply 'repeat'/1 (call 'erlang':'+'(I, 1)) ",
+            format!(
+                "<'true'> when 'true' -> let _ = apply {body_var} () in apply 'repeat'/1 (call 'erlang':'+'(I, 1)) "
+            ),
             "<'false'> when 'true' -> 'nil' ",
             "end ",
             "in apply 'repeat'/1 (1)",
