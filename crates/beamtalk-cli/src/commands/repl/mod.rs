@@ -693,7 +693,7 @@ pub(crate) fn repl_loop(
     let config = Config::builder()
         .completion_type(CompletionType::List)
         .build();
-    let helper = ReplHelper::new(host, port, cookie);
+    let helper = ReplHelper::new(host, port, cookie, client.session_id());
     let mut rl: Editor<ReplHelper, FileHistory> = Editor::with_config(config).into_diagnostic()?;
     rl.set_helper(Some(helper));
 
@@ -976,6 +976,10 @@ pub(crate) fn repl_loop(
                                     );
                                 } else {
                                     eprintln!("Reconnected (new session). Retrying evaluation...");
+                                }
+                                // Keep the completion helper's session ID in sync
+                                if let Some(h) = rl.helper() {
+                                    h.update_session_id(client.session_id());
                                 }
                                 // Reset interrupt flag for the retry attempt
                                 interrupted.store(false, Ordering::SeqCst);

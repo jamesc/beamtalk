@@ -69,18 +69,34 @@ pub(crate) struct ReplHelper {
     port: u16,
     /// Cookie for reconnection (ADR 0020).
     cookie: String,
+    /// Session ID of the main REPL session, for binding-aware completions.
+    ///
+    /// The completion client runs on a separate WebSocket connection with its
+    /// own (empty) session. Passing the main session ID lets the backend look
+    /// up the user's variable bindings from that session so instance-method
+    /// completions work for bound actor variables (e.g. `c := Counter spawn`).
+    main_session_id: RefCell<Option<String>>,
 }
 
 impl ReplHelper {
     /// Create a new helper that connects to the backend on the given port.
-    pub(crate) fn new(host: &str, port: u16, cookie: &str) -> Self {
+    ///
+    /// `session_id` is the ID of the main REPL session whose variable bindings
+    /// should be used for context-aware completions.
+    pub(crate) fn new(host: &str, port: u16, cookie: &str, session_id: Option<&str>) -> Self {
         let client = ProtocolClient::connect(host, port, cookie, Some(COMPLETION_TIMEOUT)).ok();
         Self {
             completion_client: RefCell::new(client),
             host: host.to_string(),
             port,
             cookie: cookie.to_string(),
+            main_session_id: RefCell::new(session_id.map(String::from)),
         }
+    }
+
+    /// Update the main session ID after a reconnect.
+    pub(crate) fn update_session_id(&self, session_id: Option<&str>) {
+        *self.main_session_id.borrow_mut() = session_id.map(String::from);
     }
 
     /// Query the backend for completions given the full line up to the cursor.
@@ -109,12 +125,16 @@ impl ReplHelper {
             return Vec::new();
         };
 
-        let request = serde_json::json!({
+        let session_id = self.main_session_id.borrow();
+        let mut request = serde_json::json!({
             "op": "complete",
             "id": protocol::next_msg_id(),
             "code": line_to_pos,
             "cursor": cursor
         });
+        if let Some(ref sid) = *session_id {
+            request["session"] = serde_json::Value::String(sid.clone());
+        }
 
         if let Ok(response) = client.send_request::<ReplResponse>(&request) {
             response.completions.unwrap_or_default()
