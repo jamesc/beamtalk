@@ -179,7 +179,7 @@ Actors are declared with `state:` and default values. State is initialized when 
 Actor subclass: Counter
   state: value = 0
 
-counter := Counter new.          "Spawns a gen_server process"
+counter := Counter spawn.         "Spawns a gen_server process"
 ```
 
 #### Methods and State Mutation
@@ -192,7 +192,7 @@ Actor subclass: Counter
 
   increment => self.value := self.value + 1
   decrement => self.value := self.value - 1
-  getValue  => ^self value
+  getValue  => self.value
 ```
 
 The compiler auto-generates `with*:` methods as the **public API** for external callers. Inside actor methods, direct slot assignment is preferred:
@@ -228,14 +228,14 @@ increment => self.value := self.value + 1
 "Compiles to: State1 = maps:put(value, maps:get(value, State0) + 1, State0)"
 "Generated: {reply, NewValue, State1}"
 
-"Query — ^ returns a value, state unchanged:"
-getValue => ^self value
+"Query — last expression is the reply, state unchanged:"
+getValue => self.value
 "Generated: {reply, Value, State0}"
 
 "Mixed — mutate then return a specific value:"
 incrementAndGetOld =>
   | old |
-  old := self value.
+  old := self.value.
   self.value := self.value + 1.
   ^old
 "State updated to State1, old value returned"
@@ -273,7 +273,7 @@ Inside an actor method, `self` is a `#beamtalk_object{class, class_mod, pid}` re
 ```smalltalk
 "Inside the actor method:"
 increment => self.value := self.value + 1      "direct state map update"
-notifyOther: other => other update: self pid!  "self pid returns the actor's pid"
+notifyOther: other => other update: self.pid   "self.pid returns the actor's pid"
 
 "Outside — counter is a pid, message goes through gen_server:"
 counter increment.
@@ -282,9 +282,9 @@ counter notifyOther: logger.
 
 The `#beamtalk_object{}` record is the actor's "calling card" — it can be passed to other actors as a reference. From outside, message sends go through `gen_server:call/cast`. From inside (self-sends), the dispatch bypasses gen_server to avoid deadlock, calling `Module:dispatch` directly.
 
-**`self pid`** returns the underlying BEAM process identifier (`erlang:element(4, Self)` on the `#beamtalk_object{}` tuple). This is defined as a method on the `Actor` base class (not auto-generated per-class). It is useful for:
-- Passing your reference to another actor (`other register: self pid`)
-- Monitoring/linking (`self pid` can be passed to Erlang's `monitor/2`)
+**`self.pid`** returns the underlying BEAM process identifier (`erlang:element(4, Self)` on the `#beamtalk_object{}` tuple). This is defined as a method on the `Actor` base class (not auto-generated per-class). It is useful for:
+- Passing your reference to another actor (`other register: self.pid`)
+- Monitoring/linking (`self.pid` can be passed to Erlang's `monitor/2`)
 - Logging and debugging (pid identifies the actor in crash dumps)
 
 **State map vs `self`:** Internally, the gen_server callbacks receive a plain state map (`State`). The runtime's `make_self/1` wraps it in `#beamtalk_object{}` before each method invocation. Slot reads on `self` dispatch to `maps:get` on the state map. `with*:` methods operate on the state map and return a new state map. The `#beamtalk_object{}` wrapper is transparent — developers work with `self` uniformly.
@@ -406,7 +406,7 @@ Alan Kay has acknowledged that Erlang captures the message-passing spirit of Sma
 ### Erlang/BEAM Developer
 **Positive:** This is how they already think. Immutable data, processes for state, `gen_server` for managed state transitions. BeamTalk becomes a natural Smalltalk-syntax skin over BEAM idioms rather than an impedance mismatch.
 
-**Neutral:** The `.` vs `!` for call/cast maps directly to `gen_server:call` vs `gen_server:cast`. Familiar.
+**Neutral:** The value/actor split pairs naturally with ADR 0043's sync/async messaging (`.` for call, `!` for cast). BEAM developers will find both familiar.
 
 ### Operator / Production User
 
@@ -606,7 +606,6 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 - **ADR 0041 remains exercised.** Local rebinding inside blocks and actor slot assignments inside blocks both require state threading. The compiler is simpler than the status quo (no cross-method or cross-class state threading), but not as simple as full immutability would have been.
 - **Live patching of value object classes requires migration protocol.** Value objects have no process, so there is no `code_change` callback. An existing value object in the system after a class definition change (e.g., new slot added) is an instance of the old layout. For image-based development, a value migration protocol (analogous to database schema migrations) may be needed. This is a known constraint inherited from Erlang's data model — Erlang records have the same issue — and should be addressed in the image-based development ADR.
 - **Block escape at value/actor boundary.** A block that captures rebindable locals and is passed to an actor as a callback may execute asynchronously. ADR 0041's state threading works synchronously — the `StateAcc` is threaded through the call chain. If a block escapes to an async context, the captured state snapshot is frozen at escape time. This is the same semantics as Elixir closures (capture by value), and is correct, but may surprise developers who expect the rebinding to propagate across async boundaries.
-- **`!` (cast) safety is specified in ADR 0043.** The compile-time and runtime guards for `!` on value types are defined in ADR 0043 (Sync-by-Default Actor Messaging), leveraging the Value/Actor classification that this ADR introduces.
 
 ### Neutral
 
@@ -614,6 +613,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 - **ADR 0005 alignment.** ADR 0005 (BEAM Object Model) already distinguishes value types from actors. This ADR formalizes the immutability constraint that was implicit in ADR 0005's design.
 - **Collection protocol completeness is important but not critical.** With local rebinding, developers can always fall back to `do:` with accumulator rebinding. However, `inject:into:`, `collect:`, `select:`, `reject:`, and `detect:` should still be comprehensive — idiomatic functional patterns are cleaner than imperative accumulation and should be the encouraged style.
 - **Auto-generated `with*:` methods are load-bearing.** Without them, immutability is tedious boilerplate. The compiler must generate them reliably for all declared slots.
+- **ADR 0043 leverages Value/Actor classification.** The compile-time and runtime guards for `!` (cast) on value types are defined in ADR 0043, using the Value/Actor classification introduced here.
 
 ## Implementation
 
