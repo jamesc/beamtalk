@@ -41,8 +41,10 @@ TestCase subclass: ClassStateTest
     self assert: ClassStateActor label equals: "hello"
 
   testClassStateIsolatedFromInstanceState =>
-    // Class state does not depend on actor instances being spawned.
+    // Mutating instance state on a spawned actor does not affect class state.
     ClassStateActor counter: 55.
+    actor := ClassStateActor spawn.
+    actor increment.
     self assert: ClassStateActor counter equals: 55
 
   testResetRestoresDefaultValues =>
