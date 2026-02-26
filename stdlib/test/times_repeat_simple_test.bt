@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Regression tests for timesRepeat: simple path.
+//
+// The simple path (no local mutations, no self-sends, no field writes)
+// previously generated `let _ = body_code in ...` without ever applying the
+// body closure, so the block body silently never executed.
+//
+// The mutation path (local writes / self-sends) was unaffected.
+
+TestCase subclass: TimesRepeatSimpleTest
+
+  testZeroTimesIsNoOp =>
+    c := Counter spawn.
+    0 timesRepeat: [c increment await].
+    self assert: (c getValue await) equals: 0
+
+  testOneTimeRunsBlockOnce =>
+    c := Counter spawn.
+    1 timesRepeat: [c increment await].
+    self assert: (c getValue await) equals: 1
+
+  testThreeTimesRunsBlockThreeTimes =>
+    c := Counter spawn.
+    3 timesRepeat: [c increment await].
+    self assert: (c getValue await) equals: 3
+
+  testFiveTimesRunsBlockFiveTimes =>
+    c := Counter spawn.
+    5 timesRepeat: [c increment await].
+    self assert: (c getValue await) equals: 5
