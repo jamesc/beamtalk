@@ -1,6 +1,6 @@
 # Copilot Instructions for gof-patterns
 
-This is a [Beamtalk](https://jamesc.github.io/beamtalk) example workspace implementing Gang of Four design patterns.
+This is a [Beamtalk](https://jamesc.github.io/beamtalk) example workspace — a placeholder for upcoming Gang of Four design pattern examples.
 
 ## Key Conventions
 

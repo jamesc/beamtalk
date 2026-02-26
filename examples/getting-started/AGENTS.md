@@ -15,7 +15,10 @@ getting-started/
 │   ├── protoobject_proxy.bt # Transparent proxy pattern
 │   └── stream.bt            # Lazy pipelines
 ├── test/
-│   └── counter_test.bt      # BUnit tests for Counter
+│   ├── counter_test.bt          # BUnit tests for Counter
+│   ├── hello_test.bt            # BUnit tests for Hello
+│   ├── hanoi_test.bt            # BUnit tests for Hanoi
+│   └── logging_counter_test.bt  # BUnit tests for LoggingCounter
 ├── AGENTS.md            # This file
 ├── .mcp.json            # MCP server config
 ├── .github/

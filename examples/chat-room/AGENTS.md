@@ -29,11 +29,11 @@ beamtalk repl
 
 ## Loading the Example
 
-```
-> :load message.bt
-> :load chat_room.bt
-> :load chat_member.bt
-> :load moderator.bt
+```text
+> :load src/message.bt
+> :load src/chat_room.bt
+> :load src/chat_member.bt
+> :load src/moderator.bt
 ```
 
 ## Key Concepts

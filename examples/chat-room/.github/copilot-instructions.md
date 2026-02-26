@@ -16,7 +16,7 @@ This is a [Beamtalk](https://jamesc.github.io/beamtalk) example workspace demons
 - Use `//` for line comments
 - Implicit returns (last expression is the return value)
 - Use `^` only for early returns, never on the last expression
-- Newlines separate statements (no periods)
+- Newlines separate statements; periods are optional terminators
 
 ## Build Commands
 

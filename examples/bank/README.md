@@ -35,7 +35,7 @@ beamtalk repl
 
 Load the bank classes:
 
-```
+```text
 > :load src/account.bt
 > :load src/transaction.bt
 > :load src/bank.bt
@@ -44,7 +44,7 @@ Load the bank classes:
 
 Typed variant:
 
-```
+```text
 > :load src/typed_account.bt
 > typed := TypedAccount spawn
 > typed deposit: 100
@@ -55,7 +55,7 @@ Typed variant:
 
 ### Create a bank and open accounts
 
-```
+```text
 > bank := Bank spawn
 > bank openAccount: "Alice"
 > bank openAccount: "Bob"
@@ -63,7 +63,7 @@ Typed variant:
 
 ### Deposit money
 
-```
+```text
 > alice := bank accountFor: "Alice"
 > alice deposit: 1000
 1000
@@ -75,7 +75,7 @@ Typed variant:
 
 ### Check balances
 
-```
+```text
 > alice balance
 1000
 
@@ -85,14 +85,14 @@ Typed variant:
 
 ### Transfer money
 
-```
+```text
 > agent := TransferAgent spawn
 > agent transfer: 250 from: alice to: bob
 ```
 
 The `TransferAgent` sends withdraw and deposit messages to each account:
 
-```
+```text
 > alice balance
 750
 
@@ -104,21 +104,21 @@ The `TransferAgent` sends withdraw and deposit messages to each account:
 
 What happens if we try to withdraw more than the balance?
 
-```
+```text
 > alice withdraw: 5000
 ERROR: Insufficient funds (balance: 750, requested: 5000)
 ```
 
 The withdrawal is rejected — the balance remains unchanged:
 
-```
+```text
 > alice balance
 750
 ```
 
 ### Inspect the last transfer
 
-```
+```text
 > agent getLastAmount
 250
 ```

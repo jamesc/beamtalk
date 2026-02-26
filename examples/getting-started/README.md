@@ -13,15 +13,15 @@ beamtalk repl
 
 ### hello.bt — Minimal class
 
-```
-> :load hello.bt
+```text
+> :load src/hello.bt
 > Hello new
 ```
 
 ### counter.bt — Stateful actor
 
-```
-> :load counter.bt
+```text
+> :load src/counter.bt
 > c := Counter spawn
 > c increment
 > c increment
@@ -29,21 +29,21 @@ beamtalk repl
 2
 ```
 
-`counter_test.bt` contains assertions you can run with `:load counter_test.bt`.
+Tests live under `test/` — run them with `:load test/counter_test.bt`, `:load test/hello_test.bt`, etc.
 
 ### hanoi.bt — Recursion and multi-keyword messages
 
-```
-> :load hanoi.bt
+```text
+> :load src/hanoi.bt
 > h := Hanoi new
 > h solve: 3 from: 'A' to: 'C' via: 'B'
 ```
 
 ### logging_counter.bt — Inheritance and `super`
 
-```
-> :load counter.bt
-> :load logging_counter.bt
+```text
+> :load src/counter.bt
+> :load src/logging_counter.bt
 > lc := LoggingCounter spawn
 > lc increment
 > lc getValue
@@ -51,14 +51,14 @@ beamtalk repl
 
 ### stream.bt — Lazy pipelines
 
-```
-> :load stream.bt
+```text
+> :load src/stream.bt
 ```
 
 ### protoobject_proxy.bt — Transparent proxy pattern
 
-```
-> :load protoobject_proxy.bt
+```text
+> :load src/protoobject_proxy.bt
 ```
 
 ## What's Next?
