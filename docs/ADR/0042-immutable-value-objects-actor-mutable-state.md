@@ -211,8 +211,9 @@ The compiler auto-generates `with*:` methods as the **public API** for external 
 
 - **No dispatch overhead:** `self.slot := expr` compiles to the slot-write operation directly (today: `maps:put(slot, Expr, StateN)`), without going through message dispatch. `self withSlot: expr` is a self-send through dispatch, requiring `{reply, Result, NewState}` tuple unpacking.
 - **Safer:** With `self.slot :=`, the state map always reflects all assignments. With `with*:` chains, forgetting to capture an intermediate variable silently loses state updates — a data-loss footgun with no compile-time or runtime error.
-- **Same underlying operation as `with*:`:** Both `self.slot := expr` and `withSlot:` compile to the same slot-write code (today: `maps:put`). The difference is dispatch, not the write itself. If auto-validating slots are added later (e.g., type constraints on slot values), `self.slot :=` would compile to the same validation + write that `withSlot:` uses — the compiler controls both code paths. The distinction is "no message send" vs "message send," not "validated" vs "unvalidated."
+- **Same underlying operation as `with*:`:** Both `self.slot := expr` and the auto-generated `withSlot:` compile to the same slot-write code (today: `maps:put`). The difference is dispatch, not the write itself. The distinction is "no message send" vs "message send," not "validated" vs "unvalidated."
 - **`with*:` is the public API:** External callers use `with*:`, which is dispatch-mediated and overridable. If a subclass needs validation on slot writes, it overrides `withSlot:`, which gates the *external* API. This is analogous to Erlang's direct state map manipulation inside `handle_call`, and to Swift's `mutating` methods which bypass `willSet`/`didSet` property observers.
+- **Compiler warning when `withSlot:` is overridden:** If any class in the hierarchy has overridden `withSlot:` (adding validation, logging, or other logic), the compiler warns on `self.slot :=` usage: *"`self.x :=` bypasses `ValidatedPoint#withX:` — use `self withX:` if validation is needed."* The compiler has full visibility into the class hierarchy at compile time (via `ClassHierarchy`), so this check is free. This ensures developers are aware when `self.slot :=` would skip custom logic, and the choice to bypass it is explicit and visible in the code. The warning can be suppressed with a pragma or annotation if the bypass is intentional.
 
 ```smalltalk
 "FOOTGUN — with*: chain, uncaptured intermediate silently loses balance update:"
@@ -657,6 +658,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 - Verify no slot mutation (`self.slot :=`) in value object methods
 - `!` receiver validation is specified in ADR 0043
 - Update block mutation analysis (`block_analysis.rs`) to distinguish "slot write on value type" (prohibited) from "slot write on actor" (allowed)
+- Warn on `self.slot :=` when `withSlot:` has been overridden anywhere in the class hierarchy (walk `ClassHierarchy` to check for user-defined `with*:` methods)
 
 ### Phase 2: Codegen Changes (L)
 
