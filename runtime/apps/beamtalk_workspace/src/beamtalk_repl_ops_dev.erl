@@ -32,7 +32,13 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
     Completions =
         case maps:is_key(<<"cursor">>, Params) of
             true ->
-                Bindings = get_session_bindings(SessionPid),
+                %% Completions run on a separate WebSocket session with no user bindings.
+                %% If the client passes its main session ID, resolve bindings from that session
+                %% so instance-method completions work for bound actor variables.
+                BindingPid = resolve_binding_session(
+                    maps:get(<<"session">>, Params, undefined), SessionPid
+                ),
+                Bindings = get_session_bindings(BindingPid),
                 get_context_completions(Code, Bindings);
             false ->
                 get_completions(Code)
@@ -444,6 +450,32 @@ maybe_class(ClassName) ->
         undefined -> undefined;
         _Pid -> ClassName
     end.
+
+%% @private
+%% @doc Resolve which session PID to use for binding lookups.
+%%
+%% The completion client runs on a separate WebSocket connection. When it provides
+%% the main REPL session ID, we look up that session's PID from the ETS table and
+%% use its bindings instead of the (empty) completion session's bindings.
+-spec resolve_binding_session(binary() | undefined, pid()) -> pid().
+resolve_binding_session(undefined, Default) ->
+    Default;
+resolve_binding_session(SessionId, Default) when is_binary(SessionId) ->
+    try
+        case ets:lookup(beamtalk_sessions, SessionId) of
+            [{_, Pid}] when is_pid(Pid) ->
+                case is_process_alive(Pid) of
+                    true -> Pid;
+                    false -> Default
+                end;
+            _ ->
+                Default
+        end
+    catch
+        _:_ -> Default
+    end;
+resolve_binding_session(_, Default) ->
+    Default.
 
 %% @private
 %% @doc Get the session bindings map from a session PID.

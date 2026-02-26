@@ -95,6 +95,11 @@ impl ReplClient {
         }
     }
 
+    /// Returns the session ID assigned by the server, if known.
+    pub(crate) fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref()
+    }
+
     /// Send an eval request and receive the response.
     #[allow(dead_code)] // Used in non-interruptible mode or tests
     pub(crate) fn eval(&mut self, expression: &str) -> Result<ReplResponse> {
