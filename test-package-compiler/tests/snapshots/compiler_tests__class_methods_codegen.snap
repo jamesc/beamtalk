@@ -195,7 +195,8 @@ module 'class_methods' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'
             'methodSource' => ~{'increment' => #{#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#, 'getCount' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<67>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#}~,
             'classState' => ~{'instanceCount' => 0}~,
             'classDoc' => 'none',
-            'methodDocs' => ~{}~
+            'methodDocs' => ~{}~,
+            'isConstructible' => 'false'
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'

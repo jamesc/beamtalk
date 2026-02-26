@@ -197,10 +197,19 @@ ensure_is_constructible(undefined, Module, IsAbstract) ->
 
 %% @doc Compute whether a class is constructible via new/new:.
 %%
+%% BT-877: The compiler now infers is_constructible at compile time by detecting
+%% the `new => self error: "..."` pattern, and ClassBuilder inherits the flag
+%% from superclasses. This function is only called for bootstrap/legacy classes
+%% that weren't registered with an explicit is_constructible flag.
+%%
 %% Returns false for:
 %% - Abstract classes (cannot be instantiated at all)
 %% - Actors (have spawn/0 — must use spawn/spawnWith:)
-%% - Non-instantiable primitives (Integer, String, etc. — new/0 raises)
+%% - Classes without new/0
+%% - Classes whose new/0 raises an error (e.g., primitive types)
+%%
+%% Returns true for:
+%% - Classes that export new/0 but not spawn/0 AND new/0 succeeds (value types)
 -spec compute_is_constructible(atom(), boolean()) -> boolean().
 compute_is_constructible(_Module, true) ->
     false;

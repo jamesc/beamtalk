@@ -44,6 +44,14 @@ instantiation_test_() ->
             %% compute_is_constructible tests
             {"abstract class is not constructible", fun test_compute_abstract/0},
             {"actor class (has spawn/0) is not constructible", fun test_compute_actor/0},
+            {"value type (has new/0, no spawn/0) is constructible", fun test_compute_value_type/0},
+            %% BT-877: compiler-inferred non-constructibility tests
+            {"Actor class is registered as non-constructible (compiler-inferred)",
+                fun test_actor_registered_non_constructible/0},
+            {"Counter (Actor subclass) inherits non-constructible",
+                fun test_counter_inherits_non_constructible/0},
+            {"Dictionary (value type) is registered as constructible",
+                fun test_dictionary_registered_constructible/0},
             %% abstract_class_error tests
             {"abstract_class_error returns structured error", fun test_abstract_error_structure/0}
         ]
@@ -163,6 +171,39 @@ test_compute_actor() ->
     %% Counter module has spawn/0 → not constructible
     ok = ensure_counter_loaded(),
     ?assertEqual(false, beamtalk_class_instantiation:compute_is_constructible('bt@counter', false)).
+
+test_compute_value_type() ->
+    %% Dictionary has new/0 but no spawn/0 → constructible
+    code:ensure_loaded('bt@stdlib@dictionary'),
+    ?assertEqual(
+        true,
+        beamtalk_class_instantiation:compute_is_constructible('bt@stdlib@dictionary', false)
+    ).
+
+%%====================================================================
+%% BT-877: Compiler-inferred non-constructibility tests
+%%====================================================================
+
+test_actor_registered_non_constructible() ->
+    %% Actor has `new => self error: "..."` — compiler should have set
+    %% isConstructible to false during registration.
+    ActorPid = beamtalk_class_registry:whereis_class('Actor'),
+    ?assertNotEqual(undefined, ActorPid),
+    ?assertEqual(false, beamtalk_object_class:is_constructible(ActorPid)).
+
+test_counter_inherits_non_constructible() ->
+    %% Counter is a subclass of Actor — should inherit non-constructible
+    ok = ensure_counter_loaded(),
+    CounterPid = beamtalk_class_registry:whereis_class('Counter'),
+    ?assertNotEqual(undefined, CounterPid),
+    ?assertEqual(false, beamtalk_object_class:is_constructible(CounterPid)).
+
+test_dictionary_registered_constructible() ->
+    %% Dictionary is a value type (Object subclass) — should be constructible
+    code:ensure_loaded('bt@stdlib@dictionary'),
+    DictPid = beamtalk_class_registry:whereis_class('Dictionary'),
+    ?assertNotEqual(undefined, DictPid),
+    ?assertEqual(true, beamtalk_object_class:is_constructible(DictPid)).
 
 %%====================================================================
 %% abstract_class_error tests
