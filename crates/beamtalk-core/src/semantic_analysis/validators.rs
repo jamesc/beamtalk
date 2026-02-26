@@ -373,6 +373,7 @@ fn visit_classvar_access(
         selector,
         arguments,
         span,
+        ..
     } = expr
     {
         if let Some(class_name) = receiver_class_name(receiver) {
@@ -742,6 +743,46 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
     }
 }
 
+/// BT-919: Error when `!` (cast) is used on a statically-known value type.
+///
+/// Value types are not actors — they do not have a mailbox and cannot receive
+/// asynchronous messages. Using `!` on a value type receiver is always wrong.
+pub(crate) fn check_cast_on_value_type(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    walk_module_expressions(module, hierarchy, diagnostics, visit_cast_on_value_type);
+}
+
+fn visit_cast_on_value_type(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Expression::MessageSend {
+        receiver,
+        is_cast,
+        span,
+        ..
+    } = expr
+    {
+        if !is_cast {
+            return;
+        }
+        if let Some(class_name) = receiver_class_name(receiver) {
+            if hierarchy.has_class(class_name) && hierarchy.is_value_subclass(class_name) {
+                diagnostics.push(Diagnostic::error(
+                    format!(
+                        "Cannot use ! (cast) on value type `{class_name}`. Value types are not actors."
+                    ),
+                    *span,
+                ));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -935,5 +976,49 @@ mod tests {
             "Expected 1 error for standalone method slot assignment on value type, got: {diagnostics:?}"
         );
         assert_eq!(diagnostics[0].severity, Severity::Error);
+    }
+
+    // BT-919: Cast (!) on value type tests
+
+    #[test]
+    fn cast_on_value_type_is_error() {
+        // `Point` is a Value subclass, so `Point foo!` should produce an error
+        let src = "Value subclass: Point\n  state: x = 0\n  doStuff => Point foo!";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_cast_on_value_type(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for cast on value type, got: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("Cannot use ! (cast) on value type"),
+            "Expected value-type cast error, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn cast_on_actor_type_is_ok() {
+        // Actor subclass should NOT produce an error for cast
+        let src = "Actor subclass: Worker\n  doStuff => Worker foo!";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_cast_on_value_type(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no errors for cast on actor type, got: {diagnostics:?}"
+        );
     }
 }

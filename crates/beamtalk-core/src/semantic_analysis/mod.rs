@@ -267,6 +267,8 @@ fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> Anal
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // BT-919: Reject cast (!) on value types
+    validators::check_cast_on_value_type(module, &result.class_hierarchy, &mut result.diagnostics);
 
     // Phase 6: Module-level validation (BT-349)
     let module_diags = module_validator::validate_single_class(module);
@@ -409,6 +411,7 @@ impl Analyser {
                 selector,
                 arguments,
                 span,
+                ..
             } => {
                 self.analyse_expression(receiver, None);
 
@@ -857,6 +860,7 @@ mod tests {
                 test_span(),
             )]),
             arguments: vec![Expression::Block(block)],
+            is_cast: false,
             span: test_span(),
         };
 
@@ -929,6 +933,7 @@ mod tests {
                 Expression::Literal(crate::ast::Literal::Integer(1), Span::new(10, 11)),
                 Expression::Block(block),
             ],
+            is_cast: false,
             span: Span::new(0, 33),
         };
 
@@ -1422,6 +1427,7 @@ mod tests {
                 test_span(),
             )]),
             arguments: vec![block],
+            is_cast: false,
             span: test_span(),
         };
 
@@ -1469,6 +1475,7 @@ mod tests {
                 ))),
                 selector: crate::ast::MessageSelector::Binary("+".into()),
                 arguments: vec![Expression::Literal(Literal::Integer(1), test_span())],
+                is_cast: false,
                 span: test_span(),
             }),
             span: test_span(),
@@ -1529,6 +1536,7 @@ mod tests {
                 test_span(),
             )]),
             arguments: vec![block],
+            is_cast: false,
             span: test_span(),
         };
 
@@ -1564,6 +1572,7 @@ mod tests {
                 receiver: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
                 selector: crate::ast::MessageSelector::Binary("+".into()),
                 arguments: vec![Expression::Literal(Literal::Integer(1), test_span())],
+                is_cast: false,
                 span: test_span(),
             }),
             span: test_span(),
@@ -1599,6 +1608,7 @@ mod tests {
             receiver: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
             selector: crate::ast::MessageSelector::Binary("+".into()),
             arguments: vec![Expression::Literal(Literal::Integer(1), test_span())],
+            is_cast: false,
             span: test_span(),
         };
 
@@ -1635,6 +1645,7 @@ mod tests {
                 receiver: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
                 selector: crate::ast::MessageSelector::Binary("+".into()),
                 arguments: vec![Expression::Literal(Literal::Integer(1), test_span())],
+                is_cast: false,
                 span: test_span(),
             }),
             span: test_span(),
@@ -1775,6 +1786,7 @@ mod tests {
                 Literal::Symbol("increment".into()),
                 test_span(),
             )],
+            is_cast: false,
             span: test_span(),
         };
 
@@ -1808,6 +1820,7 @@ mod tests {
                 "increment",
                 Span::new(20, 29),
             ))],
+            is_cast: false,
             span: test_span(),
         };
 
@@ -1858,6 +1871,7 @@ mod tests {
                 name: Identifier::new("Counter", Span::new(22, 29)),
                 span: Span::new(22, 29),
             }],
+            is_cast: false,
             span: test_span(),
         };
 
@@ -1895,6 +1909,7 @@ mod tests {
                 test_span(),
             )]),
             arguments: vec![Expression::Literal(Literal::Integer(42), Span::new(15, 17))],
+            is_cast: false,
             span: test_span(),
         };
 
@@ -1933,6 +1948,7 @@ mod tests {
                 "increment",
                 test_span(),
             ))],
+            is_cast: false,
             span: test_span(),
         };
 
@@ -2031,6 +2047,7 @@ mod tests {
             }),
             selector: MessageSelector::Unary("spawn".into()),
             arguments: vec![],
+            is_cast: false,
             span: test_span(),
         };
 
@@ -2651,6 +2668,7 @@ mod tests {
                         ))),
                         selector: MessageSelector::Unary("doSomething".into()),
                         arguments: vec![],
+                        is_cast: false,
                         span: Span::new(5, 20),
                     },
                 ],
@@ -2873,6 +2891,7 @@ mod tests {
                     receiver: Box::new(Expression::Super(test_span())),
                     selector: MessageSelector::Unary("reset".into()),
                     arguments: vec![],
+                    is_cast: false,
                     span: test_span(),
                 }],
                 return_type: None,
@@ -2937,6 +2956,7 @@ mod tests {
                 ))),
                 selector: MessageSelector::Binary("+".into()),
                 arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(18, 19))],
+                is_cast: false,
                 span: Span::new(14, 19),
             }],
             span: Span::new(8, 20),
@@ -3249,6 +3269,7 @@ mod tests {
             }),
             selector: MessageSelector::Unary("spawn".into()),
             arguments: vec![],
+            is_cast: false,
             span: test_span(),
         }
     }
@@ -3405,6 +3426,7 @@ mod tests {
             }),
             selector: MessageSelector::Unary("new".into()),
             arguments: vec![],
+            is_cast: false,
             span: test_span(),
         };
 

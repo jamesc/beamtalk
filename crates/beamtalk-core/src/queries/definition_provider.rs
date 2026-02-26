@@ -360,6 +360,7 @@ pub fn find_selector_lookup_in_expr(expr: &Expression, offset: u32) -> Option<Se
             selector,
             arguments,
             span,
+            ..
         } => find_selector_lookup_in_message_send(receiver, selector, arguments, *span, offset),
         Expression::Cascade {
             receiver, messages, ..

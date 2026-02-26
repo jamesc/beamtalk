@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -31,6 +32,7 @@ Module {
                     "negated",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 282,
                     end: 291,
@@ -71,6 +73,7 @@ Module {
                     "abs",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 368,
                     end: 377,
@@ -105,6 +108,7 @@ Module {
                     "isZero",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 447,
                     end: 455,
@@ -139,6 +143,7 @@ Module {
                     "isZero",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 467,
                     end: 476,
@@ -173,6 +178,7 @@ Module {
                     "isEven",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 509,
                     end: 517,
@@ -207,6 +213,7 @@ Module {
                     "isOdd",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 530,
                     end: 537,
@@ -241,6 +248,7 @@ Module {
                     "not",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 605,
                     end: 613,
@@ -275,6 +283,7 @@ Module {
                     "not",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 626,
                     end: 635,
@@ -310,6 +319,7 @@ Module {
                         "negated",
                     ),
                     arguments: [],
+                    is_cast: false,
                     span: Span {
                         start: 715,
                         end: 724,
@@ -319,6 +329,7 @@ Module {
                     "abs",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 715,
                     end: 728,
@@ -379,6 +390,7 @@ Module {
                             "isZero",
                         ),
                         arguments: [],
+                        is_cast: false,
                         span: Span {
                             start: 800,
                             end: 814,
@@ -449,6 +461,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 799,
                     end: 846,
@@ -495,6 +508,7 @@ Module {
                                 "negated",
                             ),
                             arguments: [],
+                            is_cast: false,
                             span: Span {
                                 start: 898,
                                 end: 907,

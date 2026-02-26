@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -51,6 +52,7 @@ Module {
                                                                 },
                                                             ),
                                                         ],
+                                                        is_cast: false,
                                                         span: Span {
                                                             start: 264,
                                                             end: 269,
@@ -142,6 +144,7 @@ Module {
                                                 "method1",
                                             ),
                                             arguments: [],
+                                            is_cast: false,
                                             span: Span {
                                                 start: 334,
                                                 end: 348,
@@ -151,6 +154,7 @@ Module {
                                             "method2",
                                         ),
                                         arguments: [],
+                                        is_cast: false,
                                         span: Span {
                                             start: 334,
                                             end: 356,
@@ -160,6 +164,7 @@ Module {
                                         "method3",
                                     ),
                                     arguments: [],
+                                    is_cast: false,
                                     span: Span {
                                         start: 334,
                                         end: 364,
@@ -169,6 +174,7 @@ Module {
                                     "method4",
                                 ),
                                 arguments: [],
+                                is_cast: false,
                                 span: Span {
                                     start: 334,
                                     end: 372,
@@ -178,6 +184,7 @@ Module {
                                 "method5",
                             ),
                             arguments: [],
+                            is_cast: false,
                             span: Span {
                                 start: 334,
                                 end: 380,
@@ -187,6 +194,7 @@ Module {
                             "method6",
                         ),
                         arguments: [],
+                        is_cast: false,
                         span: Span {
                             start: 334,
                             end: 388,
@@ -196,6 +204,7 @@ Module {
                         "method7",
                     ),
                     arguments: [],
+                    is_cast: false,
                     span: Span {
                         start: 334,
                         end: 396,
@@ -205,6 +214,7 @@ Module {
                     "method8",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 334,
                     end: 404,
@@ -349,6 +359,7 @@ Module {
                                                                         },
                                                                     ),
                                                                 ],
+                                                                is_cast: false,
                                                                 span: Span {
                                                                     start: 505,
                                                                     end: 518,
@@ -360,6 +371,7 @@ Module {
                                                             },
                                                         },
                                                     ],
+                                                    is_cast: false,
                                                     span: Span {
                                                         start: 495,
                                                         end: 519,
@@ -371,6 +383,7 @@ Module {
                                                 },
                                             },
                                         ],
+                                        is_cast: false,
                                         span: Span {
                                             start: 484,
                                             end: 520,
@@ -382,6 +395,7 @@ Module {
                                     },
                                 },
                             ],
+                            is_cast: false,
                             span: Span {
                                 start: 474,
                                 end: 521,
@@ -393,6 +407,7 @@ Module {
                         },
                     },
                 ],
+                is_cast: false,
                 span: Span {
                     start: 462,
                     end: 522,
@@ -589,12 +604,14 @@ Module {
                                                                                                         },
                                                                                                     ),
                                                                                                 ],
+                                                                                                is_cast: false,
                                                                                                 span: Span {
                                                                                                     start: 679,
                                                                                                     end: 684,
                                                                                                 },
                                                                                             },
                                                                                         ],
+                                                                                        is_cast: false,
                                                                                         span: Span {
                                                                                             start: 675,
                                                                                             end: 684,
@@ -732,6 +749,7 @@ Module {
                                                                         },
                                                                     ),
                                                                 ],
+                                                                is_cast: false,
                                                                 span: Span {
                                                                     start: 817,
                                                                     end: 824,
@@ -743,6 +761,7 @@ Module {
                                                             },
                                                         },
                                                     ],
+                                                    is_cast: false,
                                                     span: Span {
                                                         start: 810,
                                                         end: 825,
@@ -809,6 +828,7 @@ Module {
                                                                         },
                                                                     ),
                                                                 ],
+                                                                is_cast: false,
                                                                 span: Span {
                                                                     start: 841,
                                                                     end: 849,
@@ -820,6 +840,7 @@ Module {
                                                             },
                                                         },
                                                     ],
+                                                    is_cast: false,
                                                     span: Span {
                                                         start: 833,
                                                         end: 850,
@@ -831,6 +852,7 @@ Module {
                                                 },
                                             },
                                         ],
+                                        is_cast: false,
                                         span: Span {
                                             start: 798,
                                             end: 851,
@@ -913,6 +935,7 @@ Module {
                                                                             },
                                                                         ),
                                                                     ],
+                                                                    is_cast: false,
                                                                     span: Span {
                                                                         start: 865,
                                                                         end: 872,
@@ -924,6 +947,7 @@ Module {
                                                                 },
                                                             },
                                                         ],
+                                                        is_cast: false,
                                                         span: Span {
                                                             start: 858,
                                                             end: 873,
@@ -990,6 +1014,7 @@ Module {
                                                                             },
                                                                         ),
                                                                     ],
+                                                                    is_cast: false,
                                                                     span: Span {
                                                                         start: 889,
                                                                         end: 897,
@@ -1001,6 +1026,7 @@ Module {
                                                                 },
                                                             },
                                                         ],
+                                                        is_cast: false,
                                                         span: Span {
                                                             start: 881,
                                                             end: 898,

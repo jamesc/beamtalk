@@ -112,6 +112,12 @@ pub enum TokenKind {
     /// Statement terminator: `.`
     Period,
 
+    /// Cast statement terminator: `!`
+    ///
+    /// Used to mark a message send as a fire-and-forget cast (no return value).
+    /// Syntax: `receiver message!` — equivalent to an async actor send.
+    Bang,
+
     /// Block argument separator: `|`
     Pipe,
 
@@ -231,6 +237,7 @@ impl TokenKind {
             | Self::Caret
             | Self::Semicolon
             | Self::Period
+            | Self::Bang
             | Self::Pipe
             | Self::Colon
             | Self::Hash
@@ -274,6 +281,7 @@ impl std::fmt::Display for TokenKind {
             Self::Caret => write!(f, "^"),
             Self::Semicolon => write!(f, ";"),
             Self::Period => write!(f, "."),
+            Self::Bang => write!(f, "!"),
             Self::Pipe => write!(f, "|"),
             Self::Colon => write!(f, ":"),
             Self::Hash => write!(f, "#"),

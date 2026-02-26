@@ -512,6 +512,7 @@ fn find_hover_in_expr(
             selector,
             arguments,
             span,
+            ..
         } => {
             // First check receiver and arguments
             if let Some(hover) = find_hover_in_expr(receiver, offset, context, hierarchy, type_map)

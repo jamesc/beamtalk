@@ -254,6 +254,7 @@ fn collect_selector_refs(
             selector,
             arguments,
             span,
+            ..
         } => {
             if selector.name() == selector_name {
                 // Use the span of the selector keywords if available, otherwise the send span
