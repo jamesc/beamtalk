@@ -27,7 +27,14 @@
 -ifdef(TEST).
 -export([
     compile_expression_via_port/3,
-    compile_file_via_port/4
+    compile_file_via_port/4,
+    apply_module_name_override/2,
+    apply_source_path/2,
+    assemble_class_result/5,
+    compile_trailing_expressions/2,
+    compile_standard_expression/2,
+    compile_file_core/3,
+    format_core_error/1
 ]).
 -endif.
 

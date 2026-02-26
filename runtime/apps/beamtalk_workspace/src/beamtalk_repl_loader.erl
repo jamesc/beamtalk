@@ -32,7 +32,18 @@
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([
-    load_compiled_module/6
+    load_compiled_module/6,
+    normalize_class_source_key/1,
+    extract_trailing_info/1,
+    resolve_class_name/1,
+    safe_binary_to_atom/1,
+    safe_list_to_atom/1,
+    safe_atom_result/1,
+    resolve_package_module/3,
+    try_package_relative/3,
+    maybe_add_loaded_module/2,
+    store_file_class_sources/3,
+    store_class_sources/4
 ]).
 -endif.
 

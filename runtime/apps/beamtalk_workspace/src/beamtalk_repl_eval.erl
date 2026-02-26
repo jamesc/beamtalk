@@ -22,23 +22,12 @@
 -ifdef(TEST).
 -export([
     extract_assignment/1,
-    format_formatted_diagnostics/1,
     maybe_await_future/1,
     should_purge_module/2,
     strip_internal_bindings/1,
-    is_stdlib_path/1,
-    compute_package_module_name/1,
-    to_snake_case/1,
     inject_output/3,
-    is_internal_key/1,
-    activate_module/2,
-    register_classes/2,
-    trigger_hot_reload/2,
     handle_class_definition/7,
-    handle_method_definition/4,
-    compile_expression_via_port/3,
-    compile_file_via_port/4,
-    verify_class_present/3
+    handle_method_definition/4
 ]).
 -endif.
 
@@ -339,54 +328,3 @@ inject_output({ok, Result, State}, Output, Warnings) ->
     {ok, Result, Output, Warnings, State};
 inject_output({error, Reason, State}, Output, Warnings) ->
     {error, Reason, Output, Warnings, State}.
-
-%%% Delegate functions for backward compatibility (tests call these on beamtalk_repl_eval)
-
--ifdef(TEST).
-
--spec format_formatted_diagnostics(list()) -> binary().
-format_formatted_diagnostics(Diagnostics) ->
-    beamtalk_repl_compiler:format_formatted_diagnostics(Diagnostics).
-
--spec is_internal_key(atom()) -> boolean().
-is_internal_key(Key) ->
-    beamtalk_repl_compiler:is_internal_key(Key).
-
--spec activate_module(atom(), [map()]) -> ok.
-activate_module(ModuleName, Classes) ->
-    beamtalk_repl_loader:activate_module(ModuleName, Classes).
-
--spec register_classes([map()], atom()) -> ok.
-register_classes(ClassInfoList, ModuleName) ->
-    beamtalk_repl_loader:register_classes(ClassInfoList, ModuleName).
-
--spec trigger_hot_reload(atom(), [map()]) -> ok.
-trigger_hot_reload(ModuleName, Classes) ->
-    beamtalk_repl_loader:trigger_hot_reload(ModuleName, Classes).
-
--spec compile_expression_via_port(string(), atom(), map()) -> term().
-compile_expression_via_port(Expression, ModuleName, Bindings) ->
-    beamtalk_repl_compiler:compile_expression_via_port(Expression, ModuleName, Bindings).
-
--spec compile_file_via_port(string(), string(), boolean(), binary() | undefined) -> term().
-compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride) ->
-    beamtalk_repl_compiler:compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride).
-
--spec to_snake_case(string()) -> string().
-to_snake_case(Str) ->
-    beamtalk_repl_loader:to_snake_case(Str).
-
--spec is_stdlib_path(string()) -> boolean().
-is_stdlib_path(Path) ->
-    beamtalk_repl_loader:is_stdlib_path(Path).
-
--spec verify_class_present(atom() | undefined, [#{name := string()}], string()) ->
-    ok | {error, term()}.
-verify_class_present(ExpectedClassName, ClassNames, Path) ->
-    beamtalk_repl_loader:verify_class_present(ExpectedClassName, ClassNames, Path).
-
--spec compute_package_module_name(string()) -> binary() | undefined.
-compute_package_module_name(Path) ->
-    beamtalk_repl_loader:compute_package_module_name(Path).
-
--endif.
