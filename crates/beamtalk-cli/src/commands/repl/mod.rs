@@ -843,13 +843,7 @@ pub(crate) fn repl_loop(
                                         escape_for_string_literal(path)
                                     );
                                     match client.eval(&expr) {
-                                        Ok(response) => {
-                                            if !response.is_error() {
-                                                println!("Reloaded {path}");
-                                            } else if let Some(msg) = response.error_message() {
-                                                eprintln!("Error: {msg}");
-                                            }
-                                        }
+                                        Ok(response) => display_eval_response(&response),
                                         Err(e) => eprintln!("Error: {e}"),
                                     }
                                 }

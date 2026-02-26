@@ -55,6 +55,10 @@
 :reload Counter
 // => Counter
 
+// :reload (no arg) → reload last loaded file
+:reload
+// => _
+
 // After reload, Counter still works
 c := Counter spawn
 // => #Actor<Counter,_>
