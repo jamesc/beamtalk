@@ -170,8 +170,13 @@ class_self_spawn(ClassName, Module, Args) ->
     class_self_spawn(ClassName, Module, false, Args).
 
 %% @doc Spawn with explicit abstract class flag (used by runtime self-instantiation).
--spec class_self_spawn(class_name(), atom(), boolean(), list()) -> term().
-class_self_spawn(ClassName, Module, IsAbstract, Args) ->
+%%
+%% BT-908: The IsAbstract parameter may come from erlang:get(beamtalk_class_is_abstract)
+%% in codegen-generated class methods. Normalize to boolean defensively — undefined or
+%% any non-true value is treated as false (non-abstract).
+-spec class_self_spawn(class_name(), atom(), boolean() | term(), list()) -> term().
+class_self_spawn(ClassName, Module, IsAbstract0, Args) ->
+    IsAbstract = IsAbstract0 =:= true,
     case handle_spawn(Args, ClassName, Module, IsAbstract) of
         {ok, Result} ->
             Result;
