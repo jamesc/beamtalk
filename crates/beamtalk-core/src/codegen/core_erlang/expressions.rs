@@ -509,8 +509,8 @@ impl CoreErlangGenerator {
     ///
     /// - **Tier 2 (stateful):** blocks with captured variable mutations emit
     ///   `fun(Params..., StateAcc) -> {Result, NewStateAcc}`
-    /// - **Tier 1 (plain):** pure blocks (no captured mutations) emit
-    ///   `fun(Params...) -> Result` — zero overhead path unchanged
+    /// - **Plain fun:** pure blocks (no captured mutations) emit
+    ///   `fun(Params...) -> Result` — zero overhead for stateless blocks
     ///
     /// Captured mutations = variables written inside the block that were also
     /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
@@ -518,8 +518,9 @@ impl CoreErlangGenerator {
     /// - Field writes are threaded via `gen_server` State at the method level (BT-860 for Tier 2).
     /// - Self-sends are pre-scanned via `generate_tier2_self_send_open` (BT-851).
     ///
-    /// Tier 1 blocks handled by dedicated generators (whileTrue:, do:, collect:, etc.)
-    /// never reach this function — they call `generate_block_body()` directly.
+    /// **Tier 1** blocks (whitelisted control flow: whileTrue:, do:, collect:, etc.)
+    /// are handled by dedicated inline generators and never reach this function —
+    /// they call `generate_block_body()` directly.
     pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
         use crate::codegen::core_erlang::block_analysis::analyze_block;
 
@@ -543,7 +544,7 @@ impl CoreErlangGenerator {
             return self.generate_block_stateful(block, &captured_mutations);
         }
 
-        // Pure block: plain fun (Tier 1 optimization)
+        // Pure block: plain fun (no mutations to thread via Tier 2)
         self.push_scope();
 
         let mut param_parts: Vec<Document<'static>> = Vec::new();
