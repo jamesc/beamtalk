@@ -312,59 +312,16 @@ x := counter increment!           "COMPILER ERROR — cast has no return value"
 
 **Deadlock avoidance:** Actor-to-actor synchronous calls (`.`) can deadlock if actor A calls actor B while B is calling A — both block waiting for a reply that can never arrive. This is the standard gen_server deadlock pattern. For actor-to-actor coordination, prefer `!` (fire-and-forget) by default. Use `.` only when the caller needs the reply and is not at risk of cyclic waits (e.g., a client calling a service, or an actor calling a stateless value computation). Self-sends within an actor method bypass gen_server entirely (direct dispatch), so they are always safe.
 
-### Cascade Semantics: Pipelines for Value Objects
+### Cascade Semantics
 
-Smalltalk cascades (`;`) send multiple messages to the same receiver. With immutable objects, the traditional cascade semantics are problematic — each message returns a new object, but the cascade discards intermediate results. `point withX: 5; withY: 10` under Smalltalk semantics sends both messages to the *original* `point`, losing the `withX:` result.
+**Deferred to ADR 0043.** Cascade semantics for immutable value objects are a significant design question — Smalltalk cascades (`;`) send multiple messages to the same receiver, but with immutable objects each message returns a new object, making traditional fan-out semantics problematic. The leading candidate is cascade-as-pipeline on value objects (each message sent to the *result* of the previous), which would give BeamTalk Elixir-style `|>` pipelines for free (BT-506). However, the type-dependent semantics (pipeline on values, fan-out on actors), dynamic receiver handling, and interaction with ADR 0039 deserve their own focused ADR.
 
-**Decision:** Cascades on value objects use **pipeline semantics** — each subsequent message is sent to the *result* of the previous one, not the original receiver. On actors, cascades retain Smalltalk's traditional fan-out semantics (all messages sent to the same pid).
-
-#### Value Object Cascades (Pipeline Semantics)
+For the initial implementation of ADR 0042, explicit chaining works correctly and unambiguously:
 
 ```smalltalk
-point withX: 5; withY: 10.
-"Equivalent to: (point withX: 5) withY: 10"
-"Result: Point with x=5, y=10"
-
-"Collection pipelines — this is Elixir's |> for free:"
-items select: [:x | x > 0]; collect: [:x | x * 2]; inject: 0 into: [:sum :x | sum + x].
-"Equivalent to: ((items select: [:x | x > 0]) collect: [:x | x * 2]) inject: 0 into: [...]"
+((point withX: 5) withY: 10).
+(items select: [:x | x > 0]) collect: [:x | x * 2].
 ```
-
-This is faithful to the *intent* of cascades — performing a sequence of operations — while adapting to immutability. In Smalltalk, cascades chain side effects on the same mutable receiver. In BeamTalk, cascades chain transformations, threading each result to the next message. The programming pattern is the same: "do this, then this, then this."
-
-#### Actor Cascades (Traditional Smalltalk Fan-Out)
-
-```smalltalk
-logger log: 'starting'; log: 'processing'; log: 'done'.
-"Three messages sent to the same actor pid (gen_server:call x3)"
-
-counter increment; increment; increment!
-"Two sync increments, then one async cast — all to the same pid"
-```
-
-For actors, traditional cascade semantics are correct and useful — the receiver has stable identity (it's a pid), and each message is a side effect on that identity. There's no ambiguity about "which receiver" because the receiver is a process, not a value that might change.
-
-#### Why Type-Dependent Semantics Are Safe Here
-
-The cascade semantics are type-dependent: pipeline on values, fan-out on actors. This is a deliberate design choice, not an accident. The key insight is that the semantics align with what the developer *intends*:
-
-- **Value objects:** The developer chains `with*:` or collection operations to build up a result. Pipeline semantics do what they mean. Traditional fan-out would silently discard intermediate results — a bug, not a feature.
-- **Actors:** The developer sends multiple commands to a service. Fan-out does what they mean. Pipeline semantics would thread return values through unrelated messages — nonsensical.
-
-The type-dependency mirrors `;`'s existing behavior: even in Smalltalk, cascades interact with the receiver's semantics (some messages return `self`, others don't). BeamTalk makes the rule explicit and predictable: values pipeline, actors fan out.
-
-**This gives BeamTalk pipelines (BT-506).** The `;` cascade operator on value objects is functionally equivalent to Elixir's `|>` pipeline operator. No new syntax is needed — the existing cascade syntax naturally becomes the pipeline operator when applied to immutable values.
-
-#### Dynamic Receivers and Mid-Chain Type Changes
-
-For statically-known receivers, the compiler emits pipeline (value) or fan-out (actor) code directly. For dynamically-typed receivers (method parameters, collection elements), the generated code checks `is_pid(Receiver)` **once at cascade entry** and selects either pipeline or fan-out for the entire chain:
-
-- **Pipeline (value receiver):** each message is sent to the result of the previous step
-- **Fan-out (actor/pid receiver):** all messages are sent to the original receiver
-
-The check happens once because the receiver type is consistent within a cascade — a value object cascade produces values, an actor cascade operates on the same pid. Mid-chain type changes (e.g., a value method returning an actor) would be unusual and are not supported within a single cascade; use explicit chaining with `.` for cross-type sequences.
-
-**Why fan-out is required for actors:** `gen_server:call` returns the method's reply value (e.g., the new state map), not the actor's pid. Pipeline on `counter increment; getValue` would send `getValue` to the state map (a plain Erlang map), not to the counter actor. Fan-out ensures all messages reach the same pid.
 
 ### REPL Semantics
 
@@ -706,13 +663,6 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 - Auto-generate getters and `with*:` for actor state
 - **Affected:** `actor_codegen.rs`, `mod.rs`, `beamtalk_dispatch.erl`
 
-**Cascade Codegen:**
-- Value object cascades: compile `a foo; bar; baz` as `baz(bar(foo(a)))` — pipeline threading each result to the next message send
-- Actor cascades: compile `a foo; bar; baz` as `foo(a), bar(a), baz(a)` — fan-out to the same pid, return result of last message
-- Receiver type determines semantics: `is_actor_class()` at compile time, `is_pid` at runtime for dynamic receivers
-- Dynamic receivers: emit runtime branch checking `is_pid(Receiver)` once at cascade entry, then use pipeline or fan-out path accordingly
-- **Affected:** `cascade_codegen.rs` (or equivalent in `mod.rs`), `beamtalk_dispatch.erl`
-
 ### Phase 3: Runtime Changes (M)
 
 - Update `beamtalk_dispatch` to route calls vs casts based on message send type
@@ -775,7 +725,7 @@ Tests using instance variable assignment (`self.slot := value`) must be rewritte
 - ADR 0035 (Field-Based Reflection API) — **partially superseded**: `fieldAt:`/`fieldNames` renamed to `slotAt:`/`slotNames`; closes the deferred `slotAt:put:` access control for value types (compile-time + runtime enforcement)
 - ADR 0038 (Subclass/ClassBuilder Protocol) — ClassBuilder must recognize `Value` as a root class
 - ADR 0037 (Collection Class Hierarchy) — collection classes (List, Array, Dictionary, Range) must be classified as Value or Actor; `Range` init pattern using `self.slot :=` needs migration to keyword constructor
-- ADR 0039 (Syntax Pragmatism vs Smalltalk) — cascade semantics diverge from Smalltalk: pipeline on values, fan-out on actors. **ADR 0039 must be updated** at implementation time to document the new cascade semantics (currently documents fan-out as "What We Keep")
+- ADR 0039 (Syntax Pragmatism vs Smalltalk) — cascade semantics deferred to ADR 0043; ADR 0039's fan-out semantics remain unchanged until then
 - ADR 0040 (Workspace-Native REPL Commands) — REPL binding semantics preserved; `!` defined for REPL context
 - ADR 0041 (Universal State-Threading Block Protocol) — scope narrowed to local rebinding through blocks; remains active and essential
 
@@ -789,5 +739,5 @@ Tests using instance variable assignment (`self.slot := value`) must be rewritte
 - Pony reference capabilities: value vs identity distinction at the type level
 
 ### Related Issues
-- BT-506 — pipeline operator; resolved by cascade-as-pipeline semantics on value objects
+- BT-506 — pipeline operator; cascade-as-pipeline candidate deferred to ADR 0043
 - BT-868, BT-900, BT-904, BT-894 — state-threading edge cases that motivated this decision
