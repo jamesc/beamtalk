@@ -74,9 +74,11 @@ pub(crate) fn print_help() {
     println!("  :exit, :q       Exit the REPL");
     println!("  :clear          Clear all variable bindings");
     println!("  :bindings       Show current variable bindings");
-    println!("  :load <path>    Load a .bt file or directory (recursive; paths may be quoted)");
-    println!("  :reload         Reload the last loaded file or directory (supports quoted paths)");
-    println!("  :modules        List loaded classes");
+    println!("  :load <path>    Load a .bt file or directory (→ Workspace load: \"path\")");
+    println!("  :reload         Reload the last loaded file or directory");
+    println!("  :reload <Class> Reload a class by name (→ ClassName reload)");
+    println!("  :test           Run all test classes (→ Workspace test)");
+    println!("  :test <Class>   Run a test class (→ Workspace test: ClassName)");
     println!("  :show-codegen <expr>  Show generated Core Erlang for an expression");
     println!("  :sc <expr>      Short alias for :show-codegen");
     println!();

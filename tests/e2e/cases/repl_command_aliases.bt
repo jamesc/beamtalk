@@ -1,0 +1,67 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for REPL command alias conversions (BT-848 / ADR 0040 Phase 5).
+//
+// Tests that converted REPL aliases produce the same results as the direct
+// Beamtalk message-send forms they desugar to.
+//
+// Commands converted to eval aliases:
+//   :load path       → Workspace load: "path"
+//   :reload          → reload last loaded file/directory
+//   :reload Counter  → Counter reload
+//   :test            → Workspace test
+//   :test CounterTest → Workspace test: CounterTest
+//
+// Commands that remain REPL-only (not converted):
+//   :exit/:quit/:q     — client-side disconnect
+//   :show-codegen/:sc  — takes raw expression, not string
+//   :bindings/:b       — session locals are implicit scope
+//   :clear             — session bindings are shell-scoped
+
+// ===========================================================================
+// :load alias — Workspace load: "path"
+// ===========================================================================
+
+// Load counter fixture via :load (alias for Workspace load:)
+:load tests/e2e/fixtures/counter.bt
+// => _
+
+// The Workspace load: direct form also works
+(Workspace load: "tests/e2e/fixtures/reload_counter.bt") await
+// => nil
+
+// ===========================================================================
+// :test alias — Workspace test
+// ===========================================================================
+
+// Load a test fixture
+:load tests/e2e/fixtures/counter_test.bt
+// => _
+
+// :test CounterTest → Workspace test: CounterTest
+:test CounterTest
+// => _
+
+// :test runs all test classes → Workspace test
+:test
+// => _
+
+// ===========================================================================
+// :reload alias — ClassName reload
+// ===========================================================================
+
+// :reload Counter → Counter reload
+:reload Counter
+// => Counter
+
+// :reload (no arg) → reload last loaded file
+:reload
+// => _
+
+// After reload, Counter still works
+c := Counter spawn
+// => #Actor<Counter,_>
+
+c increment
+// => 1

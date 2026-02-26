@@ -175,6 +175,7 @@ pub(crate) struct ActorInfo {
 
 /// Information about a loaded module, deserialized from REPL JSON.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // deserialized from JSON; fields retained for backward-compatible protocol handling
 pub(crate) struct ModuleInfo {
     /// Module name as registered in the BEAM node.
     pub(crate) name: String,
@@ -236,39 +237,6 @@ fn auto_run_entry(client: &mut client::ReplClient, project_root: &Path) {
             eprintln!("Warning: [run] entry failed: {e}");
             eprintln!("The REPL is still available.");
         }
-    }
-}
-
-/// Display the result of a reload operation.
-pub(crate) fn display_reload_result(response: &ReplResponse, module_name: Option<&str>) {
-    if response.is_error() {
-        if let Some(msg) = response.error_message() {
-            eprintln!("{}", format_error(msg));
-        }
-        return;
-    }
-    let label = if let Some(ref classes) = response.classes {
-        if classes.is_empty() {
-            module_name.map_or_else(|| "Reloaded".to_string(), |n| format!("Reloaded {n}"))
-        } else {
-            format!("Reloaded {}", classes.join(", "))
-        }
-    } else {
-        module_name.map_or_else(|| "Reloaded".to_string(), |n| format!("Reloaded {n}"))
-    };
-    match (response.affected_actors, response.migration_failures) {
-        (Some(count), Some(failures)) if count > 0 && failures > 0 => {
-            let word = if count == 1 { "actor" } else { "actors" };
-            println!("{label} ({count} {word} updated, {failures} failed)");
-            eprintln!(
-                "Warning: {failures} actor(s) failed code migration. Consider restarting them with :kill"
-            );
-        }
-        (Some(count), _) if count > 0 => {
-            let word = if count == 1 { "actor" } else { "actors" };
-            println!("{label} ({count} {word} updated)");
-        }
-        _ => println!("{label}"),
     }
 }
 
@@ -740,6 +708,7 @@ pub(crate) fn repl_loop(
 
     // Main REPL loop
     let mut line_buffer: Vec<String> = Vec::new();
+    let mut last_loaded_path: Option<(String, bool)> = None; // (path, is_directory)
     loop {
         let prompt = if line_buffer.is_empty() { "> " } else { "..> " };
         match rl.readline(prompt) {
@@ -834,98 +803,80 @@ pub(crate) fn repl_loop(
                             }
 
                             if Path::new(path).is_dir() {
-                                // Directory load: recursively find and load all .bt files
-                                if load_directory(client, path, "Loaded") {
-                                    client.set_last_loaded_directory(path);
-                                }
+                                // Directory load: recursively find and load each .bt file via eval
+                                load_directory(client, path, false);
+                                last_loaded_path = Some((path.to_string(), true));
                             } else {
-                                match client.load_file(path) {
-                                    Ok(response) => {
-                                        if response.is_error() {
-                                            if let Some(msg) = response.error_message() {
-                                                eprintln!("Error: {msg}");
-                                            }
-                                        } else {
-                                            client.set_last_loaded_file(path);
-                                            if let Some(classes) = &response.classes {
-                                                if classes.is_empty() {
-                                                    println!("Loaded {path}");
-                                                } else {
-                                                    println!("Loaded {}", classes.join(", "));
-                                                }
-                                            } else {
-                                                println!("Loaded {path}");
-                                            }
-                                        }
-                                    }
+                                let expr = format!(
+                                    "Workspace load: \"{}\"",
+                                    escape_for_string_literal(path)
+                                );
+                                match client.eval(&expr) {
+                                    Ok(response) => display_eval_response(&response),
                                     Err(e) => eprintln!("Error: {e}"),
                                 }
+                                last_loaded_path = Some((path.to_string(), false));
                             }
                             continue;
                         }
                         _ if line.starts_with(":reload ") || line.starts_with(":r ") => {
                             let raw = extract_command_arg(line, ":reload ", Some(":r "));
-                            let module_name = strip_path_quotes(raw);
-                            match client.reload_module(module_name) {
-                                Ok(response) => {
-                                    display_reload_result(&response, Some(module_name));
-                                }
+                            let class_name = strip_path_quotes(raw);
+                            // :reload Counter → Counter reload
+                            let expr = format!("{class_name} reload");
+                            match client.eval(&expr) {
+                                Ok(response) => display_eval_response(&response),
                                 Err(e) => eprintln!("Error: {e}"),
                             }
                             continue;
                         }
                         ":reload" | ":r" => {
-                            match client.last_loaded_path() {
-                                Some(client::LastLoadedPath::Directory(dir)) => {
-                                    let dir = dir.clone();
-                                    load_directory(client, &dir, "Reloaded");
-                                }
-                                Some(client::LastLoadedPath::File(path)) => {
-                                    let path = path.clone();
-                                    match client.load_file(&path) {
-                                        Ok(response) => {
-                                            display_reload_result(&response, None);
-                                        }
+                            // :reload (no arg) → reload the last loaded path (directory or file)
+                            if let Some((path, is_directory)) = &last_loaded_path {
+                                if *is_directory {
+                                    // Strip trailing slash for consistent message output
+                                    let display_path = path.trim_end_matches('/');
+                                    load_directory(client, display_path, true);
+                                } else {
+                                    let expr = format!(
+                                        "Workspace load: \"{}\"",
+                                        escape_for_string_literal(path)
+                                    );
+                                    match client.eval(&expr) {
+                                        Ok(response) => display_eval_response(&response),
                                         Err(e) => eprintln!("Error: {e}"),
                                     }
                                 }
-                                None => {
-                                    eprintln!("No file or directory has been loaded yet");
+                            } else {
+                                eprintln!(
+                                    "No file or directory loaded yet. Use :load <path> first."
+                                );
+                            }
+                            continue;
+                        }
+                        _ if line.starts_with(":test ") || line.starts_with(":t ") => {
+                            let raw = extract_command_arg(line, ":test ", Some(":t "));
+                            let class_name = raw.trim();
+                            if class_name.is_empty() {
+                                // :test → Workspace test
+                                match client.eval("Workspace test") {
+                                    Ok(response) => display_eval_response(&response),
+                                    Err(e) => eprintln!("Error: {e}"),
+                                }
+                            } else {
+                                // :test CounterTest → Workspace test: CounterTest
+                                let expr = format!("Workspace test: {class_name}");
+                                match client.eval(&expr) {
+                                    Ok(response) => display_eval_response(&response),
+                                    Err(e) => eprintln!("Error: {e}"),
                                 }
                             }
                             continue;
                         }
-                        ":modules" | ":m" => {
-                            match client.list_modules() {
-                                Ok(response) => {
-                                    if response.is_error() {
-                                        if let Some(msg) = response.error_message() {
-                                            eprintln!("Error: {msg}");
-                                        }
-                                    } else if let Some(modules) = response.modules {
-                                        if modules.is_empty() {
-                                            println!("No modules loaded.");
-                                        } else {
-                                            println!("Loaded modules:");
-                                            for module in modules {
-                                                let actors_text = if module.actor_count == 0 {
-                                                    String::new()
-                                                } else if module.actor_count == 1 {
-                                                    " - 1 actor".to_string()
-                                                } else {
-                                                    format!(" - {} actors", module.actor_count)
-                                                };
-                                                println!(
-                                                    "  {} ({}){} - loaded {}",
-                                                    module.name,
-                                                    module.source_file,
-                                                    actors_text,
-                                                    module.time_ago
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
+                        ":test" | ":t" => {
+                            // :test → Workspace test
+                            match client.eval("Workspace test") {
+                                Ok(response) => display_eval_response(&response),
                                 Err(e) => eprintln!("Error: {e}"),
                             }
                             continue;
@@ -986,7 +937,7 @@ pub(crate) fn repl_loop(
                         "exit" | "quit" => Some(":exit"),
                         "clear" => Some(":clear"),
                         "bindings" => Some(":bindings"),
-                        "modules" => Some(":modules"),
+                        "test" => Some(":test"),
                         "show-codegen" => Some(":show-codegen"),
                         _ => None,
                     } {
@@ -1075,6 +1026,14 @@ pub(crate) fn repl_loop(
     Ok(())
 }
 
+/// Escape a string for use as a Beamtalk string literal.
+///
+/// Escapes backslashes and double-quotes so the result can be safely embedded
+/// inside a `"..."` string literal in a generated Beamtalk expression.
+pub(crate) fn escape_for_string_literal(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 /// Extracts the argument from a REPL command with long and optional short forms.
 ///
 /// Returns the trimmed argument string, or an empty string if the command
@@ -1141,23 +1100,23 @@ fn discover_bt_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> std::io:
     Ok(())
 }
 
-/// Load all `.bt` files from a directory into the REPL, reporting progress.
+/// Load all `.bt` files from a directory into the REPL via `Workspace load:` eval requests.
 ///
-/// Returns `true` if at least one file was loaded successfully.
-fn load_directory(client: &mut ReplClient, dir_path: &str, verb: &str) -> bool {
+/// Reports per-file success/failure and a final summary.
+fn load_directory(client: &mut ReplClient, dir_path: &str, is_reload: bool) {
     let dir = Path::new(dir_path);
 
     let files = match discover_bt_files(dir) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("Error reading directory {dir_path}: {e}");
-            return false;
+            return;
         }
     };
 
     if files.is_empty() {
         println!("No .bt files found in {dir_path}");
-        return false;
+        return;
     }
 
     let mut loaded: usize = 0;
@@ -1165,12 +1124,16 @@ fn load_directory(client: &mut ReplClient, dir_path: &str, verb: &str) -> bool {
 
     for file in &files {
         let file_str = file.to_string_lossy();
-        match client.load_file(&file_str) {
+        let expr = format!(
+            "Workspace load: \"{}\"",
+            escape_for_string_literal(&file_str)
+        );
+        let file_name = file
+            .file_name()
+            .map_or_else(|| file_str.to_string(), |n| n.to_string_lossy().to_string());
+        match client.eval(&expr) {
             Ok(response) => {
                 if response.is_error() {
-                    let file_name = file
-                        .file_name()
-                        .map_or_else(|| file_str.to_string(), |n| n.to_string_lossy().to_string());
                     if let Some(msg) = response.error_message() {
                         eprintln!("  Error in {file_name}: {msg}");
                     }
@@ -1180,9 +1143,6 @@ fn load_directory(client: &mut ReplClient, dir_path: &str, verb: &str) -> bool {
                 }
             }
             Err(e) => {
-                let file_name = file
-                    .file_name()
-                    .map_or_else(|| file_str.to_string(), |n| n.to_string_lossy().to_string());
                 eprintln!("  Error loading {file_name}: {e}");
                 failed.push(file_name);
             }
@@ -1192,6 +1152,7 @@ fn load_directory(client: &mut ReplClient, dir_path: &str, verb: &str) -> bool {
     // Summary
     if failed.is_empty() {
         let word = if loaded == 1 { "file" } else { "files" };
+        let verb = if is_reload { "Reloaded" } else { "Loaded" };
         println!("{verb} {loaded} {word} from {dir_path}");
     } else if loaded > 0 {
         let word = if loaded == 1 { "file" } else { "files" };
@@ -1210,8 +1171,6 @@ fn load_directory(client: &mut ReplClient, dir_path: &str, verb: &str) -> bool {
             failed.join(", ")
         );
     }
-
-    loaded > 0
 }
 
 #[cfg(test)]
@@ -1749,5 +1708,42 @@ mod tests {
     fn discover_bt_files_nonexistent_dir() {
         let result = discover_bt_files(Path::new("/nonexistent/path/abc123"));
         assert!(result.is_err());
+    }
+
+    // === escape_for_string_literal tests ===
+
+    #[test]
+    fn escape_plain_path() {
+        assert_eq!(
+            escape_for_string_literal("examples/counter.bt"),
+            "examples/counter.bt"
+        );
+    }
+
+    #[test]
+    fn escape_path_with_backslash() {
+        assert_eq!(
+            escape_for_string_literal("path\\to\\file.bt"),
+            "path\\\\to\\\\file.bt"
+        );
+    }
+
+    #[test]
+    fn escape_path_with_double_quote() {
+        assert_eq!(
+            escape_for_string_literal("path with \"spaces\".bt"),
+            "path with \\\"spaces\\\".bt"
+        );
+    }
+
+    #[test]
+    fn escape_empty_string() {
+        assert_eq!(escape_for_string_literal(""), "");
+    }
+
+    #[test]
+    fn escape_both_backslash_and_quote() {
+        // Backslash must be escaped first to avoid double-escaping quotes
+        assert_eq!(escape_for_string_literal("a\\\"b"), "a\\\\\\\"b");
     }
 }
