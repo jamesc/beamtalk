@@ -48,13 +48,19 @@
 %%%
 %%% ## Message Protocol
 %%%
-%%% Generated actors send messages in one of two forms:
+%%% Generated actors send messages in one of three forms:
 %%%
 %%% **Async (cast)** - Returns a future:
 %%% ```erlang
 %%% FuturePid = beamtalk_future:new(),
 %%% gen_server:cast(ActorPid, {Selector, Args, FuturePid}),
 %%% FuturePid
+%%% ```
+%%%
+%%% **Fire-and-forget (cast)** - No return value:
+%%% ```erlang
+%%% gen_server:cast(ActorPid, {cast, Selector, Args}),
+%%% ok
 %%% ```
 %%%
 %%% **Sync (call)** - Blocks until result:
@@ -152,7 +158,7 @@
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
 
 %% Message send helpers (lifecycle-aware wrappers)
--export([async_send/4, sync_send/3]).
+-export([async_send/4, sync_send/3, cast_send/3]).
 
 %% gen_server callbacks (for generated actors to delegate to)
 -export([
@@ -315,6 +321,23 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
             ok
     end.
 
+%% @doc Send a fire-and-forget message to an actor (no future, no return value).
+%%
+%% Checks if the actor is alive before sending. If dead, silently returns ok
+%% (fire-and-forget semantics — the caller does not expect a reply).
+%%
+%% WARNING: Race condition! is_process_alive/1 is a snapshot check.
+%% The actor could die between the alive check and the gen_server:cast.
+-spec cast_send(pid(), atom(), list()) -> ok.
+cast_send(ActorPid, Selector, Args) ->
+    case is_process_alive(ActorPid) of
+        true ->
+            gen_server:cast(ActorPid, {cast, Selector, Args}),
+            ok;
+        false ->
+            ok
+    end.
+
 %% @doc Send a synchronous message to an actor, with lifecycle handling.
 %%
 %% Handles lifecycle methods locally without involving the actor process:
@@ -428,10 +451,27 @@ init(_NonMapState) ->
     {stop, {invalid_state, not_a_map}}.
 
 %% @doc Handle asynchronous messages (cast).
-%% Message format: {Selector, Args, FuturePid}
-%% Dispatches to method and resolves/rejects the future.
-%% Errors are communicated via the future (rejection) rather than crash.
+%% Accepts two wire formats:
+%%   {cast, Selector, Args}       - Fire-and-forget (no future, result discarded)
+%%   {Selector, Args, FuturePid}  - Async with future (backward-compatible)
+%% Errors in fire-and-forget are logged but do not crash the actor.
+%% Errors in async-with-future are communicated via future rejection.
 -spec handle_cast(term(), map()) -> {noreply, map()}.
+handle_cast({cast, Selector, Args}, State) when is_atom(Selector), is_list(Args) ->
+    Self = make_self(State),
+    case dispatch(Selector, Args, Self, State) of
+        {reply, _Result, NewState} ->
+            %% Fire-and-forget: result is discarded
+            {noreply, NewState};
+        {noreply, NewState} ->
+            {noreply, NewState};
+        {error, Reason, NewState} ->
+            %% Log error but don't crash — caller expects no reply
+            ?LOG_WARNING("Fire-and-forget dispatch error", #{
+                selector => Selector, reason => Reason
+            }),
+            {noreply, NewState}
+    end;
 handle_cast({Selector, Args, FuturePid}, State) ->
     Self = make_self(State),
     case dispatch(Selector, Args, Self, State) of
