@@ -134,12 +134,12 @@ p respondsTo: #getX
 // => _
 
 // ===========================================================================
-// :reload — RELOAD LOADED MODULE
+// :reload — RELOAD LOADED CLASS
 // ===========================================================================
 
-// Reload the counter module by its compiled module name
-:reload bt@counter
-// => _
+// Reload by class name (BT-848: :reload <ClassName> → ClassName reload)
+:reload Counter
+// => Counter
 
 // Counter should still work after reload
 c2 := Counter spawn

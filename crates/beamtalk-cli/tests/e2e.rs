@@ -518,20 +518,13 @@ impl Drop for ProcessManager {
     }
 }
 
-/// Tracks the last loaded path for `:reload` support in e2e tests.
-#[derive(Clone, Debug)]
-enum LastLoadedPath {
-    File(String),
-    Directory(String),
-}
-
 /// Client for communicating with the REPL via WebSocket.
 struct ReplClient {
     ws: WebSocket<TcpStream>,
     /// Last warnings from evaluation (for WARNING: assertions)
     last_warnings: Vec<String>,
-    /// Last loaded path for `:reload` without arguments
-    last_loaded_path: Option<LastLoadedPath>,
+    /// Last loaded path for :reload support (path, `is_directory`) — BT-848
+    last_loaded_path: Option<(String, bool)>,
 }
 
 impl ReplClient {
@@ -968,31 +961,13 @@ impl ReplClient {
         Ok(entries.join("\n"))
     }
 
-    /// Reload a module by name.
-    fn reload_module(&mut self, module: &str) -> Result<String, String> {
-        let response = self.send_op(&serde_json::json!({
-            "op": "reload",
-            "id": "e2e-reload",
-            "module": module
-        }))?;
-        let classes = response
-            .get("classes")
-            .and_then(|c| c.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        if classes.is_empty() {
-            Ok("Reloaded".to_string())
-        } else {
-            Ok(format!("Reloaded: {}", classes.join(", ")))
-        }
-    }
-
     /// Load a file or directory and return a formatted string for test assertions.
     fn load_and_report(&mut self, path: &str) -> Result<String, String> {
+        self.load_and_report_with_verb(path, "Loaded")
+    }
+
+    /// Load a file or directory with a custom verb for the output message.
+    fn load_and_report_with_verb(&mut self, path: &str, verb: &str) -> Result<String, String> {
         let root = workspace_root();
         let path = path.trim();
         let path = path
@@ -1003,21 +978,17 @@ impl ReplClient {
         let full_path = root.join(path);
 
         if full_path.is_dir() {
-            self.load_directory_and_report(&full_path, path, "Loaded")
+            self.load_directory_and_report(&full_path, path, verb)
         } else {
-            // BT-845: Store the original relative path for :reload consistency.
-            // Using full_path for reload would break if the CWD changes.
             let classes = self.load_file(path)?;
-            self.last_loaded_path = Some(LastLoadedPath::File(path.to_string()));
             if classes.is_empty() {
-                Ok("Loaded".to_string())
+                Ok(verb.to_string())
             } else {
-                Ok(format!("Loaded: {}", classes.join(", ")))
+                Ok(format!("{verb}: {}", classes.join(", ")))
             }
         }
     }
 
-    /// Load all `.bt` files from a directory recursively and report results.
     fn load_directory_and_report(
         &mut self,
         full_path: &std::path::Path,
@@ -1049,10 +1020,6 @@ impl ReplClient {
                 }
             }
         }
-
-        self.last_loaded_path = Some(LastLoadedPath::Directory(
-            full_path.to_string_lossy().to_string(),
-        ));
 
         if failed.is_empty() {
             let word = if loaded == 1 { "file" } else { "files" };
@@ -1094,28 +1061,6 @@ impl ReplClient {
             }
         }
         Ok(())
-    }
-
-    /// Reload the last loaded file or directory.
-    fn reload_last(&mut self) -> Result<String, String> {
-        match self.last_loaded_path.clone() {
-            Some(LastLoadedPath::Directory(full_path)) => {
-                let dir = std::path::Path::new(&full_path);
-                let display_path = dir
-                    .strip_prefix(workspace_root())
-                    .map_or_else(|_| full_path.clone(), |p| p.to_string_lossy().to_string());
-                self.load_directory_and_report(dir, &display_path, "Reloaded")
-            }
-            Some(LastLoadedPath::File(path)) => {
-                let classes = self.load_file(&path)?;
-                if classes.is_empty() {
-                    Ok("Reloaded".to_string())
-                } else {
-                    Ok(format!("Reloaded: {}", classes.join(", ")))
-                }
-            }
-            None => Err("No file or directory has been loaded yet".to_string()),
-        }
     }
 
     /// Inspect an actor's state by PID string.
@@ -1384,17 +1329,38 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                 .or_else(|| case.expression.strip_prefix(":l "))
                 .unwrap()
                 .trim();
+            let normalized_path = path.trim_end_matches('/').to_string();
+            client.last_loaded_path =
+                Some((normalized_path.clone(), std::path::Path::new(path).is_dir()));
             client.load_and_report(path)
         } else if case.expression == ":reload" || case.expression == ":r" {
-            client.reload_last()
+            // :reload (no arg) → reload the last loaded path  (BT-848)
+            if let Some((path, _)) = &client.last_loaded_path.clone() {
+                client.load_and_report_with_verb(path, "Reloaded")
+            } else {
+                Err("No file or directory loaded yet. Use :load <path> first.".to_string())
+            }
         } else if case.expression.starts_with(":reload ") || case.expression.starts_with(":r ") {
-            let module = case
+            let class_name = case
                 .expression
                 .strip_prefix(":reload ")
                 .or_else(|| case.expression.strip_prefix(":r "))
                 .unwrap()
                 .trim();
-            client.reload_module(module)
+            // :reload Counter → Counter reload  (BT-848)
+            client.eval(&format!("{class_name} reload"))
+        } else if case.expression == ":test" || case.expression == ":t" {
+            // :test → Workspace test  (BT-848)
+            client.eval("Workspace test")
+        } else if case.expression.starts_with(":test ") || case.expression.starts_with(":t ") {
+            let class_name = case
+                .expression
+                .strip_prefix(":test ")
+                .or_else(|| case.expression.strip_prefix(":t "))
+                .unwrap()
+                .trim();
+            // :test CounterTest → Workspace test: CounterTest  (BT-848)
+            client.eval(&format!("Workspace test: {class_name}"))
         } else if case.expression.starts_with(":inspect ") {
             let arg = case.expression.strip_prefix(":inspect ").unwrap().trim();
             if arg.starts_with('<') {
