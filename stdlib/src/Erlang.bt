@@ -21,4 +21,16 @@
 /// generates inline proxy construction rather than routing through a
 /// gen_server process. See ADR 0028 §1.
 sealed ProtoObject subclass: Erlang
+
+  /// Look up an Erlang module by name, returning an ErlangModule proxy.
+  ///
+  /// Invoked automatically when an unknown unary message is sent to `Erlang`.
+  /// The `selector` becomes the module name; `arguments` is always empty.
+  /// Compiled via `@intrinsic erlangModuleLookup` — no gen_server roundtrip.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Erlang lists       // => #ErlangModule<lists>
+  /// Erlang maps        // => #ErlangModule<maps>
+  /// ```
   class doesNotUnderstand: selector args: arguments => @intrinsic erlangModuleLookup

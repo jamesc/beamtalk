@@ -142,9 +142,50 @@ sealed Object subclass: DateTime
 
   // ===== Instance Methods — Comparison =====
 
+  /// True if this DateTime is earlier than `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2025 month: 1 day: 1) < (DateTime year: 2026 month: 1 day: 1)  // => true
+  /// ```
   < other: DateTime -> Boolean => @primitive "<"
+
+  /// True if this DateTime is later than `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2026 month: 1 day: 1) > (DateTime year: 2025 month: 1 day: 1)  // => true
+  /// ```
   > other: DateTime -> Boolean => @primitive ">"
+
+  /// True if this DateTime is earlier than or equal to `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2026 month: 1 day: 1) <= (DateTime year: 2026 month: 1 day: 1)  // => true
+  /// ```
   <= other: DateTime -> Boolean => @primitive "<="
+
+  /// True if this DateTime is later than or equal to `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2026 month: 1 day: 1) >= (DateTime year: 2026 month: 1 day: 1)  // => true
+  /// ```
   >= other: DateTime -> Boolean => @primitive ">="
+
+  /// True if this DateTime represents the same instant as `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// dt =:= dt    // => true
+  /// ```
   =:= other: DateTime -> Boolean => @primitive "=:="
+
+  /// True if this DateTime does not represent the same instant as `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2026 month: 1 day: 1) /= (DateTime year: 2026 month: 1 day: 2)  // => true
+  /// ```
   /= other: DateTime -> Boolean => @primitive "/="
