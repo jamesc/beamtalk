@@ -1,0 +1,16 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Decorator Pattern — Beverage (abstract component)
+// Intent: Attach additional responsibilities to an object dynamically.
+// Decorators provide a flexible alternative to subclassing for extending
+// functionality by wrapping objects rather than changing their class.
+//
+// Any Beverage has a description and a cost. Both concrete beverages and
+// condiment decorators satisfy this interface.
+
+Object subclass: Beverage
+  /// Return a human-readable description of this beverage and its condiments.
+  description => self subclassResponsibility
+  /// Return the total price in dollars.
+  cost        => self subclassResponsibility

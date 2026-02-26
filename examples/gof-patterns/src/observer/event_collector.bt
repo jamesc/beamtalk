@@ -1,0 +1,19 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Observer Pattern — EventCollector (concrete observer)
+// Accumulates every event it receives. Useful as a test double and as a simple
+// audit log. Real observers would react to events (update UI, write to DB, etc.).
+
+Actor subclass: EventCollector
+  state: events = #()
+
+  /// Called by EventBus notify: — appends the event to the internal log.
+  receive: event =>
+    self.events := self.events add: event
+    self
+
+  /// Return all received events in the order they arrived.
+  events     => self.events
+  /// Return the number of events received so far.
+  eventCount => self.events size

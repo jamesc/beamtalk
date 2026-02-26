@@ -1,0 +1,66 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Command Pattern — CommandHistory, InsertCommand, DeleteCommand
+
+TestCase subclass: CommandHistoryTest
+
+  testInsertCommand =>
+    buf    := TextBuffer withText: "hello"
+    cmd    := InsertCommand at: 6 insert: " world"
+    result := cmd execute: buf
+    self assert: result text equals: "hello world"
+
+  testDeleteCommand =>
+    buf    := TextBuffer withText: "hello world"
+    cmd    := DeleteCommand from: 6 length: 6
+    result := cmd execute: buf
+    self assert: result text equals: "hello"
+
+  testHistoryExecute =>
+    h := CommandHistory on: (TextBuffer withText: "hello")
+    h := h execute: (InsertCommand at: 6 insert: " world")
+    self assert: h buffer text equals: "hello world"
+
+  testHistoryUndoInsert =>
+    h := CommandHistory on: (TextBuffer withText: "hello")
+    h := h execute: (InsertCommand at: 6 insert: " world")
+    h := h undo
+    self assert: h buffer text equals: "hello"
+
+  testHistoryUndoDelete =>
+    h := CommandHistory on: (TextBuffer withText: "hello world")
+    h := h execute: (DeleteCommand from: 6 length: 6)
+    h := h undo
+    self assert: h buffer text equals: "hello world"
+
+  testHistoryMultipleUndos =>
+    h := CommandHistory on: (TextBuffer withText: "")
+    h := h execute: (InsertCommand at: 1 insert: "foo")
+    h := h execute: (InsertCommand at: 4 insert: "bar")
+    h := h undo
+    self assert: h buffer text equals: "foo"
+    h := h undo
+    self assert: h buffer text equals: ""
+
+  testCanUndo =>
+    h := CommandHistory on: (TextBuffer withText: "hi")
+    self deny: h canUndo
+    h := h execute: (InsertCommand at: 3 insert: "!")
+    self assert: h canUndo
+    h := h undo
+    self deny: h canUndo
+
+  testUndoOnEmptyHistoryIsNoop =>
+    h := CommandHistory on: (TextBuffer withText: "hi")
+    h := h undo
+    self assert: h buffer text equals: "hi"
+
+  testDeleteThenInsertThenUndoBoth =>
+    h := CommandHistory on: (TextBuffer withText: "hello world")
+    h := h execute: (DeleteCommand from: 6 length: 6)
+    h := h execute: (InsertCommand at: 6 insert: " there")
+    h := h undo
+    self assert: h buffer text equals: "hello"
+    h := h undo
+    self assert: h buffer text equals: "hello world"

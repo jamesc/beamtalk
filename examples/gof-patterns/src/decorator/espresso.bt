@@ -1,0 +1,10 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Decorator Pattern — Espresso (concrete component)
+
+Beverage subclass: Espresso
+  /// Return "Espresso".
+  description => "Espresso"
+  /// Return the base price: $1.99.
+  cost        => 1.99

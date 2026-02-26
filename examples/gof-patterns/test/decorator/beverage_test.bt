@@ -1,0 +1,41 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Decorator Pattern — Beverage and condiments
+
+TestCase subclass: BeverageTest
+
+  testEspressoBase =>
+    e := Espresso new
+    self assert: e description equals: "Espresso"
+    self assert: e cost equals: 1.99
+
+  testHouseBlendBase =>
+    h := HouseBlend new
+    self assert: h description equals: "House Blend"
+    self assert: h cost equals: 0.89
+
+  testMilkDecorator =>
+    e := Milk wrap: Espresso new
+    self assert: e description equals: "Espresso, Milk"
+    self assert: e cost equals: 2.24
+
+  testSugarDecorator =>
+    e := Sugar wrap: Espresso new
+    self assert: e description equals: "Espresso, Sugar"
+    self assert: e cost equals: 2.09
+
+  testWhippedCreamDecorator =>
+    e := WhippedCream wrap: Espresso new
+    self assert: e description equals: "Espresso, Whipped Cream"
+    self assert: e cost equals: 2.49
+
+  testMultipleDecorators =>
+    drink := Milk wrap: (Sugar wrap: Espresso new)
+    self assert: drink description equals: "Espresso, Sugar, Milk"
+    self assert: drink cost equals: 2.34
+
+  testStackedSameDecorator =>
+    drink := Milk wrap: (Milk wrap: HouseBlend new)
+    self assert: drink description equals: "House Blend, Milk, Milk"
+    self assert: drink cost equals: 1.3900000000000001

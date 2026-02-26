@@ -1,9 +1,12 @@
-# Copyright 2026 James Casey
+# Copyright 2026 gang_of_four authors
 # SPDX-License-Identifier: Apache-2.0
 
 [package]
-name = "gof_patterns"
+name = "gang_of_four"
 version = "0.1.0"
-description = "Gang of Four design patterns implemented in Beamtalk"
+start = "main"
+
+[run]
+entry = "Main run"
 
 [dependencies]

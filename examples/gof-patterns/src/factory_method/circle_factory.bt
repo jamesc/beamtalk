@@ -1,0 +1,14 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Factory Method Pattern — CircleFactory (concrete creator)
+
+ShapeFactory subclass: CircleFactory
+  state: radius = 1.0
+
+  /// Create a factory configured to produce circles with the given radius.
+  class withRadius: r =>
+    self new: #{radius => r}
+
+  /// Produce a Circle with this factory's configured radius.
+  createShape => Circle withRadius: self.radius

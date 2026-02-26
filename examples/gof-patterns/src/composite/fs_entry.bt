@@ -1,0 +1,15 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Composite Pattern — FsEntry (abstract component)
+// Intent: Compose objects into tree structures to represent part-whole hierarchies.
+// Composite lets clients treat individual objects (FsFile) and compositions
+// (FsDir) uniformly through a single interface.
+
+Object subclass: FsEntry
+  /// Return the name of this entry (file or directory name, without path).
+  name            => self subclassResponsibility
+  /// Return the total byte size of this entry (recursive for directories).
+  size            => self subclassResponsibility
+  /// Return a human-readable string representation, indented by indent.
+  describe: indent => self subclassResponsibility

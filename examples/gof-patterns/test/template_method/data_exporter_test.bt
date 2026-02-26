@@ -1,0 +1,38 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Template Method Pattern — CsvExporter and HtmlExporter
+
+TestCase subclass: DataExporterTest
+
+  testCsvSingleRow =>
+    csv := CsvExporter new
+    result := csv export: #(#("Alice", "30"))
+    self assert: result equals: "Alice,30\n"
+
+  testCsvMultipleRows =>
+    csv := CsvExporter new
+    result := csv export: #(#("Alice", "30"), #("Bob", "25"))
+    self assert: result equals: "Alice,30\nBob,25\n"
+
+  testCsvEmptyRows =>
+    csv := CsvExporter new
+    self assert: (csv export: #()) equals: ""
+
+  testCsvSingleCellRow =>
+    csv := CsvExporter new
+    self assert: (csv export: #(#("only"))) equals: "only\n"
+
+  testHtmlSingleRow =>
+    html := HtmlExporter new
+    result := html export: #(#("Alice", "30"))
+    self assert: result equals: "<table>\n<tr><td>Alice</td><td>30</td></tr>\n</table>\n"
+
+  testHtmlMultipleRows =>
+    html := HtmlExporter new
+    result := html export: #(#("a", "1"), #("b", "2"))
+    self assert: result equals: "<table>\n<tr><td>a</td><td>1</td></tr>\n<tr><td>b</td><td>2</td></tr>\n</table>\n"
+
+  testHtmlEmptyRows =>
+    html := HtmlExporter new
+    self assert: (html export: #()) equals: "<table>\n</table>\n"

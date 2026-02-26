@@ -1,0 +1,11 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Adapter Pattern — FahrenheitThermometer (target interface)
+// The interface that client code expects: readings in both Fahrenheit and Celsius.
+
+Object subclass: FahrenheitThermometer
+  /// Return the current temperature in degrees Fahrenheit.
+  readFahrenheit => self subclassResponsibility
+  /// Return the current temperature in degrees Celsius.
+  readCelsius    => self subclassResponsibility

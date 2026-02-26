@@ -1,0 +1,10 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Decorator Pattern — Sugar (concrete decorator)
+
+CondimentDecorator subclass: Sugar
+  /// Append ", Sugar" to the wrapped beverage's description.
+  description => "{self.beverage description}, Sugar"
+  /// Add $0.10 to the wrapped beverage's cost.
+  cost        => self.beverage cost + 0.10

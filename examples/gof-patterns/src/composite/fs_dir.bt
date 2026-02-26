@@ -1,0 +1,42 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Composite Pattern — FsDir (composite)
+// A directory that holds any number of FsEntry objects (files or subdirectories).
+// Because value objects are immutable, add: returns a new FsDir.
+// Implements the same interface as FsFile (name, size, describe:) via duck typing.
+//
+// Usage:
+//   f1  := FsFile name: "main.bt" size: 120.
+//   f2  := FsFile name: "lib.bt"  size: 340.
+//   src := ((FsDir name: "src") add: f1) add: f2.
+//   src size          // => 460
+//   src describe: ""
+//   // => "src/ (460 bytes)\n  main.bt (120 bytes)\n  lib.bt (340 bytes)"
+
+FsEntry subclass: FsDir
+  state: name     = ""
+  state: children = #()
+
+  /// Create an empty directory with the given name.
+  class name: n =>
+    self new: #{name => n}
+
+  /// Return the directory name.
+  name => self.name
+
+  /// Return a new FsDir with entry appended to children.
+  add: entry =>
+    self.children := self.children add: entry
+    self
+
+  /// Total size is the recursive sum of all children.
+  size =>
+    self.children inject: 0 into: [:acc :child | acc + child size]
+
+  /// Return a multi-line tree string; each child is indented two spaces beyond indent.
+  describe: indent =>
+    total     := self size
+    childLines := self.children inject: "" into: [:acc :child |
+      acc ++ "\n" ++ (child describe: indent ++ "  ")]
+    "{indent}{self.name}/ ({total} bytes){childLines}"

@@ -1,0 +1,20 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Template Method Pattern — HtmlExporter
+// Formats rows as an HTML table.
+//
+// Usage:
+//   rows := #(#("Alice", "30"), #("Bob", "25")).
+//   HtmlExporter new export: rows
+//   // => "<table>\n<tr><td>Alice</td><td>30</td></tr>\n...\n</table>\n"
+
+DataExporter subclass: HtmlExporter
+  /// Return the opening <table> tag.
+  header => "<table>\n"
+  /// Return the closing </table> tag.
+  footer => "</table>\n"
+  /// Wrap each cell in <td> and the whole row in <tr>.
+  formatRow: row =>
+    cells := row inject: "" into: [:acc :cell | acc ++ "<td>{cell}</td>"]
+    "<tr>{cells}</tr>\n"

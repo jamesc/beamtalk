@@ -1,0 +1,10 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Decorator Pattern — WhippedCream (concrete decorator)
+
+CondimentDecorator subclass: WhippedCream
+  /// Append ", Whipped Cream" to the wrapped beverage's description.
+  description => "{self.beverage description}, Whipped Cream"
+  /// Add $0.50 to the wrapped beverage's cost.
+  cost        => self.beverage cost + 0.50

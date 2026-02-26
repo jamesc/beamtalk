@@ -1,0 +1,18 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Factory Method Pattern — Circle (concrete product)
+
+Shape subclass: Circle
+  state: radius = 1.0
+
+  /// Create a circle with the given radius.
+  class withRadius: r =>
+    self new: #{radius => r}
+
+  /// Return π * r².
+  area      => 3.14159 * self.radius * self.radius
+  /// Return 2 * π * r.
+  perimeter => 2.0 * 3.14159 * self.radius
+  /// Return "Circle(r=<radius>)".
+  describe  => "Circle(r={self.radius})"

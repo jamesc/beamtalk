@@ -1,0 +1,10 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Decorator Pattern — HouseBlend (concrete component)
+
+Beverage subclass: HouseBlend
+  /// Return "House Blend".
+  description => "House Blend"
+  /// Return the base price: $0.89.
+  cost        => 0.89

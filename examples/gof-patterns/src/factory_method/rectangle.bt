@@ -1,0 +1,19 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Factory Method Pattern — Rectangle (concrete product)
+
+Shape subclass: Rectangle
+  state: width  = 1.0
+  state: height = 1.0
+
+  /// Create a rectangle with the given width and height.
+  class width: w height: h =>
+    self new: #{width => w, height => h}
+
+  /// Return width * height.
+  area      => self.width * self.height
+  /// Return 2 * (width + height).
+  perimeter => 2.0 * (self.width + self.height)
+  /// Return "Rectangle(<width>x<height>)".
+  describe  => "Rectangle({self.width}x{self.height})"

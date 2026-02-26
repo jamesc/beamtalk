@@ -1,0 +1,20 @@
+// Copyright 2026 gang_of_four authors
+// SPDX-License-Identifier: Apache-2.0
+
+// Template Method Pattern — CsvExporter
+// Formats rows as comma-separated values.
+//
+// Usage:
+//   rows := #(#("Alice", "30"), #("Bob", "25")).
+//   CsvExporter new export: rows
+//   // => "Alice,30\nBob,25\n"
+
+DataExporter subclass: CsvExporter
+  /// No header line for CSV output.
+  header => ""
+  /// No footer line for CSV output.
+  footer => ""
+  /// Format row as comma-separated cell values followed by a newline.
+  formatRow: row =>
+    (row inject: "" into: [:acc :cell |
+      acc isEmpty ifTrue: [cell] ifFalse: ["{acc},{cell}"]]) ++ "\n"
