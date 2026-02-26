@@ -635,9 +635,19 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
         is_atom(K),
         not is_internal_key(K)
     ],
+    %% BT-907: Pass class superclass index so inline class definitions correctly
+    %% resolve cross-file inheritance chains (same as compile_file_via_port does
+    %% for file loads since BT-905). Without this, a child class defined inline
+    %% in the REPL whose parent was loaded from a file defaults to Actor codegen.
+    SuperclassIndex = build_class_superclass_index(),
+    CompileOpts =
+        case map_size(SuperclassIndex) of
+            0 -> #{};
+            _ -> #{class_superclass_index => SuperclassIndex}
+        end,
     wrap_compiler_errors(
         fun() ->
-            case beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars) of
+            case beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars, CompileOpts) of
                 %% BT-571: Inline class definition
                 {ok, class_definition, ClassInfo} ->
                     #{
@@ -1156,7 +1166,7 @@ build_class_superclass_index() ->
                     ({_Class, none}, Acc) ->
                         Acc;
                     ({Class, Superclass}, Acc) when is_atom(Class), is_atom(Superclass) ->
-                        Acc#{atom_to_binary(Class) => atom_to_binary(Superclass)};
+                        Acc#{atom_to_binary(Class, utf8) => atom_to_binary(Superclass, utf8)};
                     (_, Acc) ->
                         Acc
                 end,

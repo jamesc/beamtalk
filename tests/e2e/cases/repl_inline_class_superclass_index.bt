@@ -1,0 +1,51 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for inline REPL class definition respecting cross-file superclass index (BT-907).
+//
+// These tests verify that when a value-object class is loaded from a file and then a
+// subclass is defined *inline* in the REPL (not via :load), the subclass is compiled
+// as a value object rather than an Actor.
+//
+// Before the fix, compile_expression_via_port did not pass class_superclass_index
+// to the compiler port, so inline subclasses of file-loaded value-object parents
+// defaulted to Actor codegen.
+//
+// Uses the shape.bt fixture (Object subclass: Shape) as the file-loaded parent.
+
+// @load tests/e2e/fixtures/shape.bt
+
+// ===========================================================================
+// INLINE SUBCLASS OF FILE-LOADED VALUE-OBJECT PARENT
+// ===========================================================================
+
+// Define a subclass of Shape inline (typed in the REPL, not via :load).
+// Before the fix, Triangle was compiled as an Actor because the compiler
+// did not receive Shape's superclass info from the ETS table.
+Shape subclass: Triangle
+  state: base = 1.0
+  class withBase: b => self new: #{base => b}
+// => _
+
+Triangle >> base => self.base
+// => _
+
+Triangle >> area => self.base * self.base / 2.0
+// => _
+
+// ===========================================================================
+// VERIFY VALUE-OBJECT BEHAVIOUR
+// ===========================================================================
+
+// Class-side factory must use `new:` (value-object), not `spawnWith:` (Actor).
+// Before the fix: runtime error because Actor classes don't have `new:`.
+t := Triangle withBase: 6.0
+// => _
+
+// The result is a map-based value object, not an Actor reference
+t class name
+// => Triangle
+
+// Field access works on the value object
+t base
+// => 6.0
