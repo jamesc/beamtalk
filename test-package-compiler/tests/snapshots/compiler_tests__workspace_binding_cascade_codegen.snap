@@ -184,7 +184,8 @@ module 'workspace_binding_cascade' ['start_link'/1, 'init'/1, 'handle_cast'/2, '
             'methodSource' => ~{'run' => #{#<114>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}#}~,
             'classState' => ~{}~,
             'classDoc' => 'none',
-            'methodDocs' => ~{}~
+            'methodDocs' => ~{}~,
+            'isConstructible' => 'false'
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'

@@ -120,8 +120,8 @@ init(SessionId) ->
     %% We use undefined for listen_socket and port since session doesn't own TCP connection
     State0 = beamtalk_repl_state:new(undefined, 0),
 
-    %% ADR 0019 Phase 3: Inject workspace convenience bindings into session
-    %% so that Transcript, Beamtalk, Workspace resolve from bindings map.
+    %% BT-883: Inject non-class workspace globals (singletons + bind:as: names)
+    %% as session bindings so they resolve from the bindings map.
     Bindings0 = inject_workspace_bindings(#{}),
     State0b = beamtalk_repl_state:set_bindings(Bindings0, State0),
 
@@ -174,8 +174,8 @@ handle_call(get_bindings, _From, {SessionId, State, Worker}) ->
     Bindings = beamtalk_repl_state:get_bindings(State),
     {reply, {ok, Bindings}, {SessionId, State, Worker}};
 handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
-    %% ADR 0019 Phase 3: Re-inject workspace bindings after clearing
-    %% so that Transcript, Beamtalk, Workspace remain available.
+    %% BT-883: Re-inject workspace globals after clearing bindings
+    %% so that singletons and bind:as: names remain available.
     Bindings = inject_workspace_bindings(#{}),
     NewState = beamtalk_repl_state:set_bindings(Bindings, State),
     {reply, ok, {SessionId, NewState, Worker}};
@@ -308,22 +308,12 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%% Internal functions
 
-%% @private ADR 0019 Phase 4: Inject workspace convenience bindings.
-%% Looks up workspace singletons by registered name and adds them to
-%% the bindings map so ClassReference codegen can resolve them.
-%% Singleton definitions from beamtalk_workspace_config:singletons/0.
-
+%% @private BT-883: Inject workspace globals (minus class objects) as session bindings.
+%% Walks Workspace globals via beamtalk_workspace_interface:get_session_bindings/0
+%% instead of the hardcoded singletons list. Returns singletons (Transcript,
+%% Beamtalk, Workspace) plus any user-registered bind:as: names.
 inject_workspace_bindings(Bindings) ->
-    lists:foldl(
-        fun(#{binding_name := Name, class_name := ClassName, module := Module}, Acc) ->
-            case erlang:whereis(Name) of
-                undefined -> Acc;
-                Pid -> maps:put(Name, {beamtalk_object, ClassName, Module, Pid}, Acc)
-            end
-        end,
-        Bindings,
-        beamtalk_workspace_config:singletons()
-    ).
+    maps:merge(Bindings, beamtalk_workspace_interface:get_session_bindings()).
 
 %% @private BT-696: Dispatch eval result to sync caller or async subscriber.
 reply_eval({async, Subscriber}, Msg) ->

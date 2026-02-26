@@ -623,6 +623,17 @@ fn handle_compile(request: &Map) -> Term {
         },
     };
 
+    // BT-905: Extract optional class superclass index for resolving cross-file
+    // value-object inheritance. Without this, a child class whose parent is defined
+    // in another file defaults to Actor codegen.
+    let class_superclass_index = match map_get(request, "class_superclass_index") {
+        None => std::collections::HashMap::new(),
+        Some(term) => match term_to_string_map(term) {
+            Ok(map) => map,
+            Err(e) => return error_response(&[e]),
+        },
+    };
+
     // BT-845/BT-860: Extract optional source file path to embed as beamtalk_source attribute.
     let source_path = map_get(request, "source_path").and_then(term_to_string);
 
@@ -634,6 +645,7 @@ fn handle_compile(request: &Map) -> Term {
             .with_workspace_mode(workspace_mode)
             .with_source(&source)
             .with_class_module_index(class_module_index)
+            .with_class_superclass_index(class_superclass_index)
             .with_source_path_opt(source_path.as_deref()),
     ) {
         Ok(code) => compile_ok_response(&code, &module_name, &classes, &warning_msgs),

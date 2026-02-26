@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Circle value object, extending Shape from a separate file (BT-905 fixture).
+// This file exercises cross-file value-object inheritance: without the fix,
+// the compiler defaults to Actor codegen because Shape is not defined here.
+
+Shape subclass: Circle
+  state: radius = 1.0
+
+  class withRadius: r => self new: #{radius => r}
+
+  radius => self.radius
+  area => 3.14159 * self.radius * self.radius
+  perimeter => 2.0 * 3.14159 * self.radius

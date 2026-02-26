@@ -1030,6 +1030,10 @@ impl CoreErlangGenerator {
                     ))
                 ];
 
+                // BT-884: Store the val var so callers (e.g. cascade codegen) can
+                // reference the assigned value after hoisting the binding.
+                self.last_open_scope_result = Some(val_var);
+
                 return Ok(doc);
             }
         }
