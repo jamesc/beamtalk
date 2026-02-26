@@ -193,12 +193,7 @@ display_string(nil) ->
     <<"nil">>;
 display_string(X) when is_atom(X) -> erlang:atom_to_binary(X, utf8);
 display_string(X) when is_list(X) ->
-    try unicode:characters_to_binary(X) of
-        Bin when is_binary(Bin) -> Bin;
-        _ -> iolist_to_binary(io_lib:format("~p", [X]))
-    catch
-        _:_ -> iolist_to_binary(io_lib:format("~p", [X]))
-    end;
+    iolist_to_binary([<<"#(">>, lists:join(<<", ">>, [display_string(E) || E <- X]), <<")">>]);
 display_string({beamtalk_future, _} = Future) ->
     display_string(beamtalk_future:await(Future));
 display_string(#beamtalk_object{class = 'Metaclass', pid = Pid}) ->
