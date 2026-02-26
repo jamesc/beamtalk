@@ -18,7 +18,7 @@
 //! Note: Message sending is handled by [`super::dispatch_codegen`].
 
 use super::document::Document;
-use super::{CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MatchArm, MessageSelector,
     Pattern, StringSegment,
@@ -698,10 +698,51 @@ impl CoreErlangGenerator {
 
         // Stateful block — generate Tier 2 block, then wrap it to strip the protocol.
         let bt_block_var = self.fresh_temp_var("BtBlock");
-        let current_state = self.current_state_var();
 
         // Generate the Tier 2 block: fun(Params..., StateAcc) -> {Result, NewStateAcc}
         let tier2_doc = self.generate_block_stateful(block, &captured_mutations)?;
+
+        // Seed StateAcc with captured locals before passing to the Tier 2 block.
+        // The Tier 2 block expects keys like "__local__count" in the StateAcc for
+        // captured mutations. For ValueType context, start with an empty map since
+        // there's no State var in the signature. For Actor/Repl, start from current_state.
+        let mut seed_state = if matches!(self.context, CodeGenContext::ValueType) {
+            self.fresh_temp_var("WStateAcc")
+        } else {
+            self.current_state_var().clone()
+        };
+        let mut seed_docs: Vec<Document<'static>> = Vec::new();
+
+        // If ValueType, initialize StateAcc to empty map.
+        if matches!(self.context, CodeGenContext::ValueType) {
+            seed_docs.push(docvec![
+                "let ",
+                Document::String(seed_state.clone()),
+                " = ~{}~ in "
+            ]);
+        }
+
+        // Pack captured locals into StateAcc under "__local__*" keys.
+        for var_name in &captured_mutations {
+            let next_state = self.fresh_temp_var("WStateAcc");
+            let key = Self::local_state_key(var_name);
+            let core_var = self
+                .lookup_var(var_name)
+                .cloned()
+                .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+            seed_docs.push(docvec![
+                "let ",
+                Document::String(next_state.clone()),
+                " = call 'maps':'put'('",
+                Document::String(key),
+                "', ",
+                Document::String(core_var),
+                ", ",
+                Document::String(seed_state),
+                ") in "
+            ]);
+            seed_state = next_state;
+        }
 
         // Fresh parameter names for the wrapper fun (separate scope from the Tier 2 block).
         let n_params = block.parameters.len();
@@ -717,7 +758,7 @@ impl CoreErlangGenerator {
             param_parts.push(Document::String(p.clone()));
         }
 
-        // Build apply arguments: "WArg1, ..., WArgN, CurrentState"
+        // Build apply arguments: "WArg1, ..., WArgN, SeedStateAcc"
         let mut apply_parts: Vec<Document<'static>> = Vec::new();
         for (i, p) in wrap_params.iter().enumerate() {
             if i > 0 {
@@ -728,12 +769,15 @@ impl CoreErlangGenerator {
         if !wrap_params.is_empty() {
             apply_parts.push(Document::Str(", "));
         }
-        apply_parts.push(Document::String(current_state));
+        apply_parts.push(Document::String(seed_state));
 
         // Emit:
         // let _BtBlock = fun(Params..., StateAcc) -> ... end in
+        // let WStateAcc0 = ~{}~ in  (if ValueType)
+        // let WStateAcc1 = call 'maps':'put'('__local__count', Count, WStateAcc0) in
+        // ... (for each captured local)
         // fun(WArg1, ..., WArgN) ->
-        //     let {_WRes, _} = apply _BtBlock(WArg1, ..., WArgN, CurrentState) in
+        //     let {_WRes, _} = apply _BtBlock(WArg1, ..., WArgN, WStateAccN) in
         //     _WRes
         // end
         let wrapper_doc = docvec![
@@ -741,7 +785,9 @@ impl CoreErlangGenerator {
             Document::String(bt_block_var.clone()),
             " = ",
             tier2_doc,
-            " in fun (",
+            " in ",
+            Document::Vec(seed_docs),
+            "fun (",
             Document::Vec(param_parts),
             ") -> let {",
             Document::String(wrap_result.clone()),

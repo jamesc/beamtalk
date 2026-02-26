@@ -4596,13 +4596,18 @@ fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
     );
     // The outer fun should NOT have StateAcc — it's a plain Erlang fun.
     // Find the last `in fun (` to locate the wrapper fun signature and confirm
-    // it does not contain StateAcc.
+    // it does not contain StateAcc as a formal parameter (not in variable names).
     let wrapper_fun_start = output
         .rfind(" in fun (")
         .expect("wrapper output should contain 'in fun ('");
-    let wrapper_sig = &output[wrapper_fun_start..];
+    let after_fun_sig = &output[wrapper_fun_start + " in fun (".len()..];
+    // Extract just the function signature parameters: from after "fun (" to the first ")"
+    let close_paren_idx = after_fun_sig
+        .find(')')
+        .expect("wrapper fun signature should have closing paren");
+    let wrapper_params = &after_fun_sig[..close_paren_idx];
     assert!(
-        !wrapper_sig.contains("StateAcc"),
-        "Wrapper fun should not have StateAcc as parameter. Got: {output}"
+        !wrapper_params.contains("StateAcc"),
+        "Wrapper fun formal parameters should not have StateAcc. Got params: {wrapper_params}, full output: {output}"
     );
 }
