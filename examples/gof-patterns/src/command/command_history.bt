@@ -3,8 +3,8 @@
 
 // Command Pattern — CommandHistory (invoker)
 // Executes commands on a TextBuffer, tracking buffer snapshots for undo support.
-// Each execute: saves the buffer state before running the command. undo restores
-// the most recent saved state. No command needs to implement its own undo logic.
+// Each execute: runs the command first, then saves the previous buffer state.
+// undo restores the most recent saved state. No command needs to implement its own undo logic.
 //
 // Usage:
 //   h := CommandHistory on: (TextBuffer withText: "hello").
@@ -23,8 +23,9 @@ Object subclass: CommandHistory
 
   /// Execute a command, save the current buffer as a snapshot, update the buffer.
   execute: command =>
+    nextBuffer   := command execute: self.buffer
     self.history := self.history add: self.buffer
-    self.buffer  := command execute: self.buffer
+    self.buffer  := nextBuffer
     self
 
   /// Restore the most recent snapshot, removing it from the stack.

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Factory Method Pattern — Shape (abstract product)
-// Intent: Define an interface for creating objects but let subclasses decide
-// which class to instantiate.
+// Intent: Define the common product interface implemented by concrete shapes
+// created by factory method creators.
 
 Object subclass: Shape
   /// Return the area of this shape.

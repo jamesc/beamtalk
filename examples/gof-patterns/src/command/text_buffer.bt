@@ -21,12 +21,15 @@ Object subclass: TextBuffer
 
   /// Return a new buffer with str inserted at position pos (1-based).
   insertAt: pos text: str =>
+    pos < 1 ifTrue: [self error: "insertAt:text: pos must be >= 1"]
     before := self.text take: pos - 1
     after  := self.text drop: pos - 1
     TextBuffer withText: before ++ str ++ after
 
   /// Return a new buffer with len characters removed starting at pos (1-based).
   deleteFrom: pos length: len =>
+    pos < 1 ifTrue: [self error: "deleteFrom:length: pos must be >= 1"]
+    len < 0 ifTrue: [self error: "deleteFrom:length: len must be >= 0"]
     before := self.text take: pos - 1
     after  := self.text drop: pos - 1 + len
     TextBuffer withText: before ++ after
