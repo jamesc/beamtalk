@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "beamtalk": {
+      "command": "beamtalk-mcp",
+      "args": ["--start"]
+    }
+  }
+}

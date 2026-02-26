@@ -1,0 +1,9 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "bank"
+version = "0.1.0"
+description = "Bank transfers — actor coordination showcase"
+
+[dependencies]

@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Message value type.
+//
+// Run in the REPL:
+//   > :load src/message.bt
+//   > :load test/message_test.bt
+//   > MessageTest runAll
+
+TestCase subclass: MessageTest
+
+  testDefaultText =>
+    self assert: Message new getText equals: ""
+
+  testDefaultSender =>
+    self assert: Message new getSender equals: "Anonymous"
+
+  testNewWithText =>
+    msg := Message new: #{#text => "Hello!"}.
+    self assert: msg getText equals: "Hello!"
+
+  testNewWithSender =>
+    msg := Message new: #{#sender => "Alice"}.
+    self assert: msg getSender equals: "Alice"
+
+  testNewWithTextAndSender =>
+    msg := Message new: #{#text => "Hi there", #sender => "Bob"}.
+    self assert: msg getText equals: "Hi there".
+    self assert: msg getSender equals: "Bob"
+
+  testDescribeFormatsCorrectly =>
+    msg := Message new: #{#text => "Hello!", #sender => "Alice"}.
+    self assert: msg describe equals: "Alice: Hello!"
+
+  testDescribeWithDefaultSender =>
+    msg := Message new: #{#text => "test"}.
+    self assert: msg describe equals: "Anonymous: test"
+
+  testTwoInstancesAreIndependent =>
+    m1 := Message new: #{#text => "Foo", #sender => "Alice"}.
+    m2 := Message new: #{#text => "Bar", #sender => "Bob"}.
+    self assert: m1 getText equals: "Foo".
+    self assert: m2 getText equals: "Bar"

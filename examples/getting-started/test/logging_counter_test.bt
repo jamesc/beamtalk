@@ -1,0 +1,50 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the LoggingCounter actor.
+//
+// Requires counter.bt loaded first (LoggingCounter extends Counter).
+//
+// Run in the REPL:
+//   > :load src/counter.bt
+//   > :load src/logging_counter.bt
+//   > :load test/logging_counter_test.bt
+//   > LoggingCounterTest runAll
+
+TestCase subclass: LoggingCounterTest
+
+  testInitialValueIsZero =>
+    // Inherits Counter's initial state
+    self assert: (LoggingCounter spawn getValue await) equals: 0
+
+  testIncrementDelegatesToSuper =>
+    // LoggingCounter#increment calls super increment — returns new value
+    self assert: (LoggingCounter spawn increment await) equals: 1
+
+  testDecrementIsInherited =>
+    // decrement is inherited from Counter unchanged
+    self assert: (LoggingCounter spawn decrement await) equals: -1
+
+  testGetValueIsInherited =>
+    lc := LoggingCounter spawn.
+    lc increment await.
+    lc increment await.
+    self assert: (lc getValue await) equals: 2
+
+  testIncrementAndDecrementInteraction =>
+    lc := LoggingCounter spawn.
+    lc increment await.
+    lc increment await.
+    lc increment await.
+    lc decrement await.
+    self assert: (lc getValue await) equals: 2
+
+  testIndependentInstances =>
+    // Each spawned actor has independent state
+    lc1 := LoggingCounter spawn.
+    lc2 := LoggingCounter spawn.
+    lc1 increment await.
+    lc1 increment await.
+    lc2 increment await.
+    self assert: (lc1 getValue await) equals: 2.
+    self assert: (lc2 getValue await) equals: 1

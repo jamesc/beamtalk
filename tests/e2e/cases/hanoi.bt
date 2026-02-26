@@ -16,7 +16,7 @@
 // Hanoi is an Object subclass (not Actor), so use `new` not `spawn`.
 // BT-374: Transcript show:/cr are async sends, return self (BT-540).
 
-// @load examples/hanoi.bt
+// @load tests/e2e/fixtures/hanoi.bt
 
 // ===========================================================================
 // INSTANTIATION

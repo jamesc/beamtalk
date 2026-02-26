@@ -793,7 +793,10 @@ mod tests {
         let client = ReplClient::connect(port, &cookie).await?;
 
         // Load counter
-        let resp = client.load_file("examples/counter.bt").await.unwrap();
+        let resp = client
+            .load_file("examples/getting-started/src/counter.bt")
+            .await
+            .unwrap();
         assert!(!resp.is_error(), "load should succeed: {:?}", resp.error);
         let classes = resp.classes.unwrap_or_default();
         assert!(

@@ -1,87 +1,59 @@
 # Beamtalk Examples
 
-This directory contains example Beamtalk programs to help you learn the language.
+Each example is a self-contained **workspace** with `src/`, `test/`, and the
+standard project files (`.mcp.json`, `AGENTS.md`, `.github/copilot-instructions.md`).
+Open a workspace in Claude Code and the MCP server starts automatically.
 
-## Getting Started
+**New to Beamtalk?** Start with the [REPL Tutorial](repl-tutorial.md).
 
-**New to Beamtalk?** Start with the [REPL Tutorial](repl-tutorial.md)!
+## Workspaces
 
-The tutorial walks you through:
-- Starting the REPL
-- Basic expressions and variables
-- Loading files
-- Working with actors
-- Using REPL commands
+| Workspace | What it demonstrates |
+|-----------|---------------------|
+| [getting-started/](getting-started/) | Hello world, Counter, Hanoi, closures, inheritance |
+| [bank/](bank/) | Actor coordination: accounts, transfers, overdraft protection |
+| [chat-room/](chat-room/) | Multi-actor: actors, inheritance, Set/List, message broadcasting |
+| [sicp/](sicp/) _(coming soon)_ | SICP Scheme compiler written in Beamtalk |
+| [gof-patterns/](gof-patterns/) _(coming soon)_ | Gang of Four patterns in idiomatic Beamtalk |
 
-## Examples
-
-### Simple Examples
-
-- **hello.bt** - Minimal example showing a simple class
-  ```bash
-  beamtalk repl
-  > :load examples/hello.bt
-  > Hello new
-  ```
-
-- **counter.bt** - Counter actor with state and methods
-  ```bash
-  beamtalk repl
-  > :load examples/counter.bt
-  > c := Counter spawn
-  > c increment
-  > c increment
-  > c getValue
-  2
-  ```
-
-### Advanced Examples
-
-- **hanoi.bt** - Towers of Hanoi: recursion, multi-keyword messages, Transcript I/O
-  ```bash
-  beamtalk repl
-  > :load examples/hanoi.bt
-  > h := Hanoi new
-  > h solve: 3 from: 'A' to: 'C' via: 'B'
-  ```
-- **super_example.bt** - Inheritance and super keyword usage
-- **logging_counter.bt** - Subclassing Counter with logging behavior
-- **protoobject_proxy.bt** - Proxy pattern with message forwarding
-
-## Running Examples
-
-### In the REPL
+## Quickstart
 
 ```bash
-$ beamtalk repl
-> :load examples/<filename>.bt
+cd examples/getting-started
+beamtalk repl
+> :load src/hello.bt
+> Hello new
 ```
 
-### Compiling to BEAM
+Each workspace's `README.md` has a full walkthrough.
 
-```bash
-$ beamtalk build examples/<filename>.bt
+## Workspace Layout
+
+Every workspace follows the `beamtalk new` convention:
+
+```
+workspace/
+├── beamtalk.toml        # Package manifest
+├── src/                 # Source files (.bt)
+├── test/                # BUnit test files
+├── AGENTS.md            # AI agent guide (MCP tools, pitfalls)
+├── .mcp.json            # beamtalk-mcp config — auto-starts in Claude Code
+├── .github/
+│   └── copilot-instructions.md
+└── .gitignore
 ```
 
-## Documentation
+## Adding a New Workspace
 
-- **[REPL Tutorial](repl-tutorial.md)** - Interactive tutorial for beginners
-- **[Language Features](../docs/beamtalk-language-features.md)** - Complete syntax reference
-- **[Design Principles](../docs/beamtalk-principles.md)** - Philosophy and design goals
-- **[Architecture](../docs/beamtalk-architecture.md)** - Compiler and runtime overview
-
-## Contributing Examples
-
-When adding new examples:
-
-1. Include copyright header
-2. Add clear comments explaining what the code does
-3. Reference the example in this README
-4. Test that it loads and runs correctly in the REPL
-5. Keep examples focused on one concept
+1. Create a directory under `examples/`
+2. Run `beamtalk new <name>` inside it, or copy the layout above
+3. Add `src/` files, `test/` files, and a `README.md`
+4. Include copyright headers in all `.bt` files
+5. Update this README
 
 ## Getting Help
 
 - Type `:help` in the REPL for command reference
-- See main `README.md` for installation and setup
+- See [REPL Tutorial](repl-tutorial.md) for a guided tour
+- See [Language Features](../docs/beamtalk-language-features.md) for syntax reference
 - Report issues at: https://github.com/jamesc/beamtalk/issues

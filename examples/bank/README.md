@@ -24,32 +24,21 @@ and transferring money requires coordinating two actors.
 | `Transaction` | Value | Immutable transfer record |
 | `TransferAgent` | Actor | Coordinates two-account transfers |
 
+## Starting the Workspace
+
+```bash
+cd examples/bank
+beamtalk repl
+```
+
+All source files in `src/` load automatically when you start the REPL.
+To run the tests: `:load "test/"`
+
 ## REPL Walkthrough
-
-Start a REPL session and load the bank classes:
-
-```
-$ beamtalk repl
-> :load examples/bank/account.bt
-> :load examples/bank/transaction.bt
-> :load examples/bank/bank.bt
-> :load examples/bank/transfer_agent.bt
-```
-
-Typed variant:
-
-```
-> :load examples/bank/typed_account.bt
-> typed := TypedAccount spawn
-> typed deposit: 100
-100
-> typed balance
-100
-```
 
 ### Create a bank and open accounts
 
-```
+```text
 > bank := Bank spawn
 > bank openAccount: "Alice"
 > bank openAccount: "Bob"
@@ -57,7 +46,7 @@ Typed variant:
 
 ### Deposit money
 
-```
+```text
 > alice := bank accountFor: "Alice"
 > alice deposit: 1000
 1000
@@ -69,7 +58,7 @@ Typed variant:
 
 ### Check balances
 
-```
+```text
 > alice balance
 1000
 
@@ -79,14 +68,14 @@ Typed variant:
 
 ### Transfer money
 
-```
+```text
 > agent := TransferAgent spawn
 > agent transfer: 250 from: alice to: bob
 ```
 
 The `TransferAgent` sends withdraw and deposit messages to each account:
 
-```
+```text
 > alice balance
 750
 
@@ -98,21 +87,21 @@ The `TransferAgent` sends withdraw and deposit messages to each account:
 
 What happens if we try to withdraw more than the balance?
 
-```
+```text
 > alice withdraw: 5000
 ERROR: Insufficient funds (balance: 750, requested: 5000)
 ```
 
 The withdrawal is rejected — the balance remains unchanged:
 
-```
+```text
 > alice balance
 750
 ```
 
 ### Inspect the last transfer
 
-```
+```text
 > agent getLastAmount
 250
 ```

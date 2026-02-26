@@ -1,0 +1,98 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the ChatRoom and ChatMember actors.
+//
+// Actor-to-actor message delivery requires sync barriers:
+// after room say:from: completes, we barrier on the member to ensure
+// receiveMessage: has been processed before asserting inbox contents.
+//
+// Run in the REPL:
+//   > :load src/message.bt
+//   > :load src/chat_room.bt
+//   > :load src/chat_member.bt
+//   > :load src/moderator.bt
+//   > :load test/chat_room_test.bt
+//   > ChatRoomTest runAll
+
+TestCase subclass: ChatRoomTest
+
+  testNewRoomHasNoHistory =>
+    room := ChatRoom spawn.
+    self assert: (room getHistory await) equals: #()
+
+  testMemberJoinsRoom =>
+    room := ChatRoom spawn.
+    alice := ChatMember spawn.
+    (room join: alice) await.
+    self assert: ((room online await) includes: alice)
+
+  testMemberLeavesRoom =>
+    room := ChatRoom spawn.
+    alice := ChatMember spawn.
+    (room join: alice) await.
+    (room leave: alice) await.
+    self deny: ((room online await) includes: alice)
+
+  testSayAddsToHistory =>
+    room := ChatRoom spawn.
+    (room say: "Hello!" from: "Alice") await.
+    self assert: (room getHistory await) equals: #("Alice: Hello!")
+
+  testSayMultipleMessages =>
+    room := ChatRoom spawn.
+    (room say: "Hello!" from: "Alice") await.
+    (room say: "Hey!" from: "Bob") await.
+    self assert: (room getHistory await) equals: #("Alice: Hello!", "Bob: Hey!")
+
+  testMemberReceivesMessage =>
+    room := ChatRoom spawn.
+    alice := ChatMember spawn.
+    (room join: alice) await.
+    (room say: "Hello!" from: "System") await.
+    // Sync barrier: ensure member processed receiveMessage:
+    alice getInbox await.
+    self assert: (alice getInbox await) equals: #("System: Hello!")
+
+  testMemberDoesNotReceiveAfterLeaving =>
+    room := ChatRoom spawn.
+    alice := ChatMember spawn.
+    (room join: alice) await.
+    (room leave: alice) await.
+    (room say: "Hello?" from: "System") await.
+    alice getInbox await.
+    self assert: (alice getInbox await) equals: #()
+
+  testBroadcastToMultipleMembers =>
+    room := ChatRoom spawn.
+    alice := ChatMember spawn.
+    bob := ChatMember spawn.
+    (room join: alice) await.
+    (room join: bob) await.
+    (room say: "Hi all!" from: "System") await.
+    // Sync barriers for both members
+    alice getInbox await.
+    bob getInbox await.
+    self assert: (alice getInbox await) equals: #("System: Hi all!").
+    self assert: (bob getInbox await) equals: #("System: Hi all!")
+
+  testOnlyRemainingMemberReceives =>
+    room := ChatRoom spawn.
+    alice := ChatMember spawn.
+    bob := ChatMember spawn.
+    (room join: alice) await.
+    (room join: bob) await.
+    (room leave: alice) await.
+    (room say: "Anyone there?" from: "System") await.
+    alice getInbox await.
+    bob getInbox await.
+    self assert: (alice getInbox await) equals: #().
+    self assert: (bob getInbox await) equals: #("System: Anyone there?")
+
+  testMemberSetsName =>
+    alice := ChatMember spawn.
+    (alice setName: "Alice") await.
+    self assert: (alice getName await) equals: "Alice"
+
+  testMemberDefaultName =>
+    self assert: (ChatMember spawn getName await) equals: "Guest"
