@@ -4,7 +4,7 @@ This workspace contains a minimal Scheme interpreter written in Beamtalk, inspir
 
 ## Workspace Structure
 
-```
+```text
 sicp/
 ├── beamtalk.toml        # Package manifest
 ├── src/
