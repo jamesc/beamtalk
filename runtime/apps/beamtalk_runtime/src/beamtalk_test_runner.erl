@@ -23,6 +23,7 @@
     %% TestRunner class-side primitives
     run_all/0,
     run_class/1,
+    run_class_by_name/1,
     run_method/2,
     %% TestResult instance primitives
     result_passed/1,
@@ -151,10 +152,11 @@ result_print_string(Result) ->
 %% Internal: test execution (uses class registry, not module_info)
 %%====================================================================
 
-%% @doc Run all tests in a class by name.
+%% @doc Run all tests in a named class.
 %%
 %% Discovers test methods via the class gen_server (not module_info,
 %% which is unavailable on Core Erlang compiled modules from .bt files).
+%% Public so op handlers can call it directly by class name atom.
 -spec run_class_by_name(atom()) -> map().
 run_class_by_name(ClassName) ->
     {TestMethods, FlatMethods} = discover_methods_via_registry(ClassName),
