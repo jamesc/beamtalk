@@ -51,17 +51,27 @@ Adopt **immutable value semantics** as the default for all BeamTalk objects. Mut
 
 #### Declaration and Construction
 
-Value objects are declared with `state:` and constructed via auto-generated keyword constructors:
+Value objects are declared with `state:` and constructed via the existing `new`/`new:` protocol:
 
 ```smalltalk
 Value subclass: Point
   state: x = 0
   state: y = 0
 
-point := Point x: 3 y: 4.
+point := Point new: #{#x => 3, #y => 4}.   "Map-based — any subset of fields, defaults fill the rest"
+point := Point new.                          "All defaults — Point(0, 0)"
+point := Point x: 3 y: 4.                   "All-fields keyword constructor (auto-generated)"
 ```
 
 **Syntax note:** Today, value types use `Object subclass:` with `state:` declarations. This ADR introduces `Value subclass:` as the explicit declaration form. `Value` becomes a new root class in the hierarchy between `Object` and user value classes. The `state:` keyword is retained as the universal slot declaration for both value types and actors — the `Value` vs `Actor` superclass determines immutability semantics, not the declaration keyword. This is deliberate: `state:` declares "the named data this object holds," which is the same concept regardless of mutability. Whether those slots are immutable (value types) or mutable (actors) is determined by the class kind, not the declaration keyword — just as Smalltalk's `instanceVariableNames:` doesn't change meaning based on whether the class uses mutable or copy-on-write semantics. Introducing separate keywords (`slots:` vs `state:`) was considered and rejected as unnecessary churn: the `Value`/`Actor` superclass already provides a clear, visible signal at the declaration site.
+
+**Construction forms:** Three ways to construct a value object, avoiding Smalltalk's constructor explosion (2^N constructors for N fields):
+
+1. **`new: #{...}`** — Map-based, pass any subset of fields. Defaults fill the rest. This is the primary construction form and already exists today. Ideal for programmatic construction, partial initialization, and agent use.
+2. **`new`** — All defaults. Already exists today.
+3. **`ClassName field1: val1 field2: val2`** — Auto-generated all-fields keyword constructor. One method per class, always requires all fields. Provides LSP discoverability for free (method selector completion works out of the box). If usage data shows this is unused, it can be removed.
+
+**Discoverability:** Field names are discoverable via `Point fieldNames` (returns `#[x, y]`) in the REPL and via `:help Point`. The keyword constructor additionally makes fields visible through IDE autocomplete — typing `Point x:<TAB>` triggers standard method selector completion.
 
 **Class-level state:** `classState:` declares class-level mutable state (it lives in the class object's gen_server state), regardless of whether the class is a Value or Actor type:
 
@@ -73,7 +83,7 @@ Value subclass: Point
 
   class create: x y: y =>
     self.instanceCount := self.instanceCount + 1.
-    self x: x y: y
+    self new: #{#x => x, #y => y}
 ```
 
 #### Functional Updates via `with*:`
@@ -81,18 +91,18 @@ Value subclass: Point
 "Mutating" messages return a new object. The compiler auto-generates `with*:` methods for each slot:
 
 ```smalltalk
-point := Point x: 3 y: 4.
+point := Point new: #{#x => 3, #y => 4}.
 point2 := point withX: 5.       "Returns new Point(5, 4). point is unchanged."
 
 list := List new.
 list2 := list add: 'hello'.     "Returns new List containing 'hello'."
 ```
 
-For a value class with declared slots, the compiler generates:
+For a value class with declared slots `name`, `age`, `email`, the compiler generates:
 
-- `name`, `age`, `email` — getters
+- `name`, `age`, `email` — getters (read-only)
 - `withName:`, `withAge:`, `withEmail:` — functional setters (return new object with that slot changed)
-- `ClassName slot1: val1 slot2: val2 ...` — keyword constructor
+- `ClassName name: val1 age: val2 email: val3` — all-fields keyword constructor (one method, all fields required)
 
 Under the hood, these compile to trivial Erlang map operations. For **value types**, where `Self` is the map directly:
 
@@ -587,7 +597,7 @@ point := builder freeze.   "=> immutable Point x: 1 y: 2"
 
 This would be more ergonomic than chained `with*:` calls for constructing objects with many slots.
 
-**Rejected because:** The primary construction path is the keyword constructor (`Point x: 1 y: 2`), which handles the multi-field case directly. For modification of existing objects, `with*:` chains or cascades work and are idiomatic in the functional world (Erlang records, Gleam records, Swift structs). The freeze/thaw pattern adds a new concept (mutable transient objects) that exists only during construction — a narrow use case that doesn't justify the conceptual overhead. If deep nested updates prove painful, lens-like `update*:` methods (noted as a future enhancement) are a better solution.
+**Rejected because:** The primary construction path is `new: #{...}` (map-based, any subset of fields) plus the all-fields keyword constructor (`Point x: 1 y: 2`), which together handle the multi-field case directly. For modification of existing objects, `with*:` chains or cascades work and are idiomatic in the functional world (Erlang records, Gleam records, Swift structs). The freeze/thaw pattern adds a new concept (mutable transient objects) that exists only during construction — a narrow use case that doesn't justify the conceptual overhead. If deep nested updates prove painful, lens-like `update*:` methods (noted as a future enhancement) are a better solution.
 
 ## Consequences
 
@@ -652,7 +662,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 **Value Object Codegen:**
 - Generate immutable map-based objects from `Value subclass:` + `state:` declarations
 - Auto-generate getters and `with*:` functional setters for each declared slot
-- Auto-generate keyword constructors
+- Auto-generate all-fields keyword constructor (one per class)
 - Remove slot-write codegen for value types (no `self.slot :=` → `maps:put` paths)
 - **Affected:** `value_type_codegen.rs`, `mod.rs`, `class_hierarchy/mod.rs`
 
@@ -717,7 +727,7 @@ Value type tests using instance variable assignment (`self.slot := value`) must 
 - ADR 0028 (BEAM Interop) — immutability is compile-time only, not enforced at BEAM boundary
 - ADR 0035 (Field-Based Reflection API) — `fieldAt:put:` on value types raises `#beamtalk_error{type => immutable_value}` at runtime (closes the deferred access control question); `fieldAt:`/`fieldNames` API unchanged
 - ADR 0038 (Subclass/ClassBuilder Protocol) — ClassBuilder must recognize `Value` as a root class
-- ADR 0037 (Collection Class Hierarchy) — collection classes (List, Array, Dictionary, Range) must be classified as Value or Actor; value-type collections using `self.slot :=` need migration to keyword constructors
+- ADR 0037 (Collection Class Hierarchy) — collection classes (List, Array, Dictionary, Range) must be classified as Value or Actor; value-type collections using `self.slot :=` need migration to `with*:` functional setters
 - ADR 0039 (Syntax Pragmatism vs Smalltalk) — cascade semantics deferred to ADR 0044; ADR 0039's fan-out semantics remain unchanged until then
 - ADR 0043 (Sync-by-Default Actor Messaging) — `.` vs `!` call/cast syntax split out from this ADR into its own focused decision
 - ADR 0040 (Workspace-Native REPL Commands) — REPL binding semantics preserved
