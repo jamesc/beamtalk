@@ -188,6 +188,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "allClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![] },
                 MethodInfo { selector: "classNamed:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("Symbol".into())] },
                 MethodInfo { selector: "globals".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, return_type: Some("Dictionary".into()), param_types: vec![] },
+                MethodInfo { selector: "help:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("Object".into())] },
+                MethodInfo { selector: "help:selector:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("Object".into()), Some("Symbol".into())] },
                 MethodInfo { selector: "version".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BeamtalkInterface".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
             class_methods: vec![

@@ -47,6 +47,22 @@ Actor subclass: BeamtalkInterface
   /// ```
   globals -> Dictionary => @primitive "globals"
 
+  /// Show class documentation: name, superclass, and method signatures.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk help: Counter
+  /// ```
+  sealed help: aClass: Object -> String => @primitive "help:"
+
+  /// Show detailed documentation for a specific method on a class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Beamtalk help: Counter selector: #increment
+  /// ```
+  sealed help: aClass: Object selector: aSelector: Symbol -> String => @primitive "help:selector:"
+
   /// Return the Beamtalk version string.
   ///
   /// ## Examples
