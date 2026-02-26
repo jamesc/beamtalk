@@ -1,0 +1,171 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// SchemeEval — Scheme evaluator for the SICP workspace.
+//
+// Implements a minimal Scheme evaluator with:
+//   - Symbolic expressions: numbers, symbols (#t/#f), and lists
+//   - Primitive procedures: +, -, *, /, =, <, >
+//   - Special forms: lambda, if, quote
+//   - Guard in apply:args:in: that raises a clear error instead of crashing
+//     when a non-procedure is applied (prevents raw {badfun,X} BEAM errors)
+//
+// Dependencies:
+//   - SchemeLambda (src/scheme/lambda.bt)
+//   - SchemeEnv    (src/scheme/env.bt)
+//
+// Usage:
+//   eval := SchemeEval new.
+//   eval eval: "(+ 1 2)"                   // => "3"
+//   eval eval: "(lambda (x) (* x x))"      // => "<procedure>"
+//   eval eval: "(1 + 2)"                   // => raises "Not a procedure: 1"
+
+Object subclass: SchemeEval
+
+  // ── Tokeniser ──────────────────────────────────────────────────────────────
+  //
+  // Inserts spaces around parentheses then splits on whitespace.
+  // Returns a List of String tokens.
+  tokenize: src =>
+    spaced := src replaceAll: "(" with: " ( ".
+    spaced := spaced replaceAll: ")" with: " ) ".
+    spaced words
+
+  // ── Parser ─────────────────────────────────────────────────────────────────
+  //
+  // Recursive descent over the token list.
+  // Returns a 2-element List: #(parsedExpr, remainingTokens).
+
+  parseTokens: tokens =>
+    tokens isEmpty ifTrue: [self error: "Unexpected end of input"].
+    first := tokens first.
+    rest := tokens rest.
+    first =:= "(" ifTrue: [^self parseListFrom: rest acc: #()].
+    first =:= "#t" ifTrue: [^#((true), (rest))].
+    first =:= "#f" ifTrue: [^#((false), (rest))].
+    (first matchesRegex: "^-?[0-9]+$") ifTrue: [
+      n := first asInteger.
+      ^#((n), (rest))
+    ].
+    // Symbol — returned as a plain String for env lookup
+    #((first), (rest))
+
+  // Accumulate list elements until the closing ")".
+  parseListFrom: tokens acc: acc =>
+    tokens isEmpty ifTrue: [self error: "Missing closing ')'"].
+    tokens first =:= ")" ifTrue: [^#((acc), (tokens rest))].
+    pair := self parseTokens: tokens.
+    item := pair at: 1.
+    remaining := pair at: 2.
+    self parseListFrom: remaining acc: (acc ++ #((item)))
+
+  // ── Global environment ─────────────────────────────────────────────────────
+  //
+  // Arithmetic primitives receive their arguments as a List.
+
+  globalEnv =>
+    env := SchemeEnv new.
+    env := env define: "+" value: [:args | args inject: 0 into: [:acc :x | acc + x]].
+    env := env define: "-" value: [:args |
+      (args size =:= 1) ifTrue: [0 - args first] ifFalse: [
+        (args rest) inject: args first into: [:acc :x | acc - x]
+      ]
+    ].
+    env := env define: "*" value: [:args | args inject: 1 into: [:acc :x | acc * x]].
+    env := env define: "/" value: [:args |
+      (args rest) inject: args first into: [:acc :x | acc / x]
+    ].
+    env := env define: "=" value: [:args | (args at: 1) =:= (args at: 2)].
+    env := env define: "<" value: [:args | (args at: 1) < (args at: 2)].
+    env := env define: ">" value: [:args | (args at: 1) > (args at: 2)].
+    env
+
+  // ── Evaluator ──────────────────────────────────────────────────────────────
+
+  evalExpr: expr in: env =>
+    // Self-evaluating: integers and floats
+    expr class =:= Integer ifTrue: [^expr].
+    expr class =:= Float ifTrue: [^expr].
+    // Self-evaluating: nil (#() in display)
+    expr isNil ifTrue: [^expr].
+    // Self-evaluating: booleans (from #t / #f tokens)
+    (expr respondsTo: #isBoolean) ifTrue: [^expr].
+    // Symbol — look up in environment
+    expr class =:= String ifTrue: [^env lookup: expr].
+    // Primitive blocks self-evaluate
+    expr class =:= Block ifTrue: [^expr].
+    // Lambda objects self-evaluate
+    expr class =:= SchemeLambda ifTrue: [^expr].
+    // List — function application or special form
+    expr class =:= List ifTrue: [
+      expr isEmpty ifTrue: [^nil].
+      head := expr first.
+      // Only check for special forms if the head is a symbol (String)
+      (head class =:= String) ifTrue: [
+        head =:= "quote" ifTrue: [^expr at: 2].
+        head =:= "lambda" ifTrue: [^self evalLambda: expr in: env].
+        head =:= "if" ifTrue: [^self evalIf: expr in: env]
+      ].
+      // Regular application: evaluate operator and all arguments, then apply
+      func := self evalExpr: head in: env.
+      args := (expr rest) collect: [:a | self evalExpr: a in: env].
+      ^self apply: func args: args in: env
+    ].
+    self error: "Cannot evaluate: " ++ expr printString
+
+  evalLambda: expr in: env =>
+    params := expr at: 2.
+    body := expr at: 3.
+    SchemeLambda new withParams: params body: body closureEnv: env
+
+  evalIf: expr in: env =>
+    cond := self evalExpr: (expr at: 2) in: env.
+    cond ifTrue: [^self evalExpr: (expr at: 3) in: env].
+    expr size > 3 ifTrue: [^self evalExpr: (expr at: 4) in: env].
+    nil
+
+  // apply:args:in: — apply a procedure to evaluated arguments.
+  //
+  // Guard: raises a clear "Not a procedure: X" error when `func` is neither a
+  // Block (primitive) nor a SchemeLambda (user-defined). This prevents raw
+  // {badfun, X} BEAM crashes from surfacing to the user (BT-930).
+  apply: func args: args in: env =>
+    ((func class =:= Block) or: [func class =:= SchemeLambda]) ifFalse: [
+      self error: "Not a procedure: " ++ func printString
+    ].
+    func class =:= Block ifTrue: [^func value: args].
+    // SchemeLambda: extend closure environment with parameter bindings
+    callEnv := SchemeEnv new withParent: func closureEnv.
+    paramPairs := func params zip: args.
+    paramPairs do: [:pair |
+      callEnv := callEnv define: (pair at: 1) value: (pair at: 2)
+    ].
+    self evalExpr: func body in: callEnv
+
+  // ── Display ────────────────────────────────────────────────────────────────
+
+  schemeDisplay: val =>
+    val isNil ifTrue: [^"()"].
+    val class =:= SchemeLambda ifTrue: [^"<procedure>"].
+    val class =:= Block ifTrue: [^"<procedure>"].
+    val class =:= List ifTrue: [
+      val isEmpty ifTrue: [^"()"].
+      parts := val collect: [:e | self schemeDisplay: e].
+      inner := parts inject: "" into: [:acc :s |
+        acc isEmpty ifTrue: [s] ifFalse: [acc ++ " " ++ s]
+      ].
+      ^"(" ++ inner ++ ")"
+    ].
+    val printString
+
+  // ── Public API ─────────────────────────────────────────────────────────────
+
+  // Evaluate a Scheme expression string in a fresh global environment.
+  // Returns the result as a display string.
+  // Raises an exception on evaluation errors (unbound variable, type error, etc.).
+  eval: src =>
+    tokens := self tokenize: src.
+    pair := self parseTokens: tokens.
+    expr := pair at: 1.
+    val := self evalExpr: expr in: self globalEnv.
+    self schemeDisplay: val

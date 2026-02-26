@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// SchemeLambda — a Scheme closure (parameter list + body + captured environment).
+//
+// Created by the `lambda` special form in SchemeEval. Immutable value type.
+//
+// Usage:
+//   lam := SchemeLambda new withParams: #("x") body: #("+", "x", 1) closureEnv: env
+//   lam params    // => #("x")
+//   lam body      // => #("+", "x", 1)
+//   lam printString  // => "<procedure>"
+
+Object subclass: SchemeLambda
+  state: params = nil
+  state: body = nil
+  state: closureEnv = nil
+
+  withParams: p body: b closureEnv: e =>
+    self.params := p.
+    self.body := b.
+    self.closureEnv := e.
+    ^self
+
+  params => self.params
+  body => self.body
+  closureEnv => self.closureEnv
+
+  printString => "<procedure>"
+  displayString => "<procedure>"

@@ -1,0 +1,70 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Scheme interpreter (SchemeEval).
+//
+// Covers:
+//   - Basic arithmetic evaluation with primitive procedures
+//   - Nested expressions
+//   - Lambda creation and application
+//   - Error: applying a non-procedure raises "Not a procedure: X" (BT-930)
+//
+// Run in the REPL:
+//   > :load src/scheme/eval.bt
+//   > :load test/scheme_test.bt
+//   > SchemeTest runAll
+
+TestCase subclass: SchemeTest
+
+  testPrimitiveAddition =>
+    eval := SchemeEval new.
+    // (+ 1 2) evaluates to 3
+    self assert: (eval eval: "(+ 1 2)") equals: "3"
+
+  testPrimitiveMultiplication =>
+    eval := SchemeEval new.
+    // (* 3 4) evaluates to 12
+    self assert: (eval eval: "(* 3 4)") equals: "12"
+
+  testPrimitiveSubtraction =>
+    eval := SchemeEval new.
+    // (- 10 3) evaluates to 7
+    self assert: (eval eval: "(- 10 3)") equals: "7"
+
+  testNestedArithmetic =>
+    eval := SchemeEval new.
+    // (+ 1 (* 2 3)) evaluates to 7
+    self assert: (eval eval: "(+ 1 (* 2 3))") equals: "7"
+
+  testSelfEvaluatingNumber =>
+    eval := SchemeEval new.
+    // A bare number evaluates to itself
+    self assert: (eval eval: "42") equals: "42"
+
+  testLambdaCreation =>
+    eval := SchemeEval new.
+    // (lambda (x) (* x x)) produces a procedure
+    self assert: (eval eval: "(lambda (x) (* x x))") equals: "<procedure>"
+
+  testApplyNonProcedureRaisesError =>
+    // (1 + 2) in Scheme treats 1 as the operator.
+    // 1 is not a Block or SchemeLambda, so apply:args:in: must raise
+    // "Not a procedure: 1" rather than crashing with a raw {badfun,1} error.
+    // This is the core fix tracked in BT-930.
+    eval := SchemeEval new.
+    result := [eval eval: "(1 + 2)"] on: Exception do: [:e | e message].
+    self assert: result equals: "Not a procedure: 1"
+
+  testApplyNonProcedureString =>
+    // A string literal in operator position also raises a clear error.
+    // (define x "hello") then apply "hello" — here we just use a quoted string
+    // in operator position via a symbol lookup that returns a non-procedure.
+    // Test with a number in operator position for clarity.
+    eval := SchemeEval new.
+    result := [eval eval: "(42 1 2)"] on: Exception do: [:e | e message].
+    self assert: result equals: "Not a procedure: 42"
+
+  testUnboundVariableError =>
+    eval := SchemeEval new.
+    result := [eval eval: "undefined-var"] on: Exception do: [:e | e message].
+    self assert: result equals: "Unbound variable: undefined-var"
