@@ -1,0 +1,51 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Singleton Pattern — AppLogger
+
+TestCase subclass: AppLoggerTest
+
+  testInitiallyEmpty =>
+    logger := AppLogger spawn
+    self assert: logger size equals: 0
+    logger stop
+
+  testLogEntry =>
+    logger := AppLogger spawn
+    logger log: "first"
+    self assert: logger size equals: 1
+    self assert: logger entries first equals: "first"
+    logger stop
+
+  testMultipleLogs =>
+    logger := AppLogger spawn
+    logger log: "a"
+    logger log: "b"
+    logger log: "c"
+    self assert: logger size equals: 3
+    logger stop
+
+  testClearResets =>
+    logger := AppLogger spawn
+    logger log: "x"
+    logger clear
+    self assert: logger size equals: 0
+    logger stop
+
+  testEntriesOrdering =>
+    logger := AppLogger spawn
+    logger log: "first"
+    logger log: "second"
+    self assert: logger entries first equals: "first"
+    self assert: logger entries last equals: "second"
+    logger stop
+
+  testSingletonBehavior =>
+    // Two independently spawned loggers must not share state.
+    a := AppLogger spawn
+    b := AppLogger spawn
+    a log: "from a"
+    self assert: a size equals: 1
+    self assert: b size equals: 0
+    a stop
+    b stop

@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Adapter Pattern — CelsiusToFahrenheitAdapter
+// Wraps a CelsiusThermometer (adaptee) and exposes the FahrenheitThermometer
+// interface (target), translating units on the fly.
+//
+// Usage:
+//   sensor  := CelsiusThermometer withCelsius: 100.0.
+//   adapted := CelsiusToFahrenheitAdapter wrap: sensor.
+//   adapted readFahrenheit   // => 212.0
+//   adapted readCelsius      // => 100.0
+
+FahrenheitThermometer subclass: CelsiusToFahrenheitAdapter
+  state: adaptee = nil
+
+  /// Wrap a CelsiusThermometer so it can be used as a FahrenheitThermometer.
+  class wrap: thermometer =>
+    self new: #{adaptee => thermometer}
+
+  /// Return the adaptee's reading in degrees Celsius (pass-through).
+  readCelsius    => self.adaptee readCelsius
+  /// Convert the adaptee's Celsius reading to Fahrenheit.
+  readFahrenheit => self.adaptee readCelsius * 9.0 / 5.0 + 32.0

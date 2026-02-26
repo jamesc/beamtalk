@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Factory Method Pattern — ShapeFactory (abstract creator)
+// Declares the factory method createShape and a template method describeShape
+// that uses it, demonstrating that the base class can call the factory method
+// without knowing which concrete product will be returned.
+
+Object subclass: ShapeFactory
+  /// Factory method — subclasses override this to return the appropriate Shape.
+  createShape => self subclassResponsibility
+
+  /// Template method — uses the factory method without knowing the concrete type.
+  describeShape =>
+    shape := self createShape
+    "{shape describe}, area={shape area}"

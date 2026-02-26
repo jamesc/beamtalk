@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Strategy Pattern — Sorter
+// Intent: Define a family of algorithms, encapsulate each one, and make them
+// interchangeable. The algorithm varies independently from the clients that use it.
+//
+// Sorter holds a pluggable comparison block (the strategy) and applies it to sort
+// any list. Factory methods provide the most common orderings.
+//
+// Usage:
+//   asc := Sorter ascending.
+//   asc sort: #(3, 1, 2).                             // => #(1, 2, 3)
+//
+//   desc := Sorter descending.
+//   desc sort: #(3, 1, 2).                            // => #(3, 2, 1)
+//
+//   byLen := Sorter withStrategy: [:a :b | a length < b length].
+//   byLen sort: #("banana", "fig", "apple").           // smallest first
+
+Object subclass: Sorter
+  state: strategy = nil
+
+  /// Create a Sorter with a custom two-argument comparison block.
+  /// The block returns true when its first argument should come before the second.
+  class withStrategy: aBlock =>
+    self new: #{strategy => aBlock}
+
+  /// Convenience factory — ascending natural order.
+  class ascending =>
+    self new: #{strategy => [:a :b | a < b]}
+
+  /// Convenience factory — descending natural order.
+  class descending =>
+    self new: #{strategy => [:a :b | a > b]}
+
+  /// Sort aList using this Sorter's strategy. Returns the sorted list.
+  sort: aList =>
+    aList sort: self.strategy

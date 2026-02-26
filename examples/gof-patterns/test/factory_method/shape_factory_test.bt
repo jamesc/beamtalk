@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Factory Method Pattern — ShapeFactory, CircleFactory, RectangleFactory
+
+TestCase subclass: ShapeFactoryTest
+
+  testCircleArea =>
+    c := Circle withRadius: 2.0
+    self assert: c area equals: 3.14159 * 4.0
+
+  testCirclePerimeter =>
+    c := Circle withRadius: 1.0
+    self assert: c perimeter equals: 2.0 * 3.14159
+
+  testRectangleArea =>
+    r := Rectangle width: 3.0 height: 4.0
+    self assert: r area equals: 12.0
+
+  testRectanglePerimeter =>
+    r := Rectangle width: 3.0 height: 4.0
+    self assert: r perimeter equals: 14.0
+
+  testCircleFactoryCreatesCircle =>
+    f     := CircleFactory withRadius: 5.0
+    shape := f createShape
+    self assert: shape area equals: 3.14159 * 25.0
+
+  testRectangleFactoryCreatesRectangle =>
+    f     := RectangleFactory width: 2.0 height: 3.0
+    shape := f createShape
+    self assert: shape area equals: 6.0
+
+  testCircleDescribeShape =>
+    f := CircleFactory withRadius: 1.0
+    self assert: (f describeShape) equals: "Circle(r=1), area=3.14159"
+
+  testRectangleDescribeShape =>
+    f := RectangleFactory width: 2.0 height: 3.0
+    self assert: (f describeShape) equals: "Rectangle(2x3), area=6"

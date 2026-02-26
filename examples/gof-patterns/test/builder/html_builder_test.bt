@@ -1,0 +1,50 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Builder Pattern — HtmlBuilder / HtmlElement
+// Note: use intermediate variables to chain builder calls, because newline is
+// a statement separator in Beamtalk (multi-line parenthesised chains fail).
+
+TestCase subclass: HtmlBuilderTest
+
+  testSimpleElement =>
+    b  := HtmlBuilder buildTag: "p"
+    b  := b withText: "hello"
+    el := b build
+    self assert: el render equals: "<p>hello</p>"
+
+  testDivElement =>
+    b  := HtmlBuilder buildTag: "div"
+    b  := b withText: "content"
+    el := b build
+    self assert: el render equals: "<div>content</div>"
+
+  testWithAttribute =>
+    b  := HtmlBuilder buildTag: "a"
+    b  := b withAttr: "href" value: "https://example.com"
+    b  := b withText: "click"
+    el := b build
+    self assert: el render equals: "<a href=\"https://example.com\">click</a>"
+
+  testMultipleAttributes =>
+    b  := HtmlBuilder buildTag: "input"
+    b  := b withAttr: "type" value: "text"
+    b  := b withAttr: "id" value: "name"
+    b  := b withText: ""
+    el := b build
+    rendered := el render
+    self assert: (rendered includesSubstring: "type=\"text\"")
+    self assert: (rendered includesSubstring: "id=\"name\"")
+
+  testEmptyContent =>
+    b  := HtmlBuilder buildTag: "br"
+    el := b build
+    self assert: el render equals: "<br></br>"
+
+  testTwoIndependentBuilds =>
+    b1  := HtmlBuilder buildTag: "p"
+    b1  := b1 withText: "first"
+    b2  := HtmlBuilder buildTag: "p"
+    b2  := b2 withText: "second"
+    self assert: b1 build render equals: "<p>first</p>"
+    self assert: b2 build render equals: "<p>second</p>"

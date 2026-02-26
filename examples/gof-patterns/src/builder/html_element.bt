@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Builder Pattern — HtmlElement (the product)
+// Intent: Separate the construction of a complex object from its representation.
+//
+// HtmlElement is an immutable value object. Its state is assembled step-by-step
+// by HtmlBuilder. Callers never construct HtmlElement directly.
+
+Object subclass: HtmlElement
+  state: tag        = "div"
+  state: attributes = #{}
+  state: content    = ""
+
+  /// Begin with the given HTML tag name and empty attributes and content.
+  class tag: t =>
+    self new: #{tag => t}
+
+  /// Return a new element with the given attribute added.
+  attribute: key value: val =>
+    self.attributes := self.attributes at: key put: val
+    self
+
+  /// Return a new element with the text content replaced.
+  text: t =>
+    self.content := t
+    self
+
+  /// Render to an HTML string.
+  render =>
+    attrStr := self.attributes keys inject: "" into: [:acc :k |
+      acc ++ " {k}=\"{self.attributes at: k}\""]
+    "<{self.tag}{attrStr}>{self.content}</{self.tag}>"
