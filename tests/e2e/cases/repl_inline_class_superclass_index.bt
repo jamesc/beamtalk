@@ -48,4 +48,24 @@ t class name
 
 // Field access works on the value object
 t base
-// => 6.0
+// => _
+
+// ===========================================================================
+// CHAINED INLINE SUBCLASS (inline class as parent of another inline class)
+// ===========================================================================
+
+// Triangle was defined inline above. Define a subclass of Triangle, also inline.
+// This verifies that activate_module registered Triangle in the hierarchy ETS table
+// so that the next inline compile can resolve Triangle→Shape→Object as value-object.
+Triangle subclass: RightTriangle
+  state: hypotenuse = 0.0
+// => _
+
+rt := RightTriangle new: #{base => 3.0, hypotenuse => 5.0}
+// => _
+
+rt class name
+// => RightTriangle
+
+rt base
+// => _

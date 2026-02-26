@@ -468,7 +468,18 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
             %% Combine class source with new method definition
             CombinedSource = ClassSource ++ "\n" ++ Expression,
             SourceBin = list_to_binary(CombinedSource),
-            Options = #{stdlib_mode => false, workspace_mode => true},
+            %% BT-907: Include class superclass index so the recompiled class resolves
+            %% cross-file inheritance chains (same as compile_file_via_port and
+            %% compile_expression_via_port do). Without this, a value-object class
+            %% defined via `>>` method patch would be recompiled as an Actor if its
+            %% parent was loaded from a different file.
+            SuperclassIndex = build_class_superclass_index(),
+            Options0 = #{stdlib_mode => false, workspace_mode => true},
+            Options =
+                case map_size(SuperclassIndex) of
+                    0 -> Options0;
+                    _ -> Options0#{class_superclass_index => SuperclassIndex}
+                end,
             case beamtalk_compiler:compile(SourceBin, Options) of
                 {ok,
                     #{
@@ -647,7 +658,9 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
         end,
     wrap_compiler_errors(
         fun() ->
-            case beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars, CompileOpts) of
+            case
+                beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars, CompileOpts)
+            of
                 %% BT-571: Inline class definition
                 {ok, class_definition, ClassInfo} ->
                     #{

@@ -438,7 +438,7 @@ fn handle_compile_expression(request: &Map) -> Term {
 /// Merges any standalone method definitions into the class, generates code,
 /// and returns a `class_definition` response.
 /// BT-885: Also compiles any trailing expressions and includes them in the response.
-/// BT-907: Accepts class_superclass_index to resolve cross-file inheritance chains.
+/// BT-907: Accepts `class_superclass_index` to resolve cross-file inheritance chains.
 fn handle_inline_class_definition(
     module: beamtalk_core::ast::Module,
     source: &str,
@@ -835,15 +835,21 @@ mod tests {
     fn inline_class_definition_with_superclass_index_compiles_as_value_type() {
         // Build a compile_expression request for `Shape subclass: Triangle`
         // where Shape's superclass (Object) is provided via class_superclass_index.
-        let superclass_index_map = Map::from([
-            (binary("Shape"), binary("Object")),
-        ]);
+        let superclass_index_map = Map::from([(binary("Shape"), binary("Object"))]);
         let request = Map::from([
             (atom("command"), atom("compile_expression")),
-            (atom("source"), binary("Shape subclass: Triangle\n  state: base = 1.0\n  class withBase: b => self new: #{base => b}")),
+            (
+                atom("source"),
+                binary(
+                    "Shape subclass: Triangle\n  state: base = 1.0\n  class withBase: b => self new: #{base => b}",
+                ),
+            ),
             (atom("module"), binary("bt@triangle")),
             (atom("known_vars"), Term::from(eetf::List::from(vec![]))),
-            (atom("class_superclass_index"), Term::from(superclass_index_map)),
+            (
+                atom("class_superclass_index"),
+                Term::from(superclass_index_map),
+            ),
         ]);
 
         let response = handle_compile_expression(&request);
