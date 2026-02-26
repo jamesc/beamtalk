@@ -336,6 +336,17 @@ fn handle_compile_expression(request: &Map) -> Term {
         .and_then(term_to_string_list)
         .unwrap_or_default();
 
+    // BT-907: Extract optional class superclass index for cross-file value-object inheritance.
+    // When an inline class definition inherits from a class loaded via a file, the compiler
+    // needs the index to determine whether the parent is a value object or an actor.
+    let class_superclass_index = match map_get(request, "class_superclass_index") {
+        None => std::collections::HashMap::new(),
+        Some(term) => match term_to_string_map(term) {
+            Ok(map) => map,
+            Err(e) => return error_response(&[e]),
+        },
+    };
+
     // Parse the expression
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
@@ -382,7 +393,13 @@ fn handle_compile_expression(request: &Map) -> Term {
 
     // BT-571: If the parsed module contains class definitions, use compile path
     if !module.classes.is_empty() {
-        return handle_inline_class_definition(module, &source, &module_name, &warnings);
+        return handle_inline_class_definition(
+            module,
+            &source,
+            &module_name,
+            &warnings,
+            &class_superclass_index,
+        );
     }
 
     // BT-571: If the parsed module contains standalone method definitions, return method info
@@ -421,11 +438,13 @@ fn handle_compile_expression(request: &Map) -> Term {
 /// Merges any standalone method definitions into the class, generates code,
 /// and returns a `class_definition` response.
 /// BT-885: Also compiles any trailing expressions and includes them in the response.
+/// BT-907: Accepts `class_superclass_index` to resolve cross-file inheritance chains.
 fn handle_inline_class_definition(
     module: beamtalk_core::ast::Module,
     source: &str,
     expr_module_name: &str,
     warnings: &[String],
+    class_superclass_index: &std::collections::HashMap<String, String>,
 ) -> Term {
     let mut module = module;
     let mut warnings = warnings.to_vec();
@@ -483,7 +502,8 @@ fn handle_inline_class_definition(
         &module,
         beamtalk_core::erlang::CodegenOptions::new(&class_module_name)
             .with_workspace_mode(true)
-            .with_source(source),
+            .with_source(source)
+            .with_class_superclass_index(class_superclass_index.clone()),
     ) {
         Ok(code) => class_definition_ok_response(
             &code,
@@ -808,6 +828,61 @@ fn directive_for_verbosity(v: u8) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BT-907: Inline class definition with cross-file superclass index must compile
+    /// as a value type, not an Actor, when the parent's chain resolves to Object.
+    #[test]
+    fn inline_class_definition_with_superclass_index_compiles_as_value_type() {
+        // Build a compile_expression request for `Shape subclass: Triangle`
+        // where Shape's superclass (Object) is provided via class_superclass_index.
+        let superclass_index_map = Map::from([(binary("Shape"), binary("Object"))]);
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (
+                atom("source"),
+                binary(
+                    "Shape subclass: Triangle\n  state: base = 1.0\n  class withBase: b => self new: #{base => b}",
+                ),
+            ),
+            (atom("module"), binary("bt@triangle")),
+            (atom("known_vars"), Term::from(eetf::List::from(vec![]))),
+            (
+                atom("class_superclass_index"),
+                Term::from(superclass_index_map),
+            ),
+        ]);
+
+        let response = handle_compile_expression(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected a map response, got: {response:?}");
+        };
+
+        // Must succeed
+        let status = map_get(m, "status");
+        assert_eq!(
+            status,
+            Some(&atom("ok")),
+            "Expected ok status, got: {response:?}"
+        );
+
+        // Must be a class_definition response
+        let kind = map_get(m, "kind");
+        assert_eq!(
+            kind,
+            Some(&atom("class_definition")),
+            "Expected class_definition kind, got: {response:?}"
+        );
+
+        // The generated Core Erlang must NOT contain gen_server (value type, not Actor)
+        let core_erlang = map_get(m, "core_erlang")
+            .and_then(term_to_string)
+            .expect("core_erlang field must be present");
+        assert!(
+            !core_erlang.contains("'gen_server'"),
+            "Triangle should be a value type (Object chain), not an Actor. \
+             Shape→Object means Triangle→Shape→Object. Got core_erlang:\n{core_erlang}"
+        );
+    }
 
     #[test]
     fn directive_defaults() {

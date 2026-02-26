@@ -468,7 +468,18 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
             %% Combine class source with new method definition
             CombinedSource = ClassSource ++ "\n" ++ Expression,
             SourceBin = list_to_binary(CombinedSource),
-            Options = #{stdlib_mode => false, workspace_mode => true},
+            %% BT-907: Include class superclass index so the recompiled class resolves
+            %% cross-file inheritance chains (same as compile_file_via_port and
+            %% compile_expression_via_port do). Without this, a value-object class
+            %% defined via `>>` method patch would be recompiled as an Actor if its
+            %% parent was loaded from a different file.
+            SuperclassIndex = build_class_superclass_index(),
+            Options0 = #{stdlib_mode => false, workspace_mode => true},
+            Options =
+                case map_size(SuperclassIndex) of
+                    0 -> Options0;
+                    _ -> Options0#{class_superclass_index => SuperclassIndex}
+                end,
             case beamtalk_compiler:compile(SourceBin, Options) of
                 {ok,
                     #{
@@ -635,9 +646,21 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
         is_atom(K),
         not is_internal_key(K)
     ],
+    %% BT-907: Pass class superclass index so inline class definitions correctly
+    %% resolve cross-file inheritance chains (same as compile_file_via_port does
+    %% for file loads since BT-905). Without this, a child class defined inline
+    %% in the REPL whose parent was loaded from a file defaults to Actor codegen.
+    SuperclassIndex = build_class_superclass_index(),
+    CompileOpts =
+        case map_size(SuperclassIndex) of
+            0 -> #{};
+            _ -> #{class_superclass_index => SuperclassIndex}
+        end,
     wrap_compiler_errors(
         fun() ->
-            case beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars) of
+            case
+                beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars, CompileOpts)
+            of
                 %% BT-571: Inline class definition
                 {ok, class_definition, ClassInfo} ->
                     #{
@@ -1156,7 +1179,7 @@ build_class_superclass_index() ->
                     ({_Class, none}, Acc) ->
                         Acc;
                     ({Class, Superclass}, Acc) when is_atom(Class), is_atom(Superclass) ->
-                        Acc#{atom_to_binary(Class) => atom_to_binary(Superclass)};
+                        Acc#{atom_to_binary(Class, utf8) => atom_to_binary(Superclass, utf8)};
                     (_, Acc) ->
                         Acc
                 end,

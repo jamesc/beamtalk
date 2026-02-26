@@ -15,7 +15,7 @@
 
 -export([
     open/0, open/1,
-    compile_expression/4,
+    compile_expression/4, compile_expression/5,
     close/1
 ]).
 
@@ -59,12 +59,36 @@ open(BinaryPath) ->
     | {ok, method_definition, map()}
     | {error, [binary()]}.
 compile_expression(Port, Source, ModuleName, KnownVars) ->
-    Request = #{
+    compile_expression(Port, Source, ModuleName, KnownVars, #{}).
+
+%% @doc Compile a REPL expression with optional compilation options.
+%%
+%% Options:
+%%   class_superclass_index => #{binary() => binary()} — BT-907: cross-file superclass info
+%%
+%% When class_superclass_index is provided, it is forwarded to the compiler port
+%% so that inline class definitions correctly resolve inherited types from
+%% already-loaded files.
+-spec compile_expression(port(), binary(), binary(), [binary()], map()) ->
+    {ok, binary(), [binary()]}
+    | {ok, class_definition, map()}
+    | {ok, method_definition, map()}
+    | {error, [binary()]}.
+compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
+    SuperclassIndex = maps:get(class_superclass_index, Options, #{}),
+    Request0 = #{
         command => compile_expression,
         source => Source,
         module => ModuleName,
         known_vars => KnownVars
     },
+    %% BT-907: Include superclass index only when non-empty to keep the
+    %% protocol backward-compatible with older port binaries.
+    Request =
+        case map_size(SuperclassIndex) of
+            0 -> Request0;
+            _ -> Request0#{class_superclass_index => SuperclassIndex}
+        end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
         true ->
