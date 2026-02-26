@@ -118,7 +118,7 @@ websocket_info(
 ) when
     Msg =/= undefined
 ->
-    WrappedReason = beamtalk_repl_server:ensure_structured_error(Reason),
+    WrappedReason = beamtalk_repl_errors:ensure_structured_error(Reason),
     Response = beamtalk_repl_protocol:encode_error(
         WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1, Output, Warnings
     ),

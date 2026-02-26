@@ -317,7 +317,7 @@ handle_protocol_request(Msg, SessionPid) ->
                 stack => lists:sublist(Stack, 5),
                 op => Op
             }),
-            WrappedReason = ensure_structured_error(Reason, Class),
+            WrappedReason = beamtalk_repl_errors:ensure_structured_error(Reason, Class),
             beamtalk_repl_protocol:encode_error(
                 WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1
             )
@@ -423,6 +423,7 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
 %% @doc Parse a request from the CLI (legacy interface).
 %% Expected format: JSON with "type" field.
 %% New code should use beamtalk_repl_protocol:decode/1 instead.
+%% Implementation lives in beamtalk_repl_protocol (extracted BT-865).
 -spec parse_request(binary()) ->
     {eval, string()}
     | {clear_bindings}
@@ -436,90 +437,7 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
     | {health}
     | {shutdown, string()}
     | {error, term()}.
-parse_request(Data) when is_binary(Data) ->
-    try
-        %% Remove trailing newline if present
-        Trimmed = string:trim(Data),
-        %% Try to parse as JSON
-        case beamtalk_repl_json:parse_json(Trimmed) of
-            {ok, #{<<"op">> := Op} = Map} ->
-                %% New protocol format - translate to internal tuples
-                op_to_request(Op, Map);
-            {ok, #{<<"type">> := <<"eval">>, <<"expression">> := Expr}} ->
-                {eval, binary_to_list(Expr)};
-            {ok, #{<<"type">> := <<"clear">>}} ->
-                {clear_bindings};
-            {ok, #{<<"type">> := <<"bindings">>}} ->
-                {get_bindings};
-            {ok, #{<<"type">> := <<"load">>, <<"path">> := Path}} ->
-                {load_file, binary_to_list(Path)};
-            {ok, #{<<"type">> := <<"actors">>}} ->
-                {list_actors};
-            {ok, #{<<"type">> := <<"modules">>}} ->
-                {list_modules};
-            {ok, #{<<"type">> := <<"kill">>, <<"pid">> := PidStr}} ->
-                {kill_actor, binary_to_list(PidStr)};
-            {ok, _Other} ->
-                {error, {invalid_request, unknown_type}};
-            {error, _Reason} ->
-                %% Not JSON, treat as raw expression for robustness
-                %% Supports manual testing (e.g., netcat) and third-party tools
-                case Trimmed of
-                    <<>> -> {error, empty_expression};
-                    _ -> {eval, binary_to_list(Trimmed)}
-                end
-        end
-    catch
-        _:Error ->
-            {error, {parse_error, Error}}
-    end.
-
-%% @private
-%% @doc Translate a protocol operation name to an internal request tuple.
--spec op_to_request(binary(), map()) ->
-    {eval, string()}
-    | {clear_bindings}
-    | {get_bindings}
-    | {load_file, string()}
-    | {load_source, binary()}
-    | {list_actors}
-    | {list_modules}
-    | {kill_actor, string()}
-    | {get_docs, binary(), binary() | undefined}
-    | {health}
-    | {shutdown, string()}
-    | {error, term()}.
-op_to_request(<<"eval">>, Map) ->
-    Code = maps:get(<<"code">>, Map, <<>>),
-    {eval, binary_to_list(Code)};
-op_to_request(<<"clear">>, _Map) ->
-    {clear_bindings};
-op_to_request(<<"bindings">>, _Map) ->
-    {get_bindings};
-op_to_request(<<"load-file">>, Map) ->
-    Path = maps:get(<<"path">>, Map, <<>>),
-    {load_file, binary_to_list(Path)};
-op_to_request(<<"load-source">>, Map) ->
-    Source = maps:get(<<"source">>, Map, <<>>),
-    {load_source, Source};
-op_to_request(<<"actors">>, _Map) ->
-    {list_actors};
-op_to_request(<<"modules">>, _Map) ->
-    {list_modules};
-op_to_request(<<"kill">>, Map) ->
-    Pid = maps:get(<<"actor">>, Map, maps:get(<<"pid">>, Map, <<>>)),
-    {kill_actor, binary_to_list(Pid)};
-op_to_request(<<"docs">>, Map) ->
-    ClassName = maps:get(<<"class">>, Map, <<>>),
-    Selector = maps:get(<<"selector">>, Map, undefined),
-    {get_docs, ClassName, Selector};
-op_to_request(<<"health">>, _Map) ->
-    {health};
-op_to_request(<<"shutdown">>, Map) ->
-    Cookie = maps:get(<<"cookie">>, Map, <<>>),
-    {shutdown, binary_to_list(Cookie)};
-op_to_request(Op, _Map) ->
-    {error, {unknown_op, Op}}.
+parse_request(Data) -> beamtalk_repl_protocol:parse_request(Data).
 
 %%% Delegated helpers (BT-705)
 %%%
@@ -544,142 +462,19 @@ resolve_module_atoms(ModuleAtom, Classes) ->
 get_completions(Prefix) -> beamtalk_repl_ops_dev:get_completions(Prefix).
 make_class_not_found_error(ClassName) ->
     beamtalk_repl_ops_dev:make_class_not_found_error(ClassName).
+
+%% @private Delegate to beamtalk_repl_errors (extracted BT-865).
+ensure_structured_error(Reason, Class) ->
+    beamtalk_repl_errors:ensure_structured_error(Reason, Class).
+format_name(Name) -> beamtalk_repl_errors:format_name(Name).
 -endif.
 
-%% @private
 %% @doc Safely convert a binary to an existing atom, returning error instead of creating new atoms.
+%% Implementation lives in beamtalk_repl_errors (extracted BT-865).
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
-safe_to_existing_atom(<<>>) ->
-    {error, badarg};
-safe_to_existing_atom(Bin) when is_binary(Bin) ->
-    try binary_to_existing_atom(Bin, utf8) of
-        Atom -> {ok, Atom}
-    catch
-        error:badarg -> {error, badarg}
-    end;
-safe_to_existing_atom(_) ->
-    {error, badarg}.
+safe_to_existing_atom(Bin) -> beamtalk_repl_errors:safe_to_existing_atom(Bin).
 
-%% @private
 %% @doc Ensure an error reason is a structured #beamtalk_error{} record.
-%% If already structured (or a wrapped exception), passes through unchanged.
-%% Handles known bare tuple error patterns from the compile pipeline.
-%% Otherwise wraps the raw term in an internal_error.
+%% Implementation lives in beamtalk_repl_errors (extracted BT-865).
 -spec ensure_structured_error(term()) -> #beamtalk_error{}.
-ensure_structured_error(#beamtalk_error{} = Err) ->
-    Err;
-ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) ->
-    Err;
-ensure_structured_error(
-    {eval_error, _Class, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}}
-) ->
-    Err;
-ensure_structured_error({eval_error, _Class, #beamtalk_error{} = Err}) ->
-    Err;
-ensure_structured_error({eval_error, _Class, Reason}) ->
-    %% Delegate to /1 for known tuple patterns; fall back to generic wrapper.
-    ensure_structured_error(Reason);
-ensure_structured_error({compile_error, Msg}) when is_binary(Msg) ->
-    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
-    beamtalk_error:with_message(Err0, Msg);
-ensure_structured_error({compile_error, Msg}) when is_list(Msg) ->
-    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
-    beamtalk_error:with_message(Err0, list_to_binary(Msg));
-ensure_structured_error({compile_error, Reason}) ->
-    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Compile error: ">>, format_name(Reason)])
-    );
-ensure_structured_error({undefined_variable, Name}) ->
-    Err0 = beamtalk_error:new(undefined_variable, 'REPL'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Undefined variable: ">>, format_name(Name)])
-    );
-ensure_structured_error({file_not_found, Path}) ->
-    Err0 = beamtalk_error:new(file_not_found, 'File'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"File not found: ">>, format_name(Path)])
-    );
-ensure_structured_error({read_error, Reason}) ->
-    Err0 = beamtalk_error:new(io_error, 'File'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Failed to read file: ">>, format_name(Reason)])
-    );
-ensure_structured_error({load_error, Reason}) ->
-    Err0 = beamtalk_error:new(io_error, 'File'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Failed to load bytecode: ">>, format_name(Reason)])
-    );
-ensure_structured_error({parse_error, Details}) ->
-    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Parse error: ">>, format_name(Details)])
-    );
-ensure_structured_error({invalid_request, Reason}) ->
-    Err0 = beamtalk_error:new(internal_error, 'REPL'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Invalid request: ">>, format_name(Reason)])
-    );
-ensure_structured_error(empty_expression) ->
-    Err0 = beamtalk_error:new(empty_expression, 'REPL'),
-    beamtalk_error:with_message(Err0, <<"Empty expression">>);
-ensure_structured_error(timeout) ->
-    Err0 = beamtalk_error:new(timeout, 'REPL'),
-    beamtalk_error:with_message(Err0, <<"Request timed out">>);
-ensure_structured_error(Reason) ->
-    Err0 = beamtalk_error:new(internal_error, 'REPL'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary(io_lib:format("~p", [Reason]))
-    ).
-
-%% @private
-%% @doc Ensure an error reason is structured, with exception class context.
-%% Delegates known tuple patterns to ensure_structured_error/1 to preserve
-%% specific error kinds, only falling back to generic wrapper for unknown terms.
--spec ensure_structured_error(term(), atom()) -> #beamtalk_error{}.
-ensure_structured_error(#beamtalk_error{} = Err, _Class) ->
-    Err;
-ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Class) ->
-    Err;
-ensure_structured_error({compile_error, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({eval_error, _, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({undefined_variable, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({file_not_found, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({read_error, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({load_error, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({parse_error, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({invalid_request, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error(Reason, Class) ->
-    Err0 = beamtalk_error:new(internal_error, 'REPL'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([
-            atom_to_binary(Class, utf8),
-            <<": ">>,
-            io_lib:format("~p", [Reason])
-        ])
-    ).
-
-%% @private
-%% @doc Format a name for error messages.
--spec format_name(term()) -> binary().
-format_name(Name) when is_atom(Name) -> atom_to_binary(Name, utf8);
-format_name(Name) when is_binary(Name) -> Name;
-format_name(Name) when is_list(Name) -> list_to_binary(Name);
-format_name(Name) -> iolist_to_binary(io_lib:format("~p", [Name])).
+ensure_structured_error(Reason) -> beamtalk_repl_errors:ensure_structured_error(Reason).

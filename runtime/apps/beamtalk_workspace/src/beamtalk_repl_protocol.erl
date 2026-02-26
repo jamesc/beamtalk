@@ -21,6 +21,7 @@
 
 -export([
     decode/1,
+    parse_request/1,
     encode_result/3, encode_result/4, encode_result/5,
     encode_error/3, encode_error/4, encode_error/5,
     encode_status/3,
@@ -58,6 +59,109 @@
 
 -type protocol_msg() :: #protocol_msg{}.
 -export_type([protocol_msg/0]).
+
+%%% Legacy request parsing (deprecated — new code should use decode/1)
+
+%% @doc Parse a request from the CLI (legacy interface).
+%% Expected format: JSON with "type" field.
+%% New code should use beamtalk_repl_protocol:decode/1 instead.
+-spec parse_request(binary()) ->
+    {eval, string()}
+    | {clear_bindings}
+    | {get_bindings}
+    | {load_file, string()}
+    | {load_source, binary()}
+    | {list_actors}
+    | {kill_actor, string()}
+    | {list_modules}
+    | {get_docs, binary(), binary() | undefined}
+    | {health}
+    | {shutdown, string()}
+    | {error, term()}.
+parse_request(Data) when is_binary(Data) ->
+    try
+        %% Remove trailing newline if present
+        Trimmed = string:trim(Data),
+        %% Try to parse as JSON
+        case parse_json(Trimmed) of
+            {ok, #{<<"op">> := Op} = Map} ->
+                %% New protocol format - translate to internal tuples
+                op_to_request(Op, Map);
+            {ok, #{<<"type">> := <<"eval">>, <<"expression">> := Expr}} ->
+                {eval, binary_to_list(Expr)};
+            {ok, #{<<"type">> := <<"clear">>}} ->
+                {clear_bindings};
+            {ok, #{<<"type">> := <<"bindings">>}} ->
+                {get_bindings};
+            {ok, #{<<"type">> := <<"load">>, <<"path">> := Path}} ->
+                {load_file, binary_to_list(Path)};
+            {ok, #{<<"type">> := <<"actors">>}} ->
+                {list_actors};
+            {ok, #{<<"type">> := <<"modules">>}} ->
+                {list_modules};
+            {ok, #{<<"type">> := <<"kill">>, <<"pid">> := PidStr}} ->
+                {kill_actor, binary_to_list(PidStr)};
+            {ok, _Other} ->
+                {error, {invalid_request, unknown_type}};
+            {error, _Reason} ->
+                %% Not JSON, treat as raw expression for robustness
+                %% Supports manual testing (e.g., netcat) and third-party tools
+                case Trimmed of
+                    <<>> -> {error, empty_expression};
+                    _ -> {eval, binary_to_list(Trimmed)}
+                end
+        end
+    catch
+        _:Error ->
+            {error, {parse_error, Error}}
+    end.
+
+%% @private
+%% @doc Translate a protocol operation name to an internal request tuple.
+-spec op_to_request(binary(), map()) ->
+    {eval, string()}
+    | {clear_bindings}
+    | {get_bindings}
+    | {load_file, string()}
+    | {load_source, binary()}
+    | {list_actors}
+    | {list_modules}
+    | {kill_actor, string()}
+    | {get_docs, binary(), binary() | undefined}
+    | {health}
+    | {shutdown, string()}
+    | {error, term()}.
+op_to_request(<<"eval">>, Map) ->
+    Code = maps:get(<<"code">>, Map, <<>>),
+    {eval, binary_to_list(Code)};
+op_to_request(<<"clear">>, _Map) ->
+    {clear_bindings};
+op_to_request(<<"bindings">>, _Map) ->
+    {get_bindings};
+op_to_request(<<"load-file">>, Map) ->
+    Path = maps:get(<<"path">>, Map, <<>>),
+    {load_file, binary_to_list(Path)};
+op_to_request(<<"load-source">>, Map) ->
+    Source = maps:get(<<"source">>, Map, <<>>),
+    {load_source, Source};
+op_to_request(<<"actors">>, _Map) ->
+    {list_actors};
+op_to_request(<<"modules">>, _Map) ->
+    {list_modules};
+op_to_request(<<"kill">>, Map) ->
+    Pid = maps:get(<<"actor">>, Map, maps:get(<<"pid">>, Map, <<>>)),
+    {kill_actor, binary_to_list(Pid)};
+op_to_request(<<"docs">>, Map) ->
+    ClassName = maps:get(<<"class">>, Map, <<>>),
+    Selector = maps:get(<<"selector">>, Map, undefined),
+    {get_docs, ClassName, Selector};
+op_to_request(<<"health">>, _Map) ->
+    {health};
+op_to_request(<<"shutdown">>, Map) ->
+    Cookie = maps:get(<<"cookie">>, Map, <<>>),
+    {shutdown, binary_to_list(Cookie)};
+op_to_request(Op, _Map) ->
+    {error, {unknown_op, Op}}.
 
 %%% Decoding
 
