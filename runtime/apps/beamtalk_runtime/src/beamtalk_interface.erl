@@ -410,6 +410,10 @@ resolve_class_name({beamtalk_object, _ClassTag, _Mod, ClassPid}) when is_pid(Cla
         exit:{noproc, _} ->
             Error0 = beamtalk_error:new(class_not_found, 'BeamtalkInterface'),
             Error1 = beamtalk_error:with_message(Error0, <<"Class process no longer alive">>),
+            {error, Error1};
+        exit:{timeout, _} ->
+            Error0 = beamtalk_error:new(class_not_found, 'BeamtalkInterface'),
+            Error1 = beamtalk_error:with_message(Error0, <<"Class process not responding">>),
             {error, Error1}
     end;
 resolve_class_name(Name) when is_atom(Name) ->
