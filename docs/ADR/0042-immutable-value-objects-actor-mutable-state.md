@@ -55,7 +55,8 @@ Value objects are declared with `state:` and constructed via auto-generated keyw
 
 ```smalltalk
 Value subclass: Point
-  state: x = 0, y = 0
+  state: x = 0
+  state: y = 0
 
 point := Point x: 3 y: 4.
 ```
@@ -67,7 +68,8 @@ point := Point x: 3 y: 4.
 ```smalltalk
 Value subclass: Point
   classState: instanceCount = 0
-  state: x = 0, y = 0
+  state: x = 0
+  state: y = 0
 
   class create: x y: y =>
     self.instanceCount := self.instanceCount + 1.
@@ -198,7 +200,8 @@ Actor subclass: Counter
 The compiler auto-generates `with*:` methods as the **public API** for external callers. Inside actor methods, direct slot assignment is preferred:
 
 - **Cheaper:** `self.slot := expr` compiles to `maps:put(slot, Expr, StateN)` — a direct map operation. `self withSlot: expr` is a self-send through dispatch, requiring `{reply, Result, NewState}` tuple unpacking.
-- **Safer:** With `self.slot :=`, the state map always reflects all assignments. With `with*:` chains, forgetting to capture an intermediate variable silently loses state updates — a data-loss footgun with no compile-time or runtime error:
+- **Safer:** With `self.slot :=`, the state map always reflects all assignments. With `with*:` chains, forgetting to capture an intermediate variable silently loses state updates — a data-loss footgun with no compile-time or runtime error.
+- **Intentional asymmetry with `with*:`:** `self.slot :=` bypasses dispatch — the actor's own methods are trusted to maintain invariants directly. If a subclass needs validation on slot writes, it overrides `withSlot:`, which gates the *external* API. This is analogous to Erlang's direct state map manipulation inside `handle_call`, and to Swift's `mutating` methods which bypass `willSet`/`didSet` property observers. The two mechanisms serve different audiences: `self.slot :=` for internal state management, `with*:` for the public contract.
 
 ```smalltalk
 "FOOTGUN — with*: chain, uncaptured intermediate silently loses balance update:"
@@ -252,7 +255,8 @@ Multi-step state updates are straightforward — each line updates state directl
 
 ```smalltalk
 Actor subclass: Account
-  state: balance = 0, transactions = List new
+  state: balance = 0
+  state: transactions = List new
 
   deposit: amount =>
     self.balance := self.balance + amount.
@@ -549,7 +553,8 @@ Use a trait or protocol to opt into mutability:
 ```smalltalk
 Value subclass: Point
   uses: Mutable
-  state: x = 0, y = 0
+  state: x = 0
+  state: y = 0
 ```
 
 **Rejected because:** This is just Alternative 4 with extra syntax. The compiler still needs to handle mutable and immutable paths. The complexity isn't eliminated, it's disguised.
@@ -611,6 +616,7 @@ This would be more ergonomic than chained `with*:` calls for constructing object
 
 - **ADR 0041 remains active and essential.** ADR 0041's universal state-threading protocol is largely implemented and continues to serve its purpose: threading local variable rebindings and actor slot assignments through blocks. The scope is narrower than under the status quo — no cross-method or cross-class state threading — but the infrastructure is exercised by any block that rebinds a captured local or assigns to an actor slot. This is exactly the bounded problem ADR 0041 was designed for.
 - **ADR 0005 alignment.** ADR 0005 (BEAM Object Model) already distinguishes value types from actors. This ADR formalizes the immutability constraint that was implicit in ADR 0005's design.
+- **Collection mutation methods return new collections.** `add:`, `remove:`, `addAll:` return the new collection, not the affected element — a deliberate departure from Smalltalk convention (where `OrderedCollection>>add:` returns the added element), consistent with immutable value semantics. This is already implemented in the stdlib (`List>>add:` returns a new `List`; ADR 0037).
 - **Collection protocol completeness is important but not critical.** With local rebinding, developers can always fall back to `do:` with accumulator rebinding. However, `inject:into:`, `collect:`, `select:`, `reject:`, and `detect:` should still be comprehensive — idiomatic functional patterns are cleaner than imperative accumulation and should be the encouraged style.
 - **Auto-generated `with*:` methods are load-bearing.** Without them, immutability is tedious boilerplate. The compiler must generate them reliably for all declared slots.
 - **ADR 0043 leverages Value/Actor classification.** The compile-time and runtime guards for `!` (cast) on value types are defined in ADR 0043, using the Value/Actor classification introduced here.
