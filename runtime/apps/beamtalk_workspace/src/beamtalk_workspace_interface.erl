@@ -234,32 +234,21 @@ handle_call({actors, []}, _From, State) ->
     {reply, handle_actors(), State};
 handle_call({'actorAt:', [PidStr]}, _From, State) ->
     {reply, handle_actor_at(PidStr), State};
-handle_call({classes, []}, _From, State) ->
-    {reply, handle_classes(), State};
+handle_call({classes, []}, From, State) ->
+    %% classes iterates all class PIDs — spawn to avoid blocking gen_server mailbox
+    spawn_call_worker(From, classes, fun handle_classes/0, State);
 handle_call({'actorsOf:', [AClass]}, _From, State) ->
     {reply, handle_actors_of(AClass), State};
-handle_call({testClasses, []}, _From, State) ->
-    {reply, handle_test_classes(), State};
+handle_call({testClasses, []}, From, State) ->
+    %% testClasses calls handle_classes internally — spawn for the same reason
+    spawn_call_worker(From, testClasses, fun handle_test_classes/0, State);
 handle_call({globals, []}, From, State) ->
-    %% globals may call handle_actors which is fast, but spawn to avoid
-    %% any risk of deadlock from singleton resolution
+    %% globals may deadlock if singleton resolution re-enters the gen_server
     GenServerPid = self(),
     UserBindings = State#workspace_interface_state.user_bindings,
-    spawn(fun() ->
-        try handle_globals(GenServerPid, UserBindings) of
-            Result -> gen_server:reply(From, Result)
-        catch
-            Class:Reason:Stack ->
-                ?LOG_ERROR("globals handler crashed", #{
-                    class => Class, reason => Reason, stacktrace => Stack
-                }),
-                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-                gen_server:reply(
-                    From, {error, beamtalk_error:with_message(Err, <<"Internal error in globals">>)}
-                )
-        end
-    end),
-    {noreply, State};
+    spawn_call_worker(
+        From, globals, fun() -> handle_globals(GenServerPid, UserBindings) end, State
+    );
 handle_call({'bind:as:', [Value, Name]}, _From, State) ->
     case to_atom_name(Name) of
         {error, Err} ->
@@ -308,54 +297,12 @@ handle_call(get_session_bindings, _From, State) ->
     {reply, handle_session_bindings(GenServerPid, UserBindings), State};
 handle_call({'load:', [Path]}, From, State) ->
     %% load: compiles a file — spawn to avoid blocking the gen_server mailbox
-    spawn(fun() ->
-        try handle_load(Path) of
-            Result -> gen_server:reply(From, Result)
-        catch
-            Class:Reason:Stack ->
-                ?LOG_ERROR("load: handler crashed", #{
-                    class => Class, reason => Reason, stacktrace => Stack
-                }),
-                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-                gen_server:reply(
-                    From, {error, beamtalk_error:with_message(Err, <<"Internal error in load:">>)}
-                )
-        end
-    end),
-    {noreply, State};
+    spawn_call_worker(From, 'load:', fun() -> handle_load(Path) end, State);
 handle_call({test, []}, From, State) ->
     %% test may take a long time — spawn to avoid blocking
-    spawn(fun() ->
-        try handle_test() of
-            Result -> gen_server:reply(From, Result)
-        catch
-            Class:Reason:Stack ->
-                ?LOG_ERROR("test handler crashed", #{
-                    class => Class, reason => Reason, stacktrace => Stack
-                }),
-                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-                gen_server:reply(
-                    From, {error, beamtalk_error:with_message(Err, <<"Internal error in test">>)}
-                )
-        end
-    end),
-    {noreply, State};
+    spawn_call_worker(From, test, fun handle_test/0, State);
 handle_call({'test:', [TestClass]}, From, State) ->
-    spawn(fun() ->
-        try handle_test_class(TestClass) of
-            Result -> gen_server:reply(From, Result)
-        catch
-            Class:Reason:Stack ->
-                ?LOG_ERROR("test: handler crashed", #{
-                    class => Class, reason => Reason, stacktrace => Stack
-                }),
-                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-                gen_server:reply(
-                    From, {error, beamtalk_error:with_message(Err, <<"Internal error in test:">>)}
-                )
-        end
-    end),
-    {noreply, State};
+    spawn_call_worker(From, 'test:', fun() -> handle_test_class(TestClass) end, State);
 handle_call({Selector, Args}, From, State) when is_atom(Selector) ->
     %% Unknown selector — try hierarchy walk for inherited methods
     %% (e.g. class, respondsTo:, methods from Object/Actor)
@@ -369,7 +316,7 @@ handle_call({Selector, Args}, From, State) when is_atom(Selector) ->
                 gen_server:reply(From, {error, Error})
         catch
             Class:Reason:Stack ->
-                ?LOG_ERROR("dispatch handler crashed", #{
+                ?LOG_ERROR("workspace dispatch handler crashed", #{
                     selector => Selector, class => Class, reason => Reason, stacktrace => Stack
                 }),
                 Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
@@ -399,32 +346,21 @@ handle_cast({'actorAt:', [PidStr], FuturePid}, State) when is_pid(FuturePid) ->
     beamtalk_future:resolve(FuturePid, handle_actor_at(PidStr)),
     {noreply, State};
 handle_cast({classes, [], FuturePid}, State) when is_pid(FuturePid) ->
-    beamtalk_future:resolve(FuturePid, handle_classes()),
-    {noreply, State};
+    %% classes iterates all class PIDs — spawn to avoid blocking gen_server mailbox
+    spawn_cast_worker(FuturePid, classes, fun handle_classes/0, State);
 handle_cast({'actorsOf:', [AClass], FuturePid}, State) when is_pid(FuturePid) ->
     beamtalk_future:resolve(FuturePid, handle_actors_of(AClass)),
     {noreply, State};
 handle_cast({testClasses, [], FuturePid}, State) when is_pid(FuturePid) ->
-    beamtalk_future:resolve(FuturePid, handle_test_classes()),
-    {noreply, State};
+    %% testClasses calls handle_classes internally — spawn for the same reason
+    spawn_cast_worker(FuturePid, testClasses, fun handle_test_classes/0, State);
 handle_cast({globals, [], FuturePid}, State) when is_pid(FuturePid) ->
+    %% globals may deadlock if singleton resolution re-enters the gen_server
     GenServerPid = self(),
     UserBindings = State#workspace_interface_state.user_bindings,
-    spawn(fun() ->
-        try handle_globals(GenServerPid, UserBindings) of
-            Result -> beamtalk_future:resolve(FuturePid, Result)
-        catch
-            Class:Reason:Stack ->
-                ?LOG_ERROR("globals handler crashed", #{
-                    class => Class, reason => Reason, stacktrace => Stack
-                }),
-                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-                beamtalk_future:reject(
-                    FuturePid, beamtalk_error:with_message(Err, <<"Internal error in globals">>)
-                )
-        end
-    end),
-    {noreply, State};
+    spawn_cast_worker(
+        FuturePid, globals, fun() -> handle_globals(GenServerPid, UserBindings) end, State
+    );
 handle_cast({'bind:as:', [Value, Name], FuturePid}, State) when is_pid(FuturePid) ->
     case to_atom_name(Name) of
         {error, Err} ->
@@ -473,56 +409,11 @@ handle_cast({'unbind:', [Name], FuturePid}, State) when is_pid(FuturePid) ->
     end;
 handle_cast({'load:', [Path], FuturePid}, State) when is_pid(FuturePid) ->
     %% load: compiles a file — spawn to avoid blocking the gen_server mailbox
-    spawn(fun() ->
-        try handle_load(Path) of
-            {error, Err} ->
-                beamtalk_future:reject(FuturePid, Err);
-            Result ->
-                beamtalk_future:resolve(FuturePid, Result)
-        catch
-            Class:Reason:Stack ->
-                ?LOG_ERROR("load: cast handler crashed", #{
-                    class => Class, reason => Reason, stacktrace => Stack
-                }),
-                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-                beamtalk_future:reject(
-                    FuturePid, beamtalk_error:with_message(Err, <<"Internal error in load:">>)
-                )
-        end
-    end),
-    {noreply, State};
+    spawn_cast_worker(FuturePid, 'load:', fun() -> handle_load(Path) end, State);
 handle_cast({test, [], FuturePid}, State) when is_pid(FuturePid) ->
-    spawn(fun() ->
-        try handle_test() of
-            Result -> beamtalk_future:resolve(FuturePid, Result)
-        catch
-            Class:Reason:Stack ->
-                ?LOG_ERROR("test handler crashed", #{
-                    class => Class, reason => Reason, stacktrace => Stack
-                }),
-                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-                beamtalk_future:reject(
-                    FuturePid, beamtalk_error:with_message(Err, <<"Internal error in test">>)
-                )
-        end
-    end),
-    {noreply, State};
+    spawn_cast_worker(FuturePid, test, fun handle_test/0, State);
 handle_cast({'test:', [TestClass], FuturePid}, State) when is_pid(FuturePid) ->
-    spawn(fun() ->
-        try handle_test_class(TestClass) of
-            Result -> beamtalk_future:resolve(FuturePid, Result)
-        catch
-            Class:Reason:Stack ->
-                ?LOG_ERROR("test: handler crashed", #{
-                    class => Class, reason => Reason, stacktrace => Stack
-                }),
-                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-                beamtalk_future:reject(
-                    FuturePid, beamtalk_error:with_message(Err, <<"Internal error in test:">>)
-                )
-        end
-    end),
-    {noreply, State};
+    spawn_cast_worker(FuturePid, 'test:', fun() -> handle_test_class(TestClass) end, State);
 handle_cast({Selector, Args, FuturePid}, State) when
     is_pid(FuturePid), is_atom(Selector)
 ->
@@ -537,7 +428,7 @@ handle_cast({Selector, Args, FuturePid}, State) when
                 beamtalk_future:reject(FuturePid, Error)
         catch
             Class:Reason:Stack ->
-                ?LOG_ERROR("dispatch handler crashed", #{
+                ?LOG_ERROR("workspace dispatch handler crashed", #{
                     selector => Selector, class => Class, reason => Reason, stacktrace => Stack
                 }),
                 Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
@@ -571,6 +462,67 @@ terminate(_Reason, _State) ->
     {ok, #workspace_interface_state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+%%====================================================================
+%% Spawn worker helpers
+%%====================================================================
+
+%% @doc Spawn a worker for a handle_call path.
+%% The gen_server returns {noreply} immediately; the worker replies via gen_server:reply/2.
+%% This unblocks the gen_server mailbox while the caller still waits for the result.
+-spec spawn_call_worker(gen_server:from(), atom(), fun(() -> term()), #workspace_interface_state{}) ->
+    {noreply, #workspace_interface_state{}}.
+spawn_call_worker(From, Op, Fun, State) ->
+    spawn(fun() ->
+        try Fun() of
+            Result -> gen_server:reply(From, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("workspace handler crashed", #{
+                    op => Op, class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                gen_server:reply(
+                    From,
+                    {error,
+                        beamtalk_error:with_message(
+                            Err,
+                            iolist_to_binary([
+                                <<"Internal error in ">>, atom_to_binary(Op, utf8)
+                            ])
+                        )}
+                )
+        end
+    end),
+    {noreply, State}.
+
+%% @doc Spawn a worker for a handle_cast / future path.
+%% Resolves the future on success, rejects it on {error, Err} result or crash.
+-spec spawn_cast_worker(pid(), atom(), fun(() -> term()), #workspace_interface_state{}) ->
+    {noreply, #workspace_interface_state{}}.
+spawn_cast_worker(FuturePid, Op, Fun, State) ->
+    spawn(fun() ->
+        try Fun() of
+            {error, Err} -> beamtalk_future:reject(FuturePid, Err);
+            Result -> beamtalk_future:resolve(FuturePid, Result)
+        catch
+            Class:Reason:Stack ->
+                ?LOG_ERROR("workspace handler crashed", #{
+                    op => Op, class => Class, reason => Reason, stacktrace => Stack
+                }),
+                Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
+                beamtalk_future:reject(
+                    FuturePid,
+                    beamtalk_error:with_message(
+                        Err,
+                        iolist_to_binary([
+                            <<"Internal error in ">>, atom_to_binary(Op, utf8)
+                        ])
+                    )
+                )
+        end
+    end),
+    {noreply, State}.
 
 %%====================================================================
 %% Internal method implementations
