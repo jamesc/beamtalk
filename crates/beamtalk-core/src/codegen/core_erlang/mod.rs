@@ -533,6 +533,8 @@ pub(super) struct NlrValueTypeCatchVars {
     pub stk_var: String,
     pub ctk_var: String,
     pub val_var: String,
+    /// BT-854: State variable captured from the 4-tuple NLR throw.
+    pub state_var: String,
     pub ot_pair_var: String,
 }
 
@@ -559,12 +561,13 @@ impl NlrValueTypeCatchVars {
     /// Formats the catch suffix for the NLR wrapper.
     ///
     /// BT-774: Returns `Document` instead of `String` for composable codegen.
+    /// BT-854: Catches 4-tuple NLR throws and returns `{NlrVal, NlrState}`.
     ///
     /// ```text
     /// of Result -> Result
     /// catch <Cls, Err, Stk> ->
     ///   case {Cls, Err} of
-    ///     <{'throw', {'$bt_nlr', CatchTok, Val}}> when ... -> Val
+    ///     <{'throw', {'$bt_nlr', CatchTok, Val, State}}> when ... -> {Val, State}
     ///     <Other> when 'true' -> primop 'raw_raise'(Cls, Err, Stk)
     ///   end
     /// ```
@@ -594,13 +597,18 @@ impl NlrValueTypeCatchVars {
             self.ctk_var.clone(),
             ", ",
             self.val_var.clone(),
+            ", ",
+            self.state_var.clone(),
             "}}> ",
             "when call 'erlang':'=:='(",
             self.ctk_var.clone(),
             ", ",
             self.token_var.clone(),
-            ") -> ",
+            ") -> {",
             self.val_var.clone(),
+            ", ",
+            self.state_var.clone(),
+            "}",
             nest(INDENT + 4, line()),
             "<",
             self.ot_pair_var.clone(),
@@ -1029,10 +1037,10 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-764: Wraps a value type method body with NLR (non-local return) try/catch.
+    /// BT-764/BT-854: Wraps a value type method body with NLR (non-local return) try/catch.
     ///
-    /// Value type NLR uses a 3-element throw tuple `{$bt_nlr, Token, Value}` (no state)
-    /// and catches it to return just the value. The body parts are provided as a
+    /// Value type NLR uses a 4-element throw tuple `{$bt_nlr, Token, Value, State}`
+    /// and catches it to return `{Value, State}`. The body parts are provided as a
     /// `Document` and the result is a complete function definition document.
     pub(super) fn wrap_value_type_body_with_nlr_catch(
         &mut self,
@@ -1044,6 +1052,7 @@ impl CoreErlangGenerator {
         let stk_var = self.fresh_temp_var("NlrStk");
         let ctk_var = self.fresh_temp_var("CatchTok");
         let val_var = self.fresh_temp_var("NlrVal");
+        let state_var = self.fresh_temp_var("NlrState");
         let ot_pair_var = self.fresh_temp_var("OtherPair");
 
         NlrValueTypeCatchVars {
@@ -1054,6 +1063,7 @@ impl CoreErlangGenerator {
             stk_var,
             ctk_var,
             val_var,
+            state_var,
             ot_pair_var,
         }
     }
@@ -1214,28 +1224,24 @@ impl CoreErlangGenerator {
                 // Otherwise (at method body level, or no NLR), just emit the value.
                 if let Some(nlr_token) = self.current_nlr_token.clone() {
                     let val_doc = self.generate_expression(value)?;
-                    // BT-761: Actor methods need the current state in the throw so
-                    // the catch arm can build the {reply, Value, State} tuple.
-                    if self.context == CodeGenContext::Actor {
-                        let state = self.current_state_var();
-                        Ok(docvec![
-                            "call 'erlang':'throw'({'$bt_nlr', ",
-                            nlr_token,
-                            ", ",
-                            val_doc,
-                            ", ",
-                            state,
-                            "})"
-                        ])
+                    // BT-761/BT-854: All NLR throws carry state as a 4-tuple.
+                    // Actor methods use the current gen_server state; value type
+                    // methods use the latest Self{N} snapshot so field mutations
+                    // accumulated before the ^ are preserved.
+                    let state = if self.context == CodeGenContext::Actor {
+                        self.current_state_var()
                     } else {
-                        Ok(docvec![
-                            "call 'erlang':'throw'({'$bt_nlr', ",
-                            nlr_token,
-                            ", ",
-                            val_doc,
-                            "})"
-                        ])
-                    }
+                        self.current_self_var()
+                    };
+                    Ok(docvec![
+                        "call 'erlang':'throw'({'$bt_nlr', ",
+                        nlr_token,
+                        ", ",
+                        val_doc,
+                        ", ",
+                        state,
+                        "})"
+                    ])
                 } else {
                     // Return in Core Erlang is just the value
                     self.generate_expression(value)

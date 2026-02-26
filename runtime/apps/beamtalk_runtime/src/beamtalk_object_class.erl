@@ -256,7 +256,8 @@ init({ClassName, ClassInfo}) ->
     put(beamtalk_class_module, Module),
     put(beamtalk_class_is_abstract, IsAbstract),
 
-    %% BT-474: is_constructible starts undefined — computed lazily on first new call
+    %% BT-877: is_constructible may be set by the compiler via ClassBuilder.
+    %% If not set (undefined), it will be computed lazily on first new call.
     %% ADR 0032 Phase 1: No flattened method tables — dispatch walks the chain directly.
     State = #class_state{
         name = ClassName,
@@ -264,6 +265,7 @@ init({ClassName, ClassInfo}) ->
         superclass = Superclass,
         is_sealed = maps:get(is_sealed, ClassInfo, false),
         is_abstract = IsAbstract,
+        is_constructible = maps:get(is_constructible, ClassInfo, undefined),
         instance_methods = InstanceMethods,
         class_methods = ClassMethods,
         fields = maps:get(fields, ClassInfo, []),
@@ -485,7 +487,7 @@ apply_class_info(State, ClassInfo) ->
         class_methods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
         fields = maps:get(fields, ClassInfo, State#class_state.fields),
         method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
-        is_constructible = undefined,
+        is_constructible = maps:get(is_constructible, ClassInfo, undefined),
         doc = maps:get(doc, ClassInfo, State#class_state.doc),
         method_docs = maps:get(method_docs, ClassInfo, State#class_state.method_docs)
     }.

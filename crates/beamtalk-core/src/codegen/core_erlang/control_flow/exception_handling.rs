@@ -142,9 +142,10 @@ impl CoreErlangGenerator {
             Document::String(format!(" in try apply {block_var} () ")),
             Document::String(format!("of {result_var} -> {result_var} ")),
             Document::String(format!("catch <{type_var}, {error_var}, {stack_var}> -> ")),
-            // BT-754/BT-761: Non-local returns throw {'$bt_nlr', Token, Value} (value types)
-            // or {'$bt_nlr', Token, Value, State} (actors). on:do: must NOT catch them —
-            // re-raise immediately so the enclosing method's NLR handler can intercept.
+            // BT-754/BT-761/BT-854: Non-local returns throw {'$bt_nlr', Token, Value, State}
+            // (4-tuple for both actors and value types since BT-854). on:do: must NOT
+            // catch them — re-raise so the enclosing method's NLR handler can intercept.
+            // The 3-tuple arm is kept as a safety net for backward compatibility.
             Document::String(format!(
                 "case {{{type_var}, {error_var}}} of \
                  <{{'throw', {{'$bt_nlr', {nlr_tok_var}, {nlr_val_var}, {nlr_state_var}}}}}> when 'true' -> \
@@ -253,8 +254,9 @@ impl CoreErlangGenerator {
             Document::String(format!(" {{{try_result_var}, {try_final_var}}} ")),
             Document::String(format!("of {state_after_try} -> {state_after_try} ")),
             Document::String(format!("catch <{type_var}, {error_var}, {stack_var}> -> ")),
-            // BT-754/BT-761: Re-raise NLR throws transparently (see generate_on_do for details).
-            // Match both 4-tuple (actor) and 3-tuple (value type) NLR throw formats.
+            // BT-754/BT-761/BT-854: Re-raise NLR throws transparently (see generate_on_do).
+            // Both actors and value types now use 4-tuple format (BT-854).
+            // The 3-tuple arm is kept as a safety net for backward compatibility.
             Document::String(format!(
                 "case {{{type_var}, {error_var}}} of \
                  <{{'throw', {{'$bt_nlr', {nlr_tok_var}, {nlr_val_var}, {nlr_state_var}}}}}> when 'true' -> \

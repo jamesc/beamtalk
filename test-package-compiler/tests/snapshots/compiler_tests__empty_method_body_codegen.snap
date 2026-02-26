@@ -191,7 +191,8 @@ module 'empty_method_body' ['start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_c
             'methodSource' => ~{'doNothing' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<78>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']])}#, 'getValue' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#}~,
             'classState' => ~{}~,
             'classDoc' => 'none',
-            'methodDocs' => ~{}~
+            'methodDocs' => ~{}~,
+            'isConstructible' => 'false'
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
