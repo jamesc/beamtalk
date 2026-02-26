@@ -3,7 +3,7 @@
 
 %%% @doc Thin Behaviour/Class intrinsics (ADR 0032 Phase 2).
 %%%
-%% **DDD Context:** Object System
+%%% **DDD Context:** Object System
 %%%
 %%% These functions back the `@primitive "classXxx"` declarations in `lib/Behaviour.bt`
 %%% and `lib/Class.bt`. Each function receives a class object `Self`

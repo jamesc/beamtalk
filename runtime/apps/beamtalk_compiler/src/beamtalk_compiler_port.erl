@@ -3,7 +3,7 @@
 
 %% @doc OTP Port interface to the Rust compiler binary (ADR 0022, Phase 0).
 %%
-%% DDD Context: Compilation (Anti-Corruption Layer boundary)
+%%% **DDD Context:** Compilation (Anti-Corruption Layer boundary)
 %%
 %% Spawns `beamtalk-compiler-port` as an OTP port with `{packet, 4}' framing
 %% and ETF-encoded requests/responses.

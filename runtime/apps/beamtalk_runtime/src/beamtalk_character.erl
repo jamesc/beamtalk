@@ -4,7 +4,7 @@
 %% @doc Character runtime support for primitives that cannot be expressed
 %% as direct Erlang BIF calls.
 %%
-%% DDD Context: Runtime — Standard Library
+%%% **DDD Context:** Runtime — Standard Library
 %%
 %% Character values are integers (Unicode codepoints) at the BEAM level.
 %% This module provides predicate and conversion helpers for the Character class.

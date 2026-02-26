@@ -40,6 +40,7 @@ When generating Core Erlang or Erlang source:
 - Use EDoc format: `%%% @doc`, `%%% @param`, `%%% @returns`
 - Document the module purpose at the top
 - Document public API functions
+- Include DDD Context annotation using **triple `%`** (module-level style): `%%% **DDD Context:** ContextName` — never `%%`
 
 ---
 

@@ -3,7 +3,7 @@
 
 %% @doc Method Resolver domain service.
 %%
-%% DDD Context: Object System
+%%% **DDD Context:** Object System
 %%
 %% Resolves compiled method metadata from class references. Accepts
 %% various class reference formats (pid, atom, class object tuple) and

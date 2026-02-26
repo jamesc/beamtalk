@@ -3,7 +3,7 @@
 
 %%% @doc Minimal Metaclass bootstrap stub for ADR 0036 (Full Metaclass Tower Phase 1).
 %%%
-%% **DDD Context:** Object System
+%%% **DDD Context:** Object System
 %%%
 %%% This module acts as the implementation module for the 'Metaclass' class,
 %%% enabling ADR 0036 Phase 1: replacing the `#Metaclass` sentinel atom with a

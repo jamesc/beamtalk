@@ -3,7 +3,7 @@
 
 %% @doc Cross-platform helpers for OS-specific operations.
 %%
-%% **DDD Context:** Runtime
+%%% **DDD Context:** Runtime
 %%
 %% Provides portable abstractions over platform-specific paths and
 %% environment variables (HOME vs USERPROFILE, filesystem roots, etc.).

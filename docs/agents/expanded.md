@@ -90,7 +90,11 @@ Before using ANY Beamtalk syntax, verify it exists in at least one of:
 
 The beamtalk architecture follows **Domain-Driven Design**. Use domain terms consistently (e.g., `CompletionProvider` not `completions`). The codebase has four bounded contexts: **Language Service** (IDE features), **Compilation** (lexer→codegen), **Runtime** (actors, OTP), and **REPL** (interactive dev).
 
-All new modules should include a `//! **DDD Context:** ContextName` header. See [docs/beamtalk-ddd-model.md](../docs/beamtalk-ddd-model.md) for the full domain model.
+All new modules should include a DDD Context header near the top of the file. Use the correct comment style for the language:
+- **Rust**: `//! **DDD Context:** ContextName`
+- **Erlang**: `%%% **DDD Context:** ContextName` (triple `%` — module-level doc style)
+
+See [docs/beamtalk-ddd-model.md](../docs/beamtalk-ddd-model.md) for the full domain model.
 
 ---
 

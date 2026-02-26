@@ -13,7 +13,7 @@
 %% are now self-hosted as pure Beamtalk on Collection.bt and no longer need
 %% Erlang helpers.
 %%
-%% **DDD Context:** Runtime Context — Domain Service
+%%% **DDD Context:** Runtime Context — Domain Service
 -module(beamtalk_collection_ops).
 
 -export([

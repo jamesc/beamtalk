@@ -3,7 +3,7 @@
 
 %% @doc OTP application callback for the Beamtalk compiler (ADR 0022, Phase 1).
 %%
-%% DDD Context: Compilation (Anti-Corruption Layer)
+%%% **DDD Context:** Compilation (Anti-Corruption Layer)
 %%
 %% Starts the compiler supervision tree.
 

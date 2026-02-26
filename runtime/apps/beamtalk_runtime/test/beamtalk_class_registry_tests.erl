@@ -1,6 +1,6 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
-%% **DDD Context:** Runtime — Class System
+%%% **DDD Context:** Runtime — Class System
 
 %%% @doc EUnit tests for beamtalk_class_registry (BT-708).
 %%%

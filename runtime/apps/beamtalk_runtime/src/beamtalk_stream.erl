@@ -15,7 +15,7 @@
 %% where generator is a zero-arity function that returns either
 %% `{element, NextFun}` (an element and the continuation) or `done`.
 %%
-%% **DDD Context:** Runtime Context — Domain Service
+%%% **DDD Context:** Runtime Context — Domain Service
 -module(beamtalk_stream).
 
 -export([

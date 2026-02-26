@@ -12,7 +12,7 @@
 %%
 %% where OrdsetData is a sorted list maintained by the ordsets module.
 %%
-%% **DDD Context:** Runtime Context — Domain Service
+%%% **DDD Context:** Runtime Context — Domain Service
 -module(beamtalk_set_ops).
 
 -export([
