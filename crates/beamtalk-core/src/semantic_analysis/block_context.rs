@@ -71,7 +71,6 @@ pub(crate) fn is_control_flow_selector(selector: &str, arg_index: usize) -> bool
 /// Determines if an expression is a block variable (identifier).
 ///
 /// Returns true if the expression is an identifier that could be a block variable.
-#[allow(dead_code)] // Used by classify_block, which is tested but not yet called from production code
 pub(crate) fn is_block_variable(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(_))
 }
@@ -79,9 +78,25 @@ pub(crate) fn is_block_variable(expr: &Expression) -> bool {
 /// Determines if an expression is a literal block.
 ///
 /// Returns true if the expression is a block literal (not a block variable).
-#[allow(dead_code)] // Used by classify_block, which is tested but not yet called from production code
 pub(crate) fn is_literal_block(expr: &Expression) -> bool {
     matches!(expr, Expression::Block(_))
+}
+
+/// Identifies selectors that iterate over a collection using a block.
+///
+/// These are the higher-order methods where `self` captures inside literal blocks
+/// can deadlock via the `calling_self` re-entrancy mechanism (BT-953). Unlike
+/// `is_control_flow_selector`, this function excludes conditional selectors
+/// (`ifTrue:`, `ifFalse:`, etc.) that are safe for `self` captures.
+///
+/// Returns `true` if the argument at the given index is a block passed into
+/// collection iteration — a position where `self` captures are dangerous.
+pub(crate) fn is_collection_hof_selector(selector: &str, arg_index: usize) -> bool {
+    match selector {
+        "collect:" | "do:" | "select:" | "reject:" | "detect:" => arg_index == 0,
+        "inject:into:" | "detect:ifNone:" => arg_index == 1,
+        _ => false,
+    }
 }
 
 /// Extracts the selector string from a message selector.
@@ -159,7 +174,6 @@ pub(crate) fn selector_to_string(selector: &MessageSelector) -> String {
 /// // self myHOM: myBlock
 /// // → Passed → Tier 2 stateful calling convention
 /// ```
-#[allow(dead_code)] // Tested but not yet called from production code
 pub(crate) fn classify_block(
     block_span: Span,
     parent_expr: &Expression,
@@ -324,6 +338,35 @@ mod tests {
     fn test_block_parameter_construction() {
         let param = BlockParameter::new("x", Span::default());
         assert_eq!(param.name, "x");
+    }
+
+    // Tests for is_collection_hof_selector()
+
+    #[test]
+    fn test_is_collection_hof_selector_iteration() {
+        assert!(is_collection_hof_selector("collect:", 0));
+        assert!(is_collection_hof_selector("do:", 0));
+        assert!(is_collection_hof_selector("select:", 0));
+        assert!(is_collection_hof_selector("reject:", 0));
+        assert!(is_collection_hof_selector("detect:", 0));
+        assert!(is_collection_hof_selector("inject:into:", 1));
+        assert!(is_collection_hof_selector("detect:ifNone:", 1));
+    }
+
+    #[test]
+    fn test_is_collection_hof_selector_wrong_index() {
+        assert!(!is_collection_hof_selector("collect:", 1));
+        assert!(!is_collection_hof_selector("inject:into:", 0));
+    }
+
+    #[test]
+    fn test_is_collection_hof_selector_excludes_conditionals() {
+        // Conditional selectors must NOT be flagged — self inside ifTrue: is safe
+        assert!(!is_collection_hof_selector("ifTrue:", 0));
+        assert!(!is_collection_hof_selector("ifFalse:", 0));
+        assert!(!is_collection_hof_selector("ifTrue:ifFalse:", 0));
+        assert!(!is_collection_hof_selector("whileTrue:", 0));
+        assert!(!is_collection_hof_selector("timesRepeat:", 0));
     }
 
     // Tests for classify_block()

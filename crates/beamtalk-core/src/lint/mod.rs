@@ -20,6 +20,7 @@
 //! merge conflicts are minimal and trivially resolved.
 
 mod boolean_literal_comparison;
+mod shadowed_block_param;
 mod trailing_caret;
 mod unnecessary_parens;
 // ── add new lint modules here (alphabetical) ──────────────────────────────
@@ -42,6 +43,7 @@ pub(crate) trait LintPass {
 fn all_passes() -> Vec<Box<dyn LintPass>> {
     vec![
         Box::new(boolean_literal_comparison::BooleanLiteralComparisonPass),
+        Box::new(shadowed_block_param::ShadowedBlockParamPass),
         Box::new(trailing_caret::TrailingCaretPass),
         Box::new(unnecessary_parens::UnnecessaryParensPass),
         // ── add new passes here (alphabetical) ────────────────────────────
