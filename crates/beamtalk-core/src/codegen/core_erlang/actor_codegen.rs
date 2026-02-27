@@ -13,7 +13,7 @@ use super::document::{Document, INDENT, line, nest};
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
-use crate::ast::{MethodKind, Module};
+use crate::ast::{Expression, MethodKind, Module};
 use crate::docvec;
 
 impl CoreErlangGenerator {
@@ -31,6 +31,7 @@ impl CoreErlangGenerator {
     /// - `spawn/0` and `spawn/1` return `#beamtalk_object{class, class_mod, pid}` records
     /// - Message sends extract the pid using `call 'erlang':'element'(4, Obj)`
     /// - This enables reflection (`obj class`) and proper object semantics
+    #[allow(clippy::too_many_lines)]
     pub(super) fn generate_actor_module(&mut self, module: &Module) -> Result<Document<'static>> {
         // BT-213: Set context to Actor for this module
         self.context = CodeGenContext::Actor;
@@ -39,19 +40,31 @@ impl CoreErlangGenerator {
         // Check if module has class definitions for registration
         let has_classes = !module.classes.is_empty();
         // BT-403: Build sealed method exports
-        let sealed_export_str = self.build_sealed_export_str(module);
+        let sealed_export_doc = self.build_sealed_export_doc(module);
         // BT-411: Build class method exports
-        let class_method_export_str = Self::build_class_method_export_str(module);
+        let class_method_export_doc = Self::build_class_method_export_doc(module);
         // BT-105: Check if class is abstract
         let is_abstract = module.classes.first().is_some_and(|c| c.is_abstract);
 
         // Module header with expanded exports per BT-29
         // BT-217: Add 'new'/0 and 'new'/1 exports for error methods
         // BT-242: Add 'has_method'/1 export for reflection
-        let base_exports = "'start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
-                            'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, \
-                            'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
-                            'superclass'/0";
+        let has_primitive_methods = Self::class_has_primitive_instance_methods(module);
+
+        let dispatch_3_export: Document<'static> = if has_primitive_methods {
+            Document::Str(", 'dispatch'/3")
+        } else {
+            Document::Nil
+        };
+
+        let base_exports: Document<'static> = docvec![
+            "'start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
+             'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4",
+            dispatch_3_export,
+            ", 'safe_dispatch'/3, \
+             'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
+             'superclass'/0",
+        ];
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
@@ -73,10 +86,13 @@ impl CoreErlangGenerator {
         // Module header with exports and attributes
         let module_header = if has_classes {
             docvec![
-                format!(
-                    "module '{}' [{base_exports}{sealed_export_str}{class_method_export_str}, 'register_class'/0]",
-                    self.module_name
-                ),
+                "module '",
+                Document::String(self.module_name.clone()),
+                "' [",
+                base_exports,
+                sealed_export_doc,
+                class_method_export_doc,
+                ", 'register_class'/0]",
                 "\n",
                 "  attributes ['behaviour' = ['gen_server'], \
                  'on_load' = [{'register_class', 0}]",
@@ -87,10 +103,13 @@ impl CoreErlangGenerator {
             ]
         } else {
             docvec![
-                format!(
-                    "module '{}' [{base_exports}{sealed_export_str}{class_method_export_str}]",
-                    self.module_name
-                ),
+                "module '",
+                Document::String(self.module_name.clone()),
+                "' [",
+                base_exports,
+                sealed_export_doc,
+                class_method_export_doc,
+                "]",
                 "\n",
                 "  attributes ['behaviour' = ['gen_server']",
                 source_path_attr,
@@ -109,6 +128,7 @@ impl CoreErlangGenerator {
         };
 
         push_fn(self.generate_start_link_doc())?;
+        push_fn(self.generate_start_link_named_doc())?;
 
         if is_abstract {
             push_fn(self.generate_abstract_spawn_error_method()?)?;
@@ -136,6 +156,9 @@ impl CoreErlangGenerator {
         }
 
         push_fn(self.generate_dispatch(module)?)?;
+        if has_primitive_methods {
+            push_fn(self.generate_primitive_dispatch_3_doc())?;
+        }
         push_fn(self.generate_method_table(module)?)?;
         // has_method/1 — no trailing newline needed
         docs.push(self.generate_has_method(module)?);
@@ -164,6 +187,26 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
+    /// Returns true if the class has any instance methods with a selector-based `@primitive` body.
+    ///
+    /// Used to decide whether to generate `dispatch/3` in the actor module.
+    /// Selector-based primitives (quoted, e.g. `@primitive "show:"`) generate calls to
+    /// `Module:dispatch/3` at runtime; structural intrinsics (unquoted) do not.
+    fn class_has_primitive_instance_methods(module: &Module) -> bool {
+        module.classes.first().is_some_and(|c| {
+            c.methods.iter().any(|m| {
+                m.body.len() == 1
+                    && matches!(
+                        &m.body[0],
+                        Expression::Primitive {
+                            is_quoted: true,
+                            ..
+                        }
+                    )
+            })
+        })
+    }
+
     /// Sets up class identity and sealed method selectors from the module's class definition.
     /// BT-295: Set class identity for @primitive codegen.
     /// BT-403: Include sealed/abstract flags and collect sealed method selectors.
@@ -189,51 +232,50 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Builds the export string for sealed method standalone functions (BT-403).
-    fn build_sealed_export_str(&self, module: &Module) -> String {
+    /// Builds the export fragment for sealed method standalone functions (BT-403).
+    fn build_sealed_export_doc(&self, module: &Module) -> Document<'static> {
         // Sort selectors for deterministic output across builds
-        let mut selectors: Vec<&String> = self.sealed_method_selectors.iter().collect();
+        let mut selectors: Vec<String> = self.sealed_method_selectors.iter().cloned().collect();
         selectors.sort();
-        let sealed_exports: Vec<String> = selectors
-            .iter()
-            .map(|sel| {
-                let arity = module.classes.first().map_or(0, |c| {
-                    c.methods
-                        .iter()
-                        .find(|m| m.selector.name() == sel.as_str())
-                        .map_or(0, |m| m.selector.arity())
-                });
-                // Standalone function takes Args + Self + State params
-                format!("'__sealed_{sel}'/{}", arity + 2)
-            })
-            .collect();
-        if sealed_exports.is_empty() {
-            String::new()
-        } else {
-            format!(", {}", sealed_exports.join(", "))
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for sel in selectors {
+            let arity = module.classes.first().map_or(0, |c| {
+                c.methods
+                    .iter()
+                    .find(|m| m.selector.name() == sel.as_str())
+                    .map_or(0, |m| m.selector.arity())
+            });
+            // Standalone function takes Args + Self + State params
+            parts.push(docvec![
+                ", '__sealed_",
+                Document::String(sel),
+                "'/",
+                Document::String((arity + 2).to_string()),
+            ]);
         }
+        Document::Vec(parts)
     }
 
-    /// Builds the export string for class-side method functions (BT-411).
-    fn build_class_method_export_str(module: &Module) -> String {
-        if let Some(class) = module.classes.first() {
-            let class_method_exports: Vec<String> = class
-                .class_methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .map(|m| {
-                    // BT-412: Class method takes ClassSelf + ClassVars + user params
-                    format!("'class_{}'/{}", m.selector.name(), m.selector.arity() + 2)
-                })
-                .collect();
-            if class_method_exports.is_empty() {
-                String::new()
-            } else {
-                format!(", {}", class_method_exports.join(", "))
-            }
-        } else {
-            String::new()
+    /// Builds the export fragment for class-side method functions (BT-411).
+    fn build_class_method_export_doc(module: &Module) -> Document<'static> {
+        let Some(class) = module.classes.first() else {
+            return Document::Nil;
+        };
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for m in class
+            .class_methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary)
+        {
+            // BT-412: Class method takes ClassSelf + ClassVars + user params
+            parts.push(docvec![
+                ", 'class_",
+                Document::String(m.selector.name().to_string()),
+                "'/",
+                Document::String((m.selector.arity() + 2).to_string()),
+            ]);
         }
+        Document::Vec(parts)
     }
 
     /// Generates minimal `gen_server` callbacks for abstract classes (BT-403).
@@ -266,7 +308,11 @@ impl CoreErlangGenerator {
                     line(),
                     "let Self = call 'beamtalk_actor':'make_self'(State) in",
                     line(),
-                    format!("call '{module_name}':'dispatch'(Selector, Args, Self, State)"),
+                    docvec![
+                        "call '",
+                        Document::String(module_name.clone()),
+                        "':'dispatch'(Selector, Args, Self, State)",
+                    ],
                 ]
             ),
             "\n\n",
@@ -320,7 +366,11 @@ impl CoreErlangGenerator {
             // Generate: '__sealed_{selector}'/N = fun (Arg1, ..., Self, State) ->
             let header = docvec![
                 "\n",
-                format!("'__sealed_{selector_name}'/{arity}  = fun ("),
+                "'__sealed_",
+                Document::String(selector_name.clone()),
+                "'/",
+                Document::String(arity.to_string()),
+                "  = fun (",
                 "\n",
                 all_params.join(", "),
                 ") ->",

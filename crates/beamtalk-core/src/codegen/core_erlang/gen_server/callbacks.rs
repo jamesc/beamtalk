@@ -259,9 +259,13 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
+                                    // Store FuturePid so @primitive dispatch/3 can access it
+                                    // (e.g. subscribe/unsubscribe need to identify the caller)
+                                    "let _ = call 'erlang':'put'('$bt_future_pid', FuturePid)",
+                                    line(),
                                     // Use safe_dispatch for error isolation per BT-29
                                     docvec![
-                                        "case call '",
+                                        "in case call '",
                                         Document::String(module_name.clone()),
                                         "':'safe_dispatch'(Selector, Args, State) of"
                                     ],

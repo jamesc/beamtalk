@@ -1253,6 +1253,76 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// Generates the `start_link/2` function for named `gen_server` startup.
+    ///
+    /// This is the OTP entry point for starting a supervised `gen_server` with
+    /// a registered name (e.g. `{local, 'Transcript'}`). Used by workspace
+    /// supervisors to start singleton actors under their binding name.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'start_link'/2 = fun (ServerName, InitArgs) ->
+    ///     call 'gen_server':'start_link'(ServerName, 'module_name', InitArgs, [])
+    /// ```
+    fn generate_start_link_named_doc(&self) -> Document<'static> {
+        docvec![
+            "'start_link'/2 = fun (ServerName, InitArgs) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    docvec![
+                        "call 'gen_server':'start_link'(ServerName, '",
+                        Document::String(self.module_name.clone()),
+                        "', InitArgs, [])",
+                    ],
+                ]
+            ),
+            "\n\n",
+        ]
+    }
+
+    /// Generates the `dispatch/3` function that delegates to the primitives module.
+    ///
+    /// For actor classes with `@primitive` methods, the compiled dispatch/4 calls
+    /// `Module:dispatch(Selector, Args, Self)` (3-arity) for primitive method bodies.
+    /// This function provides that 3-arity entry point, delegating to the corresponding
+    /// `beamtalk_{snake_case}_primitives` module which implements the actual Erlang logic.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'dispatch'/3 = fun (Selector, Args, Self) ->
+    ///     call 'beamtalk_transcript_stream_primitives':'dispatch'(Selector, Args, Self)
+    /// ```
+    fn generate_primitive_dispatch_3_doc(&self) -> Document<'static> {
+        // Build primitives module name: `beamtalk_{snake}_primitives`.
+        // If `to_module_name` already emits a `beamtalk_` prefix (e.g.
+        // `BeamtalkInterface` → `beamtalk_interface`), avoid doubling it.
+        let snake_name = to_module_name(&self.class_name());
+        let primitives_module = if snake_name.starts_with("beamtalk_") {
+            format!("{snake_name}_primitives")
+        } else {
+            format!("beamtalk_{snake_name}_primitives")
+        };
+        docvec![
+            "'dispatch'/3 = fun (Selector, Args, Self) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    docvec![
+                        "call '",
+                        Document::String(primitives_module),
+                        "':'dispatch'(Selector, Args, Self)",
+                    ],
+                ]
+            ),
+            "\n\n",
+        ]
+    }
+
     ///
     /// Generates code for an expression by dispatching to the appropriate handler.
     ///
