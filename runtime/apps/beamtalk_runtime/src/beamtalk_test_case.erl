@@ -270,7 +270,7 @@ decode_beam_error({future_rejected, Inner}) ->
     iolist_to_binary([<<"future rejected: ">>, decode_beam_error(Inner)]);
 decode_beam_error({error, Map}) when is_map(Map) ->
     case maps:find(error, Map) of
-        {ok, #beamtalk_error{message = Msg}} -> Msg;
+        {ok, Inner} -> decode_beam_error(Inner);
         _ -> iolist_to_binary(io_lib:format("~p", [Map]))
     end;
 decode_beam_error(#beamtalk_error{message = Msg}) ->
