@@ -11,8 +11,8 @@
 use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
-    Block, ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, MethodKind,
-    Module,
+    Block, ClassDefinition, ClassKind, Expression, Literal, MessageSelector, MethodDefinition,
+    MethodKind, Module,
 };
 use crate::docvec;
 
@@ -1103,6 +1103,36 @@ impl CoreErlangGenerator {
                         Document::String(method.selector.name().to_string()),
                         "' => ~{'arity' => ",
                         Document::String(method.selector.arity().to_string()),
+                        "}~",
+                    ]);
+                }
+            }
+            // BT-923: Auto-generated keyword constructor for Value subclass: classes.
+            // Register it so the class actor knows it exists and can route the call
+            // to 'class_<selector>'/N+2 in the compiled module.
+            if class.class_kind == ClassKind::Value && !class.state.is_empty() {
+                // Build keyword selector string without using format! in collect
+                let build_kw_sel = |state: &[crate::ast::StateDeclaration]| -> String {
+                    let mut sel = String::new();
+                    for s in state {
+                        sel.push_str(&s.name.name);
+                        sel.push(':');
+                    }
+                    sel
+                };
+                let expected_kw_sel = build_kw_sel(&class.state);
+                let kw_selector_already_defined = class
+                    .class_methods
+                    .iter()
+                    .any(|m| m.kind == MethodKind::Primary && m.selector.name() == expected_kw_sel);
+                if !kw_selector_already_defined {
+                    let kw_sel = expected_kw_sel;
+                    let kw_arity = class.state.len();
+                    class_method_entries.push(docvec![
+                        "'",
+                        Document::String(kw_sel),
+                        "' => ~{'arity' => ",
+                        Document::String(kw_arity.to_string()),
                         "}~",
                     ]);
                 }

@@ -9,15 +9,122 @@
 //! terms (maps) with no process. They are created with `new` and `new:`,
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
+use std::fmt::Write as _;
+
 use super::document::Document;
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
-    Block, CascadeMessage, ClassDefinition, Expression, MessageSelector, MethodDefinition,
-    MethodKind, Module, StringSegment,
+    Block, CascadeMessage, ClassDefinition, ClassKind, Expression, MessageSelector,
+    MethodDefinition, MethodKind, Module, StringSegment,
 };
 use crate::docvec;
+
+/// Auto-generated slot methods for `Value subclass:` classes (ADR 0042).
+///
+/// Only populated when `class_kind == ClassKind::Value`.
+/// Skips any slot whose getter/setter selector the user has already defined.
+struct AutoSlotMethods {
+    /// Field names for which a getter `fieldName/1` is auto-generated.
+    getters: Vec<String>,
+    /// Field names for which a `withFieldName:/2` setter is auto-generated.
+    setters: Vec<String>,
+    /// Keyword constructor selector (e.g., `"x:y:"` for a Point with slots x, y),
+    /// `None` if the class has no slots or the user already defined it.
+    keyword_constructor: Option<String>,
+}
+
+impl AutoSlotMethods {
+    /// Computes the `with*:` selector name for a slot.
+    ///
+    /// Capitalises the first letter of the field name and prepends `"with"`:
+    /// - `"x"` → `"withX:"`
+    /// - `"firstName"` → `"withFirstName:"`
+    fn with_star_selector(field_name: &str) -> String {
+        let mut chars = field_name.chars();
+        match chars.next() {
+            None => "with:".to_string(),
+            Some(first) => {
+                let cap: String = first.to_uppercase().collect();
+                format!("with{}{}:", cap, chars.as_str())
+            }
+        }
+    }
+
+    /// Returns the keyword constructor selector for the given slot names.
+    ///
+    /// E.g. `["x", "y"]` → `"x:y:"`
+    fn keyword_selector(slots: &[String]) -> String {
+        let mut sel = String::new();
+        for s in slots {
+            sel.push_str(s);
+            sel.push(':');
+        }
+        sel
+    }
+}
+
+/// Computes which slot methods to auto-generate for a `Value subclass:` class.
+///
+/// Returns `None` for `ClassKind::Object` and `ClassKind::Actor` — only
+/// `ClassKind::Value` classes get auto-generated slot accessors.
+fn compute_auto_slot_methods(class: &ClassDefinition) -> Option<AutoSlotMethods> {
+    if class.class_kind != ClassKind::Value {
+        return None;
+    }
+
+    // Collect selectors the user has already explicitly defined
+    let user_instance_selectors: std::collections::HashSet<String> = class
+        .methods
+        .iter()
+        .map(|m| m.selector.name().to_string())
+        .collect();
+    let user_class_selectors: std::collections::HashSet<String> = class
+        .class_methods
+        .iter()
+        .map(|m| m.selector.name().to_string())
+        .collect();
+
+    let getters: Vec<String> = class
+        .state
+        .iter()
+        .filter(|s| !user_instance_selectors.contains(s.name.name.as_str()))
+        .map(|s| s.name.name.to_string())
+        .collect();
+
+    let setters: Vec<String> = class
+        .state
+        .iter()
+        .filter(|s| {
+            let with_name = AutoSlotMethods::with_star_selector(s.name.name.as_str());
+            !user_instance_selectors.contains(&with_name)
+        })
+        .map(|s| s.name.name.to_string())
+        .collect();
+
+    let keyword_constructor = if class.state.is_empty() {
+        None
+    } else {
+        let all_slots: Vec<String> = class
+            .state
+            .iter()
+            .map(|s| s.name.name.to_string())
+            .collect();
+        let sel = AutoSlotMethods::keyword_selector(&all_slots);
+        if user_class_selectors.contains(&sel) {
+            None
+        } else {
+            Some(sel)
+        }
+    };
+
+    Some(AutoSlotMethods {
+        getters,
+        setters,
+        keyword_constructor,
+    })
+}
 
 // Auto-generated from lib/*.bt by build.rs — do not edit manually.
 include!(concat!(env!("OUT_DIR"), "/stdlib_types.rs"));
@@ -58,6 +165,7 @@ impl CoreErlangGenerator {
     /// - Methods are synchronous functions operating on maps
     /// - No state threading (value types are immutable)
     /// - Methods return new instances rather than mutating
+    #[allow(clippy::too_many_lines)] // large orchestration function — sub-routines handle details
     pub(super) fn generate_value_type_module(
         &mut self,
         module: &Module,
@@ -95,6 +203,10 @@ impl CoreErlangGenerator {
                 .iter()
                 .any(|m| m.kind == MethodKind::Primary && m.selector.name() == "new:");
 
+        // BT-923: Compute auto-generated slot methods for `Value subclass:` classes.
+        // This is `None` for `ClassKind::Object` and `ClassKind::Actor`.
+        let auto_methods = compute_auto_slot_methods(class);
+
         // Collect method exports
         let mut exports = Vec::new();
         // new/0 is always needed: either the default constructor or a delegating one
@@ -115,6 +227,22 @@ impl CoreErlangGenerator {
             let arity = method.parameters.len() + 1; // +1 for Self parameter
             let mangled = method.selector.to_erlang_atom();
             exports.push(format!("'{mangled}'/{arity}"));
+        }
+
+        // BT-923: Auto-generated getter and with*: setter exports for Value subclass:
+        if let Some(ref auto) = auto_methods {
+            for field in &auto.getters {
+                exports.push(format!("'{field}'/1"));
+            }
+            for field in &auto.setters {
+                let with_sel = AutoSlotMethods::with_star_selector(field);
+                exports.push(format!("'{with_sel}'/2"));
+            }
+            if let Some(ref kw_sel) = auto.keyword_constructor {
+                let num_slots = class.state.len();
+                let arity = num_slots + 2; // ClassSelf + ClassVars + N slot args
+                exports.push(format!("'class_{kw_sel}'/{arity}"));
+            }
         }
 
         // All value types export dispatch/3 and has_method/1
@@ -198,15 +326,29 @@ impl CoreErlangGenerator {
             docs.push(Document::Str("\n"));
         }
 
+        // BT-923: Auto-generate getter and with*: setter functions for Value subclass:
+        let module_name_for_auto = self.module_name.clone();
+        let class_name_for_kw = self.class_name().clone();
+        if let Some(ref auto) = auto_methods {
+            for field in &auto.getters {
+                docs.push(Self::generate_slot_getter(field, &module_name_for_auto));
+                docs.push(Document::Str("\n"));
+            }
+            for field in &auto.setters {
+                docs.push(Self::generate_slot_setter(field));
+                docs.push(Document::Str("\n"));
+            }
+        }
+
         // Generate dispatch/3 and has_method/1 for all value types
         // (superclass delegation chain — same pattern as actors)
-        docs.push(self.generate_primitive_dispatch(class)?);
+        docs.push(self.generate_primitive_dispatch(class, auto_methods.as_ref())?);
         docs.push(Document::Str("\n"));
         // BT-446: Generate dispatch/4 for actor hierarchy walk.
         // The dispatch service only calls modules that export dispatch/4.
         docs.push(self.generate_dispatch_4(class)?);
         docs.push(Document::Str("\n"));
-        docs.push(self.generate_primitive_has_method(class)?);
+        docs.push(self.generate_primitive_has_method(class, auto_methods.as_ref())?);
         docs.push(Document::Str("\n"));
 
         // Generate superclass/0 for reflection
@@ -220,6 +362,23 @@ impl CoreErlangGenerator {
         if !class.class_methods.is_empty() {
             docs.push(self.generate_class_method_functions(class)?);
             docs.push(Document::Str("\n"));
+        }
+
+        // BT-923: Auto-generate keyword constructor for Value subclass:
+        if let Some(ref auto) = auto_methods {
+            if let Some(ref kw_sel) = auto.keyword_constructor {
+                let slots: Vec<String> = class
+                    .state
+                    .iter()
+                    .map(|s| s.name.name.to_string())
+                    .collect();
+                docs.push(Self::generate_keyword_constructor_fn(
+                    &class_name_for_kw,
+                    kw_sel,
+                    &slots,
+                ));
+                docs.push(Document::Str("\n"));
+            }
         }
 
         // BT-246: Register value type class with the class system for dynamic dispatch
@@ -410,6 +569,111 @@ impl CoreErlangGenerator {
     /// Generates `new/1` for Dictionary: returns `InitArgs` directly.
     fn generate_collection_new_with_args() -> Document<'static> {
         docvec!["'new'/1 = fun (InitArgs) ->\n", "    InitArgs\n", "\n",]
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // BT-923: Auto-generated slot methods for `Value subclass:` classes
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// Generates an auto-getter function for a single slot (BT-923).
+    ///
+    /// ```erlang
+    /// 'x'/1 = fun (Self) -> call 'maps':'get'('x', Self)
+    /// ```
+    fn generate_slot_getter(field_name: &str, _mod_name: &str) -> Document<'static> {
+        docvec![
+            Document::String(format!("'{field_name}'/1 = fun (Self) ->\n")),
+            Document::String(format!("    call 'maps':'get'('{field_name}', Self)\n")),
+            "\n",
+        ]
+    }
+
+    /// Generates an auto `with*:` functional setter for a single slot (BT-923).
+    ///
+    /// ```erlang
+    /// 'withX:'/2 = fun (Self, NewVal) -> call 'maps':'put'('x', NewVal, Self)
+    /// ```
+    fn generate_slot_setter(field_name: &str) -> Document<'static> {
+        let with_sel = AutoSlotMethods::with_star_selector(field_name);
+        docvec![
+            Document::String(format!("'{with_sel}'/2 = fun (Self, NewVal) ->\n")),
+            Document::String(format!(
+                "    call 'maps':'put'('{field_name}', NewVal, Self)\n"
+            )),
+            "\n",
+        ]
+    }
+
+    /// Generates the all-fields keyword constructor class method (BT-923).
+    ///
+    /// ```erlang
+    /// 'class_x:y:'/4 = fun (ClassSelf, ClassVars, X, Y) ->
+    ///     ~{'$beamtalk_class' => 'Point', 'x' => X, 'y' => Y}~
+    /// ```
+    fn generate_keyword_constructor_fn(
+        class_name: &str,
+        kw_selector: &str,
+        slots: &[String],
+    ) -> Document<'static> {
+        let num_slots = slots.len();
+        let arity = num_slots + 2; // ClassSelf + ClassVars + N args
+
+        // Parameter names: _ClassSelf (unused), _ClassVars (unused), then SlotN vars
+        let slot_params: Vec<String> = slots
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("SlotArg{i}"))
+            .collect();
+        let params = format!("_ClassSelf, _ClassVars, {}", slot_params.join(", "));
+
+        // Map literal body: ~{'$beamtalk_class' => 'ClassName', 'x' => SlotArg0, ...}~
+        let mut map_fields = format!("'$beamtalk_class' => '{class_name}'");
+        for (i, slot_name) in slots.iter().enumerate() {
+            write!(map_fields, ", '{slot_name}' => SlotArg{i}")
+                .expect("write to String is infallible");
+        }
+
+        docvec![
+            Document::String(format!(
+                "'class_{kw_selector}'/{arity} = fun ({params}) ->\n"
+            )),
+            Document::String(format!("    ~{{{map_fields}}}~\n")),
+            "\n",
+        ]
+    }
+
+    /// Generates dispatch arms for auto-generated getter and `with*:` setter methods (BT-923).
+    ///
+    /// Each arm follows the same pattern as user-defined methods in `generate_primitive_dispatch`.
+    fn generate_auto_slot_dispatch_arms(
+        mod_name: &str,
+        auto: &AutoSlotMethods,
+    ) -> Vec<Document<'static>> {
+        let mut arms: Vec<Document<'static>> = Vec::new();
+
+        for field in &auto.getters {
+            arms.push(Document::String(format!(
+                "        <'{field}'> when 'true' ->\n"
+            )));
+            arms.push(Document::String(format!(
+                "            call '{mod_name}':'{field}'(Self)\n"
+            )));
+        }
+
+        for field in &auto.setters {
+            let with_sel = AutoSlotMethods::with_star_selector(field);
+            arms.push(Document::String(format!(
+                "        <'{with_sel}'> when 'true' ->\n"
+            )));
+            arms.push(Document::Str(
+                "            let <DispArg0> = call 'erlang':'hd'(Args) in\n",
+            ));
+            arms.push(Document::String(format!(
+                "            call '{mod_name}':'{with_sel}'(Self, DispArg0)\n"
+            )));
+        }
+
+        arms
     }
 
     /// Generates an instance method for a value type.
@@ -898,13 +1162,17 @@ impl CoreErlangGenerator {
     fn generate_primitive_dispatch(
         &mut self,
         class: &ClassDefinition,
+        auto_methods: Option<&AutoSlotMethods>,
     ) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
         let superclass_mod = self.superclass_module_name(class.superclass_name());
 
-        // BT-447: Class-methods-only classes skip protocol boilerplate
-        if class.methods.is_empty() && superclass_mod.is_some() {
+        // BT-447: Class-methods-only classes skip protocol boilerplate —
+        // but only when there are no auto-generated slot methods either.
+        let has_auto_instance_methods =
+            auto_methods.is_some_and(|a| !a.getters.is_empty() || !a.setters.is_empty());
+        if class.methods.is_empty() && !has_auto_instance_methods && superclass_mod.is_some() {
             return self.generate_minimal_dispatch(class);
         }
 
@@ -1074,6 +1342,12 @@ impl CoreErlangGenerator {
             format!("            call '{mod_name}':'dispatch'(PwaSel, PwaArgs, Self)\n"),
             // Class-defined method branches
             Document::Vec(method_branches),
+            // BT-923: Auto-generated getter and with*: dispatch arms
+            Document::Vec(
+                auto_methods
+                    .map(|a| Self::generate_auto_slot_dispatch_arms(&mod_name, a))
+                    .unwrap_or_default(),
+            ),
             // Default case
             "        <_Other> when 'true' ->\n",
             format!(
@@ -1316,12 +1590,16 @@ impl CoreErlangGenerator {
     fn generate_primitive_has_method(
         &mut self,
         class: &ClassDefinition,
+        auto_methods: Option<&AutoSlotMethods>,
     ) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         let superclass_mod = self.superclass_module_name(class.superclass_name());
 
-        // BT-447: Class-methods-only classes delegate directly to superclass
-        if class.methods.is_empty() && superclass_mod.is_some() {
+        // BT-447: Class-methods-only classes delegate directly to superclass —
+        // but only when there are no auto-generated slot methods either.
+        let has_auto_instance_methods =
+            auto_methods.is_some_and(|a| !a.getters.is_empty() || !a.setters.is_empty());
+        if class.methods.is_empty() && !has_auto_instance_methods && superclass_mod.is_some() {
             return self.generate_minimal_has_method(class);
         }
 
@@ -1354,6 +1632,17 @@ impl CoreErlangGenerator {
         for method in &class.methods {
             let mangled = method.selector.to_erlang_atom();
             selectors.push(format!("'{mangled}'"));
+        }
+
+        // BT-923: Add auto-generated getter and with*: setter selectors
+        if let Some(auto) = auto_methods {
+            for field in &auto.getters {
+                selectors.push(format!("'{field}'"));
+            }
+            for field in &auto.setters {
+                let with_sel = AutoSlotMethods::with_star_selector(field);
+                selectors.push(format!("'{with_sel}'"));
+            }
         }
 
         let false_branch: Document<'static> = if let Some(ref super_mod) = superclass_mod {
