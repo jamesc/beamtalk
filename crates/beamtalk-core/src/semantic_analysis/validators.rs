@@ -941,6 +941,32 @@ fn visit_literal_boolean_condition(expr: &Expression, diagnostics: &mut Vec<Diag
             }
         }
     }
+    // Also check cascade messages — `true ifTrue: [1]; ifFalse: [2]` has a literal
+    // boolean receiver with each cascade message going to the same receiver.
+    if let Expression::Cascade {
+        receiver, messages, ..
+    } = expr
+    {
+        let literal_val = match receiver.as_ref() {
+            Expression::Identifier(Identifier { name, .. }) if name == "true" => Some(true),
+            Expression::Identifier(Identifier { name, .. }) if name == "false" => Some(false),
+            _ => None,
+        };
+        if let Some(is_true) = literal_val {
+            let literal_name = if is_true { "true" } else { "false" };
+            for msg in messages {
+                let selector_str = msg.selector.name();
+                if is_boolean_conditional_selector(&selector_str) {
+                    let mut diag = Diagnostic::warning(
+                        format!("Condition is always `{literal_name}`"),
+                        msg.span,
+                    );
+                    diag.hint = Some(dead_branch_hint(is_true, &selector_str).into());
+                    diagnostics.push(diag);
+                }
+            }
+        }
+    }
     for child in child_expressions(expr) {
         visit_literal_boolean_condition(child, diagnostics);
     }
@@ -1728,5 +1754,29 @@ mod tests {
             "Expected 1 warning inside nested block, got: {diagnostics:?}"
         );
         assert_eq!(diagnostics[0].severity, Severity::Warning);
+    }
+
+    /// Message with literal boolean receiver should warn (receiver of first message before cascade).
+    /// `true ifTrue: [1]; ifFalse: [2]` — warns for the first message's receiver.
+    #[test]
+    fn literal_bool_cascade_warns_for_each_message() {
+        let src = "true ifTrue: [1]; ifFalse: [2]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for cascade starting with literal true, got: {diagnostics:?}"
+        );
+        assert!(diagnostics.iter().all(|d| d.severity == Severity::Warning));
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.message.contains("always `true`")),
+            "Expected all messages to say 'always `true`', got: {diagnostics:?}"
+        );
     }
 }
