@@ -15,7 +15,7 @@
 /// "hello" length        // => 5
 /// "hello" ++ " world"   // => "hello world"
 /// ```
-sealed Collection subclass: String
+sealed typed Collection subclass: String
   /// Test strict equality with another string.
   ///
   /// ## Examples

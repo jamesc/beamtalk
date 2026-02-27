@@ -1,0 +1,427 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "TypedCounter",
+                span: Span {
+                    start: 297,
+                    end: 309,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Actor",
+                    span: Span {
+                        start: 281,
+                        end: 286,
+                    },
+                },
+            ),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: true,
+            state: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "value",
+                        span: Span {
+                            start: 319,
+                            end: 325,
+                        },
+                    },
+                    type_annotation: Some(
+                        Simple(
+                            Identifier {
+                                name: "Integer",
+                                span: Span {
+                                    start: 326,
+                                    end: 333,
+                                },
+                            },
+                        ),
+                    ),
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 336,
+                                end: 337,
+                            },
+                        ),
+                    ),
+                    span: Span {
+                        start: 312,
+                        end: 337,
+                    },
+                },
+            ],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "getValue",
+                    ),
+                    parameters: [],
+                    body: [
+                        FieldAccess {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 409,
+                                        end: 413,
+                                    },
+                                },
+                            ),
+                            field: Identifier {
+                                name: "value",
+                                span: Span {
+                                    start: 414,
+                                    end: 419,
+                                },
+                            },
+                            span: Span {
+                                start: 409,
+                                end: 419,
+                            },
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "Integer",
+                                span: Span {
+                                    start: 398,
+                                    end: 405,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 386,
+                        end: 419,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "increment",
+                    ),
+                    parameters: [],
+                    body: [
+                        Assignment {
+                            target: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 497,
+                                            end: 501,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 502,
+                                        end: 507,
+                                    },
+                                },
+                                span: Span {
+                                    start: 497,
+                                    end: 507,
+                                },
+                            },
+                            value: MessageSend {
+                                receiver: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 511,
+                                                end: 515,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "value",
+                                        span: Span {
+                                            start: 516,
+                                            end: 521,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 511,
+                                        end: 521,
+                                    },
+                                },
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            1,
+                                        ),
+                                        Span {
+                                            start: 524,
+                                            end: 525,
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 511,
+                                    end: 525,
+                                },
+                            },
+                            span: Span {
+                                start: 497,
+                                end: 525,
+                            },
+                        },
+                        FieldAccess {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 531,
+                                        end: 535,
+                                    },
+                                },
+                            ),
+                            field: Identifier {
+                                name: "value",
+                                span: Span {
+                                    start: 536,
+                                    end: 541,
+                                },
+                            },
+                            span: Span {
+                                start: 531,
+                                end: 541,
+                            },
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 480,
+                        end: 541,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "add:",
+                                span: Span {
+                                    start: 605,
+                                    end: 609,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "amount",
+                                span: Span {
+                                    start: 610,
+                                    end: 616,
+                                },
+                            },
+                            type_annotation: None,
+                        },
+                    ],
+                    body: [
+                        Assignment {
+                            target: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 635,
+                                            end: 639,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 640,
+                                        end: 645,
+                                    },
+                                },
+                                span: Span {
+                                    start: 635,
+                                    end: 645,
+                                },
+                            },
+                            value: MessageSend {
+                                receiver: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 649,
+                                                end: 653,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "value",
+                                        span: Span {
+                                            start: 654,
+                                            end: 659,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 649,
+                                        end: 659,
+                                    },
+                                },
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "amount",
+                                            span: Span {
+                                                start: 662,
+                                                end: 668,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 649,
+                                    end: 668,
+                                },
+                            },
+                            span: Span {
+                                start: 635,
+                                end: 668,
+                            },
+                        },
+                        FieldAccess {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 674,
+                                        end: 678,
+                                    },
+                                },
+                            ),
+                            field: Identifier {
+                                name: "value",
+                                span: Span {
+                                    start: 679,
+                                    end: 684,
+                                },
+                            },
+                            span: Span {
+                                start: 674,
+                                end: 684,
+                            },
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "Integer",
+                                span: Span {
+                                    start: 620,
+                                    end: 627,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    kind: Primary,
+                    doc_comment: None,
+                    span: Span {
+                        start: 605,
+                        end: 684,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            doc_comment: None,
+            span: Span {
+                start: 275,
+                end: 684,
+            },
+        },
+    ],
+    method_definitions: [],
+    expressions: [],
+    span: Span {
+        start: 275,
+        end: 684,
+    },
+    leading_comments: [
+        Comment {
+            content: "// Copyright 2026 James Casey",
+            span: Span {
+                start: 275,
+                end: 280,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// SPDX-License-Identifier: Apache-2.0",
+            span: Span {
+                start: 275,
+                end: 280,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// Smoke test for typed class annotation warnings (BT-941).",
+            span: Span {
+                start: 275,
+                end: 280,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "//",
+            span: Span {
+                start: 275,
+                end: 280,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// A `typed` class with deliberately incomplete annotations, so we can",
+            span: Span {
+                start: 275,
+                end: 280,
+            },
+            kind: Line,
+        },
+        Comment {
+            content: "// verify the type checker surfaces warnings for missing annotations.",
+            span: Span {
+                start: 275,
+                end: 280,
+            },
+            kind: Line,
+        },
+    ],
+}
