@@ -816,10 +816,8 @@ impl Parser {
                     || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
                 {
                     // Trailing period at end of method — not needed (BT-948)
-                    let mut diag = Diagnostic::lint(
-                        "unnecessary trailing `.` at end of method",
-                        period_span,
-                    );
+                    let mut diag =
+                        Diagnostic::lint("unnecessary trailing `.` at end of method", period_span);
                     diag.hint = Some("Remove the trailing `.`".into());
                     self.diagnostics.push(diag);
                     break;

@@ -656,10 +656,8 @@ impl Parser {
                 let period_span = self.tokens[self.current - 1].span();
                 if self.check(&TokenKind::RightBracket) {
                     // Trailing period before ']' — not needed
-                    let mut diag = Diagnostic::lint(
-                        "unnecessary trailing `.` before `]`",
-                        period_span,
-                    );
+                    let mut diag =
+                        Diagnostic::lint("unnecessary trailing `.` before `]`", period_span);
                     diag.hint = Some("Remove the trailing `.`".into());
                     self.diagnostics.push(diag);
                 } else if !self.is_at_end() && self.current_token().has_leading_newline() {

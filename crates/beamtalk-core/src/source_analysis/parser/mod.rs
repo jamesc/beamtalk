@@ -895,10 +895,7 @@ mod tests {
             .iter()
             .filter(|d| d.severity != Severity::Lint)
             .collect();
-        assert!(
-            non_lint.is_empty(),
-            "Expected no errors, got: {non_lint:?}"
-        );
+        assert!(non_lint.is_empty(), "Expected no errors, got: {non_lint:?}");
         module
     }
 
@@ -4527,9 +4524,7 @@ Actor subclass: Counter
     #[test]
     fn period_before_newline_in_method_body_emits_lint() {
         // Two statements in a method body with an explicit period before newline
-        let lints = parse_lints(
-            "Object subclass: Foo\n  go =>\n    x := 1.\n    x + 2\n",
-        );
+        let lints = parse_lints("Object subclass: Foo\n  go =>\n    x := 1.\n    x + 2\n");
         assert_eq!(lints.len(), 1, "expected one lint, got: {lints:?}");
         assert!(
             lints[0].message.contains("newline"),
@@ -4549,6 +4544,9 @@ Actor subclass: Counter
     fn module_level_period_does_not_lint() {
         // At module level, periods are optional statement terminators — no lint
         let lints = parse_lints("foo bar.\nbaz quux.");
-        assert!(lints.is_empty(), "expected no lints at module level, got: {lints:?}");
+        assert!(
+            lints.is_empty(),
+            "expected no lints at module level, got: {lints:?}"
+        );
     }
 }
