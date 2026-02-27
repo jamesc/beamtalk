@@ -60,7 +60,7 @@ globals2 includesKey: #MyValue
 // ===========================================================================
 
 // Binding a name that is a workspace singleton raises error
-[(Workspace bind: 42 as: #Transcript)] on: Error do: [:e | e message]
+[Workspace bind: 42 as: #Transcript] on: Error do: [:e | e message]
 // => Transcript is a system name and cannot be shadowed
 
 // ===========================================================================
@@ -68,7 +68,7 @@ globals2 includesKey: #MyValue
 // ===========================================================================
 
 // Unbinding a name that was never registered raises error
-[(Workspace unbind: #NoSuchBinding)] on: Error do: [:e | e message]
+[Workspace unbind: #NoSuchBinding] on: Error do: [:e | e message]
 // => NoSuchBinding is not a registered workspace name
 
 // ===========================================================================

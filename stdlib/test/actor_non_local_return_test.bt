@@ -10,13 +10,13 @@ TestCase subclass: ActorNonLocalReturnTest
 
   testNonLocalReturnInActorBlocks =>
     a := ActorNlrBasic spawn.
-    self assert: ((a test: #())) equals: "empty".
-    self assert: ((a test: #(1))) equals: "not empty".
+    self assert: (a test: #()) equals: "empty".
+    self assert: (a test: #(1)) equals: "not empty".
     self assert: (a classify: 5) equals: "positive".
     self assert: (a classify: -1) equals: "non-positive".
     self assert: (a classify: 0) equals: "non-positive".
-    self assert: ((a checkFalse: #())) equals: "empty".
-    self assert: ((a checkFalse: #(1))) equals: "not empty".
+    self assert: (a checkFalse: #()) equals: "empty".
+    self assert: (a checkFalse: #(1)) equals: "not empty".
     b := ActorNlrLocalVar spawn.
     b store: "x" val: 42.
     self assert: (b fetch: "x") equals: 42.
@@ -28,8 +28,8 @@ TestCase subclass: ActorNonLocalReturnTest
     self assert: (d countDown: 3) equals: "done".
     self assert: (d countDown: 0) equals: "done".
     e := ActorNlrOnDo spawn.
-    self assert: ((e test: #())) equals: "early".
-    self assert: ((e test: #(1))) equals: "not early".
+    self assert: (e test: #()) equals: "early".
+    self assert: (e test: #(1)) equals: "not early".
     f := ActorNlrMutate spawn.
     // count starts at 0; incAndCheck: 1 sets count=1, 1>=1 triggers NLR
     self assert: (f incAndCheck: 1) equals: 1.

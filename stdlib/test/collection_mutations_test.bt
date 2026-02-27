@@ -10,7 +10,7 @@ TestCase subclass: CollectionMutationsTest
   testActorMutatingCollections =>
     counter := CollectionMutationCounter spawn.
     self assert: (counter getTotal) equals: 0.
-    self assert: ((counter sumSet: #(1, 2, 3))) equals: 6.
+    self assert: (counter sumSet: #(1, 2, 3)) equals: 6.
     self assert: (counter getTotal) equals: 6.
     counter2 := CollectionMutationCounter spawn.
     s := (Set new) fromList: #(1, 2, 3).

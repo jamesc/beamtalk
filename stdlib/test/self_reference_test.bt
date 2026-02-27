@@ -28,7 +28,7 @@ TestCase subclass: SelfReferenceTest
     // perform: dispatches zero-arg methods dynamically on actors
     self assert: (a perform: #getValue) equals: 99.
     // perform:withArguments: dispatches methods with arguments on actors
-    self assert: ((a perform: #setValue: withArguments: #(42))) equals: 42.
+    self assert: (a perform: #setValue: withArguments: #(42)) equals: 42.
     self assert: (a getValue) equals: 42.
     // perform: also works on primitives (synchronous dispatch)
     self assert: (42 perform: #asString) equals: "42".

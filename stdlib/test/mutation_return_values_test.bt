@@ -12,7 +12,7 @@ TestCase subclass: MutationReturnValuesTest
     actor := MutationReturnValues spawn.
     self assert: (actor setValue: 0) equals: 0.
     // Block receives (acc, elem) — accumulator first, element second (BT-820)
-    self assert: ((actor sumViaInject: #(1, 2, 3))) equals: 6.
+    self assert: (actor sumViaInject: #(1, 2, 3)) equals: 6.
     // self.value += elem: 0 + 1 + 2 + 3 = 6
     self assert: (actor getValue) equals: 6.
     // State should also be updated (side effect of mutations)

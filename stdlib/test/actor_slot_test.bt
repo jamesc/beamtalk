@@ -47,7 +47,7 @@ TestCase subclass: ActorSlotTest
   testSlotAssignmentInsideDoBlock =>
     // do: with self.slot := accumulates correctly
     c := ActorSlotCounter spawn.
-    self assert: ((c sumItems: #(1, 2, 3, 4, 5))) equals: 15.
+    self assert: (c sumItems: #(1, 2, 3, 4, 5)) equals: 15.
     // State persists after the method completes
     self assert: (c getTotal) equals: 15
 

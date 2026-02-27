@@ -56,4 +56,4 @@ Object subclass: SchemePrinter
   /// Recursively format list elements separated by spaces.
   printElems: lst =>
     lst size =:= 1 ifTrue: [^self print: lst first]
-    self print: lst first) ++ " " ++ (self printElems: lst rest
+    (self print: lst first) ++ " " ++ (self printElems: lst rest)

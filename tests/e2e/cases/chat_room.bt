@@ -313,7 +313,7 @@ membersAfter includes: bob
 // // => Set(_)
 //
 // // Moderator say: prefixes with "[MOD] " then calls super (ChatMember say:)
-// (mod say: "Welcome!") await
+// mod say: "Welcome!"
 // // => nil
 //
 // // Room history should contain the prefixed message

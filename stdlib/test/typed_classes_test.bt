@@ -40,7 +40,7 @@ TestCase subclass: TypedClassesTest
     self assert: (untyped setItem: 99) equals: 99.
     typed := TypedAccount spawn.
     self assert: (typed deposit: 20) equals: 20.
-    self assert: ((typed deposit: (5 asType: Integer))) equals: 25.
+    self assert: (typed deposit: (5 asType: Integer)) equals: 25.
     self assert: (typed balance) equals: 25.
     math2 := TypedMath new.
     self assert: (math2 maybeName: false) equals: "none".

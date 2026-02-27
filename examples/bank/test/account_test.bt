@@ -43,7 +43,7 @@ TestCase subclass: AccountTest
   testOverdraftRaisesError =>
     acct := Account spawn.
     acct deposit: 100.
-    self should: [(acct withdraw: 9999)] raise: #user_error
+    self should: [acct withdraw: 9999] raise: #user_error
 
   testWithdrawExactBalance =>
     // Withdrawing exactly the balance is allowed
@@ -53,12 +53,12 @@ TestCase subclass: AccountTest
 
   testNegativeDepositRaisesError =>
     acct := Account spawn.
-    self should: [(acct deposit: -50)] raise: #user_error
+    self should: [acct deposit: -50] raise: #user_error
 
   testNegativeWithdrawRaisesError =>
     acct := Account spawn.
     acct deposit: 100.
-    self should: [(acct withdraw: -10)] raise: #user_error
+    self should: [acct withdraw: -10] raise: #user_error
 
   testSetAndGetOwner =>
     acct := Account spawn.

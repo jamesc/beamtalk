@@ -104,12 +104,12 @@ c2 getTotal
 // Attempting to subclass a sealed class raises an error
 // ---------------------------------------------------------------------------
 
-[(Object classBuilder name: #CBBadSeal; superclass: Float; register)] on: Error do: [:e | "sealed rejected"]
+[Object classBuilder name: #CBBadSeal; superclass: Float; register] on: Error do: [:e | "sealed rejected"]
 // => sealed rejected
 
 // ---------------------------------------------------------------------------
 // Registering without a name raises missing_parameter
 // ---------------------------------------------------------------------------
 
-[(Object classBuilder register)] on: Error do: [:e | "no name"]
+[Object classBuilder register] on: Error do: [:e | "no name"]
 // => no name

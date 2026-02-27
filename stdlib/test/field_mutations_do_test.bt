@@ -16,15 +16,15 @@ TestCase subclass: FieldMutationsDoTest
     self assert: (counter setValue: 10) equals: 10.
     self assert: (counter getValue) equals: 10.
     self assert: (counter setValue: 0) equals: 0.
-    self assert: ((counter sumArray: #(1, 2, 3))) equals: 6.
+    self assert: (counter sumArray: #(1, 2, 3)) equals: 6.
     self assert: (counter getValue) equals: 6.
     self assert: (counter setValue: 0) equals: 0.
-    self assert: ((counter sumArray: #(10, 20, 30))) equals: 60.
+    self assert: (counter sumArray: #(10, 20, 30)) equals: 60.
     self assert: (counter getValue) equals: 60.
-    self assert: ((counter sumWithInject: #(1, 2, 3))) equals: 6.
-    self assert: ((counter sumWithInject: #(100, 200, 300))) equals: 600.
+    self assert: (counter sumWithInject: #(1, 2, 3)) equals: 6.
+    self assert: (counter sumWithInject: #(100, 200, 300)) equals: 600.
     acc := FieldMutationAccumulator spawn.
-    self assert: ((acc processArray: #(2, 3, 4))) equals: #{#count => 3, #product => 24, #sum => 9}.
+    self assert: (acc processArray: #(2, 3, 4)) equals: #{#count => 3, #product => 24, #sum => 9}.
     self assert: (acc getSum) equals: 9.
     self assert: (acc getProduct) equals: 24.
     self assert: (acc getCount) equals: 3
