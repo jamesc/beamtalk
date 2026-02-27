@@ -1010,6 +1010,198 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
     }
 }
 
+// ── BT-951: Effect-free statement detection ───────────────────────────────────
+
+/// Returns `true` if the expression is pure (no observable side effects).
+///
+/// Only a conservative subset is classified as pure: literals, variable reads,
+/// class references, parenthesized pure expressions, and binary sends with a
+/// known arithmetic or comparison operator applied to pure operands.
+fn is_effect_free(expr: &Expression) -> bool {
+    match expr {
+        Expression::Literal(_, _)
+        | Expression::Identifier(_)
+        | Expression::ClassReference { .. } => true,
+        Expression::Parenthesized { expression, .. } => is_effect_free(expression),
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            is_cast,
+            ..
+        } => {
+            if *is_cast {
+                return false;
+            }
+            match selector {
+                crate::ast::MessageSelector::Binary(op) => {
+                    is_pure_binary_op(op)
+                        && is_effect_free(receiver)
+                        && arguments.iter().all(is_effect_free)
+                }
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Returns `true` if a binary operator is a known pure arithmetic/comparison op.
+fn is_pure_binary_op(op: &str) -> bool {
+    matches!(
+        op,
+        "+" | "-"
+            | "*"
+            | "/"
+            | "//"
+            | "\\\\"
+            | "**"
+            | "<"
+            | ">"
+            | "<="
+            | ">="
+            | "="
+            | "~~"
+            | "&"
+            | "|"
+            | "^"
+            | ">>"
+            | "<<"
+    )
+}
+
+/// Returns a short description of the expression kind for diagnostic messages.
+fn effect_free_label(expr: &Expression) -> &'static str {
+    match expr {
+        Expression::Literal(_, _) => "literal",
+        Expression::Identifier(_) => "variable reference",
+        Expression::ClassReference { .. } => "class reference",
+        _ => "pure expression",
+    }
+}
+
+/// Walk an expression to find nested sequences (blocks) that may contain
+/// effect-free non-last statements.
+fn walk_expr_for_effect_free(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    match expr {
+        Expression::Block(block) => {
+            check_seq_for_effect_free(&block.body, diagnostics);
+        }
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            walk_expr_for_effect_free(receiver, diagnostics);
+            for arg in arguments {
+                walk_expr_for_effect_free(arg, diagnostics);
+            }
+        }
+        Expression::Assignment { target, value, .. } => {
+            walk_expr_for_effect_free(target, diagnostics);
+            walk_expr_for_effect_free(value, diagnostics);
+        }
+        Expression::Return { value, .. } => {
+            walk_expr_for_effect_free(value, diagnostics);
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            walk_expr_for_effect_free(receiver, diagnostics);
+            for msg in messages {
+                for arg in &msg.arguments {
+                    walk_expr_for_effect_free(arg, diagnostics);
+                }
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            walk_expr_for_effect_free(expression, diagnostics);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            walk_expr_for_effect_free(receiver, diagnostics);
+        }
+        Expression::Match { value, arms, .. } => {
+            walk_expr_for_effect_free(value, diagnostics);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    walk_expr_for_effect_free(guard, diagnostics);
+                }
+                walk_expr_for_effect_free(&arm.body, diagnostics);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                walk_expr_for_effect_free(&pair.key, diagnostics);
+                walk_expr_for_effect_free(&pair.value, diagnostics);
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for elem in elements {
+                walk_expr_for_effect_free(elem, diagnostics);
+            }
+            if let Some(t) = tail {
+                walk_expr_for_effect_free(t, diagnostics);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                walk_expr_for_effect_free(elem, diagnostics);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for seg in segments {
+                if let crate::ast::StringSegment::Interpolation(e) = seg {
+                    walk_expr_for_effect_free(e, diagnostics);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Check a sequence of expressions: warn on any non-last expression that is
+/// effect-free, then recurse into all expressions for nested sequences.
+fn check_seq_for_effect_free(exprs: &[Expression], diagnostics: &mut Vec<Diagnostic>) {
+    let len = exprs.len();
+    for (i, expr) in exprs.iter().enumerate() {
+        let is_last = i == len - 1;
+        if !is_last && is_effect_free(expr) {
+            let label = effect_free_label(expr);
+            let mut diag = Diagnostic::lint(format!("this {label} has no effect"), expr.span());
+            diag.hint =
+                Some("Remove this expression, or assign its value to a variable if needed.".into());
+            diagnostics.push(diag);
+        }
+        walk_expr_for_effect_free(expr, diagnostics);
+    }
+}
+
+/// BT-951: Warn (as a lint) when a statement is an effect-free expression
+/// whose value is silently discarded.
+///
+/// Checks method bodies, block bodies, and module-level expression sequences.
+/// Effect-free expressions include literals, variable references, and pure
+/// binary arithmetic / comparison expressions composed from pure sub-expressions.
+///
+/// Uses `Severity::Lint` so the warning is suppressed during normal compilation
+/// and only surfaces when running `beamtalk lint`.
+pub(crate) fn check_effect_free_statements(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    // Module-level expressions
+    check_seq_for_effect_free(&module.expressions, diagnostics);
+
+    // Class instance and class-side methods
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            check_seq_for_effect_free(&method.body, diagnostics);
+        }
+    }
+
+    // Standalone method definitions (Tonel-style: `Counter >> inc => ...`)
+    for standalone in &module.method_definitions {
+        check_seq_for_effect_free(&standalone.method.body, diagnostics);
+    }
+}
+
 /// BT-919: Error when `!` (cast) is used on a statically-known value type.
 ///
 /// Value types are not actors — they do not have a mailbox and cannot receive
@@ -1269,6 +1461,174 @@ mod tests {
                 .contains("Cannot use ! (cast) on value type"),
             "Expected value-type cast error, got: {}",
             diagnostics[0].message
+        );
+    }
+
+    // ── BT-951: Effect-free statement tests ──────────────────────────────────
+
+    /// A lone literal in a method body is its return value — no lint warning.
+    #[test]
+    fn single_literal_in_method_no_lint() {
+        let src = "Object subclass: Foo\n  bar => 42";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no lint for single literal return value, got: {diagnostics:?}"
+        );
+    }
+
+    /// A literal appearing as a non-last statement should produce a lint.
+    #[test]
+    fn literal_non_last_statement_emits_lint() {
+        let src = "Object subclass: Foo\n  bar =>\n    42\n    self doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded literal, got: {diagnostics:?}"
+        );
+        assert_eq!(
+            diagnostics[0].severity,
+            Severity::Lint,
+            "Expected Lint severity"
+        );
+        assert!(
+            diagnostics[0].message.contains("literal"),
+            "Expected 'literal' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// A string literal as a non-last statement should produce a lint.
+    #[test]
+    fn string_literal_non_last_emits_lint() {
+        let src = "Object subclass: Foo\n  bar =>\n    \"hello\"\n    self doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded string literal, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Lint);
+    }
+
+    /// `x + y` as a non-last statement (pure arithmetic) should produce a lint.
+    #[test]
+    fn pure_binary_expr_non_last_emits_lint() {
+        let src = "Object subclass: Foo\n  bar: x and: y =>\n    x + y\n    self doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for pure binary expression, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Lint);
+        assert!(
+            diagnostics[0].message.contains("pure expression"),
+            "Got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// A message send with side effects (keyword send) should NOT produce a lint.
+    #[test]
+    fn effectful_send_no_lint() {
+        let src = "Object subclass: Foo\n  bar =>\n    self doSomething\n    self doOtherThing";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no lint for effectful sends, got: {diagnostics:?}"
+        );
+    }
+
+    /// A literal inside a block in non-last position should produce a lint.
+    #[test]
+    fn literal_in_block_non_last_emits_lint() {
+        let src = "Object subclass: Foo\n  bar => [42. self doSomething] value";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded literal in block, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Lint);
+    }
+
+    /// Multiple effect-free statements produce one lint each.
+    #[test]
+    fn multiple_effect_free_stmts_emit_multiple_lints() {
+        let src = "Object subclass: Foo\n  bar =>\n    42\n    \"hello\"\n    self doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            2,
+            "Expected 2 lints for two discarded literals, got: {diagnostics:?}"
+        );
+    }
+
+    /// Module-level expressions: non-last literal triggers lint.
+    #[test]
+    fn module_level_effect_free_emits_lint() {
+        let src = "42.\nself doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded literal at module level, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Lint);
+    }
+
+    /// Standalone method definition: non-last literal triggers lint.
+    #[test]
+    fn standalone_method_effect_free_emits_lint() {
+        let src = "Object subclass: Foo\nFoo >> bar =>\n  42\n  self doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        assert_eq!(
+            module.method_definitions.len(),
+            1,
+            "Expected 1 standalone method"
+        );
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded literal in standalone method, got: {diagnostics:?}"
         );
     }
 
