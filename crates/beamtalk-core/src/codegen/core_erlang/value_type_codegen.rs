@@ -1260,13 +1260,13 @@ impl CoreErlangGenerator {
             ));
             docvec![
                 "        <'fieldAt:'> when 'true' ->\n",
-                format!(
-                    "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"
-                ),
+                "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '",
+                Document::String(class_name.clone()),
+                "') in\n",
                 "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'fieldAt:') in\n",
-                format!(
-                    "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, {iva_hint}) in\n"
-                ),
+                "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, ",
+                Document::String(iva_hint),
+                ") in\n",
                 "            call 'beamtalk_error':'raise'(IvaErr2)\n",
             ]
         };
