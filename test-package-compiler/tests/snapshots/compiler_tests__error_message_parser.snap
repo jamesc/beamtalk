@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -211,3 +210,6 @@ Module {
         },
     ],
 }
+
+Diagnostics:
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 321, end: 322 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
