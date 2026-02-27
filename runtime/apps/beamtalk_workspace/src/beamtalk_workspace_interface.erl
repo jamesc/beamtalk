@@ -94,16 +94,7 @@ start_link(ServerName) ->
 %% Called before each eval to merge workspace bindings into session bindings.
 -spec get_user_bindings() -> #{atom() => term()}.
 get_user_bindings() ->
-    case whereis('Workspace') of
-        undefined ->
-            #{};
-        Pid ->
-            try
-                gen_server:call(Pid, get_user_bindings, 1000)
-            catch
-                _:_ -> #{}
-            end
-    end.
+    beamtalk_workspace_interface_primitives:get_user_bindings().
 
 %% @doc Return non-class workspace globals for session binding injection (BT-883).
 %% Includes singletons (Transcript, Beamtalk, Workspace) and user-registered
@@ -111,16 +102,7 @@ get_user_bindings() ->
 %% at session start to seed session bindings from Workspace globals.
 -spec get_session_bindings() -> #{atom() => term()}.
 get_session_bindings() ->
-    case whereis('Workspace') of
-        undefined ->
-            #{};
-        Pid ->
-            try
-                gen_server:call(Pid, get_session_bindings, 1000)
-            catch
-                _:_ -> #{}
-            end
-    end.
+    beamtalk_workspace_interface_primitives:get_session_bindings().
 
 %% @doc Check if Workspace supports a given method selector.
 -spec has_method(selector()) -> boolean().

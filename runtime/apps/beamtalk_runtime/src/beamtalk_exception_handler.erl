@@ -277,11 +277,18 @@ ensure_wrapped(exit, Reason, Stacktrace) ->
     Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
 ensure_wrapped(throw, Reason, Stacktrace) ->
     %% BT-869: Unwrap future_rejected errors (thrown from beamtalk_future:await/*)
-    %% Future rejects with {future_rejected, ActualError} where ActualError is #beamtalk_error{}
+    %% Future rejects with {future_rejected, ActualError} where ActualError may be:
+    %%   - #beamtalk_error{}           (old hand-written gen_servers via beamtalk_future:reject/2)
+    %%   - #{error := #beamtalk_error{}} (already-wrapped map, e.g. from compiled actors)
+    %%   - {error, #{error := #beamtalk_error{}}} (compiled actor safe_dispatch catches {error, Wrapped})
     %% We need to unwrap it so the actual error can be caught properly
     case Reason of
         {future_rejected, #beamtalk_error{} = InnerError} ->
             Wrapped = wrap(InnerError);
+        {future_rejected, #{error := #beamtalk_error{}} = AlreadyWrapped} ->
+            Wrapped = AlreadyWrapped;
+        {future_rejected, {error, #{error := #beamtalk_error{}} = AlreadyWrapped}} ->
+            Wrapped = AlreadyWrapped;
         _ ->
             Error = #beamtalk_error{
                 kind = erlang_throw,
