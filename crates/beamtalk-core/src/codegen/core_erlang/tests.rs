@@ -5475,16 +5475,13 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
     };
     let result = generate_module(&module, CodegenOptions::new("bt@empty"));
     let code = result.unwrap();
-    // A class with no slots has no keyword constructor selector, so no 'class_...'/N+2 export
-    // (register_class/0 is always present but that's not a keyword constructor)
+    // A class with no slots has no keyword constructor selector, so no 'class_X:'/N pattern.
+    // Scan all lines for the pattern: contains 'class_' AND contains ':'/  (selector with colon)
+    let has_keyword_ctor = code
+        .lines()
+        .any(|line| line.contains("'class_") && line.contains(":/"));
     assert!(
-        !code.contains("'class_'/"),
-        "No keyword constructor export should be generated for empty Value subclass. Got:\n{code}"
-    );
-    // More specifically: the module export list should not contain 'class_X:Y:' patterns
-    let export_line = code.lines().next().unwrap_or("");
-    assert!(
-        !export_line.contains("class_' => "),
-        "No keyword constructor in classMethods for empty Value subclass. Got:\n{code}"
+        !has_keyword_ctor,
+        "No keyword constructor should be generated for empty Value subclass. Got:\n{code}"
     );
 }

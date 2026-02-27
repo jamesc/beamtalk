@@ -1121,11 +1121,15 @@ impl CoreErlangGenerator {
                     sel
                 };
                 let expected_kw_sel = build_kw_sel(&class.state);
+                // Guard against collisions with built-in class selectors (new/new: for Value).
+                // Without this, a slot named e.g. "new" would produce a duplicate entry.
+                let collides_with_builtin =
+                    matches!(expected_kw_sel.as_str(), "new" | "new:");
                 let kw_selector_already_defined = class
                     .class_methods
                     .iter()
                     .any(|m| m.kind == MethodKind::Primary && m.selector.name() == expected_kw_sel);
-                if !kw_selector_already_defined {
+                if !collides_with_builtin && !kw_selector_already_defined {
                     let kw_sel = expected_kw_sel;
                     let kw_arity = class.state.len();
                     class_method_entries.push(docvec![

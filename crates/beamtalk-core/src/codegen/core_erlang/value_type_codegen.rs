@@ -9,9 +9,7 @@
 //! terms (maps) with no process. They are created with `new` and `new:`,
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
-use std::fmt::Write as _;
-
-use super::document::Document;
+use super::document::{concat, Document};
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
@@ -327,11 +325,10 @@ impl CoreErlangGenerator {
         }
 
         // BT-923: Auto-generate getter and with*: setter functions for Value subclass:
-        let module_name_for_auto = self.module_name.clone();
         let class_name_for_kw = self.class_name().clone();
         if let Some(ref auto) = auto_methods {
             for field in &auto.getters {
-                docs.push(Self::generate_slot_getter(field, &module_name_for_auto));
+                docs.push(Self::generate_slot_getter(field));
                 docs.push(Document::Str("\n"));
             }
             for field in &auto.setters {
@@ -580,10 +577,14 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'x'/1 = fun (Self) -> call 'maps':'get'('x', Self)
     /// ```
-    fn generate_slot_getter(field_name: &str, _mod_name: &str) -> Document<'static> {
+    fn generate_slot_getter(field_name: &str) -> Document<'static> {
         docvec![
-            Document::String(format!("'{field_name}'/1 = fun (Self) ->\n")),
-            Document::String(format!("    call 'maps':'get'('{field_name}', Self)\n")),
+            "'",
+            Document::String(field_name.to_string()),
+            "'/1 = fun (Self) ->\n",
+            "    call 'maps':'get'('",
+            Document::String(field_name.to_string()),
+            "', Self)\n",
             "\n",
         ]
     }
@@ -596,10 +597,12 @@ impl CoreErlangGenerator {
     fn generate_slot_setter(field_name: &str) -> Document<'static> {
         let with_sel = AutoSlotMethods::with_star_selector(field_name);
         docvec![
-            Document::String(format!("'{with_sel}'/2 = fun (Self, NewVal) ->\n")),
-            Document::String(format!(
-                "    call 'maps':'put'('{field_name}', NewVal, Self)\n"
-            )),
+            "'",
+            Document::String(with_sel),
+            "'/2 = fun (Self, NewVal) ->\n",
+            "    call 'maps':'put'('",
+            Document::String(field_name.to_string()),
+            "', NewVal, Self)\n",
             "\n",
         ]
     }
@@ -615,29 +618,41 @@ impl CoreErlangGenerator {
         kw_selector: &str,
         slots: &[String],
     ) -> Document<'static> {
-        let num_slots = slots.len();
-        let arity = num_slots + 2; // ClassSelf + ClassVars + N args
+        let arity = slots.len() + 2; // _ClassSelf + _ClassVars + N slot args
 
-        // Parameter names: _ClassSelf (unused), _ClassVars (unused), then SlotN vars
-        let slot_params: Vec<String> = slots
+        // Extra slot parameters appended after "_ClassSelf, _ClassVars": ", SlotArg0", ...
+        let slot_param_docs: Vec<Document<'static>> = slots
             .iter()
             .enumerate()
-            .map(|(i, _)| format!("SlotArg{i}"))
+            .flat_map(|(i, _)| [Document::Str(", "), Document::String(format!("SlotArg{i}"))])
             .collect();
-        let params = format!("_ClassSelf, _ClassVars, {}", slot_params.join(", "));
 
-        // Map literal body: ~{'$beamtalk_class' => 'ClassName', 'x' => SlotArg0, ...}~
-        let mut map_fields = format!("'$beamtalk_class' => '{class_name}'");
+        // Map literal body: '$beamtalk_class' => 'ClassName', 'x' => SlotArg0, ...
+        let mut map_field_docs: Vec<Document<'static>> = vec![
+            Document::Str("'$beamtalk_class' => '"),
+            Document::String(class_name.to_string()),
+            Document::Str("'"),
+        ];
         for (i, slot_name) in slots.iter().enumerate() {
-            write!(map_fields, ", '{slot_name}' => SlotArg{i}")
-                .expect("write to String is infallible");
+            map_field_docs.extend([
+                Document::Str(", '"),
+                Document::String(slot_name.clone()),
+                Document::Str("' => "),
+                Document::String(format!("SlotArg{i}")),
+            ]);
         }
 
         docvec![
-            Document::String(format!(
-                "'class_{kw_selector}'/{arity} = fun ({params}) ->\n"
-            )),
-            Document::String(format!("    ~{{{map_fields}}}~\n")),
+            "'class_",
+            Document::String(kw_selector.to_string()),
+            "'/",
+            Document::String(arity.to_string()),
+            " = fun (_ClassSelf, _ClassVars",
+            concat(slot_param_docs),
+            ") ->\n",
+            "    ~{",
+            concat(map_field_docs),
+            "}~\n",
             "\n",
         ]
     }
@@ -652,25 +667,37 @@ impl CoreErlangGenerator {
         let mut arms: Vec<Document<'static>> = Vec::new();
 
         for field in &auto.getters {
-            arms.push(Document::String(format!(
-                "        <'{field}'> when 'true' ->\n"
-            )));
-            arms.push(Document::String(format!(
-                "            call '{mod_name}':'{field}'(Self)\n"
-            )));
+            arms.push(docvec![
+                "        <'",
+                Document::String(field.clone()),
+                "'> when 'true' ->\n",
+            ]);
+            arms.push(docvec![
+                "            call '",
+                Document::String(mod_name.to_string()),
+                "':'",
+                Document::String(field.clone()),
+                "'(Self)\n",
+            ]);
         }
 
         for field in &auto.setters {
             let with_sel = AutoSlotMethods::with_star_selector(field);
-            arms.push(Document::String(format!(
-                "        <'{with_sel}'> when 'true' ->\n"
-            )));
+            arms.push(docvec![
+                "        <'",
+                Document::String(with_sel.clone()),
+                "'> when 'true' ->\n",
+            ]);
             arms.push(Document::Str(
                 "            let <DispArg0> = call 'erlang':'hd'(Args) in\n",
             ));
-            arms.push(Document::String(format!(
-                "            call '{mod_name}':'{with_sel}'(Self, DispArg0)\n"
-            )));
+            arms.push(docvec![
+                "            call '",
+                Document::String(mod_name.to_string()),
+                "':'",
+                Document::String(with_sel),
+                "'(Self, DispArg0)\n",
+            ]);
         }
 
         arms
