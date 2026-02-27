@@ -20,6 +20,7 @@
 //! merge conflicts are minimal and trivially resolved.
 
 mod trailing_caret;
+mod unnecessary_parens;
 // ── add new lint modules here (alphabetical) ──────────────────────────────
 
 use crate::ast::Module;
@@ -40,6 +41,7 @@ pub(crate) trait LintPass {
 fn all_passes() -> Vec<Box<dyn LintPass>> {
     vec![
         Box::new(trailing_caret::TrailingCaretPass),
+        Box::new(unnecessary_parens::UnnecessaryParensPass),
         // ── add new passes here (alphabetical) ────────────────────────────
     ]
 }
