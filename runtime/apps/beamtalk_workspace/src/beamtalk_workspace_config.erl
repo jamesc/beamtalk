@@ -5,7 +5,7 @@
 %%%
 %%% Centralises the mapping between binding names (Transcript, Beamtalk, Workspace),
 %%% class names (TranscriptStream, BeamtalkInterface, WorkspaceInterface),
-%%% and Erlang modules (beamtalk_transcript_stream, etc.).
+%%% and Erlang modules (bt@stdlib@transcript_stream, etc.).
 %%%
 %%% Used by:
 %%% - beamtalk_workspace_sup — to build supervisor child specs
@@ -44,20 +44,20 @@ singletons() ->
         #{
             binding_name => 'Transcript',
             class_name => 'TranscriptStream',
-            module => beamtalk_transcript_stream,
-            start_args => [1000]
+            module => 'bt@stdlib@transcript_stream',
+            start_args => [#{}]
         },
         #{
             binding_name => 'Beamtalk',
             class_name => 'BeamtalkInterface',
-            module => beamtalk_interface,
-            start_args => [[]]
+            module => 'bt@stdlib@beamtalk_interface',
+            start_args => [#{}]
         },
         #{
             binding_name => 'Workspace',
             class_name => 'WorkspaceInterface',
-            module => beamtalk_workspace_interface,
-            start_args => []
+            module => 'bt@stdlib@workspace_interface',
+            start_args => [#{}]
         }
     ].
 

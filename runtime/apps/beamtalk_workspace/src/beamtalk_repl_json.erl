@@ -238,7 +238,7 @@ term_to_json(Value) when is_integer(Value); is_float(Value); is_boolean(Value) -
 term_to_json(Value) when is_atom(Value) ->
     atom_to_binary(Value, utf8);
 term_to_json(Value) when is_binary(Value) ->
-    beamtalk_transcript_stream:ensure_utf8(Value);
+    beamtalk_transcript_stream_primitives:ensure_utf8(Value);
 term_to_json(Value) when is_list(Value) ->
     case Value of
         [] ->
@@ -331,7 +331,9 @@ term_to_json(Value) when is_tuple(Value) ->
             iolist_to_binary([<<"{">>, lists:join(<<", ">>, ElementStrs), <<"}">>])
     end;
 term_to_json(Value) ->
-    beamtalk_transcript_stream:ensure_utf8(iolist_to_binary(io_lib:format("~p", [Value]))).
+    beamtalk_transcript_stream_primitives:ensure_utf8(
+        iolist_to_binary(io_lib:format("~p", [Value]))
+    ).
 
 %% @private Format a tagged future's underlying pid for display.
 -spec term_to_json_future_pid(pid()) -> binary().
