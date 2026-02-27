@@ -68,16 +68,14 @@ Actor subclass: WorkspaceInterface
 
   /// Return an immutable Dictionary snapshot of the project namespace.
   ///
-  /// Includes workspace singletons (Transcript, Beamtalk, Workspace) and
-  /// all user-loaded classes (those with a recorded source file).
+  /// Includes workspace singletons (Transcript, Beamtalk, Workspace),
+  /// user-registered bindings (bind:as:), and all user-loaded classes.
   ///
   /// ## Examples
   /// ```beamtalk
   /// Workspace globals
   /// ```
-  globals -> Dictionary =>
-    base := ((Dictionary new at: #Transcript put: TranscriptStream current) at: #Beamtalk put: BeamtalkInterface current) at: #Workspace put: self
-    self classes inject: base into: [:acc :c | acc at: c name put: c]
+  globals -> Dictionary => @primitive "globals"
 
   /// Compile and load a .bt file, registering the class.
   /// Returns a structured error if path is not a String.

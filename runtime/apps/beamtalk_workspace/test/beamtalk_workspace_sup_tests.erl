@@ -52,9 +52,9 @@ children_ids_test() ->
     %% Verify all expected children are present
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
-    ?assert(lists:member(beamtalk_transcript_stream, Ids)),
-    ?assert(lists:member(beamtalk_interface, Ids)),
-    ?assert(lists:member(beamtalk_workspace_interface, Ids)),
+    ?assert(lists:member('bt@stdlib@transcript_stream', Ids)),
+    ?assert(lists:member('bt@stdlib@beamtalk_interface', Ids)),
+    ?assert(lists:member('bt@stdlib@workspace_interface', Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)),
     ?assert(lists:member(beamtalk_repl_server, Ids)),
     ?assert(lists:member(beamtalk_idle_monitor, Ids)),
@@ -151,22 +151,23 @@ session_sup_spec_test() ->
 transcript_stream_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_transcript_stream],
+    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == 'bt@stdlib@transcript_stream'],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
     ?assertEqual(
-        {beamtalk_transcript_stream, start_link, [{local, 'Transcript'}, 1000]},
+        {'bt@stdlib@transcript_stream', start_link, [{local, 'Transcript'}, #{}]},
         maps:get(start, Spec)
     ).
 
 system_dictionary_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_interface],
+    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == 'bt@stdlib@beamtalk_interface'],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
     ?assertEqual(
-        {beamtalk_interface, start_link, [{local, 'Beamtalk'}, []]}, maps:get(start, Spec)
+        {'bt@stdlib@beamtalk_interface', start_link, [{local, 'Beamtalk'}, #{}]},
+        maps:get(start, Spec)
     ).
 
 singletons_after_metadata_test() ->
@@ -175,8 +176,8 @@ singletons_after_metadata_test() ->
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     %% Singletons must come after workspace_meta (boot ordering)
     MetaIdx = index_of(beamtalk_workspace_meta, Ids),
-    TranscriptIdx = index_of(beamtalk_transcript_stream, Ids),
-    SysDictIdx = index_of(beamtalk_interface, Ids),
+    TranscriptIdx = index_of('bt@stdlib@transcript_stream', Ids),
+    SysDictIdx = index_of('bt@stdlib@beamtalk_interface', Ids),
     ?assert(TranscriptIdx > MetaIdx),
     ?assert(SysDictIdx > MetaIdx).
 
@@ -198,7 +199,7 @@ bootstrap_after_singletons_before_repl_test() ->
 
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     BootstrapIdx = index_of(beamtalk_workspace_bootstrap, Ids),
-    WorkspaceInterfaceIdx = index_of(beamtalk_workspace_interface, Ids),
+    WorkspaceInterfaceIdx = index_of('bt@stdlib@workspace_interface', Ids),
     ReplServerIdx = index_of(beamtalk_repl_server, Ids),
     %% Bootstrap must come after all singletons but before REPL server
     ?assert(BootstrapIdx > WorkspaceInterfaceIdx),
@@ -249,10 +250,10 @@ all_children_alive_test() ->
         %% Verify each child has correct ID and is alive
         ExpectedIds = [
             beamtalk_workspace_meta,
-            beamtalk_transcript_stream,
-            beamtalk_interface,
+            'bt@stdlib@transcript_stream',
+            'bt@stdlib@beamtalk_interface',
             beamtalk_actor_registry,
-            beamtalk_workspace_interface,
+            'bt@stdlib@workspace_interface',
             beamtalk_workspace_bootstrap,
             beamtalk_repl_server,
             beamtalk_idle_monitor,
@@ -341,11 +342,11 @@ session_sup_shutdown_infinity_test() ->
 workspace_environment_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_interface],
+    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == 'bt@stdlib@workspace_interface'],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
     ?assertEqual(
-        {beamtalk_workspace_interface, start_link, [{local, 'Workspace'}]},
+        {'bt@stdlib@workspace_interface', start_link, [{local, 'Workspace'}, #{}]},
         maps:get(start, Spec)
     ).
 
@@ -356,7 +357,7 @@ registry_before_workspace_environment_test() ->
 
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     RegistryIdx = index_of(beamtalk_actor_registry, Ids),
-    WorkspaceEnvIdx = index_of(beamtalk_workspace_interface, Ids),
+    WorkspaceEnvIdx = index_of('bt@stdlib@workspace_interface', Ids),
     %% Registry must come before WorkspaceInterface (it depends on registry)
     ?assert(RegistryIdx < WorkspaceEnvIdx).
 
@@ -393,7 +394,9 @@ singleton_specs_have_local_registration_test() ->
 
     %% Every singleton should use {local, Name} registration
     SingletonIds = [
-        beamtalk_transcript_stream, beamtalk_interface, beamtalk_workspace_interface
+        'bt@stdlib@transcript_stream',
+        'bt@stdlib@beamtalk_interface',
+        'bt@stdlib@workspace_interface'
     ],
     lists:foreach(
         fun(Id) ->
