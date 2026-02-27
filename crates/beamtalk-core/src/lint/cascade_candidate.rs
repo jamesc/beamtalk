@@ -4,6 +4,8 @@
 //! Lint: warn when the same receiver has 3+ consecutive message sends in a
 //! statement sequence that could be written as a cascade.
 //!
+//! **DDD Context:** Compilation
+//!
 //! ```text
 //! // Bad — three separate sends to the same receiver
 //! arr add: 1.
@@ -48,10 +50,19 @@ fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
     check_sequence(&method.body, diagnostics);
 }
 
-/// Returns the simple receiver name if `expr` is a `MessageSend` whose
-/// receiver is an identifier (variable, `self`) or a class reference.
+/// Returns the simple receiver name if `expr` is a synchronous `MessageSend`
+/// whose receiver is an identifier (variable, `self`) or a class reference.
+///
+/// Cast sends (`is_cast: true`) are excluded because `CascadeMessage` does not
+/// support cast semantics — a cast cannot appear in a cascade.
 fn simple_receiver_name(expr: &Expression) -> Option<&str> {
-    if let Expression::MessageSend { receiver, .. } = expr {
+    if let Expression::MessageSend {
+        receiver, is_cast, ..
+    } = expr
+    {
+        if *is_cast {
+            return None;
+        }
         match receiver.as_ref() {
             Expression::Identifier(Identifier { name, .. }) => Some(name.as_str()),
             Expression::ClassReference { name, .. } => Some(name.name.as_str()),
@@ -347,6 +358,74 @@ mod tests {
             diags.len(),
             1,
             "consecutive sends in block body should be flagged, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn mixed_selector_types_flagged() {
+        // Unary + keyword sends to the same receiver are still a cascade candidate.
+        let diags = lint(
+            "Object subclass: Foo\n\
+             run: arr =>\n\
+             arr add: 1.\n\
+             arr sort.\n\
+             arr add: 2\n",
+        );
+        assert_eq!(
+            diags.len(),
+            1,
+            "mixed selector types should still be flagged, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn cast_send_breaks_run() {
+        // Cast sends (`!`) cannot appear in a cascade, so they break the run.
+        let diags = lint(
+            "Object subclass: Foo\n\
+             run: arr =>\n\
+             arr add: 1.\n\
+             arr fire!\n\
+             arr add: 2\n",
+        );
+        assert!(
+            diags.is_empty(),
+            "cast send should break the run, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn expect_directive_breaks_run() {
+        // `@expect` directives are separate expression nodes that break runs.
+        // This is correct: an @expect-annotated send has different semantics.
+        let diags = lint(
+            "Object subclass: Foo\n\
+             run: arr =>\n\
+             arr add: 1.\n\
+             @expect dnu\n\
+             arr add: 2.\n\
+             arr add: 3\n",
+        );
+        assert!(
+            diags.is_empty(),
+            "@expect should break the run, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn class_method_body_flagged() {
+        let diags = lint(
+            "Object subclass: Foo\n\
+             class\n\
+             setup: arr =>\n\
+             arr add: 1.\n\
+             arr add: 2.\n\
+             arr add: 3\n",
+        );
+        assert_eq!(
+            diags.len(),
+            1,
+            "class method body should be checked, got: {diags:?}"
         );
     }
 }

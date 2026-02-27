@@ -358,4 +358,16 @@ mod tests {
         );
         assert_eq!(diags[0].severity, Severity::Lint);
     }
+
+    /// BT-957: Parentheses around a message receiver (e.g. `(x builder) add: 1`)
+    /// are used for visual grouping even when precedence makes them redundant.
+    /// They should NOT be flagged as unnecessary.
+    #[test]
+    fn parens_around_receiver_not_flagged() {
+        let diags = lint("Object subclass: Foo\n  value: x => (x builder) add: 1\n");
+        assert!(
+            diags.is_empty(),
+            "receiver parens must not be flagged, got: {diags:?}"
+        );
+    }
 }
