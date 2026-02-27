@@ -273,6 +273,8 @@ fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> Anal
     validators::check_redundant_assignment(module, &mut result.diagnostics);
     // BT-953: Hint on self capture in collection HOF blocks (deadlock risk)
     validators::check_self_capture_in_actor_block(module, &mut result.diagnostics);
+    // BT-955: Warn on literal boolean conditions (always true / always false)
+    validators::check_literal_boolean_condition(module, &mut result.diagnostics);
 
     // Phase 6: Module-level validation (BT-349)
     let module_diags = module_validator::validate_single_class(module);
