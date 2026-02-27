@@ -23,6 +23,7 @@ Module {
                     },
                 },
             ),
+            class_kind: Object,
             is_abstract: false,
             is_sealed: true,
             is_typed: false,

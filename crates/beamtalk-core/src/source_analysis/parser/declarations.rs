@@ -32,6 +32,11 @@ impl Parser {
     ///   methodName => body
     ///   sealed methodName => body
     /// ```
+    ///
+    /// The superclass name determines the class kind:
+    /// - `Actor subclass:` → `ClassKind::Actor`
+    /// - `Value subclass:` → `ClassKind::Value` (ADR 0042)
+    /// - Anything else → `ClassKind::Object`
     pub(super) fn parse_class_definition(&mut self) -> ClassDefinition {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();

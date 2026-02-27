@@ -23,6 +23,7 @@ Module {
                     },
                 },
             ),
+            class_kind: Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
