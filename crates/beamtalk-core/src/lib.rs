@@ -15,6 +15,7 @@
 #![doc = include_str!("../../../README.md")]
 
 pub mod ast;
+pub(crate) mod ast_walker;
 pub mod codegen;
 pub mod erlang;
 pub mod language_service;
