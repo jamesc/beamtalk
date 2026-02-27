@@ -10,7 +10,7 @@
 //   > :load src/scheme/lambda.bt
 //   > :load src/scheme/eval.bt
 //   > :load src/scheme/printer.bt
-//   > :load src/scheme/scheme_test.bt
+//   > :load test/scheme_test.bt
 //   > SchemeTest runAll
 
 TestCase subclass: SchemeTest
@@ -182,6 +182,10 @@ TestCase subclass: SchemeTest
   testNonProcedureError =>
     result := [self eval: "(1 + 2)"] on: Error do: [:e | e message]
     self assert: result equals: "Not a procedure: 1"
+
+  testNonProcedureErrorInteger =>
+    result := [self eval: "(42 1 2)"] on: Error do: [:e | e message]
+    self assert: result equals: "Not a procedure: 42"
 
   // --- Recursion ---
 

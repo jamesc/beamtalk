@@ -62,7 +62,7 @@ eval value: "(fact 10)"                        // => "3628800"
 ## Running Tests
 
 ```bash
-beamtalk test src/scheme/scheme_test.bt
+beamtalk test test/scheme_test.bt
 ```
 
-Or in the REPL load each file in order (symbol → reader → env → lambda → eval → printer → scheme_test) then run `SchemeTest runAll`.
+Or in the REPL load each file in order (symbol → reader → env → lambda → eval → printer → `test/scheme_test.bt`) then run `SchemeTest runAll`.

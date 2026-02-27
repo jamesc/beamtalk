@@ -34,21 +34,27 @@ Object subclass: SchemeReader
   read: str =>
     chars := str asList
     pair  := self parseExpr: (self dropWs: chars)
+    rest  := self dropWs: pair last
+    rest isEmpty ifFalse: [^self error: "Unexpected trailing input"]
     pair first
 
-  /// Drop leading space characters from a char list.
+  /// Return true if `ch` is a whitespace character (space, newline, tab, carriage return).
+  isWs: ch =>
+    (ch =:= " ") or: [(ch =:= "\n") or: [(ch =:= "\t") or: [ch =:= "\r"]]]
+
+  /// Drop leading whitespace characters from a char list.
   dropWs: chars =>
     chars isEmpty ifTrue: [^chars]
-    (chars first =:= " ") ifFalse: [^chars]
+    (self isWs: chars first) ifFalse: [^chars]
     self dropWs: chars rest
 
   /// Wrap `val` and `chars` into a 2-element `#(val, remainingChars)` pair.
   pairOf: val rest: chars =>
     (#() add: val) add: chars
 
-  /// Return true if `ch` is a token delimiter (space, `(`, or `)`).
+  /// Return true if `ch` is a token delimiter (whitespace, `(`, or `)`).
   isDelim: ch =>
-    (ch =:= " ") or: [(ch =:= "(") or: [ch =:= ")"]]
+    (self isWs: ch) or: [(ch =:= "(") or: [ch =:= ")"]]
 
   /// Dispatch to the appropriate sub-parser based on the leading character.
   ///
