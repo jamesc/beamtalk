@@ -18,18 +18,18 @@ sed -n '14,25p' src/scheme/symbol.bt
 ```
 
 ```output
+/// sym =:= (SchemeSymbol withName: "define")  // => true
+/// sym =:= (SchemeSymbol withName: "lambda")  // => false
+/// ```
 Object subclass: SchemeSymbol
   state: name = ""
 
-  class withName: n => self new: #{#name => n}
-
-  name => self.name
-
-  =:= other =>
-    (other class =:= SchemeSymbol) ifFalse: [^false]
-    self.name =:= other name
-
-  printString => self.name
+  /// Create a new symbol with the given name string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SchemeSymbol withName: "car"   // => a SchemeSymbol
+  /// ```
 ```
 
 ### SchemeReader — tokenising s-expressions
@@ -41,14 +41,14 @@ sed -n '44,51p' src/scheme/reader.bt
 ```
 
 ```output
-  parseExpr: chars =>
-    chars isEmpty ifTrue: [^self error: "Unexpected end of input"]
-    ch := chars first
-    (ch =:= "(") ifTrue: [^self parseListElems: chars rest]
-    (ch =:= "#") ifTrue: [^self parseBool: chars rest]
-    ch isDigit        ifTrue: [^self parseNum: chars acc: ""]
-    (ch =:= """")     ifTrue: [^self parseString: chars rest acc: ""]
-    self parseSym: chars acc: ""
+
+  /// Drop leading whitespace characters from a char list.
+  dropWs: chars =>
+    chars isEmpty ifTrue: [^chars]
+    (self isWs: chars first) ifFalse: [^chars]
+    self dropWs: chars rest
+
+  /// Wrap `val` and `chars` into a 2-element `#(val, remainingChars)` pair.
 ```
 
 ### SchemeEnv — environment as an Actor
@@ -60,32 +60,32 @@ sed -n '18,43p' src/scheme/env.bt
 ```
 
 ```output
+/// (env define: "x" value: 42) await
+/// (env lookup: "x") await    // => 42
+/// ```
 Actor subclass: SchemeEnv
   state: bindings = #{}
   state: parent   = nil
 
-  // Look up a name, walking the parent chain when not found here.
+  /// Look up `name` in this frame, then walk parent frames until found.
+  /// Raises an error if the name is unbound in the entire chain.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (env lookup: "x") await    // => 42 (if x was defined)
+  /// (env lookup: "z") await    // raises "Unbound variable: z"
+  /// ```
   lookup: name =>
     val := self.bindings at: name ifAbsent: [nil]
     val notNil ifTrue: [^val]
     self.parent notNil ifTrue: [^(self.parent lookup: name) await]
     self error: "Unbound variable: " ++ name
 
-  // Add or update a binding in this environment
-  define: name value: val =>
-    self.bindings := self.bindings at: name put: val
-    nil
-
-  // Set the parent environment reference
-  setParent: p =>
-    self.parent := p
-
-  // Create a child env that binds params to vals, with self as parent.
-  extend: params values: vals =>
-    newBindings := (params zip: vals) inject: #{} into: [:d :pair |
-      d at: (pair at: "key") put: (pair at: "value")]
-    SchemeEnv spawnWith: #{#bindings => newBindings, #parent => self}
-
+  /// Bind or rebind `name` to `val` in this frame.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (env define: "x" value: 10) await
 ```
 
 ### SchemeLambda — closures as plain data
@@ -97,17 +97,17 @@ sed -n '15,25p' src/scheme/lambda.bt
 ```
 
 ```output
+/// lam body         // => bodyExpr
+/// lam closureEnv   // => the SchemeEnv actor
+/// ```
 Object subclass: SchemeLambda
   state: params     = #()   // List of parameter name strings
   state: body       = nil   // Unevaluated body expression (AST)
   state: closureEnv = nil   // SchemeEnv actor at point of definition
 
-  class withParams: p body: b env: e =>
-    self new: #{#params => p, #body => b, #closureEnv => e}
-
-  params     => self.params
-  body       => self.body
-  closureEnv => self.closureEnv
+  /// Create a new lambda capturing `p` as parameter names, `b` as the body
+  /// AST, and `e` as the enclosing environment.
+  ///
 ```
 
 ### SchemeEval — the metacircular evaluator
@@ -119,24 +119,24 @@ sed -n '48,65p' src/scheme/eval.bt
 ```
 
 ```output
-  eval: expr in: env =>
-    // Self-evaluating atomic types
-    (expr class =:= Integer) ifTrue: [^expr]
-    (expr class =:= True)    ifTrue: [^expr]
-    (expr class =:= False)   ifTrue: [^expr]
-    (expr class =:= String)  ifTrue: [^expr]
-    expr isNil               ifTrue: [^expr]
+        "/"     => [:args | (args at: 1) div: (args at: 2)],
+        "="     => [:args | (args at: 1) =:= (args at: 2)],
+        "<"     => [:args | (args at: 1) < (args at: 2)],
+        ">"     => [:args | (args at: 1) > (args at: 2)],
+        "<="    => [:args | (args at: 1) <= (args at: 2)],
+        ">="    => [:args | (args at: 1) >= (args at: 2)],
+        "car"   => [:args | (args at: 1) first],
+        "cdr"   => [:args | (args at: 1) rest],
+        "cons"  => [:args | (#() add: (args at: 1)) ++ (args at: 2)],
+        "list"  => [:args | args],
+        "not"   => [:args | (args at: 1) not],
+        "null?" => [:args |
+          v := args at: 1
+          v isNil or: [v class =:= List and: [v isEmpty]]]
+      },
+      #parent => nil}
 
-    // Symbol: look up the name in the environment
-    (expr class =:= SchemeSymbol) ifTrue: [
-      ^(env lookup: expr name) await]
-
-    // Must be a list — special form or function application
-    (expr class =:= List) ifFalse: [^self error: "Unknown expression type"]
-    expr isEmpty ifTrue: [^#()]
-
-    head := expr first
-    tail := expr rest
+  /// Evaluate `expr` in `env` and return the result.
 ```
 
 ```bash
@@ -144,18 +144,18 @@ sed -n '112,123p' src/scheme/eval.bt
 ```
 
 ```output
-    // Function application: evaluate head, evaluate all args, apply
-    func     := self eval: head in: env
-    evalArgs := tail collect: [:a | self eval: a in: env]
-    self apply: func args: evalArgs in: env
+      (sym =:= "lambda") ifTrue: [
+        params := (tail at: 1) collect: [:p | p name]
+        ^SchemeLambda withParams: params body: (tail at: 2) env: env]
 
-  // Apply a function — SchemeLambda or built-in Block
-  apply: func args: args in: env =>
-    (func class =:= SchemeLambda) ifTrue: [
-      childEnv := (func closureEnv extend: func params values: args) await
-      ^self eval: func body in: childEnv]
-    (func class =:= Block) ifFalse: [
-      ^self error: "Not a procedure: " ++ func printString]
+      // (if test then else?) — conditional branch
+      (sym =:= "if") ifTrue: [
+        condVal := self eval: (tail at: 1) in: env
+        (condVal == false or: [condVal isNil]) ifTrue: [
+          ^(tail size > 2) ifTrue: [self eval: (tail at: 3) in: env] ifFalse: [nil]
+        ] ifFalse: [
+          ^self eval: (tail at: 2) in: env]]
+
 ```
 
 ### SchemePrinter — values back to Scheme notation
@@ -167,27 +167,27 @@ sed -n '17,37p' src/scheme/printer.bt
 ```
 
 ```output
+/// printer print: #(1 2 3)    // => "(1 2 3)"
+/// ```
 Object subclass: SchemePrinter
 
+  /// Convert `val` to its Scheme string representation.
+  ///
+  /// Dispatches on `val class`: nil → `"()"`, booleans → `"#t"`/`"#f"`,
+  /// integers → decimal string, strings → double-quoted, symbols → name,
+  /// lambdas → `"#<lambda>"`, lists → `"(elem ...)"`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SchemePrinter new print: 0          // => "0"
+  /// SchemePrinter new print: "hi"       // => "\"hi\""
+  /// SchemePrinter new print: nil        // => "()"
+  /// ```
   print: val =>
     val isNil ifTrue: [^"()"]
     (val class =:= True)         ifTrue: [^"#t"]
     (val class =:= False)        ifTrue: [^"#f"]
     (val class =:= Integer)      ifTrue: [^val printString]
-    (val class =:= String)       ifTrue: [^"""" ++ val ++ """"]
-    (val class =:= SchemeSymbol) ifTrue: [^val name]
-    (val class =:= SchemeLambda) ifTrue: [^"#<lambda>"]
-    (val class =:= List) ifTrue: [^self printList: val]
-    "#<unknown>"
-
-  printList: lst =>
-    lst isEmpty ifTrue: [^"()"]
-    inner := self printElems: lst
-    "(" ++ inner ++ ")"
-
-  printElems: lst =>
-    lst size =:= 1 ifTrue: [^self print: lst first]
-    (self print: lst first) ++ " " ++ (self printElems: lst rest)
 ```
 
 ## How Beamtalk Features Help
@@ -262,9 +262,9 @@ sed -n '182,188p' test/scheme_test.bt
     result := [self eval: "(1 + 2)"] on: Error do: [:e | e message]
     self assert: result equals: "Not a procedure: 1"
 
-  // --- Recursion ---
-
-  testFactorial =>
+  testNonProcedureErrorInteger =>
+    result := [self eval: "(42 1 2)"] on: Error do: [:e | e message]
+    self assert: result equals: "Not a procedure: 42"
 ```
 
 ```bash
@@ -272,11 +272,11 @@ sed -n '188,192p' test/scheme_test.bt
 ```
 
 ```output
+    self assert: result equals: "Not a procedure: 42"
+
+  // --- Recursion ---
+
   testFactorial =>
-    reader := SchemeReader new
-    ev     := SchemeEval new
-    env    := ev defaultEnv
-    ev eval: (reader read: "(define fact (lambda (n) (if (= n 0) 1 (* n (fact (- n 1))))))") in: env
 ```
 
 ```bash
@@ -284,7 +284,7 @@ sed -n '193,193p' test/scheme_test.bt
 ```
 
 ```output
-    self assert: (ev eval: (reader read: "(fact 5)") in: env) equals: 120
+    reader := SchemeReader new
 ```
 
 ### testNonProcedureError — clear error for infix notation
