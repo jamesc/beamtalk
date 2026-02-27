@@ -270,6 +270,9 @@ fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> Anal
     // BT-919: Reject cast (!) on value types
     validators::check_cast_on_value_type(module, &result.class_hierarchy, &mut result.diagnostics);
 
+    // BT-951: Lint on effect-free statements (suppressed during normal compile)
+    validators::check_effect_free_statements(module, &mut result.diagnostics);
+
     // Phase 6: Module-level validation (BT-349)
     let module_diags = module_validator::validate_single_class(module);
     result.diagnostics.extend(module_diags);
