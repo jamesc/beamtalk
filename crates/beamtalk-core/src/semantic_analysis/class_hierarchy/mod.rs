@@ -13,7 +13,7 @@
 //!
 //! The hierarchy uses simple depth-first MRO (no multiple inheritance).
 
-use crate::ast::{ClassDefinition, MethodKind, Module, TypeAnnotation};
+use crate::ast::{ClassDefinition, ClassKind, MethodKind, Module, TypeAnnotation};
 use crate::semantic_analysis::SemanticError;
 use crate::source_analysis::Diagnostic;
 use ecow::EcoString;
@@ -62,6 +62,7 @@ impl MethodInfo {
 ///
 /// **DDD Context:** Semantic Analysis — Value Object
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ClassInfo {
     /// Class name.
     pub name: EcoString,
@@ -74,6 +75,11 @@ pub struct ClassInfo {
     /// Whether this class has the explicit `typed` modifier.
     /// Use `ClassHierarchy::is_typed()` to check inherited typed status.
     pub is_typed: bool,
+    /// Whether this class is a direct `Value subclass:` declaration (ADR 0042).
+    ///
+    /// `true` only for classes whose direct superclass is `Value`. To check
+    /// the full inheritance chain, use [`ClassHierarchy::is_value_subclass`].
+    pub is_value: bool,
     /// State (instance variable) names.
     pub state: Vec<EcoString>,
     /// Declared type annotations for state fields (field name → type name).
@@ -212,6 +218,7 @@ impl ClassHierarchy {
                         is_sealed: false,
                         is_abstract: false,
                         is_typed: false,
+                        is_value: superclass_name == "Value",
                         state: Vec::new(),
                         state_types: HashMap::new(),
                         methods: Vec::new(),
@@ -800,6 +807,7 @@ impl ClassHierarchy {
                 is_sealed: class.is_sealed,
                 is_abstract: class.is_abstract,
                 is_typed: class.is_typed,
+                is_value: class.class_kind == ClassKind::Value,
                 state: class.state.iter().map(|s| s.name.name.clone()).collect(),
                 state_types: class
                     .state
@@ -870,8 +878,8 @@ mod tests {
     use super::builtins::builtin_method;
     use super::*;
     use crate::ast::{
-        ClassDefinition, Identifier, MethodDefinition, ParameterDefinition, StateDeclaration,
-        TypeAnnotation,
+        ClassDefinition, ClassKind, Identifier, MethodDefinition, ParameterDefinition,
+        StateDeclaration, TypeAnnotation,
     };
     use crate::semantic_analysis::test_helpers::test_span;
     use crate::source_analysis::Span;
@@ -1134,6 +1142,7 @@ mod tests {
         ClassDefinition {
             name: Identifier::new(name, test_span()),
             superclass: Some(Identifier::new(superclass, test_span())),
+            class_kind: ClassKind::from_superclass_name(superclass),
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -1399,6 +1408,7 @@ mod tests {
         ClassDefinition {
             name: Identifier::new(name, test_span()),
             superclass: Some(Identifier::new(superclass, test_span())),
+            class_kind: ClassKind::from_superclass_name(superclass),
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -1573,6 +1583,7 @@ mod tests {
                 is_sealed: false,
                 is_abstract: false,
                 is_typed: false,
+                is_value: false,
                 state: vec![],
                 state_types: HashMap::new(),
                 methods: vec![builtin_method("methodA", 0, "A")],
@@ -1588,6 +1599,7 @@ mod tests {
                 is_sealed: false,
                 is_abstract: false,
                 is_typed: false,
+                is_value: false,
                 state: vec![],
                 state_types: HashMap::new(),
                 methods: vec![builtin_method("methodB", 0, "B")],
@@ -1612,6 +1624,7 @@ mod tests {
         let base = ClassDefinition {
             name: Identifier::new("Base", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -1634,6 +1647,7 @@ mod tests {
         let derived = ClassDefinition {
             name: Identifier::new("Derived", test_span()),
             superclass: Some(Identifier::new("Base", test_span())),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -1702,6 +1716,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -1756,6 +1771,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -1807,6 +1823,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -1974,6 +1991,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary("getValue".into()),
@@ -2013,6 +2031,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Keyword(vec![crate::ast::KeywordPart {
@@ -2060,6 +2079,7 @@ mod tests {
         ClassDefinition {
             name: Identifier::new(name, test_span()),
             superclass: Some(Identifier::new(superclass, test_span())),
+            class_kind: ClassKind::from_superclass_name(superclass),
             is_abstract: false,
             is_sealed: false,
             is_typed: true,
@@ -2135,6 +2155,7 @@ mod tests {
         let child = ClassDefinition {
             name: Identifier::new("Child", test_span()),
             superclass: Some(Identifier::new("TypedParent", test_span())),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2191,6 +2212,7 @@ mod tests {
         let child = ClassDefinition {
             name: Identifier::new("Child", test_span()),
             superclass: Some(Identifier::new("TypedParent", test_span())),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2352,5 +2374,52 @@ mod tests {
         // Object should still resolve to ProtoObject (built-in), not SomethingElse
         let chain = h.superclass_chain("Object");
         assert_eq!(chain, vec![EcoString::from("ProtoObject")]);
+    }
+
+    // --- ClassKind / is_value integration tests (BT-922) ---
+
+    #[test]
+    fn value_subclass_sets_is_value_flag() {
+        let class = ClassDefinition {
+            name: Identifier::new("Point", test_span()),
+            superclass: Some(Identifier::new("Value", test_span())),
+            class_kind: ClassKind::Value,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+        let module = Module::new(vec![], test_span());
+        let mut module_with_class = module;
+        module_with_class.classes.push(class);
+        let (Ok(h), _) = ClassHierarchy::build(&module_with_class) else {
+            panic!("build should succeed");
+        };
+        let info = h.get_class("Point").expect("Point should be registered");
+        assert!(info.is_value, "Value subclass should have is_value = true");
+        assert!(h.is_value_subclass("Point"));
+    }
+
+    #[test]
+    fn actor_subclass_does_not_set_is_value_flag() {
+        let module = Module {
+            classes: vec![make_user_class("Counter", "Actor")],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let (Ok(h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+        let info = h
+            .get_class("Counter")
+            .expect("Counter should be registered");
+        assert!(!info.is_value, "Actor subclass should not have is_value");
     }
 }

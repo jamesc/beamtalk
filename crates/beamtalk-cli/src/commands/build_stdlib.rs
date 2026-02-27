@@ -692,11 +692,13 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
          \x20           superclass: {superclass},\n\
          \x20           is_sealed: {sealed},\n\
          \x20           is_abstract: {abstract_},\n\
-         \x20           is_typed: {typed},\n",
+         \x20           is_typed: {typed},\n\
+         \x20           is_value: {is_value},\n",
         name = meta.class_name,
         sealed = meta.is_sealed,
         abstract_ = meta.is_abstract,
         typed = meta.is_typed,
+        is_value = meta.superclass_name == "Value",
     );
 
     // State
