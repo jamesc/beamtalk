@@ -21,8 +21,9 @@
 //! because they may have side effects and are not straightforward to extract
 //! into a single cascade receiver.
 
-use crate::ast::{Block, Expression, Identifier, MethodDefinition, Module};
+use crate::ast::{Block, Expression, Identifier, Module};
 use crate::lint::LintPass;
+use crate::lint::walker::for_each_expr_seq;
 use crate::source_analysis::Diagnostic;
 
 /// Lint pass that warns on 3+ consecutive message sends to the same simple
@@ -31,23 +32,8 @@ pub(crate) struct CascadeCandidatePass;
 
 impl LintPass for CascadeCandidatePass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        check_sequence(&module.expressions, diagnostics);
-        for class in &module.classes {
-            for method in &class.methods {
-                check_method(method, diagnostics);
-            }
-            for method in &class.class_methods {
-                check_method(method, diagnostics);
-            }
-        }
-        for standalone in &module.method_definitions {
-            check_method(&standalone.method, diagnostics);
-        }
+        for_each_expr_seq(module, |seq| check_sequence(seq, diagnostics));
     }
-}
-
-fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
-    check_sequence(&method.body, diagnostics);
 }
 
 /// Returns the simple receiver name if `expr` is a synchronous `MessageSend`
