@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'typed_value_type' ['new'/0, 'new'/1, 'getX'/1, 'getY'/1, 'distanceTo:'/2, 'printString'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
+module 'typed_value_type' ['new'/0, 'new'/1, 'getX'/1, 'getY'/1, 'distanceTo:'/2, 'printString'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'TypedPoint', 'Object'}],
      'spec' =
@@ -127,5 +127,12 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
     of RegResult -> RegResult
     catch <CatchType, CatchError, CatchStack> -> 'ok'
 
+
+'__beamtalk_meta'/0 = fun () ->
+    ~{'class' => 'TypedPoint',
+      'superclass' => 'Object',
+      'fields' => ['x', 'y'],
+      'methods' => [{'getX', 0}, {'getY', 0}, {'distanceTo:', 1}, {'printString', 0}],
+      'class_methods' => []}~
 
 end

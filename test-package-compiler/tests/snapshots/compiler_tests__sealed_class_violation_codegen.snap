@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'sealed_class_violation' ['new'/0, 'new'/1, 'doubled'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
+module 'sealed_class_violation' ['new'/0, 'new'/1, 'doubled'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'MyInt', 'Integer'}]]
 
@@ -105,5 +105,12 @@ call 'erlang':'*'(call 'beamtalk_future':'maybe_await'(Self), call 'beamtalk_fut
     of RegResult -> RegResult
     catch <CatchType, CatchError, CatchStack> -> 'ok'
 
+
+'__beamtalk_meta'/0 = fun () ->
+    ~{'class' => 'MyInt',
+      'superclass' => 'Integer',
+      'fields' => [],
+      'methods' => [{'doubled', 0}],
+      'class_methods' => []}~
 
 end
