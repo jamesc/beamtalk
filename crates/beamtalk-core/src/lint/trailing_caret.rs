@@ -27,6 +27,12 @@ impl LintPass for TrailingCaretPass {
             for method in &class.methods {
                 check_method(method, diagnostics);
             }
+            for method in &class.class_methods {
+                check_method(method, diagnostics);
+            }
+        }
+        for standalone in &module.method_definitions {
+            check_method(&standalone.method, diagnostics);
         }
     }
 }
@@ -97,5 +103,21 @@ mod tests {
         let diags = lint("Object subclass: Foo\n  value => ^42\n");
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].category, Some(DiagnosticCategory::Lint));
+    }
+
+    #[test]
+    fn class_side_method_trailing_caret_is_flagged() {
+        // Class methods (e.g. `Foo class >> create => ^Foo new`) should also be checked.
+        let diags = lint("Object subclass: Foo\n  Foo class >> create => ^Foo new\n");
+        assert_eq!(diags.len(), 1, "expected one lint on class-side method");
+        assert_eq!(diags[0].severity, Severity::Lint);
+    }
+
+    #[test]
+    fn standalone_method_trailing_caret_is_flagged() {
+        // Tonel-style `Foo >> method => ^expr` should also be checked.
+        let diags = lint("Object subclass: Foo\n  value => 0\nFoo >> value => ^42\n");
+        assert_eq!(diags.len(), 1, "expected one lint on standalone method");
+        assert_eq!(diags[0].severity, Severity::Lint);
     }
 }
