@@ -249,11 +249,17 @@ impl CoreErlangGenerator {
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let doc = docvec![
-            Document::String(format!(
-                "let {discard_var} = call '{module}':'safe_dispatch'('{selector_atom}', ["
-            )),
+            "let ",
+            Document::String(discard_var),
+            " = call '",
+            Document::String(module),
+            "':'safe_dispatch'('",
+            Document::String(selector_atom),
+            "', [",
             args_doc,
-            Document::String(format!("], {current_state}) in 'ok'"))
+            "], ",
+            Document::String(current_state),
+            ") in 'ok'",
         ];
 
         Ok(doc)
@@ -277,9 +283,11 @@ impl CoreErlangGenerator {
         let doc = docvec![
             "call 'beamtalk_message_dispatch':'cast'(",
             receiver_doc,
-            Document::String(format!(", '{selector_atom}', [")),
+            ", '",
+            Document::String(selector_atom),
+            "', [",
             args_doc,
-            "])"
+            "])",
         ];
 
         Ok(doc)
