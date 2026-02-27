@@ -76,8 +76,7 @@ Actor subclass: SchemeEnv
   /// (env lookup: "z") await    // raises "Unbound variable: z"
   /// ```
   lookup: name =>
-    val := self.bindings at: name ifAbsent: [nil]
-    val notNil ifTrue: [^val]
+    (self.bindings includesKey: name) ifTrue: [^self.bindings at: name]
     self.parent notNil ifTrue: [^(self.parent lookup: name) await]
     self error: "Unbound variable: " ++ name
 
@@ -86,6 +85,7 @@ Actor subclass: SchemeEnv
   /// ## Examples
   /// ```beamtalk
   /// (env define: "x" value: 10) await
+  /// (env lookup: "x") await    // => 10
 ```
 
 ### SchemeLambda — closures as plain data
