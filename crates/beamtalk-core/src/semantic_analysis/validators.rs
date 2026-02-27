@@ -862,6 +862,116 @@ fn visit_self_capture_in_block(expr: &Expression, diagnostics: &mut Vec<Diagnost
     }
 }
 
+// ── BT-955: Literal boolean condition ────────────────────────────────────────
+
+/// BT-955: Warn when a boolean conditional message is sent to a literal boolean receiver.
+///
+/// When `ifTrue:`, `ifFalse:`, or `ifTrue:ifFalse:` is sent to a literal `true`
+/// or `false`, one branch is statically unreachable or the conditional is
+/// entirely redundant.
+///
+/// Examples:
+/// - `true ifTrue: [42]`           → condition always true (branch always taken)
+/// - `false ifFalse: [42]`         → condition always false (branch always taken)
+/// - `true ifFalse: [42]`          → condition always true (`ifFalse:` unreachable)
+/// - `false ifTrue: [42]`          → condition always false (`ifTrue:` unreachable)
+/// - `true ifTrue: [1] ifFalse: [2]`  → `ifFalse:` branch is dead code
+/// - `false ifTrue: [1] ifFalse: [2]` → `ifTrue:` branch is dead code
+pub(crate) fn check_literal_boolean_condition(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    for expr in &module.expressions {
+        visit_literal_boolean_condition(expr, diagnostics);
+    }
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            for expr in &method.body {
+                visit_literal_boolean_condition(expr, diagnostics);
+            }
+        }
+    }
+    for standalone in &module.method_definitions {
+        for expr in &standalone.method.body {
+            visit_literal_boolean_condition(expr, diagnostics);
+        }
+    }
+}
+
+/// Returns `true` if the selector is a boolean conditional message.
+fn is_boolean_conditional_selector(sel: &str) -> bool {
+    matches!(sel, "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:")
+}
+
+/// Returns a hint string describing the unreachable or redundant branch.
+fn dead_branch_hint(is_true: bool, selector: &str) -> &'static str {
+    match (is_true, selector) {
+        (true, "ifTrue:") | (false, "ifFalse:") => {
+            "The branch is always taken. Remove the conditional and use the branch body directly."
+        }
+        (true, "ifFalse:") | (false, "ifTrue:") => "This branch is never executed. Remove it.",
+        (true, "ifTrue:ifFalse:") => {
+            "The `ifFalse:` branch is never executed. Simplify to the `ifTrue:` block."
+        }
+        (false, "ifTrue:ifFalse:") => {
+            "The `ifTrue:` branch is never executed. Simplify to the `ifFalse:` block."
+        }
+        _ => "Remove the unreachable branch.",
+    }
+}
+
+fn visit_literal_boolean_condition(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    if let Expression::MessageSend {
+        receiver,
+        selector,
+        span,
+        ..
+    } = expr
+    {
+        let literal_val = match receiver.as_ref() {
+            Expression::Identifier(Identifier { name, .. }) if name == "true" => Some(true),
+            Expression::Identifier(Identifier { name, .. }) if name == "false" => Some(false),
+            _ => None,
+        };
+        if let Some(is_true) = literal_val {
+            let selector_str = selector.name();
+            if is_boolean_conditional_selector(&selector_str) {
+                let literal_name = if is_true { "true" } else { "false" };
+                let mut diag =
+                    Diagnostic::warning(format!("Condition is always `{literal_name}`"), *span);
+                diag.hint = Some(dead_branch_hint(is_true, &selector_str).into());
+                diagnostics.push(diag);
+            }
+        }
+    }
+    // Also check cascade messages — `true ifTrue: [1]; ifFalse: [2]` has a literal
+    // boolean receiver with each cascade message going to the same receiver.
+    if let Expression::Cascade {
+        receiver, messages, ..
+    } = expr
+    {
+        let literal_val = match receiver.as_ref() {
+            Expression::Identifier(Identifier { name, .. }) if name == "true" => Some(true),
+            Expression::Identifier(Identifier { name, .. }) if name == "false" => Some(false),
+            _ => None,
+        };
+        if let Some(is_true) = literal_val {
+            let literal_name = if is_true { "true" } else { "false" };
+            for msg in messages {
+                let selector_str = msg.selector.name();
+                if is_boolean_conditional_selector(&selector_str) {
+                    let mut diag = Diagnostic::warning(
+                        format!("Condition is always `{literal_name}`"),
+                        msg.span,
+                    );
+                    diag.hint = Some(dead_branch_hint(is_true, &selector_str).into());
+                    diagnostics.push(diag);
+                }
+            }
+        }
+    }
+    for child in child_expressions(expr) {
+        visit_literal_boolean_condition(child, diagnostics);
+    }
+}
+
 /// BT-859: Error on empty method bodies.
 ///
 /// Methods declared with `=>` but no body expressions are a compile error.
@@ -1789,6 +1899,244 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected no hints for block variable (not literal), got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-955: Literal boolean condition tests ───────────────────────────────
+
+    /// `true ifTrue: [42]` — condition always true, branch always taken.
+    #[test]
+    fn literal_true_if_true_warns() {
+        let src = "true ifTrue: [42]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for true ifTrue:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("always `true`"),
+            "Expected 'always `true`' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// `false ifFalse: [42]` — condition always false, branch always taken.
+    #[test]
+    fn literal_false_if_false_warns() {
+        let src = "false ifFalse: [42]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for false ifFalse:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("always `false`"),
+            "Expected 'always `false`' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// `true ifFalse: [42]` — condition always true, `ifFalse:` branch unreachable.
+    #[test]
+    fn literal_true_if_false_warns() {
+        let src = "true ifFalse: [42]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for true ifFalse:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("always `true`"),
+            "Expected 'always `true`' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// `false ifTrue: [42]` — condition always false, `ifTrue:` branch unreachable.
+    #[test]
+    fn literal_false_if_true_warns() {
+        let src = "false ifTrue: [42]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for false ifTrue:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("always `false`"),
+            "Expected 'always `false`' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// `true ifTrue: [1] ifFalse: [2]` — `ifFalse:` branch is dead code.
+    #[test]
+    fn literal_true_if_true_if_false_warns() {
+        let src = "true ifTrue: [1] ifFalse: [2]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for true ifTrue:ifFalse:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("always `true`"),
+            "Expected 'always `true`' in message, got: {}",
+            diagnostics[0].message
+        );
+        assert!(
+            diagnostics[0]
+                .hint
+                .as_ref()
+                .is_some_and(|h| h.contains("ifFalse:")),
+            "Expected hint to mention `ifFalse:`, got: {:?}",
+            diagnostics[0].hint
+        );
+    }
+
+    /// `false ifTrue: [1] ifFalse: [2]` — `ifTrue:` branch is dead code.
+    #[test]
+    fn literal_false_if_true_if_false_warns() {
+        let src = "false ifTrue: [1] ifFalse: [2]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for false ifTrue:ifFalse:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("always `false`"),
+            "Expected 'always `false`' in message, got: {}",
+            diagnostics[0].message
+        );
+        assert!(
+            diagnostics[0]
+                .hint
+                .as_ref()
+                .is_some_and(|h| h.contains("ifTrue:")),
+            "Expected hint to mention `ifTrue:`, got: {:?}",
+            diagnostics[0].hint
+        );
+    }
+
+    /// A non-literal receiver does NOT trigger the warning.
+    #[test]
+    fn non_literal_receiver_no_warn() {
+        let src = "x := true.\nx ifTrue: [42]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for non-literal receiver, got: {diagnostics:?}"
+        );
+    }
+
+    /// A non-boolean conditional selector does NOT trigger the warning.
+    #[test]
+    fn non_conditional_selector_no_warn() {
+        let src = "true printString";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for non-conditional selector, got: {diagnostics:?}"
+        );
+    }
+
+    /// Warning fires inside a method body.
+    #[test]
+    fn literal_bool_condition_in_method_warns() {
+        let src = "Object subclass: Foo\n  run => true ifFalse: [42]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning inside method body, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+    }
+
+    /// Warning fires inside a nested block.
+    #[test]
+    fn literal_bool_condition_in_block_warns() {
+        let src = "Object subclass: Foo\n  run => [false ifTrue: [1]] value";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning inside nested block, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+    }
+
+    /// Message with literal boolean receiver should warn (receiver of first message before cascade).
+    /// `true ifTrue: [1]; ifFalse: [2]` — warns for the first message's receiver.
+    #[test]
+    fn literal_bool_cascade_warns_for_each_message() {
+        let src = "true ifTrue: [1]; ifFalse: [2]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_literal_boolean_condition(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for cascade starting with literal true, got: {diagnostics:?}"
+        );
+        assert!(diagnostics.iter().all(|d| d.severity == Severity::Warning));
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.message.contains("always `true`")),
+            "Expected all messages to say 'always `true`', got: {diagnostics:?}"
         );
     }
 }

@@ -139,7 +139,8 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
         // Equality (ADR 0002: Erlang comparison operators)
         // `=:=` strict equality, `=/=` strict inequality
         // `/=` loose inequality, `==` loose equality
-        "==" | "/=" | "=:=" | "=/=" => Some(BindingPower::left_assoc(10)),
+        // `=` is the legacy strict-equality alias (BT-952: lint warns to use =:= or simplify)
+        "==" | "/=" | "=:=" | "=/=" | "=" => Some(BindingPower::left_assoc(10)),
 
         // Comparison
         "<" | ">" | "<=" | ">=" => Some(BindingPower::left_assoc(20)),
