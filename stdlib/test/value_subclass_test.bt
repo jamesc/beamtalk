@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-923: End-to-end tests for `Value subclass:` auto-generated slot methods.
+// Exercises: getters, with*: functional setters, keyword constructor, new, new:.
+
+
+TestCase subclass: ValueSubclassTest
+
+  testAutoGetter =>
+    p := ValuePoint new.
+    // Auto-generated getter returns the default value
+    self assert: p x equals: 0.
+    self assert: p y equals: 0
+
+  testAutoGetterAfterNew =>
+    p := ValuePoint new: #{#x => 3, #y => 4}.
+    self assert: p x equals: 3.
+    self assert: p y equals: 4
+
+  testAutoSetterReturnsNewInstance =>
+    p := ValuePoint new: #{#x => 1, #y => 2}.
+    p2 := p withX: 10.
+    // Original unchanged
+    self assert: p x equals: 1.
+    // New instance has updated x, same y
+    self assert: p2 x equals: 10.
+    self assert: p2 y equals: 2
+
+  testChainedWithSetters =>
+    p := ValuePoint new.
+    p2 := (p withX: 5) withY: 7.
+    self assert: p2 x equals: 5.
+    self assert: p2 y equals: 7
+
+  testKeywordConstructor =>
+    p := ValuePoint x: 3 y: 4.
+    self assert: p x equals: 3.
+    self assert: p y equals: 4
+
+  testUserDefinedMethodCoexists =>
+    p := ValuePoint x: 3 y: 4.
+    self assert: p distanceSquared equals: 25
+
+  testWithSetterPreservesClass =>
+    p := ValuePoint x: 1 y: 2.
+    p2 := p withX: 99.
+    self assert: p2 class equals: ValuePoint
+
+  testNewDefaultsAllZero =>
+    p := ValuePoint new.
+    self assert: p x equals: 0.
+    self assert: p y equals: 0

@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ValuePoint — a Point class declared with `Value subclass:` (BT-923).
+// Tests auto-generated getters, with*: setters, and keyword constructor.
+
+Value subclass: ValuePoint
+  state: x = 0
+  state: y = 0
+
+  // User-defined method: distance squared from origin
+  distanceSquared => (self.x * self.x) + (self.y * self.y)
