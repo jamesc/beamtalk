@@ -6,7 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! Generates the standard OTP callbacks: `init/1`, `handle_cast/2`,
-//! `handle_call/3`, `code_change/3`, and `terminate/2`.
+//! `handle_call/3`, `handle_info/2`, `code_change/3`, and `terminate/2`.
 
 use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CoreErlangGenerator, Result};
@@ -419,6 +419,35 @@ impl CoreErlangGenerator {
                     line(),
                     "end",
                 ]
+            ),
+            "\n",
+            "\n",
+        ];
+        Ok(doc)
+    }
+
+    /// Generates the `handle_info/2` callback for out-of-band messages (BT-936).
+    ///
+    /// Delegates to `beamtalk_actor:handle_info/2`, which currently ignores
+    /// all info messages. This satisfies the `gen_server` behaviour contract
+    /// and provides a hook point for future OTP message handling (e.g. DOWN).
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// 'handle_info'/2 = fun (Msg, State) ->
+    ///     call 'beamtalk_actor':'handle_info'(Msg, State)
+    /// ```
+    #[allow(clippy::unused_self)] // method on impl for API consistency
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
+    pub(in crate::codegen::core_erlang) fn generate_handle_info(
+        &self,
+    ) -> Result<Document<'static>> {
+        let doc = docvec![
+            "'handle_info'/2 = fun (Msg, State) ->",
+            nest(
+                INDENT,
+                docvec![line(), "call 'beamtalk_actor':'handle_info'(Msg, State)",]
             ),
             "\n",
             "\n",

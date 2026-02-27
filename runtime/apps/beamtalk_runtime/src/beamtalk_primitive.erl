@@ -109,7 +109,9 @@ class_of_object_by_name(ClassName) ->
 -spec print_string(term()) -> binary().
 print_string(X) when is_integer(X) -> erlang:integer_to_binary(X);
 print_string(X) when is_float(X) -> erlang:float_to_binary(X, [short]);
-print_string(X) when is_binary(X) -> iolist_to_binary([$", X, $"]);
+print_string(X) when is_binary(X) ->
+    Escaped = binary:replace(X, <<"\"">>, <<"\"\"">>, [global]),
+    iolist_to_binary([$", Escaped, $"]);
 print_string(true) ->
     <<"true">>;
 print_string(false) ->

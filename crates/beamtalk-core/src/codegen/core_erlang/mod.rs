@@ -1432,8 +1432,10 @@ impl CoreErlangGenerator {
                 receiver, messages, ..
             } => self.generate_cascade(receiver, messages),
             Expression::Primitive {
-                name, is_quoted, ..
-            } => self.generate_primitive(name, *is_quoted),
+                name,
+                is_quoted,
+                span,
+            } => self.generate_primitive(name, *is_quoted, *span),
             Expression::Match { value, arms, .. } => self.generate_match(value, arms),
             Expression::StringInterpolation { segments, .. } => {
                 self.generate_string_interpolation(segments)
@@ -1797,7 +1799,12 @@ impl CoreErlangGenerator {
     /// For **structural intrinsics** (unquoted, e.g., `@primitive blockValue`),
     /// these are handled at the call site by `dispatch_codegen`, not here.
     /// The method body for structural intrinsics is never directly called.
-    fn generate_primitive(&mut self, name: &str, is_quoted: bool) -> Result<Document<'static>> {
+    fn generate_primitive(
+        &mut self,
+        name: &str,
+        is_quoted: bool,
+        span: crate::source_analysis::Span,
+    ) -> Result<Document<'static>> {
         let class_name = self
             .class_identity
             .as_ref()
@@ -1828,6 +1835,21 @@ impl CoreErlangGenerator {
         // - Structural intrinsics (unquoted) — handled at call site, body is placeholder
         // - Selector-based primitives with no known BIF (unimplemented or complex)
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
+
+        // BT-938: Validate that the target dispatch module exists in the known stdlib
+        // module set. Only check when binding data is available (non-empty binding table).
+        // An empty table means no stdlib was loaded, so we skip validation silently.
+        if is_quoted && !self.primitive_bindings.is_empty() {
+            let known = self.primitive_bindings.known_runtime_modules();
+            if !known.contains(&runtime_module) {
+                self.add_codegen_warning(Diagnostic::warning(
+                    format!(
+                        "@primitive '{name}' references module '{runtime_module}' which has not been compiled — ensure the class is included in the stdlib build"
+                    ),
+                    span,
+                ));
+            }
+        }
 
         let params_str = self.current_method_params.join(", ");
         // BT-677: In class methods, self is bound to ClassSelf, not Self
