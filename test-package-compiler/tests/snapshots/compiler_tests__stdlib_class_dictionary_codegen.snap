@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'stdlib_class_dictionary' ['new'/0, 'new'/1, 'size'/1, 'keys'/1, 'values'/1, 'at:'/2, 'at:ifAbsent:'/3, 'at:put:'/3, 'includesKey:'/2, 'removeKey:'/2, 'merge:'/2, 'keysAndValuesDo:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
+module 'stdlib_class_dictionary' ['new'/0, 'new'/1, 'size'/1, 'keys'/1, 'values'/1, 'at:'/2, 'at:ifAbsent:'/3, 'at:put:'/3, 'includesKey:'/2, 'removeKey:'/2, 'merge:'/2, 'keysAndValuesDo:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'Dictionary', 'Object'}]]
 
@@ -158,5 +158,12 @@ call 'beamtalk_map_ops':'keys_and_values_do'(Self, _block9)
     of RegResult -> RegResult
     catch <CatchType, CatchError, CatchStack> -> 'ok'
 
+
+'__beamtalk_meta'/0 = fun () ->
+    ~{'class' => 'Dictionary',
+      'superclass' => 'Object',
+      'fields' => [],
+      'methods' => [{'size', 0}, {'keys', 0}, {'values', 0}, {'at:', 1}, {'at:ifAbsent:', 2}, {'at:put:', 2}, {'includesKey:', 1}, {'removeKey:', 1}, {'merge:', 1}, {'keysAndValuesDo:', 1}],
+      'class_methods' => []}~
 
 end

@@ -57,6 +57,13 @@ impl CoreErlangGenerator {
             Document::Nil
         };
 
+        // BT-942: Only export __beamtalk_meta/0 for class-based modules
+        let meta_export: Document<'static> = if has_classes {
+            Document::Str(", '__beamtalk_meta'/0")
+        } else {
+            Document::Nil
+        };
+
         let base_exports: Document<'static> = docvec![
             "'start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
              'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4",
@@ -64,6 +71,7 @@ impl CoreErlangGenerator {
             ", 'safe_dispatch'/3, \
              'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
              'superclass'/0",
+            meta_export,
         ];
 
         let mut docs: Vec<Document<'static>> = Vec::new();
@@ -175,9 +183,12 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Generate class registration function (BT-218)
+        // Generate class registration and metadata functions
         if !module.classes.is_empty() {
+            // BT-942: Generate __beamtalk_meta/0 for zero-process reflection
             docs.push(Document::Str("\n"));
+            docs.push(self.generate_meta_function(module)?);
+            // BT-218: Generate register_class/0 for class system registration
             docs.push(self.generate_register_class(module)?);
         }
 

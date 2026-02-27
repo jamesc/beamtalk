@@ -1740,4 +1740,131 @@ impl CoreErlangGenerator {
         // to avoid binding non-state values to StateN
         false
     }
+
+    /// Generates the `__beamtalk_meta/0` function (BT-942).
+    ///
+    /// Embeds static reflection metadata directly in the compiled BEAM module.
+    /// This enables zero-process reflection queries for structural data:
+    /// class name, superclass, fields, instance methods, and class methods.
+    ///
+    /// Dynamic classes created via `beamtalk_class_builder` do not have this function;
+    /// the runtime falls back to `gen_server` calls when `erlang:function_exported/3` (BIF)
+    /// returns false.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// '__beamtalk_meta'/0 = fun () ->
+    ///     ~{'class' => 'Counter',
+    ///       'superclass' => 'Actor',
+    ///       'fields' => ['value'],
+    ///       'methods' => [{'increment', 0}, {'decrement', 0}, {'getValue', 0}],
+    ///       'class_methods' => [{'new', 0}]
+    ///     }~
+    /// ```
+    #[allow(clippy::unused_self)] // method on impl for API consistency
+    #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
+    pub(in crate::codegen::core_erlang) fn generate_meta_function(
+        &self,
+        module: &Module,
+    ) -> Result<Document<'static>> {
+        let Some(class) = module.classes.first() else {
+            return Ok(Document::Nil);
+        };
+
+        let class_name = class.name.name.to_string();
+        let superclass_name = class
+            .superclass
+            .as_ref()
+            .map_or_else(|| "nil".to_string(), |s| s.name.to_string());
+
+        // Build fields list from instance state declarations
+        let fields: Vec<String> = class
+            .state
+            .iter()
+            .map(|s| s.name.name.to_string())
+            .collect();
+
+        // Build instance methods list (Primary methods only, using mangled selector names)
+        let methods: Vec<(String, usize)> = class
+            .methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary)
+            .map(|m| (m.selector.to_erlang_atom(), m.selector.arity()))
+            .collect();
+
+        // Build class methods list (Primary methods only)
+        let class_methods: Vec<(String, usize)> = class
+            .class_methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary)
+            .map(|m| (m.selector.to_erlang_atom(), m.selector.arity()))
+            .collect();
+
+        let fields_doc = Self::meta_atom_list(&fields);
+        let methods_doc = Self::meta_method_tuple_list(&methods);
+        let class_methods_doc = Self::meta_method_tuple_list(&class_methods);
+
+        Ok(docvec![
+            "'__beamtalk_meta'/0 = fun () ->\n",
+            "    ~{'class' => '",
+            Document::String(class_name),
+            "',\n      'superclass' => '",
+            Document::String(superclass_name),
+            "',\n      'fields' => ",
+            fields_doc,
+            ",\n      'methods' => ",
+            methods_doc,
+            ",\n      'class_methods' => ",
+            class_methods_doc,
+            "}~\n",
+            "\n",
+        ])
+    }
+
+    /// Builds a Core Erlang atom list document from a slice of string names.
+    ///
+    /// Example: `["field1", "field2"]` → `['field1', 'field2']`
+    /// Empty slice → `[]`
+    fn meta_atom_list(names: &[String]) -> Document<'static> {
+        if names.is_empty() {
+            return Document::Str("[]");
+        }
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        parts.push(Document::Str("["));
+        for (i, name) in names.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(docvec!["'", Document::String(name.clone()), "'"]);
+        }
+        parts.push(Document::Str("]"));
+        Document::Vec(parts)
+    }
+
+    /// Builds a Core Erlang list of `{Selector, Arity}` tuples.
+    ///
+    /// Example: `[("increment", 0), ("add:", 1)]` → `[{'increment', 0}, {'add:', 1}]`
+    /// Empty slice → `[]`
+    fn meta_method_tuple_list(methods: &[(String, usize)]) -> Document<'static> {
+        if methods.is_empty() {
+            return Document::Str("[]");
+        }
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        parts.push(Document::Str("["));
+        for (i, (sel, arity)) in methods.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(docvec![
+                "{'",
+                Document::String(sel.clone()),
+                "', ",
+                Document::String(arity.to_string()),
+                "}",
+            ]);
+        }
+        parts.push(Document::Str("]"));
+        Document::Vec(parts)
+    }
 }

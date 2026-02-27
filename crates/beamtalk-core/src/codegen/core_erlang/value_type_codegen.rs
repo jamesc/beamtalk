@@ -132,6 +132,9 @@ impl CoreErlangGenerator {
         // BT-246: Value types register with class system for dynamic dispatch
         exports.push("'register_class'/0".to_string());
 
+        // BT-942: Static reflection metadata for zero-process queries
+        exports.push("'__beamtalk_meta'/0".to_string());
+
         // BT-411: Class method exports
         for method in &class.class_methods {
             if method.kind == MethodKind::Primary {
@@ -219,6 +222,9 @@ impl CoreErlangGenerator {
         // BT-246: Register value type class with the class system for dynamic dispatch
         docs.push(self.generate_register_class(module)?);
         docs.push(Document::Str("\n"));
+
+        // BT-942: Generate __beamtalk_meta/0 for zero-process reflection
+        docs.push(self.generate_meta_function(module)?);
 
         // Module end
         docs.push(Document::Str("end\n"));

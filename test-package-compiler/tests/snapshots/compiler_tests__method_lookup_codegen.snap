@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'method_lookup' ['new'/0, 'new'/1, 'lookupLiteral'/1, 'lookupVariable:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
+module 'method_lookup' ['new'/0, 'new'/1, 'lookupLiteral'/1, 'lookupVariable:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'MethodLookupTest', 'Object'}]]
 
@@ -111,5 +111,12 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
     of RegResult -> RegResult
     catch <CatchType, CatchError, CatchStack> -> 'ok'
 
+
+'__beamtalk_meta'/0 = fun () ->
+    ~{'class' => 'MethodLookupTest',
+      'superclass' => 'Object',
+      'fields' => [],
+      'methods' => [{'lookupLiteral', 0}, {'lookupVariable:', 1}],
+      'class_methods' => []}~
 
 end
