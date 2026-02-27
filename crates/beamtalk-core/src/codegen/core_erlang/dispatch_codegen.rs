@@ -194,6 +194,97 @@ impl CoreErlangGenerator {
         self.generate_runtime_dispatch(receiver, selector, arguments)
     }
 
+    /// Generates a cast (fire-and-forget) message send (BT-920).
+    ///
+    /// Called when the AST `MessageSend` node has `is_cast: true` (the `!` suffix).
+    ///
+    /// # Dispatch Strategy
+    ///
+    /// - **Self-sends in actor context** (`self someMethod!`): Calls `safe_dispatch` directly
+    ///   but discards both the result and any state update — fire-and-forget semantics
+    ///   within the same process.
+    /// - **All other sends**: Routes through `beamtalk_message_dispatch:cast/3`, which
+    ///   extracts the actor PID and calls `beamtalk_actor:cast_send/3`. Non-actor
+    ///   receivers are silently ignored.
+    ///
+    /// Cast sends always evaluate to `'ok'`.
+    pub(super) fn generate_cast_send(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        // Self-sends with ! in actor context: direct dispatch, discard result
+        if self.context == CodeGenContext::Actor {
+            if let Expression::Identifier(id) = receiver {
+                if id.name == "self" {
+                    return self.generate_self_cast_send(selector, arguments);
+                }
+            }
+        }
+
+        // Non-self cast sends: route through beamtalk_message_dispatch:cast/3
+        self.generate_runtime_cast(receiver, selector, arguments)
+    }
+
+    /// Generates a self-cast send in actor context (BT-920).
+    ///
+    /// Calls `safe_dispatch` synchronously but discards the result (and any state
+    /// mutation from the callee). Returns `'ok'` as the expression value.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// let _Cast0 = call 'module':'safe_dispatch'('selector', [Args], State) in 'ok'
+    /// ```
+    fn generate_self_cast_send(
+        &mut self,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        let selector_atom = selector.to_erlang_atom();
+        let discard_var = self.fresh_temp_var("Cast");
+        let current_state = self.current_state_var();
+        let module = self.module_name.clone();
+        let args_doc = self.capture_argument_list_doc(arguments)?;
+
+        let doc = docvec![
+            Document::String(format!(
+                "let {discard_var} = call '{module}':'safe_dispatch'('{selector_atom}', ["
+            )),
+            args_doc,
+            Document::String(format!("], {current_state}) in 'ok'"))
+        ];
+
+        Ok(doc)
+    }
+
+    /// Generates unified runtime cast via `beamtalk_message_dispatch:cast/3` (BT-920).
+    ///
+    /// Fire-and-forget path: routes to the actor's message queue via
+    /// `beamtalk_actor:cast_send/3`. Non-actor receivers are silently ignored.
+    /// Always returns `'ok'`.
+    fn generate_runtime_cast(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Document<'static>> {
+        let selector_atom = selector.to_erlang_atom();
+        let receiver_doc = self.expression_doc(receiver)?;
+        let args_doc = self.capture_argument_list_doc(arguments)?;
+
+        let doc = docvec![
+            "call 'beamtalk_message_dispatch':'cast'(",
+            receiver_doc,
+            Document::String(format!(", '{selector_atom}', [")),
+            args_doc,
+            "])"
+        ];
+
+        Ok(doc)
+    }
+
     /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3` (BT-430).
     ///
     /// This is the fallback path for messages that don't match any compiler intrinsic.

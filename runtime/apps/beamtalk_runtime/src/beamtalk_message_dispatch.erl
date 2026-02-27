@@ -26,13 +26,13 @@
 %%% See: ADR 0006 (Unified Method Dispatch), BT-430, ADR 0043 (BT-918)
 
 -module(beamtalk_message_dispatch).
--export([send/3]).
+-export([send/3, cast/3]).
 
 -include("beamtalk.hrl").
 
 %% Compiled stdlib modules are generated from Core Erlang.
 %% Dialyzer can't resolve them if stdlib hasn't been built yet.
--dialyzer({nowarn_function, [send/3]}).
+-dialyzer({nowarn_function, [send/3, cast/3]}).
 
 %% @doc Send a message to any receiver (actor, class object, primitive, or future).
 %%
@@ -85,6 +85,44 @@ send(Receiver, Selector, Args) ->
             end;
         false ->
             beamtalk_primitive:send(Receiver, Selector, Args)
+    end.
+
+%% @doc Fire-and-forget cast to an actor receiver (BT-920).
+%%
+%% For actors, extracts the PID and calls beamtalk_actor:cast_send/3.
+%% Returns ok regardless of receiver type — non-actors are silently ignored
+%% since cast has no meaningful semantics for primitives.
+%% Auto-awaits futures before dispatching (BT-840 parity with send/3).
+-spec cast(term(), atom(), list()) -> ok.
+cast({beamtalk_future, _} = Future, Selector, Args) ->
+    Value = beamtalk_future:await(Future),
+    cast(Value, Selector, Args);
+cast(Receiver, Selector, Args) ->
+    case is_actor(Receiver) of
+        true ->
+            case element(2, Receiver) of
+                'Metaclass' ->
+                    %% Metaclass objects cannot receive cast messages
+                    ok;
+                _ ->
+                    case beamtalk_class_registry:is_class_object(Receiver) of
+                        true ->
+                            %% Class objects cannot receive cast messages
+                            ok;
+                        false ->
+                            Pid = element(4, Receiver),
+                            case is_pid(Pid) of
+                                true ->
+                                    beamtalk_actor:cast_send(Pid, Selector, Args);
+                                false ->
+                                    %% Dead actor: cast is fire-and-forget, silently ignore
+                                    ok
+                            end
+                    end
+            end;
+        false ->
+            %% Primitive receiver: cast has no effect
+            ok
     end.
 
 %% @doc Check if a value is a beamtalk actor (beamtalk_object record).
