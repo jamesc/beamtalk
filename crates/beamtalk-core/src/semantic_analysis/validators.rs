@@ -987,7 +987,11 @@ fn walk_expr_for_effect_free(expr: &Expression, diagnostics: &mut Vec<Diagnostic
                 walk_expr_for_effect_free(arg, diagnostics);
             }
         }
-        Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
+        Expression::Assignment { target, value, .. } => {
+            walk_expr_for_effect_free(target, diagnostics);
+            walk_expr_for_effect_free(value, diagnostics);
+        }
+        Expression::Return { value, .. } => {
             walk_expr_for_effect_free(value, diagnostics);
         }
         Expression::Cascade {
