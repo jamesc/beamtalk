@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-932: BUnit failure messages — verify raw BEAM errors are decoded
+// into human-readable messages instead of raw Erlang term formatting.
+//
+// ErrorMessageHelperTest defines methods that intentionally trigger raw BEAM
+// errors. They are NOT prefixed with "test" so BUnit will not auto-discover
+// them. ErrorMessageTest runs each helper method via TestRunner run:method:
+// and checks that the resulting failure messages are human-readable.
+
+TestCase subclass: ErrorMessageTest
+
+  testBadkeyMessageIsReadable =>
+    result := TestRunner run: ErrorMessageHelperTest method: #triggerBadkey.
+    self assert: (result failed) equals: 1.
+    failures := result failures.
+    errorMsg := (failures first) at: #error.
+    // Should say "not found in dictionary" instead of raw {badkey,...}
+    self assert: (errorMsg includesSubstring: "not found in dictionary").
+
+  testBadarithMessageIsReadable =>
+    result := TestRunner run: ErrorMessageHelperTest method: #triggerBadarith.
+    self assert: (result failed) equals: 1.
+    failures := result failures.
+    errorMsg := (failures first) at: #error.
+    // Should say "bad arithmetic" instead of raw badarith atom
+    self assert: (errorMsg includesSubstring: "bad arithmetic").

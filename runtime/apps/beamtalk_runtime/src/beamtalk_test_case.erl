@@ -261,6 +261,134 @@ find_test_classes() ->
 
 %%% Internal helpers
 
+%% @doc Decode a BEAM error term into a human-readable binary message.
+%%
+%% Translates common Erlang error shapes and Beamtalk wrappers into
+%% readable messages instead of raw ~p formatting.
+-spec decode_beam_error(term()) -> binary().
+decode_beam_error({future_rejected, Inner}) ->
+    iolist_to_binary([<<"future rejected: ">>, decode_beam_error(Inner)]);
+decode_beam_error({error, Map}) when is_map(Map) ->
+    case maps:find(error, Map) of
+        {ok, #beamtalk_error{message = Msg}} -> Msg;
+        _ -> iolist_to_binary(io_lib:format("~p", [Map]))
+    end;
+decode_beam_error(#beamtalk_error{message = Msg}) ->
+    Msg;
+decode_beam_error(#{class := 'Exception', error := #beamtalk_error{message = Msg}}) ->
+    Msg;
+decode_beam_error(#{'$beamtalk_class' := _, error := #beamtalk_error{message = Msg}}) ->
+    Msg;
+decode_beam_error({badkey, Key}) ->
+    iolist_to_binary(io_lib:format("key ~p not found in dictionary", [Key]));
+decode_beam_error({badmap, Map}) ->
+    iolist_to_binary(io_lib:format("~p is not a map", [Map]));
+decode_beam_error({badmatch, Value}) ->
+    iolist_to_binary(io_lib:format("no match of right-hand side value ~p", [Value]));
+decode_beam_error({case_clause, Value}) ->
+    iolist_to_binary(io_lib:format("no case clause matched ~p", [Value]));
+decode_beam_error({try_clause, Value}) ->
+    iolist_to_binary(io_lib:format("no try clause matched ~p", [Value]));
+decode_beam_error(function_clause) ->
+    <<"no matching function clause">>;
+decode_beam_error(if_clause) ->
+    <<"no true branch in conditional">>;
+decode_beam_error({badarity, {Fun, Args}}) when is_function(Fun), is_list(Args) ->
+    {arity, Expected} = erlang:fun_info(Fun, arity),
+    iolist_to_binary(
+        io_lib:format("function expects ~p arguments but was called with ~p", [
+            Expected, length(Args)
+        ])
+    );
+decode_beam_error({badfun, Term}) ->
+    iolist_to_binary(io_lib:format("~p is not a function", [Term]));
+decode_beam_error(badarg) ->
+    <<"bad argument">>;
+decode_beam_error(badarith) ->
+    <<"bad arithmetic operation">>;
+decode_beam_error(undef) ->
+    <<"undefined function">>;
+decode_beam_error(noproc) ->
+    <<"no such process or port">>;
+decode_beam_error(timeout) ->
+    <<"operation timed out">>;
+decode_beam_error(Other) ->
+    iolist_to_binary(io_lib:format("~p", [Other])).
+
+%% @doc Format a BEAM stacktrace for display in test failure messages.
+%%
+%% Filters out internal test runner and OTP frames; shows up to 3 user frames.
+%% Returns an empty binary when no relevant frames exist.
+-spec format_stacktrace(list()) -> binary().
+format_stacktrace([]) ->
+    <<>>;
+format_stacktrace(Frames) ->
+    Relevant = lists:sublist(filter_stackframes(Frames), 3),
+    case Relevant of
+        [] ->
+            <<>>;
+        _ ->
+            Lines = [format_stackframe(F) || F <- Relevant],
+            iolist_to_binary(["\n  at " | lists:join("\n  at ", Lines)])
+    end.
+
+%% @doc Format a single stacktrace frame for display.
+-spec format_stackframe({atom(), atom(), non_neg_integer() | [term()], list()}) -> iolist().
+format_stackframe({Mod, Fun, ArityOrArgs, []}) ->
+    io_lib:format("~p:~p/~p", [Mod, Fun, normalize_arity(ArityOrArgs)]);
+format_stackframe({Mod, Fun, ArityOrArgs, Loc}) ->
+    A = normalize_arity(ArityOrArgs),
+    File = proplists:get_value(file, Loc, ""),
+    Line = proplists:get_value(line, Loc, 0),
+    case {File, Line} of
+        {"", 0} -> io_lib:format("~p:~p/~p", [Mod, Fun, A]);
+        _ -> io_lib:format("~p:~p/~p (~s:~p)", [Mod, Fun, A, File, Line])
+    end.
+
+%% @doc Normalize arity field: stacktrace frames may contain an argument list
+%% instead of an arity integer. Convert to integer for display.
+-spec normalize_arity(non_neg_integer() | [term()]) -> non_neg_integer().
+normalize_arity(Args) when is_list(Args) -> length(Args);
+normalize_arity(Arity) when is_integer(Arity) -> Arity.
+
+%% @doc Filter stacktrace frames, removing internal test runner and OTP frames.
+-spec filter_stackframes(list()) -> list().
+filter_stackframes(Frames) ->
+    lists:filter(
+        fun
+            ({Mod, _Fun, _Arity, _Loc}) ->
+                ModStr = atom_to_list(Mod),
+                not lists:prefix("beamtalk_test", ModStr) andalso
+                    not lists:prefix("erlang", ModStr) andalso
+                    Mod =/= gen_server andalso
+                    Mod =/= proc_lib;
+            (_) ->
+                false
+        end,
+        Frames
+    ).
+
+%% @doc Format a test failure message combining error description and stacktrace.
+-spec format_test_error(atom(), term(), list()) -> binary().
+format_test_error(error, Reason, Stacktrace) ->
+    Msg = decode_beam_error(Reason),
+    ST = format_stacktrace(Stacktrace),
+    <<Msg/binary, ST/binary>>;
+format_test_error(throw, Reason, Stacktrace) ->
+    Msg = iolist_to_binary([<<"throw: ">>, decode_beam_error(Reason)]),
+    ST = format_stacktrace(Stacktrace),
+    <<Msg/binary, ST/binary>>;
+format_test_error(exit, Reason, Stacktrace) ->
+    Msg = iolist_to_binary([<<"exit: ">>, decode_beam_error(Reason)]),
+    ST = format_stacktrace(Stacktrace),
+    <<Msg/binary, ST/binary>>;
+format_test_error(Class, Reason, Stacktrace) ->
+    ClassBin = atom_to_binary(Class, utf8),
+    ReasonBin = decode_beam_error(Reason),
+    Msg = <<ClassBin/binary, ": ", ReasonBin/binary>>,
+    ST = format_stacktrace(Stacktrace),
+    <<Msg/binary, ST/binary>>.
+
 %% @doc Extract the error kind from an exception.
 %%
 %% Handles #beamtalk_error{} records, wrapped Exception objects (ADR 0015),
@@ -376,7 +504,7 @@ class_name_to_snake([H | T], _PrevLower, Acc) ->
 %% tearDown always runs, even if the test fails.
 -spec run_test_method(atom(), atom(), atom(), map() | none) ->
     {pass, atom()} | {fail, atom(), binary()}.
-run_test_method(ClassName, Module, MethodName, FlatMethods) ->
+run_test_method(_ClassName, Module, MethodName, FlatMethods) ->
     try
         Instance = Module:new(),
         {HasSetUp, HasTearDown} = check_lifecycle_methods(Module, FlatMethods),
@@ -402,17 +530,11 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
                             error, undef, TestST
                         ),
                     {fail, MethodName, FailMsg};
-                error:TestReason ->
-                    FailMsg = iolist_to_binary(io_lib:format("~p", [TestReason])),
+                error:TestReason:TestST ->
+                    FailMsg = format_test_error(error, TestReason, TestST),
                     {fail, MethodName, FailMsg};
                 TestClass:TestReason:TestST ->
-                    FailMsg = iolist_to_binary(
-                        io_lib:format("~p:~p", [TestClass, TestReason])
-                    ),
-                    ?LOG_DEBUG(
-                        "Test ~p:~p failed with stacktrace: ~p",
-                        [ClassName, MethodName, TestST]
-                    ),
+                    FailMsg = format_test_error(TestClass, TestReason, TestST),
                     {fail, MethodName, FailMsg}
             after
                 case HasTearDown of
@@ -440,10 +562,9 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
                 ),
             Prefix = <<"setUp failed: ">>,
             {fail, MethodName, <<Prefix/binary, SetupErrMsg/binary>>};
-        SetupClass:SetupReason ->
-            SetupMsg = iolist_to_binary(
-                io_lib:format("setUp failed: ~p:~p", [SetupClass, SetupReason])
-            ),
+        SetupClass:SetupReason:SetupST ->
+            Inner = format_test_error(SetupClass, SetupReason, SetupST),
+            SetupMsg = <<"setUp failed: ", Inner/binary>>,
             {fail, MethodName, SetupMsg}
     end.
 
