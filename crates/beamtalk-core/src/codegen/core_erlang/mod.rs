@@ -1349,8 +1349,15 @@ impl CoreErlangGenerator {
                 receiver,
                 selector,
                 arguments,
+                is_cast,
                 ..
-            } => self.generate_message_send(receiver, selector, arguments),
+            } => {
+                if *is_cast {
+                    self.generate_cast_send(receiver, selector, arguments)
+                } else {
+                    self.generate_message_send(receiver, selector, arguments)
+                }
+            }
             Expression::Assignment { target, value, .. } => {
                 // BT-852: Stored blocks with mutations are now supported via Tier 2.
                 // generate_block() handles stateful emission; no validation needed here.
