@@ -104,6 +104,21 @@ fn check_map_key(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
+/// Like `check_expr`, but skips the unnecessary-parens diagnostic for a
+/// top-level `Parenthesized` node used as a message receiver.
+///
+/// Parentheses around a receiver expression (e.g. `(x builder) add: 1`) are
+/// often written to visually group the receiver even when Beamtalk precedence
+/// rules already bind it correctly.  Flagging them as unnecessary creates
+/// noisy, unhelpful output — we only recurse into the inner expression.
+fn check_receiver(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    if let Expression::Parenthesized { expression, .. } = expr {
+        check_expr(expression, diagnostics);
+    } else {
+        check_expr(expr, diagnostics);
+    }
+}
+
 /// Recursively inspects `expr`, emitting a lint for each `Parenthesized`
 /// node whose inner expression is always-unnecessary.
 fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
@@ -123,7 +138,7 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
             arguments,
             ..
         } => {
-            check_expr(receiver, diagnostics);
+            check_receiver(receiver, diagnostics);
             for arg in arguments {
                 check_expr(arg, diagnostics);
             }
@@ -147,7 +162,7 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
         Expression::Cascade {
             receiver, messages, ..
         } => {
-            check_expr(receiver, diagnostics);
+            check_receiver(receiver, diagnostics);
             for msg in messages {
                 for arg in &msg.arguments {
                     check_expr(arg, diagnostics);
@@ -342,5 +357,17 @@ mod tests {
             "parens around map value should be flagged, got: {diags:?}"
         );
         assert_eq!(diags[0].severity, Severity::Lint);
+    }
+
+    /// BT-957: Parentheses around a message receiver (e.g. `(x builder) add: 1`)
+    /// are used for visual grouping even when precedence makes them redundant.
+    /// They should NOT be flagged as unnecessary.
+    #[test]
+    fn parens_around_receiver_not_flagged() {
+        let diags = lint("Object subclass: Foo\n  value: x => (x builder) add: 1\n");
+        assert!(
+            diags.is_empty(),
+            "receiver parens must not be flagged, got: {diags:?}"
+        );
     }
 }
