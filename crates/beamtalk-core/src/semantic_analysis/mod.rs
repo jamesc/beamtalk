@@ -2398,6 +2398,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: crate::ast::ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2449,6 +2450,7 @@ mod tests {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
             is_abstract: false,
+            class_kind: crate::ast::ClassKind::Actor,
             is_sealed: false,
             is_typed: false,
             state: vec![],
