@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 76
 expression: core_erlang
 ---
 module 'stdlib_class_list' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'first'/1, 'rest'/1, 'last'/1, 'at:'/2, 'includes:'/2, 'sort'/1, 'sort:'/2, 'reversed'/1, 'unique'/1, 'detect:'/2, 'detect:ifNone:'/3, 'do:'/2, 'collect:'/2, 'select:'/2, 'reject:'/2, 'inject:into:'/3, 'take:'/2, 'drop:'/2, 'flatten'/1, 'flatMap:'/2, 'count:'/2, 'anySatisfy:'/2, 'allSatisfy:'/2, '++'/2, 'from:to:'/3, 'indexOf:'/2, 'eachWithIndex:'/2, 'zip:'/2, 'groupBy:'/2, 'partition:'/2, 'takeWhile:'/2, 'dropWhile:'/2, 'intersperse:'/2, 'add:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
@@ -111,6 +112,7 @@ call 'beamtalk_list_ops':'from_to'(Self, _start20, _end21)
         <{'throw', {'$bt_nlr', _CatchTok32, _NlrVal33, _NlrState34}}> when call 'erlang':'=:='(_CatchTok32, _NlrToken23) -> {_NlrVal33, _NlrState34}
         <_OtherPair35> when 'true' -> primop 'raw_raise'(_NlrCls29, _NlrErr30, _NlrStk31)
       end
+
 
 'eachWithIndex:'/2 = fun (Self, _block36) ->
     let _seq37 = call 'beamtalk_collection_ops':'inject_into'(Self, 0, fun (_i38, _each39) -> let NewI = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_i38), call 'beamtalk_future':'maybe_await'(1)) in let _Unit = let _Fun40 = _block36 in apply _Fun40 (_each39, NewI) in NewI) in

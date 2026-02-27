@@ -90,6 +90,8 @@ impl CoreErlangGenerator {
 
         // BT-845/BT-860: Build beamtalk_source attribute when source_path is set.
         let source_path_attr = self.source_path_attr();
+        // BT-940: Build 'file' attribute so BEAM stacktraces show the .bt source file.
+        let file_attr = self.file_attr();
 
         // Module header with exports and attributes
         let module_header = if has_classes {
@@ -105,6 +107,7 @@ impl CoreErlangGenerator {
                 "  attributes ['behaviour' = ['gen_server'], \
                  'on_load' = [{'register_class', 0}]",
                 beamtalk_class_attr,
+                file_attr,
                 source_path_attr,
                 spec_suffix,
                 "]\n",
@@ -120,6 +123,7 @@ impl CoreErlangGenerator {
                 "]",
                 "\n",
                 "  attributes ['behaviour' = ['gen_server']",
+                file_attr,
                 source_path_attr,
                 spec_suffix,
                 "]\n",
@@ -374,21 +378,6 @@ impl CoreErlangGenerator {
             all_params.push("Self".to_string());
             all_params.push("State".to_string());
 
-            // Generate: '__sealed_{selector}'/N = fun (Arg1, ..., Self, State) ->
-            let header = docvec![
-                "\n",
-                "'__sealed_",
-                Document::String(selector_name.clone()),
-                "'/",
-                Document::String(arity.to_string()),
-                "  = fun (",
-                "\n",
-                all_params.join(", "),
-                ") ->",
-                "\n",
-            ];
-            docs.push(header);
-
             // BT-761: Detect NLR in sealed method body
             let needs_nlr = method
                 .body
@@ -417,8 +406,34 @@ impl CoreErlangGenerator {
                 method_body_doc
             };
 
-            let body_doc = docvec![nest(INDENT, docvec![line(), method_body_doc,]), "\n",];
-            docs.push(body_doc);
+            // BT-940: Annotate the `fun` expression (not just the body) with source line.
+            // Annotating the body would create invalid `( ( e -| [...] ) -| [...] )` when the
+            // body is itself a single annotated MessageSend expression.
+            let fun_doc = docvec![
+                "fun (",
+                all_params.join(", "),
+                ") ->",
+                "\n",
+                nest(INDENT, docvec![line(), method_body_doc,]),
+            ];
+            let fun_doc = if let Some(line_num) = self.span_to_line(method.span) {
+                Self::annotate_with_line(fun_doc, line_num)
+            } else {
+                fun_doc
+            };
+
+            // Generate: '__sealed_{selector}'/N = fun (Arg1, ..., Self, State) ->
+            let method_entry = docvec![
+                "\n",
+                "'__sealed_",
+                Document::String(selector_name.clone()),
+                "'/",
+                Document::String(arity.to_string()),
+                "  = ",
+                fun_doc,
+                "\n",
+            ];
+            docs.push(method_entry);
 
             self.pop_scope();
         }

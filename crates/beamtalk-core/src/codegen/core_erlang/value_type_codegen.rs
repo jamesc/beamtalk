@@ -155,6 +155,8 @@ impl CoreErlangGenerator {
 
         // BT-845/BT-860: Build beamtalk_source attribute when source_path is set.
         let source_path_attr = self.source_path_attr();
+        // BT-940: Build 'file' attribute so BEAM stacktraces show the .bt source file.
+        let file_attr = self.file_attr();
 
         // Module header
         let module_name = self.module_name.clone();
@@ -162,6 +164,7 @@ impl CoreErlangGenerator {
             format!("module '{}' [{}]\n", module_name, exports.join(", ")),
             "  attributes ['on_load' = [{'register_class', 0}]",
             beamtalk_class_attr,
+            file_attr,
             source_path_attr,
             spec_suffix,
             "]\n",
@@ -606,22 +609,44 @@ impl CoreErlangGenerator {
         self.pop_scope();
         self.current_nlr_token = None;
 
+        // BT-940: Annotate the `fun` expression (not just the body) with source line.
+        // Annotating only the body would create invalid double-annotation when the body
+        // is itself a single annotated MessageSend expression: `( ( e -| [...] ) -| [...] )`.
+        let line_annotation = self.span_to_line(method.span);
+
         if let Some(token_var) = nlr_token_var {
             // BT-754/BT-764: Wrap the method body in try/catch to catch non-local returns
             // thrown by ^ inside block closures. Uses the shared value type NLR helper.
             let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
 
             let body_doc = Document::Vec(body_parts);
-            Ok(docvec![
-                format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
+            let fun_doc = docvec![
+                format!("fun ({}) ->\n", params.join(", ")),
                 catch_vars.format_try_prefix(),
                 body_doc,
                 catch_vars.format_catch_suffix(),
+            ];
+            let fun_doc = if let Some(line_num) = line_annotation {
+                Self::annotate_with_line(fun_doc, line_num)
+            } else {
+                fun_doc
+            };
+            Ok(docvec![
+                format!("'{}'/{} = ", mangled, arity),
+                fun_doc,
+                "\n",
             ])
         } else {
+            let body_doc = Document::Vec(body_parts);
+            let fun_doc = docvec![format!("fun ({}) ->\n", params.join(", ")), body_doc];
+            let fun_doc = if let Some(line_num) = line_annotation {
+                Self::annotate_with_line(fun_doc, line_num)
+            } else {
+                fun_doc
+            };
             Ok(docvec![
-                format!("'{}'/{} = fun ({}) ->\n", mangled, arity, params.join(", ")),
-                Document::Vec(body_parts),
+                format!("'{}'/{} = ", mangled, arity),
+                fun_doc,
                 "\n",
             ])
         }
