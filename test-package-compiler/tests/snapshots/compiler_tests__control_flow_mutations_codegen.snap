@@ -80,6 +80,11 @@ module 'control_flow_mutations' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
         , 'total' => 0
         , 'arraySum' => 0
         , 'evenCount' => 0
+        , 'matchCount' => 0
+        , 'maxSeen' => 0
+        , 'outerSum' => 0
+        , 'innerSum' => 0
+        , 'x' => 1
     }~
     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
     in {'ok', FinalState}

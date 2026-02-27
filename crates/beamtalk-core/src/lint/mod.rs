@@ -19,6 +19,7 @@
 //! Each branch touches only its own new file plus two sorted lines here —
 //! merge conflicts are minimal and trivially resolved.
 
+mod boolean_literal_comparison;
 mod trailing_caret;
 // ── add new lint modules here (alphabetical) ──────────────────────────────
 
@@ -39,6 +40,7 @@ pub(crate) trait LintPass {
 /// alphabetical order. This is the only line that needs to change per lint.
 fn all_passes() -> Vec<Box<dyn LintPass>> {
     vec![
+        Box::new(boolean_literal_comparison::BooleanLiteralComparisonPass),
         Box::new(trailing_caret::TrailingCaretPass),
         // ── add new passes here (alphabetical) ────────────────────────────
     ]
