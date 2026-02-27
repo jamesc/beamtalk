@@ -4838,6 +4838,182 @@ fn test_nested_if_true_with_field_mutation_threads_state() {
     );
 }
 
+// BT-920: Cast send (!) codegen tests
+
+#[test]
+fn test_cast_send_to_non_self_receiver_uses_dispatch_cast() {
+    // BT-920: `someActor increment!` should generate beamtalk_message_dispatch:cast/3
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let receiver = Expression::Identifier(Identifier::new("someActor", Span::new(0, 9)));
+    let selector = MessageSelector::Unary("increment".into());
+    let send_expr = Expression::MessageSend {
+        receiver: Box::new(receiver),
+        selector: selector.clone(),
+        arguments: vec![],
+        is_cast: true,
+        span: Span::new(0, 20),
+    };
+
+    let doc = if let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        is_cast: true,
+        ..
+    } = &send_expr
+    {
+        generator
+            .generate_cast_send(receiver, selector, arguments)
+            .unwrap()
+    } else {
+        panic!("expected MessageSend")
+    };
+
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("beamtalk_message_dispatch':'cast'("),
+        "Cast send should route via beamtalk_message_dispatch:cast/3. Got: {output}"
+    );
+    assert!(
+        output.contains("'increment'"),
+        "Cast send should include selector atom. Got: {output}"
+    );
+    assert!(
+        !output.contains("beamtalk_message_dispatch':'send'"),
+        "Cast send must NOT use send/3. Got: {output}"
+    );
+}
+
+#[test]
+fn test_cast_send_to_non_self_keyword_receiver_uses_dispatch_cast() {
+    // BT-920: `someActor setValue: 42!` should generate beamtalk_message_dispatch:cast/3
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let receiver = Expression::Identifier(Identifier::new("someActor", Span::new(0, 9)));
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("setValue:", Span::new(10, 19))]);
+    let args = vec![Expression::Literal(Literal::Integer(42), Span::new(20, 22))];
+    let send_expr = Expression::MessageSend {
+        receiver: Box::new(receiver),
+        selector: selector.clone(),
+        arguments: args.clone(),
+        is_cast: true,
+        span: Span::new(0, 22),
+    };
+
+    let doc = if let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        is_cast: true,
+        ..
+    } = &send_expr
+    {
+        generator
+            .generate_cast_send(receiver, selector, arguments)
+            .unwrap()
+    } else {
+        panic!("expected MessageSend")
+    };
+
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("beamtalk_message_dispatch':'cast'("),
+        "Keyword cast send should route via beamtalk_message_dispatch:cast/3. Got: {output}"
+    );
+    assert!(
+        output.contains("'setValue:'"),
+        "Cast send should include keyword selector atom. Got: {output}"
+    );
+    assert!(
+        output.contains("42"),
+        "Cast send should include argument value. Got: {output}"
+    );
+}
+
+#[test]
+fn test_cast_self_send_uses_safe_dispatch_and_discards_result() {
+    // BT-920: `self increment!` in actor context should call safe_dispatch but
+    // discard the result and return 'ok'.
+    let mut generator = CoreErlangGenerator::new("test");
+    // CoreErlangGenerator::new defaults to Actor context — self-sends are valid
+
+    let receiver = Expression::Identifier(Identifier::new("self", Span::new(0, 4)));
+    let selector = MessageSelector::Unary("increment".into());
+    let send_expr = Expression::MessageSend {
+        receiver: Box::new(receiver),
+        selector: selector.clone(),
+        arguments: vec![],
+        is_cast: true,
+        span: Span::new(0, 15),
+    };
+
+    let doc = if let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        is_cast: true,
+        ..
+    } = &send_expr
+    {
+        generator
+            .generate_cast_send(receiver, selector, arguments)
+            .unwrap()
+    } else {
+        panic!("expected MessageSend")
+    };
+
+    let output = doc.to_pretty_string();
+    // Self cast: calls safe_dispatch and discards result
+    assert!(
+        output.contains("safe_dispatch"),
+        "Self cast send should use safe_dispatch. Got: {output}"
+    );
+    assert!(
+        output.contains("'increment'"),
+        "Self cast send should include selector atom. Got: {output}"
+    );
+    assert!(
+        output.contains("'ok'"),
+        "Self cast send should evaluate to 'ok'. Got: {output}"
+    );
+    // Must NOT use beamtalk_message_dispatch:cast (that's for external sends)
+    assert!(
+        !output.contains("beamtalk_message_dispatch':'cast'"),
+        "Self cast send must NOT use message dispatch cast. Got: {output}"
+    );
+}
+
+#[test]
+fn test_cast_send_in_actor_method_compiles() {
+    // BT-920: `counter increment!` as a statement in an actor method compiles
+    // to Core Erlang that calls beamtalk_message_dispatch:cast/3.
+    let src = "Actor subclass: Sender\n  state: target = nil\n\n  fire =>\n    target increment!\n    \"done\"\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("sender").with_workspace_mode(true),
+    )
+    .expect("codegen should succeed");
+
+    eprintln!("Generated code for cast send in actor method:\n{code}");
+
+    assert!(
+        code.contains("beamtalk_message_dispatch':'cast'("),
+        "Should generate beamtalk_message_dispatch:cast/3 for cast send. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'increment'"),
+        "Should include 'increment' selector atom. Got:\n{code}"
+    );
+    // Verify the cast send is non-last (wrapped in let binding to discard result)
+    assert!(
+        code.contains("let _seq"),
+        "Cast send should be wrapped in let to discard its result. Got:\n{code}"
+    );
+}
+
 // BT-938: Validate that bt@stdlib@X module exists when generating dispatch calls.
 
 #[test]
