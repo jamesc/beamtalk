@@ -187,6 +187,14 @@ TestCase subclass: SchemeTest
     result := [self eval: "(42 1 2)"] on: Error do: [:e | e message]
     self assert: result equals: "Not a procedure: 42"
 
+  // --- Cycle guard ---
+
+  testSetParentCycleGuard =>
+    ev  := SchemeEval new
+    env := ev defaultEnv
+    result := [env setParent: env] on: Error do: [:e | e message]
+    self assert: result equals: "Cycle detected: environment cannot be its own parent"
+
   // --- Recursion ---
 
   testFactorial =>
