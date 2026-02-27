@@ -21,7 +21,7 @@ Actor subclass: ChatRoom
   // Formats message as "sender: text" string
   say: text from: senderName =>
     self.history := self.history ++ #(senderName ++ ": " ++ text).
-    self.members do: [:m | m receiveMessage: senderName ++ ": " ++ text]
+    self.members do: [:m | m receiveMessage: senderName ++ ": " ++ text!]
   
   // Return current online members (Set of actor refs)
   online =>
