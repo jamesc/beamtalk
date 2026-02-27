@@ -5167,3 +5167,321 @@ sealed Object subclass: Other
         "Structural intrinsics should not trigger module-existence warning. Got: {module_warnings:?}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BT-923: Value subclass: auto-generated slot method tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Builds a Module with a `Value subclass: Point` with x and y slots.
+fn make_value_subclass_point() -> Module {
+    let class = ClassDefinition {
+        name: Identifier::new("Point", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Value", Span::new(0, 0))),
+        class_kind: ClassKind::Value,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        state: vec![
+            StateDeclaration {
+                name: Identifier::new("x", Span::new(0, 0)),
+                type_annotation: None,
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
+                span: Span::new(0, 0),
+            },
+            StateDeclaration {
+                name: Identifier::new("y", Span::new(0, 0)),
+                type_annotation: None,
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
+                span: Span::new(0, 0),
+            },
+        ],
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        doc_comment: None,
+        span: Span::new(0, 0),
+    };
+    Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        leading_comments: vec![],
+    }
+}
+
+#[test]
+fn test_value_subclass_auto_getter_exported() {
+    // BT-923: `Value subclass:` auto-generates getter functions for each slot.
+    let module = make_value_subclass_point();
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    assert!(result.is_ok(), "Codegen should succeed for Value subclass:");
+    let code = result.unwrap();
+    // Getter exports: 'x'/1 and 'y'/1
+    assert!(
+        code.contains("'x'/1"),
+        "Should export getter 'x'/1. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'y'/1"),
+        "Should export getter 'y'/1. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_auto_getter_function() {
+    // BT-923: Getter body uses maps:get to read the slot from Self.
+    let module = make_value_subclass_point();
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'x'/1 = fun (Self) ->"),
+        "Should generate x/1 getter. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'get'('x', Self)"),
+        "x getter should use maps:get. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'y'/1 = fun (Self) ->"),
+        "Should generate y/1 getter. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_auto_setter_exported() {
+    // BT-923: `Value subclass:` auto-generates with*: functional setters.
+    let module = make_value_subclass_point();
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'withX:'/2"),
+        "Should export withX:/2. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'withY:'/2"),
+        "Should export withY:/2. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_auto_setter_function() {
+    // BT-923: with*: setter body uses maps:put to return an updated map.
+    let module = make_value_subclass_point();
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'withX:'/2 = fun (Self, NewVal) ->"),
+        "Should generate withX:/2 setter. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'put'('x', NewVal, Self)"),
+        "withX: setter should use maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_keyword_constructor_exported() {
+    // BT-923: `Value subclass:` auto-generates an all-fields keyword constructor.
+    let module = make_value_subclass_point();
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    let code = result.unwrap();
+    // Keyword constructor selector for x, y → 'class_x:y:'/4
+    assert!(
+        code.contains("'class_x:y:'/4"),
+        "Should export 'class_x:y:'/4 keyword constructor. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_keyword_constructor_function() {
+    // BT-923: Keyword constructor body creates a tagged map with all slots.
+    let module = make_value_subclass_point();
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'class_x:y:'/4 = fun (_ClassSelf, _ClassVars, SlotArg0, SlotArg1) ->"),
+        "Should generate keyword constructor function. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'$beamtalk_class' => 'Point'"),
+        "Keyword constructor should set $beamtalk_class. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'x' => SlotArg0"),
+        "Keyword constructor should set x from SlotArg0. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'y' => SlotArg1"),
+        "Keyword constructor should set y from SlotArg1. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_dispatch_routes_getter() {
+    // BT-923: dispatch/3 must route getter selectors to auto-generated functions.
+    let module = make_value_subclass_point();
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("call 'bt@point':'x'(Self)"),
+        "dispatch/3 should route 'x' to getter. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_dispatch_routes_setter() {
+    // BT-923: dispatch/3 must route with*: selectors to auto-generated functions.
+    let module = make_value_subclass_point();
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("call 'bt@point':'withX:'(Self, DispArg0)"),
+        "dispatch/3 should route 'withX:' to setter. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_has_method_includes_auto_methods() {
+    // BT-923: has_method/1 must report true for auto-generated selectors.
+    let module = make_value_subclass_point();
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    let code = result.unwrap();
+    assert!(
+        code.contains("'x'"),
+        "has_method/1 should list 'x' getter. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'withX:'"),
+        "has_method/1 should list 'withX:' setter. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_object_subclass_no_auto_getters() {
+    // BT-923: `Object subclass:` (ClassKind::Object) must NOT generate auto-getters.
+    let class = ClassDefinition {
+        name: Identifier::new("Point", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Object", Span::new(0, 0))),
+        class_kind: ClassKind::Object,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        state: vec![StateDeclaration {
+            name: Identifier::new("x", Span::new(0, 0)),
+            type_annotation: None,
+            default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
+            span: Span::new(0, 0),
+        }],
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        doc_comment: None,
+        span: Span::new(0, 0),
+    };
+    let module = Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        leading_comments: vec![],
+    };
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    let code = result.unwrap();
+    // Object subclass should NOT have auto-getter 'x'/1
+    assert!(
+        !code.contains("'x'/1 = fun (Self) ->"),
+        "Object subclass should not generate auto-getter. Got:\n{code}"
+    );
+    // And should not have withX:/2
+    assert!(
+        !code.contains("'withX:'/2"),
+        "Object subclass should not generate auto-setter. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_user_defined_overrides_auto() {
+    // BT-923: User-defined methods suppress the corresponding auto-generated method.
+    let x_method = MethodDefinition {
+        selector: MessageSelector::Unary("x".into()),
+        parameters: vec![],
+        return_type: None,
+        body: vec![Expression::Literal(Literal::Integer(99), Span::new(0, 0))],
+        kind: MethodKind::Primary,
+        is_sealed: false,
+        doc_comment: None,
+        span: Span::new(0, 0),
+    };
+    let class = ClassDefinition {
+        name: Identifier::new("MyVal", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Value", Span::new(0, 0))),
+        class_kind: ClassKind::Value,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        state: vec![StateDeclaration {
+            name: Identifier::new("x", Span::new(0, 0)),
+            type_annotation: None,
+            default_value: None,
+            span: Span::new(0, 0),
+        }],
+        methods: vec![x_method],
+        class_methods: vec![],
+        class_variables: vec![],
+        doc_comment: None,
+        span: Span::new(0, 0),
+    };
+    let module = Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        leading_comments: vec![],
+    };
+    let result = generate_module(&module, CodegenOptions::new("bt@my_val"));
+    let code = result.unwrap();
+    // The auto-getter would produce: call 'maps':'get'('x', Self)
+    // When user defines 'x', that body should NOT appear — the user's body (99) wins.
+    assert!(
+        !code.contains("call 'maps':'get'('x', Self)"),
+        "Auto-getter body should be suppressed when user defines 'x'. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_no_slots_no_keyword_constructor() {
+    // BT-923: A Value subclass with no slots produces no keyword constructor.
+    let class = ClassDefinition {
+        name: Identifier::new("Empty", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Value", Span::new(0, 0))),
+        class_kind: ClassKind::Value,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        state: vec![],
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        doc_comment: None,
+        span: Span::new(0, 0),
+    };
+    let module = Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        leading_comments: vec![],
+    };
+    let result = generate_module(&module, CodegenOptions::new("bt@empty"));
+    let code = result.unwrap();
+    // A class with no slots has no keyword constructor selector, so no 'class_X:'/N pattern.
+    // Scan all lines for the pattern: contains 'class_' AND contains ':'/  (selector with colon)
+    let has_keyword_ctor = code
+        .lines()
+        .any(|line| line.contains("'class_") && line.contains(":/"));
+    assert!(
+        !has_keyword_ctor,
+        "No keyword constructor should be generated for empty Value subclass. Got:\n{code}"
+    );
+}
