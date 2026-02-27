@@ -585,22 +585,15 @@ value_type_inst_var_at_put_raises_immutable_value_test() ->
         code:delete('bt@mock_vt_ivar')
     end.
 
-value_type_inst_var_at_raises_immutable_value_test() ->
-    %% fieldAt: on a value type should raise immutable_value
+value_type_inst_var_at_reads_slot_test() ->
+    %% BT-924: fieldAt: on a user-defined value type reads from the underlying map.
+    %% Value objects store their slots as map keys, so reflection is read-only.
     Self = #{'$beamtalk_class' => 'MockVtIvar2', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar2', 'MockVtIvar2', []),
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = immutable_value,
-                    class = 'MockVtIvar2',
-                    selector = 'fieldAt:'
-                }
-            },
-            beamtalk_primitive:send(Self, 'fieldAt:', [x])
-        )
+        ?assertEqual(42, beamtalk_primitive:send(Self, 'fieldAt:', [x])),
+        %% Non-existent field returns nil (Smalltalk-80 semantics)
+        ?assertEqual(nil, beamtalk_primitive:send(Self, 'fieldAt:', [nonexistent]))
     after
         code:purge('bt@mock_vt_ivar2'),
         code:delete('bt@mock_vt_ivar2')

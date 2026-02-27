@@ -3,7 +3,10 @@
 
 // BT-97, BT-359, BT-765: Tests the basic reflection API on actor objects —
 // class, respondsTo:, fieldNames, fieldAt:, fieldAt:put:, perform:; and that
-// fieldAt: and fieldAt:put: raise immutable_value errors on value types.
+// fieldAt:put: raises immutable_value on primitive types (integers, strings).
+// BT-924: fieldAt: on user-defined Value subclass: objects reads slots — see
+// value_subclass_test.bt. fieldAt: on primitive literals (42, "hello") still
+// raises immutable_value since primitives have no map slots.
 
 
 TestCase subclass: ReflectionBasicTest
@@ -34,7 +37,8 @@ TestCase subclass: ReflectionBasicTest
     self assert: (c perform: #increment) equals: 43.
     // Verify increment worked via getValue
     self assert: (c getValue) equals: 43.
-    // BT-359: fieldAt: on value types raises immutable_value error
+    // BT-359: fieldAt: on primitive value types (integers) raises immutable_value.
+    // Note: user-defined Value subclass: objects support fieldAt: for reading (BT-924).
     self should: [42 fieldAt: #x] raise: #immutable_value.
     // BT-765: fieldAt:put: on immutable literals raises immutable_value error
     @expect type

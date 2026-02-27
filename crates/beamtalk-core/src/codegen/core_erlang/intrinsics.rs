@@ -940,12 +940,20 @@ impl CoreErlangGenerator {
 
                     let recv_code = self.expression_doc(receiver)?;
 
+                    // BT-924: If receiver is a map (value object or stdlib tagged map),
+                    // delegate to beamtalk_primitive:send which routes through the
+                    // correct dispatch/3 for the receiver's class kind.
+                    // Actor (tuple) receivers use the fast async send path.
                     let doc = docvec![
                         "let ",
                         Document::String(receiver_var.clone()),
                         " = ",
                         recv_code,
-                        " in let ",
+                        " in case call 'erlang':'is_map'(",
+                        Document::String(receiver_var.clone()),
+                        ") of <'true'> when 'true' -> call 'beamtalk_primitive':'send'(",
+                        Document::String(receiver_var.clone()),
+                        ", 'fieldNames', []) <_> when 'true' -> let ",
                         Document::String(pid_var.clone()),
                         " = call 'erlang':'element'(4, ",
                         Document::String(receiver_var),
@@ -961,6 +969,7 @@ impl CoreErlangGenerator {
                         Document::String(future_pid_var),
                         ") in ",
                         Document::String(future_var),
+                        " end",
                     ];
                     Ok(Some(doc))
                 }
@@ -1004,12 +1013,18 @@ impl CoreErlangGenerator {
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
                         let error_hint = self.fresh_var("Err");
+                        // BT-924: primitive value types (Integer, String, etc.) have no slots;
+                        // user-defined value objects are maps and use beamtalk_reflection.
                         let hint =
                             Self::binary_string_literal("Value types have no instance variables");
 
                         let recv_code = self.expression_doc(receiver)?;
                         let name_code = self.expression_doc(&arguments[0])?;
 
+                        // BT-924: The non-actor branch is split:
+                        //   - map receiver → delegate to beamtalk_primitive:send (routes
+                        //     through dispatch/3 which respects ClassKind::Value vs Object)
+                        //   - other (primitive literal) → raise immutable_value
                         let doc = docvec![
                             "let ",
                             Document::String(receiver_var.clone()),
@@ -1039,12 +1054,20 @@ impl CoreErlangGenerator {
                             ") in let _ = call 'beamtalk_actor':'async_send'(",
                             Document::String(pid_var),
                             ", 'fieldAt:', [",
-                            Document::String(name_var),
+                            Document::String(name_var.clone()),
                             "], ",
                             Document::String(future_pid_var),
                             ") in ",
                             Document::String(future_var),
-                            " <_> when 'true' -> let ",
+                            // Non-actor: delegate map receivers to beamtalk_primitive:send
+                            // which routes through dispatch/3 (respects ClassKind)
+                            " <_> when 'true' -> case call 'erlang':'is_map'(",
+                            Document::String(receiver_var.clone()),
+                            ") of <'true'> when 'true' -> call 'beamtalk_primitive':'send'(",
+                            Document::String(receiver_var.clone()),
+                            ", 'fieldAt:', [",
+                            Document::String(name_var),
+                            "]) <_> when 'true' -> let ",
                             Document::String(class_var.clone()),
                             " = call 'beamtalk_primitive':'class_of'(",
                             Document::String(receiver_var),
@@ -1064,7 +1087,7 @@ impl CoreErlangGenerator {
                             Document::String(hint),
                             ") in call 'beamtalk_error':'raise'(",
                             Document::String(error_hint),
-                            ") end",
+                            ") end end",
                         ];
                         Ok(Some(doc))
                     }
@@ -1080,7 +1103,7 @@ impl CoreErlangGenerator {
                         let error_sel = self.fresh_var("Err");
                         let error_hint = self.fresh_var("Err");
                         let hint = Self::binary_string_literal(
-                            "Value types are immutable. Use a method that returns a new instance instead.",
+                            "Cannot modify slot on value type \u{2014} use withSlot: to create a new instance",
                         );
 
                         let recv_code = self.expression_doc(receiver)?;
