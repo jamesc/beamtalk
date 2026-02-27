@@ -80,6 +80,13 @@ module 'class_definition' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cas
 
 'handle_cast'/2 = fun (Msg, State) ->
     case Msg of
+        <{'cast', CastSelector, CastArgs}> when 'true' ->
+            case call 'class_definition':'safe_dispatch'(CastSelector, CastArgs, State) of
+                <{'reply', _CastResult, CastNewState}> when 'true' ->
+                    {'noreply', CastNewState}
+                <{'error', _CastError, _CastState}> when 'true' ->
+                    {'noreply', State}
+            end
         <{Selector, Args, FuturePid}> when 'true' ->
             let _ = call 'erlang':'put'('$bt_future_pid', FuturePid)
             in case call 'class_definition':'safe_dispatch'(Selector, Args, State) of

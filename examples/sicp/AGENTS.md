@@ -1,19 +1,49 @@
 # sicp — Agent Guide
 
-> **Coming soon.** This workspace will contain a SICP Scheme compiler written in Beamtalk.
+This workspace contains a minimal Scheme interpreter written in Beamtalk, inspired by SICP.
 
 ## Workspace Structure
 
-```
+```text
 sicp/
 ├── beamtalk.toml        # Package manifest
-├── src/                 # Source files (to be added)
-├── test/                # BUnit tests (to be added)
+├── src/
+│   └── scheme/
+│       ├── lambda.bt    # SchemeLambda — Scheme closure value type
+│       ├── env.bt       # SchemeEnv — lexical environment (immutable-update)
+│       └── eval.bt      # SchemeEval — tokeniser, parser, and evaluator
+├── test/
+│   └── scheme_test.bt   # BUnit tests for SchemeEval
 ├── AGENTS.md            # This file
 ├── .mcp.json            # MCP server config
 ├── .github/
 │   └── copilot-instructions.md
 └── .gitignore
+```
+
+## Scheme Interpreter
+
+The interpreter supports:
+- **Data types**: integers, floats, booleans (`#t`/`#f`), symbols, lists
+- **Primitives**: `+`, `-`, `*`, `/`, `=`, `<`, `>`
+- **Special forms**: `lambda`, `if`, `quote`
+- **Error handling**: clear "Not a procedure: X" errors instead of raw BEAM crashes
+
+### Usage
+
+```beamtalk
+eval := SchemeEval new.
+eval eval: "(+ 1 2)"               // => "3"
+eval eval: "(* 3 (+ 1 2))"        // => "9"
+eval eval: "(lambda (x) (* x x))" // => "<procedure>"
+eval eval: "(if #t 1 2)"           // => "1"
+```
+
+### Running Tests
+
+```bash
+cd examples/sicp
+beamtalk test
 ```
 
 ## Starting the REPL

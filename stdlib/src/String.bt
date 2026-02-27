@@ -473,12 +473,13 @@ sealed Collection subclass: String
   splitRegex: pattern -> List => @primitive "splitRegex:"
 
   /// Return a developer-readable string representation (with surrounding quotes).
+  /// Embedded double-quote characters are doubled (Beamtalk string literal convention).
   ///
   /// ## Examples
   /// ```beamtalk
   /// "hello" printString         // => """hello"""
   /// ```
-  printString -> String => """" ++ self ++ """"
+  printString -> String => """" ++ (self replaceAll: """" with: """""") ++ """"
 
   /// Return the string itself for user-facing display (no surrounding quotes).
   ///
