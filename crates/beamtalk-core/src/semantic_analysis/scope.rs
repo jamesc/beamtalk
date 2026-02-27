@@ -227,6 +227,26 @@ impl Scope {
             })
             .collect()
     }
+
+    /// Returns unused parameter bindings from the current scope level.
+    ///
+    /// Returns bindings that are:
+    /// - `BindingKind::Parameter`
+    /// - Not marked as used
+    /// - Not prefixed with `_` (intentionally unused convention)
+    ///
+    /// # Panics
+    /// Never panics. The `expect` is for internal invariant checking only.
+    /// The `levels` vec is guaranteed to have at least one element (module scope).
+    pub(crate) fn unused_params(&self) -> Vec<&Binding> {
+        self.levels
+            .last()
+            .expect("levels should never be empty")
+            .variables
+            .values()
+            .filter(|b| b.kind == BindingKind::Parameter && !b.used && !b.name.starts_with('_'))
+            .collect()
+    }
 }
 
 impl Default for Scope {
