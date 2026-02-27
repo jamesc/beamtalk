@@ -61,7 +61,6 @@ jobs:
         with:
           otp-version: '27.0'
           rebar3-version: '3.23'
-          cache: true
 
       - name: Install Just
         uses: extractions/setup-just@v3
@@ -141,7 +140,6 @@ jobs:
         with:
           otp-version: '27.0'
           rebar3-version: '3.23'
-          cache: true
 
       - name: Install Just
         uses: extractions/setup-just@v3
@@ -220,7 +218,6 @@ jobs:
         with:
           otp-version: '27.0'
           rebar3-version: '3.23'
-          cache: true
 
       - name: Install Just
         uses: extractions/setup-just@v3
@@ -301,7 +298,6 @@ jobs:
         with:
           otp-version: '27.0'
           rebar3-version: '3.23'
-          cache: true
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@v5
