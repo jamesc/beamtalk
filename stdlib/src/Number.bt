@@ -12,24 +12,24 @@
 /// 5 isPositive      // => true
 /// -3 isNegative     // => true
 /// ```
-abstract Object subclass: Number
+abstract typed Object subclass: Number
 
   // === Abstract protocol (subclasses must implement) ===
 
   /// Equality comparison.
-  =:= other -> Boolean => self subclassResponsibility
+  =:= other: Number -> Boolean => self subclassResponsibility
 
   /// Less than.
-  < other -> Boolean => self subclassResponsibility
+  < other: Number -> Boolean => self subclassResponsibility
 
   /// Greater than.
-  > other -> Boolean => self subclassResponsibility
+  > other: Number -> Boolean => self subclassResponsibility
 
   /// Less than or equal.
-  <= other -> Boolean => self subclassResponsibility
+  <= other: Number -> Boolean => self subclassResponsibility
 
   /// Greater than or equal.
-  >= other -> Boolean => self subclassResponsibility
+  >= other: Number -> Boolean => self subclassResponsibility
 
   // === Shared protocol (implemented in terms of abstract methods) ===
 
@@ -78,4 +78,4 @@ abstract Object subclass: Number
   /// 5 between: 1 and: 10   // => true
   /// 15 between: 1 and: 10  // => false
   /// ```
-  between: min and: max -> Boolean => (self >= min) and: [self <= max]
+  between: min: Number and: max: Number -> Boolean => (self >= min) and: [self <= max]

@@ -16,7 +16,7 @@
 /// #(1, 2, 3) includes: 2       // => true
 /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
 /// ```
-abstract Object subclass: Collection
+abstract typed Object subclass: Collection
 
   // === Abstract protocol (subclasses must implement) ===
 
@@ -41,7 +41,7 @@ abstract Object subclass: Collection
   /// #(1, 2) species         // => List
   /// #[1, 2] species         // => Array
   /// ```
-  species => self class
+  species -> Object => self class
 
   /// Factory method — create a collection of this type from a list.
   ///
@@ -54,7 +54,7 @@ abstract Object subclass: Collection
   /// List withAll: #(1, 2, 3)         // => #(1, 2, 3)
   /// Array withAll: #(1, 2, 3)        // => #[1, 2, 3]
   /// ```
-  class withAll: list: List => list
+  class withAll: list: List -> Collection => list
 
   // === Shared protocol (implemented in terms of abstract methods) ===
 
@@ -86,7 +86,7 @@ abstract Object subclass: Collection
   /// #(1, 2, 3) includes: 2      // => true
   /// #(1, 2, 3) includes: 9      // => false
   /// ```
-  includes: element -> Boolean =>
+  includes: element: Object -> Boolean =>
     self do: [:each | each =:= element ifTrue: [^true]].
     false
 
@@ -117,7 +117,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
   /// ```
-  collect: block: Block =>
+  collect: block: Block -> Collection =>
     result := (self inject: #() into: [:acc :each | acc addFirst: (block value: each)]) reversed.
     self species withAll: result
 
@@ -130,7 +130,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3, 4) select: [:x | x > 2]  // => #(3, 4)
   /// ```
-  select: block: Block =>
+  select: block: Block -> Collection =>
     result := (self inject: #() into: [:acc :each |
       (block value: each) ifTrue: [acc addFirst: each] ifFalse: [acc]
     ]) reversed.
@@ -142,7 +142,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3, 4) reject: [:x | x > 2]  // => #(1, 2)
   /// ```
-  reject: block: Block =>
+  reject: block: Block -> Collection =>
     self select: [:each | (block value: each) not]
 
   /// Find the first element for which `block` returns true.
@@ -154,7 +154,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3) detect: [:x | x > 1]     // => 2
   /// ```
-  detect: block: Block =>
+  detect: block: Block -> Object | Nil =>
     self do: [:each | (block value: each) ifTrue: [^each]].
     nil
 
@@ -166,7 +166,7 @@ abstract Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]  // => 0
   /// ```
-  detect: block: Block ifNone: noneBlock: Block =>
+  detect: block: Block ifNone: noneBlock: Block -> Object =>
     self do: [:each | (block value: each) ifTrue: [^each]].
     noneBlock value
 

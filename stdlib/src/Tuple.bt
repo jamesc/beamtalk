@@ -18,7 +18,7 @@
 /// result isOk ifTrue: [result unwrap]
 /// result unwrapOr: 'default'
 /// ```
-sealed Collection subclass: Tuple
+sealed typed Collection subclass: Tuple
 
   /// Number of elements in the tuple.
   ///
@@ -58,7 +58,7 @@ sealed Collection subclass: Tuple
   /// ```beamtalk
   /// result unwrap     // => 42 when result is {ok, 42}
   /// ```
-  unwrap => self isOk ifTrue: [self at: 2] ifFalse: [self isError ifTrue: [self error: "Called unwrap on error tuple: {self at: 2}"] ifFalse: [self error: "unwrap requires \{ok, Value\} or \{error, Reason\} tuple"]]
+  unwrap -> Object => self isOk ifTrue: [self at: 2] ifFalse: [self isError ifTrue: [self error: "Called unwrap on error tuple: {self at: 2}"] ifFalse: [self error: "unwrap requires \{ok, Value\} or \{error, Reason\} tuple"]]
 
   /// Extract the value from an `{'ok', Value}` tuple, or return `default` on error.
   ///
@@ -66,7 +66,7 @@ sealed Collection subclass: Tuple
   /// ```beamtalk
   /// result unwrapOr: 0   // => 0 when result is {error, _}
   /// ```
-  unwrapOr: default => self isOk ifTrue: [self at: 2] ifFalse: [default]
+  unwrapOr: default: Object -> Object => self isOk ifTrue: [self at: 2] ifFalse: [default]
 
   /// Extract the value from an `{'ok', Value}` tuple, or evaluate `block` on error.
   ///
@@ -74,7 +74,7 @@ sealed Collection subclass: Tuple
   /// ```beamtalk
   /// result unwrapOrElse: [0]   // => 0 when result is {error, _}
   /// ```
-  unwrapOrElse: block: Block => self isOk ifTrue: [self at: 2] ifFalse: [block value]
+  unwrapOrElse: block: Block -> Object => self isOk ifTrue: [self at: 2] ifFalse: [block value]
 
   /// Convert the tuple to its string representation.
   ///
