@@ -98,9 +98,8 @@ md setX
 // => 2
 
 // secret is now doesNotUnderstand: on a fresh instance
-// Actor message sends return Futures; await inside the block to surface the error
 // on: RuntimeError do: catches only RuntimeError kinds (does_not_understand is RuntimeError)
-[(MethodDropActor spawn secret) await] on: RuntimeError do: [:e | e kind]
+[(MethodDropActor spawn secret)] on: RuntimeError do: [:e | e kind]
 // => does_not_understand
 
 // ===========================================================================

@@ -10,8 +10,8 @@ TestCase subclass: EmptyMethodSelfTest
   testDoNothingReturnsSelf =>
     a := EmptyMethodActor spawn.
     // Call method that explicitly returns self
-    ref := a doNothing await.
+    ref := a doNothing.
     // Returned reference should be the same actor
     self assert: (ref =:= a).
     // Verify by reading state through the returned reference
-    self assert: (ref getValue await) equals: 42
+    self assert: (ref getValue) equals: 42

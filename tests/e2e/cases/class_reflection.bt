@@ -8,17 +8,16 @@
 // stdlib/test/class_reflection_test.bt (BUnit).
 //
 // BT-374: Beamtalk is a workspace binding (actor) dispatched via
-// persistent_term. Sends are async and return Futures, so we must
-// `await` to get the actual class object.
+// persistent_term. Sends return the value directly (sync-by-default).
 
 // @load tests/e2e/fixtures/counter.bt
 
 // ===========================================================================
-// ASYNC classNamed: LOOKUP (REPL-specific: async dispatch via workspace binding)
+// classNamed: LOOKUP (REPL-specific: dispatch via workspace binding)
 // ===========================================================================
 
-// Async lookup of existing class — must await the Future
-stringClass := (Beamtalk classNamed: #String) await
+// Lookup of existing class
+stringClass := (Beamtalk classNamed: #String)
 // => String
 
 // Workspace variable persists — name is accessible in next turn
@@ -26,18 +25,18 @@ stringClass name
 // => String
 
 // Async lookup of a loaded actor class
-counterClass := (Beamtalk classNamed: #Counter) await
+counterClass := (Beamtalk classNamed: #Counter)
 // => Counter
 
 counterClass name
 // => Counter
 
 // ===========================================================================
-// NIL RETURN FOR UNKNOWN CLASS (async lookup)
+// NIL RETURN FOR UNKNOWN CLASS
 // ===========================================================================
 
-// Look up a non-existent class — await resolves to nil
-(Beamtalk classNamed: #NonExistentClass) await
+// Look up a non-existent class — returns nil
+(Beamtalk classNamed: #NonExistentClass)
 // => nil
 
 // ===========================================================================
@@ -45,7 +44,7 @@ counterClass name
 // ===========================================================================
 
 // Class object stored in workspace variable is accessible in later turns
-intClass := (Beamtalk classNamed: #Integer) await
+intClass := (Beamtalk classNamed: #Integer)
 // => Integer
 
 intClass name

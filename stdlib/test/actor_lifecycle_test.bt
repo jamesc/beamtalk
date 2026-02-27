@@ -10,19 +10,19 @@ TestCase subclass: ActorLifecycleTest
   testIsAliveAndStop =>
     counter := Counter spawn.
     // isAlive returns true for a running actor
-    self assert: (counter isAlive await).
+    self assert: (counter isAlive).
     // Actor still works after isAlive check
-    self assert: (counter increment await) equals: 1.
+    self assert: (counter increment) equals: 1.
     // isAlive still true after message processing
-    self assert: (counter isAlive await).
+    self assert: (counter isAlive).
     // Stop the actor gracefully
-    self assert: (counter stop await) equals: #ok.
+    self assert: (counter stop) equals: #ok.
     // Stopping an already-stopped actor is idempotent
-    self assert: (counter stop await) equals: #ok.
+    self assert: (counter stop) equals: #ok.
     // isAlive returns false after stop
-    self deny: (counter isAlive await).
+    self deny: (counter isAlive).
     // Sending a message to a stopped actor raises an error
-    self should: [counter increment await] raise: #actor_dead
+    self should: [counter increment] raise: #actor_dead
 
   testNonMapArgumentToSpawnwith =>
     // not silently fall back to spawn/0.
@@ -34,12 +34,12 @@ TestCase subclass: ActorLifecycleTest
   testSpawnwithWithBareIdentifierKeys =>
     // Bare identifier keys in map literals work as implicit symbols
     c3 := Counter spawnWith: #{value => 10}.
-    self assert: (c3 getValue await) equals: 10.
-    self assert: (c3 increment await) equals: 11
+    self assert: (c3 getValue) equals: 10.
+    self assert: (c3 increment) equals: 11
 
   testPrintstringActorInstanceAndClassObject =>
     // Actor instance printString returns "a ClassName"
     c2 := Counter spawn.
-    self assert: (c2 printString await) equals: "a Counter".
+    self assert: (c2 printString) equals: "a Counter".
     // Class object printString returns class name
     self assert: (Counter printString) equals: "Counter"

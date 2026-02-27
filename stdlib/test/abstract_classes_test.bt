@@ -8,8 +8,8 @@ TestCase subclass: AbstractClassesTest
 
   testConcreteSubclassWorksNormally =>
     c := Circle spawn.
-    self assert: ((c setRadius: 5) await) equals: 5.
-    self assert: (c area await) equals: 25
+    self assert: ((c setRadius: 5)) equals: 5.
+    self assert: (c area) equals: 25
 
   testAbstractMethodRaisesSubclassResponsibility =>
     // Calling subclassResponsibility raises a user_error

@@ -291,7 +291,7 @@ membersBefore includes: bob
 // => true
 
 // Moderator kicks bob from the room
-(mod kick: bob) await
+(mod kick: bob)
 // => _
 
 membersAfter := room online

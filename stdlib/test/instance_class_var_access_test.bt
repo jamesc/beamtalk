@@ -15,11 +15,11 @@ TestCase subclass: InstanceClassVarAccessTest
     // Class variable was incremented (verify via class method)
     self assert: (InstanceAccessCounter instanceCount) equals: 1.
     // Instance reads class variable via self class (the key BT-413 feature)
-    self assert: (c totalCounters await) equals: 1.
+    self assert: (c totalCounters) equals: 1.
     // Create another instance
     d := InstanceAccessCounter create.
     // Class variable reflects both creations
     self assert: (InstanceAccessCounter instanceCount) equals: 2.
     // Both instances see the same class variable
-    self assert: (c totalCounters await) equals: 2.
-    self assert: (d totalCounters await) equals: 2
+    self assert: (c totalCounters) equals: 2.
+    self assert: (d totalCounters) equals: 2

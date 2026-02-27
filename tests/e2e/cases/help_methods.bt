@@ -12,7 +12,7 @@
 // ===========================================================================
 
 // help: with a class object returns formatted documentation
-helpResult := (Beamtalk help: Integer) await
+helpResult := (Beamtalk help: Integer)
 // => == Integer < Number ==_
 
 // Result is a non-empty string
@@ -28,7 +28,7 @@ helpResult includesSubstring: "Instance methods:"
 // ===========================================================================
 
 // help:selector: returns method documentation for a known method
-methodHelp := (Beamtalk help: Integer selector: #asString) await
+methodHelp := (Beamtalk help: Integer selector: #asString)
 // => Integer >> asString_
 
 // Method help result is non-empty
@@ -40,7 +40,7 @@ methodHelp isEmpty
 // ===========================================================================
 
 // help: with unknown class name raises class_not_found error
-(Beamtalk help: #NoSuchClass) await
+(Beamtalk help: #NoSuchClass)
 // => ERROR: Class 'NoSuchClass' not found.
 
 // ===========================================================================
@@ -48,5 +48,5 @@ methodHelp isEmpty
 // ===========================================================================
 
 // help:selector: with unknown selector raises does_not_understand error
-(Beamtalk help: Integer selector: #noSuchMethod) await
+(Beamtalk help: Integer selector: #noSuchMethod)
 // => ERROR: does not understand noSuchMethod

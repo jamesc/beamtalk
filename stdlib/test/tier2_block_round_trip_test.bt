@@ -12,20 +12,20 @@ TestCase subclass: Tier2BlockRoundTripTest
   // BT-851: Basic round-trip: block mutates count, HOM is last expression.
   testStatefulBlockViaHOM =>
     actor := Tier2BlockTestActor spawn.
-    self assert: ((actor testRoundTrip) await) equals: 5
+    self assert: ((actor testRoundTrip)) equals: 5
 
   // BT-853: Non-last Tier 2 value: call in HOM body.
   // The block mutates count (via StateAcc), the HOM continues and returns 99,
   // but the state update (count=3) must still propagate back to the caller.
   testNonLastTier2ValueCallPropagates =>
     actor := Tier2BlockTestActor spawn.
-    self assert: ((actor testNonLastTier2ValueCall) await) equals: 3
+    self assert: ((actor testNonLastTier2ValueCall)) equals: 3
 
   // BT-853: Tier 2 block result captured in local variable in HOM body.
   // Block returns count (=4 after mutation), HOM adds 10, returns 14.
   testTier2ResultCaptureInHOM =>
     actor := Tier2BlockTestActor spawn.
-    self assert: ((actor testTier2ResultCapture) await) equals: 14
+    self assert: ((actor testTier2ResultCapture)) equals: 14
 
   // BT-852/BT-853: Two sequential Tier 2 assignment calls in a HOM.
   // Verifies new_state is computed AFTER expression_doc to avoid duplicate
@@ -34,4 +34,4 @@ TestCase subclass: Tier2BlockRoundTripTest
   // testTwoBlocks: count starts at 0, after block1(2): count=2, r1=2; after block2(r1=2): count=4, r2=4.
   testTwoSequentialTier2Assignments =>
     actor := Tier2BlockTestActor spawn.
-    self assert: ((actor testTwoBlocks) await) equals: 4
+    self assert: ((actor testTwoBlocks)) equals: 4

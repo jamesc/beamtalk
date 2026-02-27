@@ -150,20 +150,28 @@ fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> Stri
     );
 
     for method_name in &test_class.test_methods {
-        // EUnit test function name: method_name + _test
+        // EUnit test generator name: method_name + _test_ (trailing underscore)
+        // Using _test_ generator form with {timeout, 30, ...} to allow tests that
+        // involve actor dispatch (e.g. deadlock detection) up to 30 seconds.
         // Erlang atom-safe: quote with single quotes
-        let _ = writeln!(erl, "'{method_name}_test'() ->");
+        let _ = writeln!(erl, "'{method_name}_test_'() ->");
+
+        // Determine setUp
+        let has_setup = test_class.has_setup;
+        let has_teardown = test_class.has_teardown;
+
+        let _ = writeln!(erl, "    {{timeout, 30, fun() ->");
 
         // Create fresh instance
-        let _ = writeln!(erl, "    Instance = '{bt_module}':new(),");
+        let _ = writeln!(erl, "        Instance = '{bt_module}':new(),");
 
         // setUp (if defined)
         // For value objects (immutable maps), setUp returns a new instance with modified fields.
         // We must capture that return value and use it for the test method.
-        let instance_var = if test_class.has_setup {
+        let instance_var = if has_setup {
             let _ = writeln!(
                 erl,
-                "    Instance1 = '{bt_module}':dispatch('setUp', [], Instance),"
+                "        Instance1 = '{bt_module}':dispatch('setUp', [], Instance),"
             );
             "Instance1"
         } else {
@@ -171,24 +179,26 @@ fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> Stri
         };
 
         // Run test method inside try/after for tearDown
-        if test_class.has_teardown {
-            let _ = writeln!(erl, "    try");
+        if has_teardown {
+            let _ = writeln!(erl, "        try");
+            let _ = writeln!(
+                erl,
+                "            '{bt_module}':dispatch('{method_name}', [], {instance_var})"
+            );
+            let _ = writeln!(erl, "        after");
+            let _ = writeln!(
+                erl,
+                "            '{bt_module}':dispatch('tearDown', [], {instance_var})"
+            );
+            let _ = writeln!(erl, "        end");
+        } else {
             let _ = writeln!(
                 erl,
                 "        '{bt_module}':dispatch('{method_name}', [], {instance_var})"
             );
-            let _ = writeln!(erl, "    after");
-            let _ = writeln!(
-                erl,
-                "        '{bt_module}':dispatch('tearDown', [], {instance_var})"
-            );
-            let _ = writeln!(erl, "    end.");
-        } else {
-            let _ = writeln!(
-                erl,
-                "    '{bt_module}':dispatch('{method_name}', [], {instance_var})."
-            );
         }
+
+        let _ = writeln!(erl, "    end}}.");
 
         erl.push('\n');
     }
@@ -1287,7 +1297,8 @@ mod tests {
 
         let wrapper = generate_eunit_wrapper(&test_class, "test/counter_test.bt");
         assert!(wrapper.contains("-module('bt@counter_test_tests')."));
-        assert!(wrapper.contains("'testIncrement_test'()"));
+        assert!(wrapper.contains("'testIncrement_test_'()"));
+        assert!(wrapper.contains("{timeout, 30, fun() ->"));
         assert!(wrapper.contains("'bt@counter_test':new()"));
         assert!(wrapper.contains("'bt@counter_test':dispatch('testIncrement', [], Instance)"));
         // No setUp/tearDown
@@ -1380,7 +1391,7 @@ mod tests {
         assert!(wrapper.contains("after"));
         assert!(wrapper.contains("dispatch('tearDown', [], Instance1)"));
         // Both test methods present
-        assert!(wrapper.contains("'testA_test'()"));
-        assert!(wrapper.contains("'testB_test'()"));
+        assert!(wrapper.contains("'testA_test_'()"));
+        assert!(wrapper.contains("'testB_test_'()"));
     }
 }

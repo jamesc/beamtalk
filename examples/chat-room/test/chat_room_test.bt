@@ -3,9 +3,9 @@
 
 // BUnit tests for the ChatRoom and ChatMember actors.
 //
-// Actor-to-actor message delivery requires sync barriers:
-// after room say:from: completes, we barrier on the member to ensure
-// receiveMessage: has been processed before asserting inbox contents.
+// With sync-by-default dispatch, room say:from: calls receiveMessage: on each
+// member synchronously. When say:from: returns, all members have processed
+// the message — no sync barriers are needed.
 //
 // Run in the REPL:
 //   > :load src/message.bt
@@ -19,80 +19,72 @@ TestCase subclass: ChatRoomTest
 
   testNewRoomHasNoHistory =>
     room := ChatRoom spawn.
-    self assert: (room getHistory await) equals: #()
+    self assert: (room getHistory) equals: #()
 
   testMemberJoinsRoom =>
     room := ChatRoom spawn.
     alice := ChatMember spawn.
-    (room join: alice) await.
-    self assert: ((room online await) includes: alice)
+    (room join: alice).
+    self assert: ((room online) includes: alice)
 
   testMemberLeavesRoom =>
     room := ChatRoom spawn.
     alice := ChatMember spawn.
-    (room join: alice) await.
-    (room leave: alice) await.
-    self deny: ((room online await) includes: alice)
+    (room join: alice).
+    (room leave: alice).
+    self deny: ((room online) includes: alice)
 
   testSayAddsToHistory =>
     room := ChatRoom spawn.
-    (room say: "Hello!" from: "Alice") await.
-    self assert: (room getHistory await) equals: #("Alice: Hello!")
+    (room say: "Hello!" from: "Alice").
+    self assert: (room getHistory) equals: #("Alice: Hello!")
 
   testSayMultipleMessages =>
     room := ChatRoom spawn.
-    (room say: "Hello!" from: "Alice") await.
-    (room say: "Hey!" from: "Bob") await.
-    self assert: (room getHistory await) equals: #("Alice: Hello!", "Bob: Hey!")
+    (room say: "Hello!" from: "Alice").
+    (room say: "Hey!" from: "Bob").
+    self assert: (room getHistory) equals: #("Alice: Hello!", "Bob: Hey!")
 
   testMemberReceivesMessage =>
     room := ChatRoom spawn.
     alice := ChatMember spawn.
-    (room join: alice) await.
-    (room say: "Hello!" from: "System") await.
-    // Sync barrier: ensure member processed receiveMessage:
-    alice getInbox await.
-    self assert: (alice getInbox await) equals: #("System: Hello!")
+    (room join: alice).
+    (room say: "Hello!" from: "System").
+    self assert: (alice getInbox) equals: #("System: Hello!")
 
   testMemberDoesNotReceiveAfterLeaving =>
     room := ChatRoom spawn.
     alice := ChatMember spawn.
-    (room join: alice) await.
-    (room leave: alice) await.
-    (room say: "Hello?" from: "System") await.
-    alice getInbox await.
-    self assert: (alice getInbox await) equals: #()
+    (room join: alice).
+    (room leave: alice).
+    (room say: "Hello?" from: "System").
+    self assert: (alice getInbox) equals: #()
 
   testBroadcastToMultipleMembers =>
     room := ChatRoom spawn.
     alice := ChatMember spawn.
     bob := ChatMember spawn.
-    (room join: alice) await.
-    (room join: bob) await.
-    (room say: "Hi all!" from: "System") await.
-    // Sync barriers for both members
-    alice getInbox await.
-    bob getInbox await.
-    self assert: (alice getInbox await) equals: #("System: Hi all!").
-    self assert: (bob getInbox await) equals: #("System: Hi all!")
+    (room join: alice).
+    (room join: bob).
+    (room say: "Hi all!" from: "System").
+    self assert: (alice getInbox) equals: #("System: Hi all!").
+    self assert: (bob getInbox) equals: #("System: Hi all!")
 
   testOnlyRemainingMemberReceives =>
     room := ChatRoom spawn.
     alice := ChatMember spawn.
     bob := ChatMember spawn.
-    (room join: alice) await.
-    (room join: bob) await.
-    (room leave: alice) await.
-    (room say: "Anyone there?" from: "System") await.
-    alice getInbox await.
-    bob getInbox await.
-    self assert: (alice getInbox await) equals: #().
-    self assert: (bob getInbox await) equals: #("System: Anyone there?")
+    (room join: alice).
+    (room join: bob).
+    (room leave: alice).
+    (room say: "Anyone there?" from: "System").
+    self assert: (alice getInbox) equals: #().
+    self assert: (bob getInbox) equals: #("System: Anyone there?")
 
   testMemberSetsName =>
     alice := ChatMember spawn.
-    (alice setName: "Alice") await.
-    self assert: (alice getName await) equals: "Alice"
+    (alice setName: "Alice").
+    self assert: (alice getName) equals: "Alice"
 
   testMemberDefaultName =>
-    self assert: (ChatMember spawn getName await) equals: "Guest"
+    self assert: (ChatMember spawn getName) equals: "Guest"

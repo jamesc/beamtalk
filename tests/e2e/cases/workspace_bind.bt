@@ -12,7 +12,7 @@
 // ===========================================================================
 
 // Register a simple value in the workspace namespace
-(Workspace bind: 42 as: #MyValue) await
+(Workspace bind: 42 as: #MyValue)
 // => nil
 
 // Registered name resolves in subsequent eval
@@ -20,7 +20,7 @@ MyValue
 // => 42
 
 // Workspace globals includes the registered name
-globals := (Workspace globals) await
+globals := (Workspace globals)
 // => _
 
 globals includesKey: #MyValue
@@ -34,7 +34,7 @@ globals at: #MyValue
 // ===========================================================================
 
 // Re-binding an existing user binding updates the value
-(Workspace bind: 99 as: #MyValue) await
+(Workspace bind: 99 as: #MyValue)
 // => nil
 
 MyValue
@@ -45,11 +45,11 @@ MyValue
 // ===========================================================================
 
 // Unbind removes the registration
-(Workspace unbind: #MyValue) await
+(Workspace unbind: #MyValue)
 // => nil
 
 // Workspace globals no longer includes the unbound name
-globals2 := (Workspace globals) await
+globals2 := (Workspace globals)
 // => _
 
 globals2 includesKey: #MyValue
@@ -60,7 +60,7 @@ globals2 includesKey: #MyValue
 // ===========================================================================
 
 // Binding a name that is a workspace singleton raises error
-[(Workspace bind: 42 as: #Transcript) await] on: Error do: [:e | e message]
+[(Workspace bind: 42 as: #Transcript)] on: Error do: [:e | e message]
 // => Transcript is a system name and cannot be shadowed
 
 // ===========================================================================
@@ -68,7 +68,7 @@ globals2 includesKey: #MyValue
 // ===========================================================================
 
 // Unbinding a name that was never registered raises error
-[(Workspace unbind: #NoSuchBinding) await] on: Error do: [:e | e message]
+[(Workspace unbind: #NoSuchBinding)] on: Error do: [:e | e message]
 // => NoSuchBinding is not a registered workspace name
 
 // ===========================================================================
@@ -81,16 +81,16 @@ globals2 includesKey: #MyValue
 counter := Counter spawn
 // => _
 
-(Workspace bind: counter as: #SharedCounter) await
+(Workspace bind: counter as: #SharedCounter)
 // => nil
 
 // Registered actor resolves and can receive messages
-SharedCounter increment await
+SharedCounter increment
 // => 1
 
-SharedCounter getValue await
+SharedCounter getValue
 // => 1
 
 // Clean up
-(Workspace unbind: #SharedCounter) await
+(Workspace unbind: #SharedCounter)
 // => nil

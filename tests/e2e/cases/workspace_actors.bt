@@ -45,7 +45,7 @@ Workspace respondsTo: #nonExistentMethod
 
 // Workspace actors returns a list (may contain actors from prior tests)
 // Actor list depends on prior test state, keep wildcard
-allActors := (Workspace actors) await
+allActors := (Workspace actors)
 // => _
 
 // ===========================================================================
@@ -61,7 +61,7 @@ c := Counter spawn
 // => #Actor<Counter,_>
 
 // Workspace actors now has more actors (depends on prior tests, keep wildcard)
-actors := (Workspace actors) await
+actors := (Workspace actors)
 // => _
 
 actors size > beforeCount
@@ -72,7 +72,7 @@ actors size > beforeCount
 // ===========================================================================
 
 // Record counter count before spawning second (depends on prior tests, keep wildcard)
-countersBefore := (Workspace actorsOf: Counter) await
+countersBefore := (Workspace actorsOf: Counter)
 // => _
 
 countersBeforeSize := countersBefore size
@@ -83,7 +83,7 @@ c2 := Counter spawn
 // => #Actor<Counter,_>
 
 // actorsOf: Counter now returns one more (depends on prior tests, keep wildcard)
-countersAfter := (Workspace actorsOf: Counter) await
+countersAfter := (Workspace actorsOf: Counter)
 // => _
 
 countersAfter size > countersBeforeSize
@@ -101,7 +101,7 @@ c getValue
 // => 1
 
 // Verify actorsOf: returns functional references too (depends on prior tests, keep wildcard)
-counterRefs := (Workspace actorsOf: Counter) await
+counterRefs := (Workspace actorsOf: Counter)
 // => _
 
 // Get last element and send it a message
@@ -117,7 +117,7 @@ lastCounter getValue
 // ===========================================================================
 
 // actorAt: with invalid pid returns nil
-(Workspace actorAt: "invalid") await
+(Workspace actorAt: "invalid")
 // => nil
 
 // ===========================================================================
@@ -127,7 +127,7 @@ lastCounter getValue
 // actorAt: returns an actor object that responds to messages when found
 // (The actor objects returned by actors are already fully functional — tested above)
 // Verify actors list contains functional actor objects via actorsOf:
-freshActors := (Workspace actorsOf: Counter) await
+freshActors := (Workspace actorsOf: Counter)
 // => _
 
 freshActors size > 0

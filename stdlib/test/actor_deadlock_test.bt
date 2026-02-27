@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests that mutual actor calls (A calls B, B calls back A) produce a
+// clear #timeout error after the default 5000ms gen_server:call timeout.
+//
+// NOTE: This test intentionally triggers a 5000ms deadlock timeout.
+// It verifies deadlock detection behavior per ADR 0043.
+
+TestCase subclass: ActorDeadlockTest
+
+  // Two actors calling each other synchronously creates a deadlock.
+  // The gen_server:call timeout (5000ms) raises a #timeout error.
+  testMutualCallDeadlockRaisesTimeout =>
+    a := DeadlockA spawn.
+    b := DeadlockB spawn.
+    (a setPeer: b).
+    self should: [a callPeer] raise: #timeout

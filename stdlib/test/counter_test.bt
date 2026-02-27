@@ -7,7 +7,7 @@
 TestCase subclass: CounterTest
 
   testInitialValue =>
-    self assert: (Counter spawn getValue await) equals: 0
+    self assert: (Counter spawn getValue) equals: 0
 
   testIncrement =>
-    self assert: (Counter spawn increment await) equals: 1
+    self assert: (Counter spawn increment) equals: 1

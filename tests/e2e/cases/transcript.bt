@@ -6,8 +6,7 @@
 // These tests require E2E because Transcript is a workspace-bound actor
 // dispatched via persistent_term. Workspace bindings only exist in the live
 // REPL process; BUnit tests run in compiled code without access to the REPL
-// workspace. Async actor dispatch with `await` and cross-turn variable
-// persistence are also required.
+// workspace. Cross-turn variable persistence is also required.
 //
 // Transcript is a workspace-bound actor for writing to stdout.
 // show: prints a value, cr prints a newline.
@@ -33,18 +32,18 @@ Transcript show: nil
 // => #Actor<TranscriptStream,_>
 
 // ===========================================================================
-// RETURN VALUE IS SELF (BT-540) — explicit await return-type checks
+// RETURN VALUE IS SELF (BT-540) — return-type checks
 // ===========================================================================
 
 // Command methods return self (the Transcript actor), not nil
 // This follows Smalltalk convention and Command-Query Separation
-t := (Transcript show: "test") await
+t := (Transcript show: "test")
 // => #Actor<TranscriptStream,_>
 
 t class
 // => TranscriptStream
 
-t2 := (Transcript cr) await
+t2 := (Transcript cr)
 // => #Actor<TranscriptStream,_>
 
 t2 class

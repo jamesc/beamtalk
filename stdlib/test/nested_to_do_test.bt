@@ -10,6 +10,6 @@ TestCase subclass: NestedToDoTest
   testNestedLoopWithFieldMutation =>
     nested := FieldMutationNested spawn.
     // Test nested to:do: — 3 outer × 2 inner = 6 increments
-    self assert: ((nested nestedIncrement: 3 inner: 2) await) equals: 6.
+    self assert: ((nested nestedIncrement: 3 inner: 2)) equals: 6.
     // Verify state persists
-    self assert: ((nested getValue) await) equals: 6
+    self assert: ((nested getValue)) equals: 6

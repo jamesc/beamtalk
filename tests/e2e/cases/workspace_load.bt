@@ -41,7 +41,7 @@ Workspace respondsTo: #test:
 // ===========================================================================
 
 // Workspace globals returns a map (Dictionary snapshot)
-wsGlobals := (Workspace globals) await
+wsGlobals := (Workspace globals)
 // => _
 
 // globals includes workspace singletons (symbol key #Workspace)
@@ -53,7 +53,7 @@ wsGlobals includesKey: #Workspace
 // ===========================================================================
 
 // Workspace classes returns a list (may be empty before any user classes loaded)
-initialClasses := (Workspace classes) await
+initialClasses := (Workspace classes)
 // => _
 
 // ===========================================================================
@@ -61,18 +61,18 @@ initialClasses := (Workspace classes) await
 // ===========================================================================
 
 // Load counter fixture
-(Workspace load: "tests/e2e/fixtures/counter.bt") await
+(Workspace load: "tests/e2e/fixtures/counter.bt")
 // => nil
 
 // After loading, Workspace classes includes Counter
-afterLoadClasses := (Workspace classes) await
+afterLoadClasses := (Workspace classes)
 // => _
 
 afterLoadClasses includes: Counter
 // => true
 
 // Load the CounterTest fixture
-(Workspace load: "tests/e2e/fixtures/counter_test.bt") await
+(Workspace load: "tests/e2e/fixtures/counter_test.bt")
 // => nil
 
 // ===========================================================================
@@ -80,7 +80,7 @@ afterLoadClasses includes: Counter
 // ===========================================================================
 
 // Workspace testClasses includes CounterTest
-testClasses := (Workspace testClasses) await
+testClasses := (Workspace testClasses)
 // => _
 
 testClasses includes: CounterTest
@@ -91,7 +91,7 @@ testClasses includes: CounterTest
 // ===========================================================================
 
 // Run CounterTest via test: message
-result := (Workspace test: CounterTest) await
+result := (Workspace test: CounterTest)
 // => _
 
 // All counter tests pass
@@ -103,7 +103,7 @@ result failed
 // ===========================================================================
 
 // Workspace test runs all test classes
-allResult := (Workspace test) await
+allResult := (Workspace test)
 // => _
 
 // Total is at least 2 (CounterTest has 2 test methods)

@@ -23,7 +23,7 @@
 // ===========================================================================
 
 // Beamtalk version returns a non-empty string
-v := (Beamtalk version) await
+v := (Beamtalk version)
 // => _
 
 v isEmpty
@@ -34,7 +34,7 @@ v isEmpty
 // ===========================================================================
 
 // allClasses returns a list of class name symbols (atoms)
-classNames := (Beamtalk allClasses) await
+classNames := (Beamtalk allClasses)
 // => _
 
 // allClasses includes names of known stdlib classes
@@ -52,11 +52,11 @@ classNames includes: #Actor
 // ===========================================================================
 
 // classNamed: returns the Integer class object
-(Beamtalk classNamed: #Integer) await
+(Beamtalk classNamed: #Integer)
 // => Integer
 
 // classNamed: returns nil for unknown classes
-(Beamtalk classNamed: #NoSuchClassXyzzy) await
+(Beamtalk classNamed: #NoSuchClassXyzzy)
 // => nil
 
 // ===========================================================================
@@ -64,7 +64,7 @@ classNames includes: #Actor
 // ===========================================================================
 
 // Beamtalk globals returns a Dictionary snapshot
-btGlobals := (Beamtalk globals) await
+btGlobals := (Beamtalk globals)
 // => _
 
 // globals includes core stdlib classes
@@ -79,14 +79,14 @@ btGlobals includesKey: #String
 // ===========================================================================
 
 // Beamtalk help: returns documentation for a class
-helpText := (Beamtalk help: Integer) await
+helpText := (Beamtalk help: Integer)
 // => _
 
 helpText isNil
 // => false
 
 // Beamtalk help:selector: returns documentation for a specific method
-methodHelpText := (Beamtalk help: Integer selector: #+) await
+methodHelpText := (Beamtalk help: Integer selector: #+)
 // => _
 
 methodHelpText isNil
@@ -106,7 +106,7 @@ methodHelpText isNil
 // => _
 
 // Workspace classes includes the loaded Counter class
-wsClasses := (Workspace classes) await
+wsClasses := (Workspace classes)
 // => _
 
 wsClasses includes: Counter
@@ -117,7 +117,7 @@ wsClasses includes: Counter
 // ===========================================================================
 
 // Load using native Workspace load: message send
-(Workspace load: "tests/e2e/fixtures/reload_counter.bt") await
+(Workspace load: "tests/e2e/fixtures/reload_counter.bt")
 // => nil
 
 // After loading, the class is available and has a sourceFile
@@ -148,7 +148,7 @@ rc increment
 // ===========================================================================
 
 // Workspace globals includes Workspace, Beamtalk, Transcript
-wsGlobals := (Workspace globals) await
+wsGlobals := (Workspace globals)
 // => _
 
 wsGlobals includesKey: #Workspace

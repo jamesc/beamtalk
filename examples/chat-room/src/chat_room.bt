@@ -5,7 +5,7 @@
 //
 // This example demonstrates:
 // 1. **Actors** — ChatRoom and ChatMember as independent processes
-// 2. **Message passing** — async messages between actors
+// 2. **Message passing** — sync-by-default messages between actors
 // 3. **Collections** — Set for member tracking, List for message history
 // 4. **Value types** — Message class (Object subclass) for structured data
 // 5. **Blocks** — iteration with do: for broadcasting

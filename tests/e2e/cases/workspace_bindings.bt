@@ -6,9 +6,8 @@
 // These tests require E2E because workspace bindings (Transcript, Beamtalk)
 // are singleton actors registered in the REPL process via persistent_term.
 // They are REPL-specific: BUnit tests run in compiled code without access to
-// workspace binding infrastructure. Async actor dispatch with `await`,
-// cross-turn variable persistence, and subscribe/unsubscribe lifecycle are
-// also tested here.
+// workspace binding infrastructure. Cross-turn variable persistence and
+// subscribe/unsubscribe lifecycle are also tested here.
 //
 // Workspace bindings (Transcript, Beamtalk) are singleton actors
 // accessed via workspace convenience bindings. The explicit form
@@ -61,7 +60,7 @@ Beamtalk respondsTo: #allClasses
 
 // Beamtalk allClasses returns a list including core classes
 // Class list changes as classes are added, keep wildcard
-classes := (Beamtalk allClasses) await
+classes := (Beamtalk allClasses)
 // => _
 
 // Validate allClasses returns a non-empty list
@@ -69,7 +68,7 @@ classes isEmpty
 // => false
 
 // Beamtalk version returns a string
-version := (Beamtalk version) await
+version := (Beamtalk version)
 // => 0.1.0
 
 // Validate version is a non-empty string
@@ -89,7 +88,7 @@ Transcript show: "Hello"; cr; show: "World"
 // ===========================================================================
 
 // Beamtalk globals returns a map (class registry snapshot)
-globals := (Beamtalk globals) await
+globals := (Beamtalk globals)
 // => _
 
 // ===========================================================================
@@ -97,7 +96,7 @@ globals := (Beamtalk globals) await
 // ===========================================================================
 
 // Beamtalk classNamed: looks up a class by symbol
-intClass := (Beamtalk classNamed: #Integer) await
+intClass := (Beamtalk classNamed: #Integer)
 // => Integer
 
 // ===========================================================================
@@ -105,15 +104,15 @@ intClass := (Beamtalk classNamed: #Integer) await
 // ===========================================================================
 
 // Clear transcript buffer first
-(Transcript clear) await
+(Transcript clear)
 // => #Actor<TranscriptStream,_>
 
 // Write something to transcript
-(Transcript show: "TestOutput") await
+(Transcript show: "TestOutput")
 // => #Actor<TranscriptStream,_>
 
 // Recent returns buffer contents (list of recent output)
-recent := (Transcript recent) await
+recent := (Transcript recent)
 // => _
 
 // Buffer should not be empty after writing
@@ -121,11 +120,11 @@ recent isEmpty
 // => false
 
 // Clear empties the buffer
-(Transcript clear) await
+(Transcript clear)
 // => #Actor<TranscriptStream,_>
 
 // Buffer should be empty after clear
-recentAfterClear := (Transcript recent) await
+recentAfterClear := (Transcript recent)
 // => _
 
 recentAfterClear isEmpty
@@ -136,11 +135,11 @@ recentAfterClear isEmpty
 // ===========================================================================
 
 // Transcript subscribe dispatches as unary method (BT-530)
-(Transcript subscribe) await
+(Transcript subscribe)
 // => #Actor<TranscriptStream,_>
 
 // Transcript unsubscribe dispatches as unary method (BT-530)
-(Transcript unsubscribe) await
+(Transcript unsubscribe)
 // => #Actor<TranscriptStream,_>
 
 // ===========================================================================
@@ -148,9 +147,9 @@ recentAfterClear isEmpty
 // ===========================================================================
 
 // TranscriptStream current returns the same singleton as Transcript binding
-(TranscriptStream current show: "hello from explicit form") await
+(TranscriptStream current show: "hello from explicit form")
 // => #Actor<TranscriptStream,_>
 
 // BeamtalkInterface current works as explicit form of Beamtalk
-(BeamtalkInterface current version) await
+(BeamtalkInterface current version)
 // => 0.1.0

@@ -45,8 +45,8 @@ TestCase subclass: LanguageFeaturesDocTest
     self assert: (typedDocMath sum: 2 with: 5) equals: 7.
     self assert: (typedDocMath maybeName: false) equals: "none".
     typedDocAccount := TypedAccount spawn.
-    self assert: ((typedDocAccount deposit: 8) await) equals: 8.
-    self assert: (typedDocAccount balance await) equals: 8
+    self assert: ((typedDocAccount deposit: 8)) equals: 8.
+    self assert: (typedDocAccount balance) equals: 8
 
   testBlocksClosures =>
     // Block with arguments

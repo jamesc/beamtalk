@@ -4,9 +4,9 @@
 // E2E tests for class-side methods (BT-411 / ADR 0013 Phase 2)
 //
 // These tests require E2E because they use the Beamtalk workspace binding
-// (an async actor) via `Beamtalk classNamed:` with `await` and workspace
-// variable persistence across REPL turns. BUnit tests cannot drive async
-// workspace binding dispatch with cross-turn variable persistence.
+// (an actor) via `Beamtalk classNamed:` with workspace variable persistence
+// across REPL turns. BUnit tests cannot drive workspace binding dispatch
+// with cross-turn variable persistence.
 //
 // Tests defining and calling class methods using the `class` prefix.
 // Class methods run on the class process, not instances.
@@ -18,7 +18,7 @@
 // BASIC CLASS METHOD DISPATCH
 // ===========================================================================
 
-cls := (Beamtalk classNamed: #Calculator) await
+cls := (Beamtalk classNamed: #Calculator)
 // => Calculator
 
 cls defaultValue
@@ -31,7 +31,7 @@ cls add: 10 to: 20
 // CLASS METHOD TO CLASS METHOD DELEGATION (BT-891)
 // ===========================================================================
 
-del := (Beamtalk classNamed: #Delegator) await
+del := (Beamtalk classNamed: #Delegator)
 // => Delegator
 
 del helper: 5

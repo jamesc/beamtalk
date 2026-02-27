@@ -10,27 +10,23 @@ TestCase subclass: ExceptionMutationsTest
 
   testMutationsInOnDoAndEnsure =>
     c := ErrorCounter spawn.
-    // Returns a future (bare PID) from async send
     c riskyIncrement.
     // Verify errorCount was mutated by the handler
-    self assert: (c getErrorCount await) equals: 1.
+    self assert: (c getErrorCount) equals: 1.
     // Value should be unchanged (try body failed before mutation completed)
-    self assert: (c getValue await) equals: 0.
-    // Returns a future (bare PID) from async send
+    self assert: (c getValue) equals: 0.
     c riskyIncrement.
     // Call again to verify mutation accumulates
-    self assert: (c getErrorCount await) equals: 2.
+    self assert: (c getErrorCount) equals: 2.
     // Spawn a fresh actor
     d := ErrorCounter spawn.
-    // Returns a future (bare PID) from async send
     d safeIncrementWithCleanup.
     // Value should be incremented by the try body
-    self assert: (d getValue await) equals: 1.
+    self assert: (d getValue) equals: 1.
     // errorCount should be incremented by the cleanup block
-    self assert: (d getErrorCount await) equals: 1.
-    // Returns a future (bare PID) from async send
+    self assert: (d getErrorCount) equals: 1.
     d safeIncrementWithCleanup.
     // Call again to verify both accumulate
-    self assert: (d getValue await) equals: 2.
+    self assert: (d getValue) equals: 2.
     // safeIncrementWithCleanup: body increments value, cleanup increments errorCount
-    self assert: (d getErrorCount await) equals: 2
+    self assert: (d getErrorCount) equals: 2

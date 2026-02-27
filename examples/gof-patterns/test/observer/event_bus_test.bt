@@ -3,10 +3,8 @@
 
 // Tests for Observer Pattern — EventBus and EventCollector
 //
-// Actor-to-actor sends are asynchronous — bus notify: sends to col via cast.
-// Use the sync barrier pattern to ensure all messages are processed:
-//   1. `bus subscriberCount await` — round-trip on bus ensures notify: completed
-//   2. `col events await`           — round-trip on col ensures receive: completed
+// With sync-by-default dispatch, bus notify: calls receive: on each subscriber
+// synchronously. When notify: returns, all subscribers have processed the event.
 
 TestCase subclass: EventBusTest
 
@@ -15,10 +13,8 @@ TestCase subclass: EventBusTest
     col := EventCollector spawn
     bus subscribe: col
     bus notify: "hello"
-    bus subscriberCount await
-    col events await
-    self assert: (col eventCount await) equals: 1
-    self assert: ((col events await) first) equals: "hello"
+    self assert: (col eventCount) equals: 1
+    self assert: ((col events) first) equals: "hello"
     bus stop
     col stop
 
@@ -29,9 +25,7 @@ TestCase subclass: EventBusTest
     bus notify: "a"
     bus notify: "b"
     bus notify: "c"
-    bus subscriberCount await
-    col events await
-    self assert: (col eventCount await) equals: 3
+    self assert: (col eventCount) equals: 3
     bus stop
     col stop
 
@@ -42,10 +36,8 @@ TestCase subclass: EventBusTest
     bus notify: "before"
     bus unsubscribe: col
     bus notify: "after"
-    bus subscriberCount await
-    col events await
-    self assert: (col eventCount await) equals: 1
-    self assert: ((col events await) first) equals: "before"
+    self assert: (col eventCount) equals: 1
+    self assert: ((col events) first) equals: "before"
     bus stop
     col stop
 
@@ -56,11 +48,8 @@ TestCase subclass: EventBusTest
     bus subscribe: c1
     bus subscribe: c2
     bus notify: "event"
-    bus subscriberCount await
-    c1 events await
-    c2 events await
-    self assert: (c1 eventCount await) equals: 1
-    self assert: (c2 eventCount await) equals: 1
+    self assert: (c1 eventCount) equals: 1
+    self assert: (c2 eventCount) equals: 1
     bus stop
     c1 stop
     c2 stop
@@ -69,6 +58,6 @@ TestCase subclass: EventBusTest
     bus := EventBus spawn
     col := EventCollector spawn
     bus notify: "ghost"
-    self assert: (col eventCount await) equals: 0
+    self assert: (col eventCount) equals: 0
     bus stop
     col stop

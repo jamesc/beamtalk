@@ -4,8 +4,8 @@
 // TransferAgent actor — coordinates transfers between two Account actors
 //
 // A TransferAgent moves money between accounts by sending withdraw and
-// deposit messages. Since actor messaging is asynchronous, each Account
-// handles its own validation (e.g. overdraft protection) independently.
+// deposit messages synchronously. Each Account handles its own validation
+// (e.g. overdraft protection) independently.
 //
 // This demonstrates the actor coordination pattern: the TransferAgent
 // orchestrates two independent actors, and each actor enforces its own

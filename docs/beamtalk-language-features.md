@@ -13,7 +13,7 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 - [String Encoding and UTF-8](#string-encoding-and-utf-8)
 - [Core Syntax](#core-syntax)
 - [Gradual Typing (ADR 0025)](#gradual-typing-adr-0025)
-- [Async Message Passing](#async-message-passing)
+- [Actor Message Passing](#actor-message-passing)
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
@@ -149,7 +149,7 @@ Actor subclass: Counter
 | Instantiation | `Point new` or `Point new: #{x => 5}` | `Counter spawn` or `Counter spawnWith: #{count => 0}` |
 | Runtime | Plain Erlang map/record | BEAM process (gen_server) |
 | Mutation | Immutable - methods return new instances | Mutable - methods modify state |
-| Message passing | N/A (direct function calls) | Async messages with futures |
+| Message passing | N/A (direct function calls) | Sync messages (gen_server:call) |
 | Concurrency | Copied when sent between processes | Process isolation, mailbox queuing |
 | Use cases | Data structures, coordinates, money | Services, stateful entities, concurrent tasks |
 
@@ -532,11 +532,11 @@ Fix: Use control flow directly, or extract to a method:
 
 ---
 
-## Async Message Passing
+## Actor Message Passing
 
-Beamtalk uses **async-first** message passing, unlike Smalltalk's synchronous model. Messages to actors return **futures**.
+Beamtalk uses **sync-by-default** actor message passing (ADR 0043). The `.` message send operator uses `gen_server:call`, which blocks the caller until the actor processes the message and returns a value. This is the same natural synchronous feel as Smalltalk, while preserving full process isolation and fault tolerance.
 
-### Default: Async with Futures
+### Default: Sync with Direct Return
 
 ```beamtalk
 // Load the Counter actor
@@ -545,15 +545,15 @@ Beamtalk uses **async-first** message passing, unlike Smalltalk's synchronous mo
 // Spawn an actor — returns a reference
 c := Counter spawn
 
-// Messages to actors return futures
-c increment             // returns a Future
-c increment await       // explicitly wait for completion
-c getValue await        // => 2
+// Messages to actors return values directly
+c increment             // => 1
+c increment             // => 2
+c getValue              // => 2
 ```
 
-### REPL Auto-Await
+### REPL and Compiled Code
 
-In the REPL, futures are **automatically awaited** for a natural, synchronous feel:
+Actor sends behave identically in REPL and compiled code — both return values directly:
 
 ```text
 > c := Counter spawn
@@ -569,37 +569,55 @@ In the REPL, futures are **automatically awaited** for a natural, synchronous fe
 2
 ```
 
-Outside the REPL (in compiled code), you must explicitly `await` or use continuations.
+### Explicit Async Cast (`!`)
+
+For fire-and-forget scenarios, use the `!` (bang) operator, which uses `gen_server:cast` and returns `nil` immediately:
+
+```beamtalk
+// Fire-and-forget — does not block, returns nil
+c ! increment
+```
+
+Use `!` when you intentionally don't need the result and don't want to block.
+
+### Deadlock Prevention
+
+Because `.` sends block the caller (gen_server:call), two actors calling each other creates a deadlock. The default timeout is **5000ms**, after which a `#timeout` error is raised:
+
+```beamtalk
+// DeadlockA calls DeadlockB, which calls DeadlockA — timeout after 5s
+self should: [a callPeer] raise: #timeout
+```
+
+Design actor interactions to avoid circular synchronous calls. Use `!` (cast) when an actor needs to notify another without expecting a response.
 
 ### BEAM Mapping
 
 | Beamtalk | BEAM |
 |----------|------|
-| Async send | `gen_server:cast` + future process |
-| `await` | `receive` block or `gen_server:call` |
-| Future | Lightweight process holding a result |
+| `.` send (sync) | `gen_server:call` — blocks until reply |
+| `!` send (async cast) | `gen_server:cast` — returns immediately |
+| Timeout | `gen_server:call` default 5000ms timeout |
 
 ### Actor-to-Actor Coordination
 
-When one actor sends a message to another actor internally (e.g., a `notify:` method that forwards to a collector), the caller never holds a future for that internal message. This means reading state from the second actor immediately after calling the first may return stale values — the internal message hasn't been processed yet.
-
-This is **expected actor semantics**, consistent with Erlang, Akka, and other actor systems. The solution is the **sync barrier pattern**: force a round-trip on each actor in the chain to ensure all pending messages have been processed before asserting.
+Because `.` sends are synchronous, when an actor method calls another actor internally, the caller **waits** for the nested call to complete before continuing. The sync barrier pattern (explicit round-trip queries) is generally no longer needed:
 
 ```beamtalk
-// Wrong — reads stale state because internal message is still in flight
+// With sync-by-default: bus notify: calls receive: on each subscriber
+// synchronously. When notify: returns, all subscribers have processed it.
 bus notify: "hello".
-col eventCount          // => 0 (not yet processed!)
-
-// Correct — sync barriers force message processing
-bus notify: "hello".
-bus subscriberCount.    // barrier: ensures bus handler completed
-col events.             // barrier: ensures col processed the forwarded message
-col eventCount          // => 1 (now correctly reflects the event)
+col eventCount          // => 1 (already processed)
 ```
 
-Any query that forces a round-trip on the actor works as a barrier — the key is that BEAM mailboxes are ordered, so once a reply comes back, all prior messages have been handled.
+The sync barrier pattern is only needed when using `!` (cast) sends internally:
 
-> **Future work:** A dedicated `waitFor:` or `barrier` primitive could make this pattern more explicit, but the manual round-trip approach is idiomatic in actor systems and maps directly to BEAM semantics. Adding sugar would risk hiding the inherent asynchrony that programmers need to reason about. If coordination patterns become common enough to warrant it, a higher-level construct (e.g., `Actor flush` or a `Barrier` value object) could be introduced without changing the underlying model.
+```beamtalk
+// If bus uses `!` internally to forward to subscriber:
+bus notify: "hello".    // bus sends subscriber ! receive: "hello" internally
+col events.             // barrier: ensures col processed the cast message
+col eventCount          // => 1 (now correctly reflects the event)
+```
 
 ---
 
@@ -724,13 +742,13 @@ Beamtalk allClasses includes: #Integer
 Beamtalk classNamed: #Counter
 // => Counter (or nil if not loaded)
 
-(Beamtalk globals) await at: #Integer
+(Beamtalk globals) at: #Integer
 // => Integer
 
-(Beamtalk help: Integer) await
+(Beamtalk help: Integer)
 // => "== Integer < Number ==\n..."
 
-(Beamtalk help: Integer selector: #+) await
+(Beamtalk help: Integer selector: #+)
 // => "Integer >> +\n..."
 ```
 
@@ -754,19 +772,19 @@ workspace. Analogous to Pharo's `Smalltalk` project facade.
 | `unbind: #Name` | `Nil` | Remove a registered name from the namespace |
 
 ```beamtalk
-(Workspace load: "examples/counter.bt") await
+(Workspace load: "examples/counter.bt")
 // => nil  (Counter is now registered)
 
-(Workspace classes) await includes: Counter
+(Workspace classes) includes: Counter
 // => true
 
-(Workspace testClasses) await includes: CounterTest
+(Workspace testClasses) includes: CounterTest
 // => true
 
-(Workspace test: CounterTest) await failed
+(Workspace test: CounterTest) failed
 // => 0  (all tests pass)
 
-(Workspace actors) await size
+(Workspace actors) size
 // => 3  (number of live actors)
 ```
 
@@ -838,7 +856,7 @@ When you load a file — using `:load path/to/file.bt` or `Workspace load: "path
 // => Loaded: Counter
 
 // Via native message send (works from compiled code too)
-(Workspace load: "examples/counter.bt") await
+(Workspace load: "examples/counter.bt")
 
 c := Counter spawn
 c increment
@@ -940,9 +958,8 @@ globally unique. See [known-limitations.md](known-limitations.md) and
 | Instance variable | Process state map field |
 | Field access (`self.x`) | `maps:get('x', State)` |
 | Field write (`self.x := v`) | `maps:put('x', v, State)` |
-| Message send | Async: `gen_server:cast` + future |
-| Sync message | `gen_server:call` (opt-in) |
-| `await` | Block on future / `receive` |
+| `.` message send | `gen_server:call` — sync, blocks for result |
+| `!` message send | `gen_server:cast` — async fire-and-forget |
 | Block | Erlang fun (closure) |
 | Image | Running node(s) |
 | Workspace | Connected REPL to live node (`Workspace` singleton) |
@@ -1202,7 +1219,7 @@ beamtalk repl               # Interactive REPL
 // Spawn and interact
 counter := Counter spawn
 counter increment
-counter getValue await  // => 1
+counter getValue  // => 1
 ```
 
 ### VS Code Extension
@@ -1223,15 +1240,15 @@ Beamtalk includes a native test framework inspired by Smalltalk's SUnit.
 TestCase subclass: CounterTest
 
   testInitialValue =>
-    self assert: (Counter spawn getValue await) equals: 0
+    self assert: (Counter spawn getValue) equals: 0
 
   testIncrement =>
-    self assert: (Counter spawn increment await) equals: 1
+    self assert: (Counter spawn increment) equals: 1
 
   testMultipleIncrements =>
     counter := Counter spawn
-    3 timesRepeat: [counter increment await]
-    self assert: (counter getValue await) equals: 3
+    3 timesRepeat: [counter increment]
+    self assert: (counter getValue) equals: 3
 ```
 
 Each test method gets a fresh instance with `setUp` → test → `tearDown` lifecycle.
@@ -1267,6 +1284,6 @@ Running 1 test class...
 2 passed, 0 failed
 
 // Equivalent native API — works from compiled code too:
-> (Workspace test: CounterTest) await failed
+> (Workspace test: CounterTest) failed
 // => 0
 ```
