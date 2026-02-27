@@ -59,7 +59,7 @@ impl CoreErlangGenerator {
 
         let base_exports: Document<'static> = docvec![
             "'start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
-             'code_change'/3, 'terminate'/2, 'dispatch'/4",
+             'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4",
             dispatch_3_export,
             ", 'safe_dispatch'/3, \
              'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
@@ -149,6 +149,7 @@ impl CoreErlangGenerator {
         } else {
             push_fn(self.generate_handle_cast()?)?;
             push_fn(self.generate_handle_call()?)?;
+            push_fn(self.generate_handle_info()?)?;
             push_fn(self.generate_code_change()?)?;
             push_fn(self.generate_terminate(module)?)?;
             push_fn(self.generate_safe_dispatch()?)?;
@@ -289,6 +290,9 @@ impl CoreErlangGenerator {
             "\n\n",
             // handle_call - never called for abstract classes
             "'handle_call'/3 = fun (_Msg, _From, State) -> {'reply', 'nil', State}",
+            "\n\n",
+            // handle_info - delegate to base, never called for abstract classes
+            "'handle_info'/2 = fun (Msg, State) -> call 'beamtalk_actor':'handle_info'(Msg, State)",
             "\n\n",
             // code_change
             "'code_change'/3 = fun (_OldVsn, State, _Extra) -> {'ok', State}",
