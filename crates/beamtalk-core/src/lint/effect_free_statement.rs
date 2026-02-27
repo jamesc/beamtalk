@@ -37,7 +37,11 @@ mod tests {
 
     fn lint(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
         let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
+        let (module, parse_diags) = parse(tokens);
+        assert!(
+            parse_diags.is_empty(),
+            "Parse failed for lint fixture: {parse_diags:?}"
+        );
         run_lint_passes(&module)
     }
 
