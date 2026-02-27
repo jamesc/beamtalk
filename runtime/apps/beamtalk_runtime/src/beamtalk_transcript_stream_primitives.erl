@@ -193,16 +193,25 @@ buffer_text(Text) ->
     end,
     ok.
 
-%% @private Send text to all current subscribers.
+%% @private Send text to all current subscribers, pruning any dead processes.
 -spec push_to_subscribers(binary()) -> ok.
 push_to_subscribers(Text) ->
     Subs = erlang:get(?TS_SUBSCRIBERS),
-    maps:foreach(
-        fun(Pid, _Ref) ->
-            Pid ! {transcript_output, Text}
+    AliveSubs = maps:fold(
+        fun(Pid, Ref, Acc) ->
+            case is_process_alive(Pid) of
+                true ->
+                    Pid ! {transcript_output, Text},
+                    Acc#{Pid => Ref};
+                false ->
+                    demonitor(Ref, [flush]),
+                    Acc
+            end
         end,
+        #{},
         Subs
     ),
+    erlang:put(?TS_SUBSCRIBERS, AliveSubs),
     ok.
 
 %% @private Add a subscriber and monitor it for automatic cleanup.

@@ -82,7 +82,7 @@ module 'boundary_long_identifiers' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
 'handle_cast'/2 = fun (Msg, State) ->
     case Msg of
         <{Selector, Args, FuturePid}> when 'true' ->
-            let _SavedFuture = call 'erlang':'put'('$bt_future_pid', FuturePid)
+            let _ = call 'erlang':'put'('$bt_future_pid', FuturePid)
             in case call 'boundary_long_identifiers':'safe_dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     let _Ignored = call 'erlang':'!'(FuturePid, {'resolve', Result})

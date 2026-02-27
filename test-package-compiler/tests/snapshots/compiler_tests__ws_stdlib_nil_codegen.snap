@@ -80,7 +80,7 @@ module 'ws_stdlib_nil' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/
 'handle_cast'/2 = fun (Msg, State) ->
     case Msg of
         <{Selector, Args, FuturePid}> when 'true' ->
-            let _SavedFuture = call 'erlang':'put'('$bt_future_pid', FuturePid)
+            let _ = call 'erlang':'put'('$bt_future_pid', FuturePid)
             in case call 'ws_stdlib_nil':'safe_dispatch'(Selector, Args, State) of
                 <{'reply', Result, NewState}> when 'true' ->
                     let _Ignored = call 'erlang':'!'(FuturePid, {'resolve', Result})

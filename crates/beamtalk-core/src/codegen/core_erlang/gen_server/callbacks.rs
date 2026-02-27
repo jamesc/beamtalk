@@ -261,7 +261,7 @@ impl CoreErlangGenerator {
                                     line(),
                                     // Store FuturePid so @primitive dispatch/3 can access it
                                     // (e.g. subscribe/unsubscribe need to identify the caller)
-                                    "let _SavedFuture = call 'erlang':'put'('$bt_future_pid', FuturePid)",
+                                    "let _ = call 'erlang':'put'('$bt_future_pid', FuturePid)",
                                     line(),
                                     // Use safe_dispatch for error isolation per BT-29
                                     docvec![

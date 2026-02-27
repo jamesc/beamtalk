@@ -1272,10 +1272,11 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    format!(
-                        "call 'gen_server':'start_link'(ServerName, '{}', InitArgs, [])",
-                        self.module_name
-                    ),
+                    docvec![
+                        "call 'gen_server':'start_link'(ServerName, '",
+                        Document::String(self.module_name.clone()),
+                        "', InitArgs, [])",
+                    ],
                 ]
             ),
             "\n\n",
@@ -1311,7 +1312,11 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    format!("call '{primitives_module}':'dispatch'(Selector, Args, Self)"),
+                    docvec![
+                        "call '",
+                        Document::String(primitives_module),
+                        "':'dispatch'(Selector, Args, Self)",
+                    ],
                 ]
             ),
             "\n\n",

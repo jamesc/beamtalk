@@ -331,7 +331,24 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                             (Selector =:= 'displayString' orelse Selector =:= inspect)
                     of
                         true ->
-                            beamtalk_object_ops:dispatch(Selector, Args, Self, State);
+                            %% beamtalk_object_ops:dispatch is known-safe, but wrap it
+                            %% with the same normalization as the slow path so callers
+                            %% always receive a canonical {reply,_,_} | {error,_} tuple.
+                            try beamtalk_object_ops:dispatch(Selector, Args, Self, State) of
+                                {reply, _, _} = Reply -> Reply;
+                                {error, Error, _State} -> {error, Error}
+                            catch
+                                Type:Reason:Stack ->
+                                    ?LOG_ERROR(
+                                        "Erlang error in beamtalk_object_ops:dispatch: ~p",
+                                        [Reason]
+                                    ),
+                                    Wrapped = beamtalk_exception_handler:ensure_wrapped(
+                                        Type, Reason, Stack
+                                    ),
+                                    #{error := BtError} = Wrapped,
+                                    {error, BtError}
+                            end;
                         false ->
                             %% Normalize the return value: dispatch/4 returns either
                             %% {reply, Result, NewState} or {error, Error, State} (3-tuple).
