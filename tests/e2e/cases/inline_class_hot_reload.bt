@@ -107,7 +107,7 @@ md setX
 // ===========================================================================
 
 // Inline-defined class is in the class registry
-(Object allSubclasses includes: InlineRedefActor)
+Object allSubclasses includes: InlineRedefActor
 // => true
 
 // Inline-defined class has correct superclass

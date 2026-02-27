@@ -12,30 +12,30 @@ TestCase subclass: ActorNonLocalReturnTest
     a := ActorNlrBasic spawn.
     self assert: ((a test: #())) equals: "empty".
     self assert: ((a test: #(1))) equals: "not empty".
-    self assert: ((a classify: 5)) equals: "positive".
-    self assert: ((a classify: -1)) equals: "non-positive".
-    self assert: ((a classify: 0)) equals: "non-positive".
+    self assert: (a classify: 5) equals: "positive".
+    self assert: (a classify: -1) equals: "non-positive".
+    self assert: (a classify: 0) equals: "non-positive".
     self assert: ((a checkFalse: #())) equals: "empty".
     self assert: ((a checkFalse: #(1))) equals: "not empty".
     b := ActorNlrLocalVar spawn.
     (b store: "x" val: 42).
-    self assert: ((b fetch: "x")) equals: 42.
-    self assert: ((b fetch: "y")) equals: "not found".
+    self assert: (b fetch: "x") equals: 42.
+    self assert: (b fetch: "y") equals: "not found".
     c := ActorNlrComputed spawn.
-    self assert: ((c doubleIfPositive: 5)) equals: 10.
-    self assert: ((c doubleIfPositive: -1)) equals: 0.
+    self assert: (c doubleIfPositive: 5) equals: 10.
+    self assert: (c doubleIfPositive: -1) equals: 0.
     d := ActorNlrRecursive spawn.
-    self assert: ((d countDown: 3)) equals: "done".
-    self assert: ((d countDown: 0)) equals: "done".
+    self assert: (d countDown: 3) equals: "done".
+    self assert: (d countDown: 0) equals: "done".
     e := ActorNlrOnDo spawn.
     self assert: ((e test: #())) equals: "early".
     self assert: ((e test: #(1))) equals: "not early".
     f := ActorNlrMutate spawn.
     // count starts at 0; incAndCheck: 1 sets count=1, 1>=1 triggers NLR
-    self assert: ((f incAndCheck: 1)) equals: 1.
+    self assert: (f incAndCheck: 1) equals: 1.
     // count is now 1 (mutation was preserved); incAndCheck: 5 sets count=2, 2<5 falls through
-    self assert: ((f incAndCheck: 5)) equals: "not yet".
+    self assert: (f incAndCheck: 5) equals: "not yet".
     // count is now 2; incAndCheck: 3 sets count=3, 3>=3 triggers NLR
-    self assert: ((f incAndCheck: 3)) equals: 3.
+    self assert: (f incAndCheck: 3) equals: 3.
     // count is now 3 (verified mutation persisted across NLR and non-NLR paths)
-    self assert: ((f incAndCheck: 10)) equals: "not yet"
+    self assert: (f incAndCheck: 10) equals: "not yet"

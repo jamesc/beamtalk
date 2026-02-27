@@ -14,8 +14,8 @@ TestCase subclass: CollectionMutationsTest
     self assert: (counter getTotal) equals: 6.
     counter2 := CollectionMutationCounter spawn.
     s := (Set new) fromList: #(1, 2, 3).
-    self assert: ((counter2 sumSet: s)) equals: 6.
+    self assert: (counter2 sumSet: s) equals: 6.
     self assert: (counter2 getTotal) equals: 6.
     counter3 := CollectionMutationCounter spawn.
-    self assert: ((counter3 sumDictValues: (Dictionary new: #{#a => 10, #b => 20, #c => 30}))) equals: 60.
+    self assert: (counter3 sumDictValues: (Dictionary new: #{#a => 10, #b => 20, #c => 30})) equals: 60.
     self assert: (counter3 getTotal) equals: 60

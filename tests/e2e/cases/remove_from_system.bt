@@ -28,7 +28,7 @@ TempClassForRemoval new greet
 // => hello
 
 // Verify it appears in allSubclasses
-(Object allSubclasses includes: TempClassForRemoval)
+Object allSubclasses includes: TempClassForRemoval
 // => true
 
 // ===========================================================================
@@ -44,7 +44,7 @@ TempClassForRemoval removeFromSystem
 // => nil
 
 // Verify it is gone from allSubclasses
-(Object allSubclasses includes: tempClass)
+Object allSubclasses includes: tempClass
 // => false
 
 // ===========================================================================

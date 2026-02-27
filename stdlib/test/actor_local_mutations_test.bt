@@ -13,15 +13,15 @@ TestCase subclass: ActorLocalMutationsTest
     b := LocalMutationActor spawn.
     self assert: ((b sumWithInject: #(10, 20, 30))) equals: #{#count => 3, #result => 60}.
     c := LocalMutationActor spawn.
-    self assert: ((c countToN: 5)) equals: 5.
+    self assert: (c countToN: 5) equals: 5.
     d := LocalMutationActor spawn.
-    self assert: ((d sumRange: 5)) equals: 15.
+    self assert: (d sumRange: 5) equals: 15.
     e := LocalMutationActor spawn.
-    self assert: ((e countDownFrom: 3)) equals: 3.
+    self assert: (e countDownFrom: 3) equals: 3.
     h := LocalMutationActor spawn.
-    self assert: ((h countUpWithWhileFalseFrom: 3)) equals: 3.
+    self assert: (h countUpWithWhileFalseFrom: 3) equals: 3.
     i := LocalMutationActor spawn.
-    self assert: ((i sumEvens: 10)) equals: 30.
+    self assert: (i sumEvens: 10) equals: 30.
     f := LocalMutationActor spawn.
     self assert: ((f processWithTracking: #(5, 10, 15))) equals: #{#localCount => 3, #log => 30}.
     g := FieldMutationAccumulator spawn.

@@ -11,14 +11,14 @@ TestCase subclass: FieldMutationsDoTest
   testFieldMutationsWithSetAndDo =>
     counter := FieldMutationCounter spawn.
     self assert: (counter getValue) equals: 0.
-    self assert: ((counter setValue: 5)) equals: 5.
+    self assert: (counter setValue: 5) equals: 5.
     self assert: (counter getValue) equals: 5.
-    self assert: ((counter setValue: 10)) equals: 10.
+    self assert: (counter setValue: 10) equals: 10.
     self assert: (counter getValue) equals: 10.
-    self assert: ((counter setValue: 0)) equals: 0.
+    self assert: (counter setValue: 0) equals: 0.
     self assert: ((counter sumArray: #(1, 2, 3))) equals: 6.
     self assert: (counter getValue) equals: 6.
-    self assert: ((counter setValue: 0)) equals: 0.
+    self assert: (counter setValue: 0) equals: 0.
     self assert: ((counter sumArray: #(10, 20, 30))) equals: 60.
     self assert: (counter getValue) equals: 60.
     self assert: ((counter sumWithInject: #(1, 2, 3))) equals: 6.

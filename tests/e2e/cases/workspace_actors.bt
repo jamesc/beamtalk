@@ -117,7 +117,7 @@ lastCounter getValue
 // ===========================================================================
 
 // actorAt: with invalid pid returns nil
-(Workspace actorAt: "invalid")
+Workspace actorAt: "invalid"
 // => nil
 
 // ===========================================================================

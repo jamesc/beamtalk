@@ -24,7 +24,7 @@ stringClass := (Beamtalk classNamed: #String)
 stringClass name
 // => String
 
-// Async lookup of a loaded actor class
+// Lookup of a loaded actor class
 counterClass := (Beamtalk classNamed: #Counter)
 // => Counter
 
@@ -36,7 +36,7 @@ counterClass name
 // ===========================================================================
 
 // Look up a non-existent class — returns nil
-(Beamtalk classNamed: #NonExistentClass)
+Beamtalk classNamed: #NonExistentClass
 // => nil
 
 // ===========================================================================

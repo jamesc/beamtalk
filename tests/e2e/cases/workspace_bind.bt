@@ -12,7 +12,7 @@
 // ===========================================================================
 
 // Register a simple value in the workspace namespace
-(Workspace bind: 42 as: #MyValue)
+Workspace bind: 42 as: #MyValue
 // => nil
 
 // Registered name resolves in subsequent eval
@@ -34,7 +34,7 @@ globals at: #MyValue
 // ===========================================================================
 
 // Re-binding an existing user binding updates the value
-(Workspace bind: 99 as: #MyValue)
+Workspace bind: 99 as: #MyValue
 // => nil
 
 MyValue
@@ -45,7 +45,7 @@ MyValue
 // ===========================================================================
 
 // Unbind removes the registration
-(Workspace unbind: #MyValue)
+Workspace unbind: #MyValue
 // => nil
 
 // Workspace globals no longer includes the unbound name
@@ -81,7 +81,7 @@ globals2 includesKey: #MyValue
 counter := Counter spawn
 // => _
 
-(Workspace bind: counter as: #SharedCounter)
+Workspace bind: counter as: #SharedCounter
 // => nil
 
 // Registered actor resolves and can receive messages
@@ -92,5 +92,5 @@ SharedCounter getValue
 // => 1
 
 // Clean up
-(Workspace unbind: #SharedCounter)
+Workspace unbind: #SharedCounter
 // => nil

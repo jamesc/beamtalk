@@ -104,11 +104,11 @@ intClass := (Beamtalk classNamed: #Integer)
 // ===========================================================================
 
 // Clear transcript buffer first
-(Transcript clear)
+Transcript clear
 // => #Actor<TranscriptStream,_>
 
 // Write something to transcript
-(Transcript show: "TestOutput")
+Transcript show: "TestOutput"
 // => #Actor<TranscriptStream,_>
 
 // Recent returns buffer contents (list of recent output)
@@ -120,7 +120,7 @@ recent isEmpty
 // => false
 
 // Clear empties the buffer
-(Transcript clear)
+Transcript clear
 // => #Actor<TranscriptStream,_>
 
 // Buffer should be empty after clear
@@ -135,11 +135,11 @@ recentAfterClear isEmpty
 // ===========================================================================
 
 // Transcript subscribe dispatches as unary method (BT-530)
-(Transcript subscribe)
+Transcript subscribe
 // => #Actor<TranscriptStream,_>
 
 // Transcript unsubscribe dispatches as unary method (BT-530)
-(Transcript unsubscribe)
+Transcript unsubscribe
 // => #Actor<TranscriptStream,_>
 
 // ===========================================================================
@@ -147,9 +147,9 @@ recentAfterClear isEmpty
 // ===========================================================================
 
 // TranscriptStream current returns the same singleton as Transcript binding
-(TranscriptStream current show: "hello from explicit form")
+TranscriptStream current show: "hello from explicit form"
 // => #Actor<TranscriptStream,_>
 
 // BeamtalkInterface current works as explicit form of Beamtalk
-(BeamtalkInterface current version)
+BeamtalkInterface current version
 // => 0.1.0

@@ -22,7 +22,7 @@ TestCase subclass: ProtoobjectActorsTest
     // Root class has no superclass
     self assert: (ProtoObject superclass) equals: nil
 
-  testActorBasicMessagingWithAwait =>
+  testActorBasicMessaging =>
     counter := Counter spawn.
     // Test initial state
     self assert: (counter getValue) equals: 0.

@@ -14,8 +14,8 @@ TestCase subclass: ActorConditionalMutationsTest
   testIfTrueWithTrueFlag =>
     // Verify flag=true causes the increment to be applied
     c := ConditionalMutationCounter spawn.
-    self assert: ((c conditionalIncrement: true)) equals: 1.
-    self assert: ((c conditionalIncrement: true)) equals: 2
+    self assert: (c conditionalIncrement: true) equals: 1.
+    self assert: (c conditionalIncrement: true) equals: 2
 
   testIfTrueWithFalseFlag =>
     // Verify flag=false leaves state unchanged
@@ -27,7 +27,7 @@ TestCase subclass: ActorConditionalMutationsTest
   testIfFalseWithFalseFlag =>
     // Verify flag=false causes the decrement to be applied
     c := ConditionalMutationCounter spawn.
-    self assert: ((c conditionalDecrement: false)) equals: -1.
+    self assert: (c conditionalDecrement: false) equals: -1.
     self assert: (c getCount) equals: -1
 
   testIfFalseWithTrueFlag =>
@@ -63,28 +63,28 @@ TestCase subclass: ActorConditionalMutationsTest
     // Verify two sequential conditionals in one method both thread state
     c := ConditionalMutationCounter spawn.
     // a=true, b=true => count = 0 + 1 + 10 = 11
-    self assert: ((c doubleConditional: true and: true)) equals: 11.
+    self assert: (c doubleConditional: true and: true) equals: 11.
     (c reset).
     // a=true, b=false => count = 0 + 1 = 1
-    self assert: ((c doubleConditional: true and: false)) equals: 1.
+    self assert: (c doubleConditional: true and: false) equals: 1.
     (c reset).
     // a=false, b=true => count = 0 + 10 = 10
-    self assert: ((c doubleConditional: false and: true)) equals: 10.
+    self assert: (c doubleConditional: false and: true) equals: 10.
     (c reset).
     // a=false, b=false => count = 0
-    self assert: ((c doubleConditional: false and: false)) equals: 0
+    self assert: (c doubleConditional: false and: false) equals: 0
 
   testNestedConditionals =>
     // Verify nested ifTrue: with mutations threads state correctly
     c := ConditionalMutationCounter spawn.
     // outer=true, inner=true => count = 0 + 100 = 100
-    self assert: ((c nestedConditional: true and: true)) equals: 100.
+    self assert: (c nestedConditional: true and: true) equals: 100.
     (c reset).
     // outer=true, inner=false => count = 0 (inner not taken)
-    self assert: ((c nestedConditional: true and: false)) equals: 0.
+    self assert: (c nestedConditional: true and: false) equals: 0.
     (c reset).
     // outer=false => count = 0 (outer not taken)
-    self assert: ((c nestedConditional: false and: true)) equals: 0
+    self assert: (c nestedConditional: false and: true) equals: 0
 
   testConditionalAsLastExpression =>
     // Verify conditional as the last expression in a method

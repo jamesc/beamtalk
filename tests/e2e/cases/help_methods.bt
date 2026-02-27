@@ -40,7 +40,7 @@ methodHelp isEmpty
 // ===========================================================================
 
 // help: with unknown class name raises class_not_found error
-(Beamtalk help: #NoSuchClass)
+Beamtalk help: #NoSuchClass
 // => ERROR: Class 'NoSuchClass' not found.
 
 // ===========================================================================
@@ -48,5 +48,5 @@ methodHelp isEmpty
 // ===========================================================================
 
 // help:selector: with unknown selector raises does_not_understand error
-(Beamtalk help: Integer selector: #noSuchMethod)
+Beamtalk help: Integer selector: #noSuchMethod
 // => ERROR: does not understand noSuchMethod

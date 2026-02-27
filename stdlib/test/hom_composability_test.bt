@@ -24,17 +24,17 @@ TestCase subclass: HomComposabilityTest
   // sumOf:over: with [:x | x * 2] over #(1,2,3,4,5) = 30.
   testPureBlockViaHOMCorrectResult =>
     actor := HomComposabilityActor spawn.
-    self assert: ((actor testPureBlockViaHOM)) equals: 30
+    self assert: (actor testPureBlockViaHOM) equals: 30
 
   // BT-912: Mutating block passed to user-defined HOM accumulates correctly.
   // [:x | count := count + x] over 1..5 → count = 15.
   testMutatingBlockViaMutatingHOM =>
     actor := HomComposabilityActor spawn.
-    self assert: ((actor testMutatingBlockInCustomLoop)) equals: 15
+    self assert: (actor testMutatingBlockInCustomLoop) equals: 15
 
   // BT-912: Nested HOMs — outer delegates to inner, state threads through both layers.
   // Same block, same items, same expected result as above.
   testNestedHOMsThreadState =>
     actor := HomComposabilityActor spawn.
-    self assert: ((actor testNestedHOMsAccumulate)) equals: 15
+    self assert: (actor testNestedHOMsAccumulate) equals: 15
 

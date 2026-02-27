@@ -21,7 +21,7 @@ TestCase subclass: SealedClassTest
     // Decrement
     self assert: (c decrement) equals: 1.
     // Parentheses needed: unary messages bind tighter than keyword messages
-    self assert: ((c addAmount: 10)) equals: 11.
+    self assert: (c addAmount: 10) equals: 11.
     // Internal self-send: getValuePlusTen calls self getValue (tests __sealed_* direct call)
     self assert: (c getValuePlusTen) equals: 21.
     // Final state verification

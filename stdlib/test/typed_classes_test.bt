@@ -21,12 +21,12 @@ TestCase subclass: TypedClassesTest
     // Test actor instances with typed methods
     counter := TypedCounter spawn.
     self assert: (counter increment) equals: 1.
-    self assert: ((counter add: 5)) equals: 6.
+    self assert: (counter add: 5) equals: 6.
     self assert: (counter current) equals: 6.
     account := TypedAccount spawn.
-    self assert: ((account setOwner: "Alice")) equals: "Alice".
-    self assert: ((account deposit: 10)) equals: 10.
-    self assert: ((account withdraw: 3)) equals: 7.
+    self assert: (account setOwner: "Alice") equals: "Alice".
+    self assert: (account deposit: 10) equals: 10.
+    self assert: (account withdraw: 3) equals: 7.
     self assert: (account balance) equals: 7.
     self assert: (account getOwner) equals: "Alice"
 
@@ -36,10 +36,10 @@ TestCase subclass: TypedClassesTest
     self assert: (ledger addOne) equals: 1.
     self assert: (ledger addOne) equals: 2.
     untyped := UntypedContainer spawn.
-    self assert: ((untyped setItem: "hello")) equals: "hello".
-    self assert: ((untyped setItem: 99)) equals: 99.
+    self assert: (untyped setItem: "hello") equals: "hello".
+    self assert: (untyped setItem: 99) equals: 99.
     typed := TypedAccount spawn.
-    self assert: ((typed deposit: 20)) equals: 20.
+    self assert: (typed deposit: 20) equals: 20.
     self assert: ((typed deposit: (5 asType: Integer))) equals: 25.
     self assert: (typed balance) equals: 25.
     math2 := TypedMath new.

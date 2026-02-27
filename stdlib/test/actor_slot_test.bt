@@ -26,23 +26,23 @@ TestCase subclass: ActorSlotTest
   testMultipleAssignmentsToSameSlot =>
     // Three sequential assignments to the same slot accumulate correctly
     c := ActorSlotCounter spawn.
-    self assert: ((c addThrice: 3)) equals: 9.
-    self assert: ((c addThrice: 1)) equals: 12
+    self assert: (c addThrice: 3) equals: 9.
+    self assert: (c addThrice: 1) equals: 12
 
   testSlotAssignmentInsideConditional =>
     // Slot assignment inside ifTrue: is applied when condition is true
     c := ConditionalMutationCounter spawn.
-    self assert: ((c conditionalIncrement: true)) equals: 1.
-    self assert: ((c conditionalIncrement: true)) equals: 2.
+    self assert: (c conditionalIncrement: true) equals: 1.
+    self assert: (c conditionalIncrement: true) equals: 2.
     // Slot assignment is NOT applied when condition is false
-    self assert: ((c conditionalIncrement: false)) equals: 2
+    self assert: (c conditionalIncrement: false) equals: 2
 
   testSlotAssignmentInsideIfTrueIfFalse =>
     // Both branches of ifTrue:ifFalse: correctly thread state
     c := ConditionalMutationCounter spawn.
-    self assert: ((c conditionalToggle: true)) equals: 10.
+    self assert: (c conditionalToggle: true) equals: 10.
     (c reset).
-    self assert: ((c conditionalToggle: false)) equals: -1
+    self assert: (c conditionalToggle: false) equals: -1
 
   testSlotAssignmentInsideDoBlock =>
     // do: with self.slot := accumulates correctly

@@ -13,7 +13,7 @@ TestCase subclass: SelfReferenceTest
     // The returned reference responds to class
     self assert: (ref class) equals: SelfRefActor.
     // The returned reference is the same actor (can send messages through it)
-    self assert: ((ref setValue: 99)) equals: 99.
+    self assert: (ref setValue: 99) equals: 99.
     // Verify the state changed on the original actor (same process)
     self assert: (a getValue) equals: 99
 
@@ -26,7 +26,7 @@ TestCase subclass: SelfReferenceTest
     a := SelfRefActor spawn.
     (a setValue: 99).
     // perform: dispatches zero-arg methods dynamically on actors
-    self assert: ((a perform: #getValue)) equals: 99.
+    self assert: (a perform: #getValue) equals: 99.
     // perform:withArguments: dispatches methods with arguments on actors
     self assert: ((a perform: #setValue: withArguments: #(42))) equals: 42.
     self assert: (a getValue) equals: 42.

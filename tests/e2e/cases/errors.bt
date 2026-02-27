@@ -183,7 +183,7 @@ café := 42
 // ===========================================================================
 
 // Very deeply nested valid expression (should work)
-((((((((((1 + 1))))))))))
+((((((((1 + 1))))))))
 // => 2
 
 // Very long identifier (should work up to reasonable limit)

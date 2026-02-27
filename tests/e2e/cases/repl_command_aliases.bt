@@ -28,7 +28,7 @@
 // => _
 
 // The Workspace load: direct form also works
-(Workspace load: "tests/e2e/fixtures/reload_counter.bt")
+Workspace load: "tests/e2e/fixtures/reload_counter.bt"
 // => nil
 
 // ===========================================================================

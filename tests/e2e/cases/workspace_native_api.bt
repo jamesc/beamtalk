@@ -52,11 +52,11 @@ classNames includes: #Actor
 // ===========================================================================
 
 // classNamed: returns the Integer class object
-(Beamtalk classNamed: #Integer)
+Beamtalk classNamed: #Integer
 // => Integer
 
 // classNamed: returns nil for unknown classes
-(Beamtalk classNamed: #NoSuchClassXyzzy)
+Beamtalk classNamed: #NoSuchClassXyzzy
 // => nil
 
 // ===========================================================================
@@ -117,7 +117,7 @@ wsClasses includes: Counter
 // ===========================================================================
 
 // Load using native Workspace load: message send
-(Workspace load: "tests/e2e/fixtures/reload_counter.bt")
+Workspace load: "tests/e2e/fixtures/reload_counter.bt"
 // => nil
 
 // After loading, the class is available and has a sourceFile
