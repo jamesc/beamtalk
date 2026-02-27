@@ -397,8 +397,10 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
                 error:#beamtalk_error{message = ErrMsg} ->
                     {fail, MethodName, ErrMsg};
                 error:undef:TestST ->
-                    Wrapped = beamtalk_exception_handler:ensure_wrapped(error, undef, TestST),
-                    #{error := #beamtalk_error{message = FailMsg}} = Wrapped,
+                    #{error := #beamtalk_error{message = FailMsg}} =
+                        beamtalk_exception_handler:ensure_wrapped(
+                            error, undef, TestST
+                        ),
                     {fail, MethodName, FailMsg};
                 error:TestReason ->
                     FailMsg = iolist_to_binary(io_lib:format("~p", [TestReason])),
@@ -428,6 +430,16 @@ run_test_method(ClassName, Module, MethodName, FlatMethods) ->
         TestResult
     catch
         %% setUp or new() itself failed
+        error:#beamtalk_error{message = SetupErrMsg} ->
+            Prefix = <<"setUp failed: ">>,
+            {fail, MethodName, <<Prefix/binary, SetupErrMsg/binary>>};
+        error:undef:SetupST ->
+            #{error := #beamtalk_error{message = SetupErrMsg}} =
+                beamtalk_exception_handler:ensure_wrapped(
+                    error, undef, SetupST
+                ),
+            Prefix = <<"setUp failed: ">>,
+            {fail, MethodName, <<Prefix/binary, SetupErrMsg/binary>>};
         SetupClass:SetupReason ->
             SetupMsg = iolist_to_binary(
                 io_lib:format("setUp failed: ~p:~p", [SetupClass, SetupReason])
