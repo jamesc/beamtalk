@@ -23,7 +23,7 @@
 //!   identifies a code generation pattern handled by the compiler.
 
 use crate::ast::{Expression, Module};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A single primitive binding extracted from a stdlib method.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +155,19 @@ impl PrimitiveBindingTable {
             }
         }
         result
+    }
+
+    /// Returns the set of known runtime module names from all class names in the table.
+    ///
+    /// Used during codegen (BT-938) to validate that a referenced `bt@stdlib@X`
+    /// module will actually be compiled. Returns an empty set when the table is
+    /// empty (no stdlib bindings loaded), in which case validation is skipped.
+    #[must_use]
+    pub fn known_runtime_modules(&self) -> HashSet<String> {
+        self.bindings
+            .keys()
+            .map(|(class_name, _)| Self::runtime_module_for_class(class_name))
+            .collect()
     }
 
     /// Returns the runtime module name for a class's selector-based primitives.

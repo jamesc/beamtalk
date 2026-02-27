@@ -3783,7 +3783,9 @@ fn test_generate_primitive_selector_based() {
     generator.class_identity = Some(util::ClassIdentity::new("Integer"));
     generator.current_method_params = vec!["Other".to_string()];
 
-    let doc = generator.generate_primitive("+", true).unwrap();
+    let doc = generator
+        .generate_primitive("+", true, Span::new(0, 0))
+        .unwrap();
     // BT-340: Now emits direct Erlang BIF instead of dispatch delegation
     assert_eq!(doc.to_pretty_string(), "call 'erlang':'+'(Self, Other)");
 }
@@ -3794,7 +3796,9 @@ fn test_generate_primitive_structural_intrinsic() {
     generator.class_identity = Some(util::ClassIdentity::new("Block"));
     generator.current_method_params = vec![];
 
-    let doc = generator.generate_primitive("blockValue", false).unwrap();
+    let doc = generator
+        .generate_primitive("blockValue", false, Span::new(0, 0))
+        .unwrap();
     assert_eq!(
         doc.to_pretty_string(),
         "call 'bt@stdlib@block':'dispatch'('blockValue', [], Self)"
@@ -3807,7 +3811,9 @@ fn test_generate_primitive_multiple_params() {
     generator.class_identity = Some(util::ClassIdentity::new("Integer"));
     generator.current_method_params = vec!["End".to_string(), "Block".to_string()];
 
-    let doc = generator.generate_primitive("toDo", false).unwrap();
+    let doc = generator
+        .generate_primitive("toDo", false, Span::new(0, 0))
+        .unwrap();
     assert_eq!(
         doc.to_pretty_string(),
         "call 'bt@stdlib@integer':'dispatch'('toDo', [End, Block], Self)"
@@ -4829,5 +4835,137 @@ fn test_nested_if_true_with_field_mutation_threads_state() {
     assert!(
         code.contains("maps':'put'('count'"),
         "Inner branch should update 'count' via maps:put. Got:\n{code}"
+    );
+}
+
+// BT-938: Validate that bt@stdlib@X module exists when generating dispatch calls.
+
+#[test]
+fn test_bt938_no_warning_when_binding_table_empty() {
+    // With no binding table (empty), validation is skipped — no spurious warnings.
+    let src = "
+sealed Object subclass: Foo
+  doIt => @primitive \"doIt\"
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module_with_warnings(
+        &module,
+        CodegenOptions::new("bt@stdlib@foo").with_bindings(
+            primitive_bindings::PrimitiveBindingTable::new(), // empty — no validation
+        ),
+    );
+    let generated = result.expect("codegen should succeed");
+    assert!(
+        generated.warnings.is_empty(),
+        "Empty binding table should skip module-existence validation. Got: {:?}",
+        generated.warnings
+    );
+}
+
+#[test]
+fn test_bt938_no_warning_when_module_present_in_bindings() {
+    // When the binding table knows about 'Foo', no warning is emitted.
+    let src = "
+sealed Object subclass: Foo
+  doIt => @primitive \"doIt\"
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+
+    // Build a binding table that includes Foo (so bt@stdlib@foo is known).
+    let mut table = primitive_bindings::PrimitiveBindingTable::new();
+    table.add_from_module(&module);
+
+    let result = generate_module_with_warnings(
+        &module,
+        CodegenOptions::new("bt@stdlib@foo").with_bindings(table),
+    );
+    let generated = result.expect("codegen should succeed");
+    assert!(
+        generated.warnings.is_empty(),
+        "Known module should produce no warning. Got: {:?}",
+        generated.warnings
+    );
+}
+
+#[test]
+fn test_bt938_warning_when_module_absent_from_bindings() {
+    // Foo has @primitive 'doIt' but the binding table only knows about Bar.
+    // bt@stdlib@foo is NOT in the known set → diagnostic warning expected.
+    let src = "
+sealed Object subclass: Foo
+  doIt => @primitive \"doIt\"
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+
+    // Build a binding table that only knows about a different class (Bar, not Foo).
+    let other_src = "
+sealed Object subclass: Bar
+  barOp => @primitive \"barOp\"
+";
+    let other_tokens = crate::source_analysis::lex_with_eof(other_src);
+    let (other_module, _) = crate::source_analysis::parse(other_tokens);
+    let mut table = primitive_bindings::PrimitiveBindingTable::new();
+    table.add_from_module(&other_module); // only Bar is known; Foo is absent
+
+    let result = generate_module_with_warnings(
+        &module,
+        CodegenOptions::new("bt@stdlib@foo").with_bindings(table),
+    );
+    let generated = result.expect("codegen should succeed (warning, not error)");
+    assert!(
+        !generated.warnings.is_empty(),
+        "Absent module should emit a warning diagnostic"
+    );
+    let msg = &generated.warnings[0].message;
+    assert!(
+        msg.contains("bt@stdlib@foo"),
+        "Warning should mention the missing module. Got: {msg}"
+    );
+    assert!(
+        msg.contains("doIt"),
+        "Warning should mention the selector. Got: {msg}"
+    );
+    assert!(
+        msg.contains("has not been compiled"),
+        "Warning should explain the issue. Got: {msg}"
+    );
+}
+
+#[test]
+fn test_bt938_no_warning_for_structural_intrinsics() {
+    // @primitive blockValue (unquoted/structural) — no module-existence check needed.
+    let src = "
+sealed Object subclass: Block
+  value => @primitive blockValue
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+
+    // Binding table only knows about something else — but structurals skip the check.
+    let other_src = "
+sealed Object subclass: Other
+  other => @primitive \"other\"
+";
+    let other_tokens = crate::source_analysis::lex_with_eof(other_src);
+    let (other_module, _) = crate::source_analysis::parse(other_tokens);
+    let mut table = primitive_bindings::PrimitiveBindingTable::new();
+    table.add_from_module(&other_module);
+
+    let options = CodegenOptions::new("bt@stdlib@block").with_bindings(table);
+    // Use stdlib_mode-aware codegen — but structural intrinsics skip module check.
+    let result = generate_module_with_warnings(&module, options);
+    let generated = result.expect("codegen should succeed");
+    // Structural intrinsics do not trigger the bt@stdlib@X module-existence check.
+    let module_warnings: Vec<_> = generated
+        .warnings
+        .iter()
+        .filter(|w| w.message.contains("has not been compiled"))
+        .collect();
+    assert!(
+        module_warnings.is_empty(),
+        "Structural intrinsics should not trigger module-existence warning. Got: {module_warnings:?}"
     );
 }
