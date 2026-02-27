@@ -218,7 +218,7 @@ impl ClassHierarchy {
                         is_sealed: false,
                         is_abstract: false,
                         is_typed: false,
-                        is_value: false,
+                        is_value: superclass_name == "Value",
                         state: Vec::new(),
                         state_types: HashMap::new(),
                         methods: Vec::new(),
