@@ -49,7 +49,7 @@ impl CoreErlangGenerator {
         // BT-217: Add 'new'/0 and 'new'/1 exports for error methods
         // BT-242: Add 'has_method'/1 export for reflection
         let base_exports = "'start_link'/1, 'init'/1, 'handle_cast'/2, 'handle_call'/3, \
-                            'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, \
+                            'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4, 'safe_dispatch'/3, \
                             'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
                             'superclass'/0";
 
@@ -129,6 +129,7 @@ impl CoreErlangGenerator {
         } else {
             push_fn(self.generate_handle_cast()?)?;
             push_fn(self.generate_handle_call()?)?;
+            push_fn(self.generate_handle_info()?)?;
             push_fn(self.generate_code_change()?)?;
             push_fn(self.generate_terminate(module)?)?;
             push_fn(self.generate_safe_dispatch()?)?;
@@ -247,6 +248,9 @@ impl CoreErlangGenerator {
             "\n\n",
             // handle_call - never called for abstract classes
             "'handle_call'/3 = fun (_Msg, _From, State) -> {'reply', 'nil', State}",
+            "\n\n",
+            // handle_info - delegate to base, never called for abstract classes
+            "'handle_info'/2 = fun (Msg, State) -> call 'beamtalk_actor':'handle_info'(Msg, State)",
             "\n\n",
             // code_change
             "'code_change'/3 = fun (_OldVsn, State, _Extra) -> {'ok', State}",
