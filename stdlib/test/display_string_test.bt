@@ -47,3 +47,20 @@ TestCase subclass: DisplayStringTest
   testObjectDisplayStringDelegatesToPrintString =>
     // Object.displayString delegates to printString by default
     self assert: (42 displayString) equals: (42 printString)
+
+  // BT-933: printString must escape embedded double-quote characters by doubling them.
+
+  testStringWithEmbeddedQuotePrintString =>
+    // "a""b" is the string a"b; printString doubles the embedded " and wraps in outer quotes.
+    // Result is "a""b" (6 chars), written as Beamtalk literal: """a""""b"""
+    self assert: ("a""b" printString) equals: """a""""b"""
+
+  testStringThatIsJustAQuotePrintString =>
+    // """" is the string containing one "; printString produces """" (4 chars: " "" ")
+    // That 4-char string as a Beamtalk literal is: """"""""""
+    self assert: ("""" printString) equals: """"""""""
+
+  testStringWithMultipleEmbeddedQuotesPrintString =>
+    // "a""b""c" is the string a"b"c; printString doubles each " and wraps.
+    // Result: "a""b""c" (8 chars), as Beamtalk: """a""""b""""c"""
+    self assert: ("a""b""c" printString) equals: """a""""b""""c"""
