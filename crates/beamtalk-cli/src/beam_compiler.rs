@@ -760,7 +760,15 @@ pub fn compile_source_with_bindings(
             "Found diagnostics during compilation"
         );
         for diagnostic in &diagnostics {
-            // Skip warnings and hints when suppress_warnings is enabled
+            // Skip warnings and hints when suppress_warnings is enabled.
+            // Always skip Lint diagnostics during normal compilation — they are
+            // only shown by `beamtalk lint`.
+            if matches!(
+                diagnostic.severity,
+                beamtalk_core::source_analysis::Severity::Lint
+            ) {
+                continue;
+            }
             if options.suppress_warnings
                 && matches!(
                     diagnostic.severity,

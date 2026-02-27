@@ -698,6 +698,7 @@ fn handle_diagnostics(request: &Map) -> Term {
             severity: match d.severity {
                 beamtalk_core::source_analysis::Severity::Error => "error".to_string(),
                 beamtalk_core::source_analysis::Severity::Warning => "warning".to_string(),
+                beamtalk_core::source_analysis::Severity::Lint => "lint".to_string(),
                 beamtalk_core::source_analysis::Severity::Hint => "hint".to_string(),
             },
             start: d.span.start(),

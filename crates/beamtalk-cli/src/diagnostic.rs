@@ -47,6 +47,7 @@ impl CompileDiagnostic {
         let label = match diagnostic.severity {
             Severity::Error => "error here",
             Severity::Warning => "warning here",
+            Severity::Lint => "lint here",
             Severity::Hint => "hint here",
         };
 
@@ -94,6 +95,16 @@ mod tests {
         assert_eq!(diag.span.offset(), 5);
         assert_eq!(diag.span.len(), 3);
         assert_eq!(diag.label, "warning here");
+    }
+
+    #[test]
+    fn test_from_core_diagnostic_lint() {
+        let core_diag = CoreDiagnostic::lint("Trailing caret is redundant", Span::new(5, 10));
+        let source = "foo => ^bar";
+        let diag = CompileDiagnostic::from_core_diagnostic(&core_diag, "test.bt", source);
+
+        assert_eq!(diag.severity, Severity::Lint);
+        assert_eq!(diag.label, "lint here");
     }
 
     #[test]

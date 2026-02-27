@@ -141,6 +141,17 @@ enum Command {
         path: String,
     },
 
+    /// Run style/redundancy lint checks on source files
+    Lint {
+        /// Source file or directory to lint
+        #[arg(default_value = ".")]
+        path: String,
+
+        /// Output format for lint diagnostics
+        #[arg(long, default_value = "text")]
+        format: commands::lint::OutputFormat,
+    },
+
     /// Stream Transcript output from a running workspace
     Transcript {
         /// Explicit workspace name (default: auto-detect from current directory)
@@ -347,6 +358,7 @@ fn run() -> Result<()> {
             println!("(Not yet implemented)");
             Ok(())
         }
+        Command::Lint { path, format } => commands::lint::run_lint(&path, format),
         Command::Workspace { action } => commands::workspace::cli::run(action),
         Command::TestStdlib {
             path,
