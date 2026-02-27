@@ -399,9 +399,10 @@ impl CoreErlangGenerator {
             // Annotating the body would create invalid `( ( e -| [...] ) -| [...] )` when the
             // body is itself a single annotated MessageSend expression.
             let fun_doc = docvec![
-                "fun (\n",
+                "fun (",
                 all_params.join(", "),
-                ") ->\n",
+                ") ->",
+                "\n",
                 nest(INDENT, docvec![line(), method_body_doc,]),
             ];
             let fun_doc = if let Some(line_num) = self.span_to_line(method.span) {
