@@ -80,6 +80,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -89,9 +90,8 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     // Value — root class for immutable value objects (ADR 0042).
-    // Parser support for `Value subclass:` comes in Stage 3. This entry
-    // allows `is_value_subclass()` to resolve the hierarchy correctly once
-    // users write `Value subclass: MyClass`.
+    // `Value subclass:` is parsed as a class declaration with ClassKind::Value (BT-922).
+    // This entry provides the root so `is_value_subclass()` can resolve the hierarchy.
     classes.insert(
         "Value".into(),
         ClassInfo {
@@ -100,6 +100,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],

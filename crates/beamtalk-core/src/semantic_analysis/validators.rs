@@ -13,11 +13,12 @@
 //! - Class variable access (BT-563)
 //! - Empty method bodies (BT-631)
 
-use crate::ast::{Expression, Identifier, Module};
-use crate::semantic_analysis::ClassHierarchy;
+use crate::ast::{Block, Expression, Identifier, Module};
+use crate::semantic_analysis::block_context::{classify_block, is_collection_hof_selector};
+use crate::semantic_analysis::{BlockContext, ClassHierarchy};
 #[cfg(test)]
 use crate::source_analysis::lex_with_eof;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
 /// BT-105: Check for attempts to instantiate abstract classes.
@@ -705,6 +706,162 @@ fn walk_for_slot_assignments(
     }
 }
 
+// ── BT-950: Redundant assignment ─────────────────────────────────────────────
+
+/// BT-950: Warn when the RHS of an assignment is the same identifier as the LHS.
+///
+/// Detects `x := x` where both sides are the same plain identifier binding.
+/// This has no effect at runtime and usually indicates a copy-paste error or
+/// leftover code.
+pub(crate) fn check_redundant_assignment(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    for expr in &module.expressions {
+        visit_redundant_assignment(expr, diagnostics);
+    }
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            for expr in &method.body {
+                visit_redundant_assignment(expr, diagnostics);
+            }
+        }
+    }
+    for standalone in &module.method_definitions {
+        for expr in &standalone.method.body {
+            visit_redundant_assignment(expr, diagnostics);
+        }
+    }
+}
+
+fn visit_redundant_assignment(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    if let Expression::Assignment {
+        target,
+        value,
+        span,
+        ..
+    } = expr
+    {
+        if let (
+            Expression::Identifier(Identifier { name: lhs, .. }),
+            Expression::Identifier(Identifier { name: rhs, .. }),
+        ) = (target.as_ref(), value.as_ref())
+        {
+            if lhs == rhs {
+                let mut diag = Diagnostic::warning(
+                    format!("Redundant assignment: `{lhs} := {lhs}` has no effect"),
+                    *span,
+                );
+                diag.hint = Some("Remove this assignment or assign a different value.".into());
+                diagnostics.push(diag);
+            }
+        }
+    }
+    for child in child_expressions(expr) {
+        visit_redundant_assignment(child, diagnostics);
+    }
+}
+
+// ── BT-953: Self capture in collection HOF blocks ─────────────────────────────
+
+/// BT-953: Warn when `self` is referenced inside a literal block passed to a
+/// collection higher-order method (collect:, do:, select:, reject:, inject:into:,
+/// detect:, detect:ifNone:).
+///
+/// These methods pass the block to Erlang-side iteration. If the block body
+/// references `self` as a message receiver, the re-entrant self-send goes
+/// through the `calling_self` mechanism and can deadlock at runtime.
+///
+/// Example: `items collect: [:x | self process: x]`  ← deadlock risk
+pub(crate) fn check_self_capture_in_actor_block(
+    module: &Module,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for expr in &module.expressions {
+        visit_self_capture_in_block(expr, diagnostics);
+    }
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            for expr in &method.body {
+                visit_self_capture_in_block(expr, diagnostics);
+            }
+        }
+    }
+    for standalone in &module.method_definitions {
+        for expr in &standalone.method.body {
+            visit_self_capture_in_block(expr, diagnostics);
+        }
+    }
+}
+
+/// Recursively searches an expression tree for any reference to `self`.
+///
+/// Returns the `Span` of the first `self` identifier found, or `None`.
+/// Uses `child_expressions` to traverse all expression variants consistently.
+fn find_self_reference(expr: &Expression) -> Option<Span> {
+    // Check current node
+    if let Expression::Identifier(Identifier { name, span, .. }) = expr {
+        if name == "self" {
+            return Some(*span);
+        }
+    }
+    // Recurse into children (covers all expression variants)
+    child_expressions(expr)
+        .into_iter()
+        .find_map(find_self_reference)
+}
+
+/// Searches a block's body for any `self` reference.
+fn find_self_reference_in_block(block: &Block) -> Option<Span> {
+    block.body.iter().find_map(find_self_reference)
+}
+
+/// Walks expressions looking for literal blocks in collection HOF positions
+/// that reference `self`. Emits a hint diagnostic for each such occurrence.
+///
+/// Uses `classify_block` to confirm the argument is a literal block in a
+/// control-flow position (Tier 1 codegen site), then additionally checks that
+/// the selector is one of the dangerous collection iteration methods.
+fn visit_self_capture_in_block(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    if let Expression::MessageSend {
+        selector,
+        arguments,
+        span,
+        ..
+    } = expr
+    {
+        let selector_str = selector.name();
+        for (i, arg) in arguments.iter().enumerate() {
+            if !is_collection_hof_selector(&selector_str, i) {
+                continue;
+            }
+            // Use classify_block to confirm this is a literal block in a control-flow
+            // position (not a block variable). This is the production wiring of the
+            // block_context infrastructure (BT-953).
+            let ctx = classify_block(arg.span(), expr, false);
+            if !matches!(ctx, BlockContext::ControlFlow) {
+                continue;
+            }
+            if let Expression::Block(block) = arg {
+                if find_self_reference_in_block(block).is_some() {
+                    let mut diag = Diagnostic::hint(
+                        format!("`self` capture in block passed to `{selector_str}` may deadlock"),
+                        *span,
+                    );
+                    diag.hint = Some(
+                        "Sending `self` from within a collection block re-enters the \
+                         `calling_self` dispatch and can deadlock. \
+                         Inline the logic or bind the result to a local variable before \
+                         entering the block."
+                            .into(),
+                    );
+                    diagnostics.push(diag);
+                }
+            }
+        }
+    }
+    for child in child_expressions(expr) {
+        visit_self_capture_in_block(child, diagnostics);
+    }
+}
+
 /// BT-859: Error on empty method bodies.
 ///
 /// Methods declared with `=>` but no body expressions are a compile error.
@@ -1213,7 +1370,7 @@ mod tests {
     /// A literal appearing as a non-last statement should produce a lint.
     #[test]
     fn literal_non_last_statement_emits_lint() {
-        let src = "Object subclass: Foo\n  bar =>\n    42.\n    self doSomething";
+        let src = "Object subclass: Foo\n  bar =>\n    42\n    self doSomething";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -1239,7 +1396,7 @@ mod tests {
     /// A string literal as a non-last statement should produce a lint.
     #[test]
     fn string_literal_non_last_emits_lint() {
-        let src = "Object subclass: Foo\n  bar =>\n    \"hello\".\n    self doSomething";
+        let src = "Object subclass: Foo\n  bar =>\n    \"hello\"\n    self doSomething";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -1256,7 +1413,7 @@ mod tests {
     /// `x + y` as a non-last statement (pure arithmetic) should produce a lint.
     #[test]
     fn pure_binary_expr_non_last_emits_lint() {
-        let src = "Object subclass: Foo\n  bar: x and: y =>\n    x + y.\n    self doSomething";
+        let src = "Object subclass: Foo\n  bar: x and: y =>\n    x + y\n    self doSomething";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -1278,7 +1435,7 @@ mod tests {
     /// A message send with side effects (keyword send) should NOT produce a lint.
     #[test]
     fn effectful_send_no_lint() {
-        let src = "Object subclass: Foo\n  bar =>\n    self doSomething.\n    self doOtherThing";
+        let src = "Object subclass: Foo\n  bar =>\n    self doSomething\n    self doOtherThing";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -1310,7 +1467,7 @@ mod tests {
     /// Multiple effect-free statements produce one lint each.
     #[test]
     fn multiple_effect_free_stmts_emit_multiple_lints() {
-        let src = "Object subclass: Foo\n  bar =>\n    42.\n    \"hello\".\n    self doSomething";
+        let src = "Object subclass: Foo\n  bar =>\n    42\n    \"hello\"\n    self doSomething";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -1343,7 +1500,7 @@ mod tests {
     /// Standalone method definition: non-last literal triggers lint.
     #[test]
     fn standalone_method_effect_free_emits_lint() {
-        let src = "Object subclass: Foo\nFoo >> bar =>\n  42.\n  self doSomething";
+        let src = "Object subclass: Foo\nFoo >> bar =>\n  42\n  self doSomething";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -1375,6 +1532,259 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected no errors for cast on actor type, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-950: Redundant assignment tests ───────────────────────────────────
+
+    /// `x := x` at the top level emits a warning.
+    #[test]
+    fn redundant_assignment_top_level_warns() {
+        let src = "x := 1.\nx := x";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for redundant assignment, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("Redundant assignment"),
+            "Expected 'Redundant assignment' in message, got: {}",
+            diagnostics[0].message
+        );
+        assert!(
+            diagnostics[0].message.contains("x := x"),
+            "Expected 'x := x' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// `x := y` (different names) does NOT warn.
+    #[test]
+    fn non_redundant_assignment_no_warn() {
+        let src = "x := 1.\ny := 2.\nx := y";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for non-redundant assignment, got: {diagnostics:?}"
+        );
+    }
+
+    /// `x := x` inside a method body (using a parameter) emits a warning.
+    #[test]
+    fn redundant_assignment_in_method_warns() {
+        let src = "Object subclass: Foo\n  withX: x => x := x";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for redundant assignment in method, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+    }
+
+    /// `x := x` nested inside a block emits a warning.
+    #[test]
+    fn redundant_assignment_in_block_warns() {
+        let src = "Object subclass: Foo\n  withX: x => [x := x] value";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for redundant assignment inside block, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+    }
+
+    /// `self.x := self.x` (field access, not plain identifiers) does NOT trigger
+    /// the redundant-assignment check (that's a separate BT-914 concern).
+    #[test]
+    fn field_access_assignment_not_flagged_as_redundant() {
+        let src = "Object subclass: Foo\n  state: x = 0\n  noOp => self.x := self.x";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no redundant-assignment warning for field access, got: {diagnostics:?}"
+        );
+    }
+
+    /// `x := x` inside a standalone method definition warns.
+    #[test]
+    fn redundant_assignment_in_standalone_method_warns() {
+        let src = "Object subclass: Foo\n  value => 1\nFoo >> withX: x => x := x";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for redundant assignment in standalone method, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+    }
+
+    // ── BT-953: Self capture in collection HOF blocks ─────────────────────────
+
+    /// `self` inside a `collect:` block emits a hint.
+    #[test]
+    fn self_capture_in_collect_block_hints() {
+        let src =
+            "Actor subclass: Processor\n  process: items => items collect: [:x | self handle: x]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 hint for self capture in collect:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Hint);
+        assert!(
+            diagnostics[0].message.contains("collect:"),
+            "Expected 'collect:' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// `self` inside an `inject:into:` block emits a hint.
+    #[test]
+    fn self_capture_in_inject_into_block_hints() {
+        let src = "Actor subclass: Processor\n  run: items => items inject: 0 into: [:acc :x | self transform: x]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 hint for self capture in inject:into:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Hint);
+        assert!(diagnostics[0].message.contains("inject:into:"));
+    }
+
+    /// No `self` in the block — no hint.
+    #[test]
+    fn no_self_in_collect_block_no_hint() {
+        let src = "Actor subclass: Processor\n  process: items => items collect: [:x | x * 2]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hints when self is not in block, got: {diagnostics:?}"
+        );
+    }
+
+    /// `self` in an `ifTrue:` block is safe — no hint.
+    #[test]
+    fn self_in_if_true_block_no_hint() {
+        let src = "Actor subclass: Worker\n  run => (x > 0) ifTrue: [self doWork]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hints for self in ifTrue: block, got: {diagnostics:?}"
+        );
+    }
+
+    /// Value-object class (not Actor) also gets the hint — the deadlock risk
+    /// exists for any class using the `calling_self` mechanism.
+    #[test]
+    fn self_capture_in_value_object_collect_hints() {
+        let src = "Object subclass: Formatter\n  format: rows => rows collect: [:row | self formatRow: row]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 hint for self capture in value-object collect:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Hint);
+    }
+
+    /// `self` inside a `do:` block emits a hint.
+    #[test]
+    fn self_capture_in_do_block_hints() {
+        let src = "Object subclass: Runner\n  run: items => items do: [:x | self process: x]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 hint for self capture in do:, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Hint);
+    }
+
+    /// `self` inside a map literal within a collect: block still triggers.
+    #[test]
+    fn self_capture_nested_in_map_literal_hints() {
+        let src =
+            "Object subclass: Foo\n  run: items => items collect: [:x | #{key => self value}]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 hint for self nested in map literal, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Hint);
+    }
+
+    /// A block variable (not a literal block) passed to collect: does NOT trigger
+    /// the hint — we only flag literal blocks.
+    #[test]
+    fn block_variable_in_collect_no_hint() {
+        let src = "Object subclass: Foo\n  run: items with: blk => items collect: blk";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hints for block variable (not literal), got: {diagnostics:?}"
         );
     }
 }

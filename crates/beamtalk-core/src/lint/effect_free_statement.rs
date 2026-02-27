@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn discarded_literal_surfaced_by_lint_runner() {
-        let diags = lint("Object subclass: Foo\n  bar =>\n    42.\n    self doSomething");
+        let diags = lint("Object subclass: Foo\n  bar =>\n    42\n    self doSomething");
         let effect_free: Vec<_> = diags
             .iter()
             .filter(|d| d.message.contains("no effect"))

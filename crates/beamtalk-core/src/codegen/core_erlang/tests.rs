@@ -587,6 +587,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
     let class = ClassDefinition {
         name: Identifier::new("EventBus", Span::new(0, 8)),
         superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
+        class_kind: ClassKind::Actor,
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
@@ -2880,6 +2881,7 @@ fn test_class_registration_generation() {
     let class = ClassDefinition {
         name: Identifier::new("Counter", Span::new(0, 7)),
         superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
+        class_kind: ClassKind::Actor,
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
@@ -3059,6 +3061,7 @@ fn test_multiple_classes_registration() {
         ClassDefinition {
             name: Identifier::new(name, Span::new(0, name_len)),
             superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -3179,6 +3182,7 @@ fn test_multi_class_early_error_short_circuits() {
         ClassDefinition {
             name: Identifier::new(name, Span::new(0, name_len)),
             superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -3246,6 +3250,7 @@ fn test_three_class_short_circuit_nesting() {
         ClassDefinition {
             name: Identifier::new(name, Span::new(0, name_len)),
             superclass: Some(Identifier::new("Actor", Span::new(0, 5))),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -3536,6 +3541,7 @@ fn test_is_actor_class_direct_actor_subclass() {
     let class = ClassDefinition {
         name: Identifier::new("Counter", Span::new(0, 0)),
         superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
+        class_kind: ClassKind::Actor,
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
@@ -3564,6 +3570,7 @@ fn test_is_actor_class_object_subclass_is_value_type() {
     let class = ClassDefinition {
         name: Identifier::new("Point", Span::new(0, 0)),
         superclass: Some(Identifier::new("Object", Span::new(0, 0))),
+        class_kind: ClassKind::Object,
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
@@ -3594,6 +3601,7 @@ fn test_is_actor_class_multi_level_inheritance() {
     let counter = ClassDefinition {
         name: Identifier::new("Counter", Span::new(0, 0)),
         superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
+        class_kind: ClassKind::Actor,
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
@@ -3607,6 +3615,7 @@ fn test_is_actor_class_multi_level_inheritance() {
     let logging_counter = ClassDefinition {
         name: Identifier::new("LoggingCounter", Span::new(0, 0)),
         superclass: Some(Identifier::new("Counter", Span::new(0, 0))),
+        class_kind: ClassKind::Object,
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
@@ -3657,6 +3666,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
     let class = ClassDefinition {
         name: Identifier::new("LoggingCounter", Span::new(0, 0)),
         superclass: Some(Identifier::new("Counter", Span::new(0, 0))),
+        class_kind: ClassKind::Object,
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
@@ -3686,6 +3696,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
     let class = ClassDefinition {
         name: Identifier::new("MyList", Span::new(0, 0)),
         superclass: Some(Identifier::new("Collection", Span::new(0, 0))),
+        class_kind: ClassKind::Object,
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
@@ -3719,6 +3730,7 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
     let class = ClassDefinition {
         name: Identifier::new("MyInt", Span::new(0, 0)),
         superclass: Some(Identifier::new("Integer", Span::new(0, 0))),
+        class_kind: ClassKind::Object,
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
@@ -3751,6 +3763,7 @@ fn test_is_actor_class_root_class_is_value_type() {
     let class = ClassDefinition {
         name: Identifier::new("ProtoObject", Span::new(0, 0)),
         superclass: None,
+        class_kind: ClassKind::Object,
         is_abstract: true,
         is_sealed: false,
         is_typed: false,
