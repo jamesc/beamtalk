@@ -1123,8 +1123,7 @@ impl CoreErlangGenerator {
                 let expected_kw_sel = build_kw_sel(&class.state);
                 // Guard against collisions with built-in class selectors (new/new: for Value).
                 // Without this, a slot named e.g. "new" would produce a duplicate entry.
-                let collides_with_builtin =
-                    matches!(expected_kw_sel.as_str(), "new" | "new:");
+                let collides_with_builtin = matches!(expected_kw_sel.as_str(), "new" | "new:");
                 let kw_selector_already_defined = class
                     .class_methods
                     .iter()

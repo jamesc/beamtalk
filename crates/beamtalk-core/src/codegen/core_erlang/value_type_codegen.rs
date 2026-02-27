@@ -9,7 +9,7 @@
 //! terms (maps) with no process. They are created with `new` and `new:`,
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
-use super::document::{concat, Document};
+use super::document::{Document, concat};
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
