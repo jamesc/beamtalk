@@ -14,7 +14,7 @@
 /// false or: [true]        // => true
 /// ```
 
-abstract Object subclass: Boolean
+abstract Value subclass: Boolean
 
   // === Abstract protocol (subclasses must implement) ===
 

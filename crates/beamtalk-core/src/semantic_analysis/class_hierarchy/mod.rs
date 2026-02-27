@@ -1006,6 +1006,7 @@ mod tests {
             chain,
             vec![
                 EcoString::from("Number"),
+                EcoString::from("Value"),
                 EcoString::from("Object"),
                 EcoString::from("ProtoObject"),
             ]

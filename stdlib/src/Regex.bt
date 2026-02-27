@@ -19,7 +19,7 @@
 /// ```beamtalk
 /// Regex from: "[a-z]+" options: #(#caseless)   // case-insensitive
 /// ```
-sealed Object subclass: Regex
+sealed Value subclass: Regex
 
   /// Compile a regex pattern string into a Regex object (class method).
   ///

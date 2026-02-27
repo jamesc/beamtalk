@@ -13,7 +13,7 @@
 ///   e stackTrace first method
 /// ]
 /// ```
-Object subclass: StackFrame
+Value subclass: StackFrame
   /// Return the function/method name as a symbol.
   ///
   /// ## Examples

@@ -1224,13 +1224,19 @@ impl CoreErlangGenerator {
             if chain.iter().any(|s| s.as_str() == "Actor") {
                 return true;
             }
-            // If the chain terminated at a known value-type root (Object/ProtoObject),
+            // If the chain terminated at a known value-type root (Object/ProtoObject/Value),
             // this is definitely a value type.
             // BT-480: Include exception hierarchy classes — these inherit from Object
             // (Exception → Object) and must compile as value types, not actors.
+            // BT-925: Include "Value" — Value has no .bt file (runtime-only builtin) so
+            // it is absent from the class_superclass_index. Classes that directly extend
+            // Value (Collection, Number, Boolean, Exception) may see the chain terminate
+            // at "Value" when cross-file superclass info is incomplete. Recognise "Value"
+            // as a known value-type root so these abstract bases compile correctly.
             let known_value_roots = [
                 "Object",
                 "ProtoObject",
+                "Value",
                 "Exception",
                 "Error",
                 "RuntimeError",
