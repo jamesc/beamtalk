@@ -1,0 +1,195 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SchemeEval — the metacircular evaluator.
+///
+/// `eval:in:` dispatches on expression type following the classic SICP
+/// eval/apply loop:
+///
+/// - **Self-evaluating** — integers, booleans, strings, nil are returned as-is.
+/// - **Symbols** — looked up in the environment via `SchemeEnv>>lookup:`.
+/// - **Lists** — special forms or function application.
+///
+/// Special forms: `quote`, `define`, `lambda`, `if`, `cond`, `let`, `and`, `or`.
+///
+/// Built-in procedures are `Block` values stored directly in the environment
+/// dictionary, so no separate primitive dispatch table is needed.
+///
+/// ## Examples
+/// ```beamtalk
+/// reader := SchemeReader new
+/// eval   := SchemeEval new
+/// env    := eval defaultEnv
+///
+/// eval eval: (reader read: "(* 6 7)") in: env      // => 42
+/// eval eval: (reader read: "(define x 10)") in: env  // => nil
+/// eval eval: (reader read: "x") in: env            // => 10
+/// ```
+Object subclass: SchemeEval
+
+  /// Build a fresh `SchemeEnv` pre-loaded with standard arithmetic and
+  /// list primitives: `+`, `-`, `*`, `/`, `=`, `<`, `>`, `<=`, `>=`,
+  /// `car`, `cdr`, `cons`, `list`, `not`, `null?`.
+  ///
+  /// Each primitive is a `Block` that receives the full evaluated argument
+  /// list and returns the result.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// env := SchemeEval new defaultEnv
+  /// (env lookup: "+") await   // => a Block
+  /// ```
+  defaultEnv =>
+    SchemeEnv spawnWith: #{
+      #bindings => #{
+        "+"     => [:args | (args at: 1) + (args at: 2)],
+        "-"     => [:args | (args at: 1) - (args at: 2)],
+        "*"     => [:args | (args at: 1) * (args at: 2)],
+        "/"     => [:args | (args at: 1) div: (args at: 2)],
+        "="     => [:args | (args at: 1) =:= (args at: 2)],
+        "<"     => [:args | (args at: 1) < (args at: 2)],
+        ">"     => [:args | (args at: 1) > (args at: 2)],
+        "<="    => [:args | (args at: 1) <= (args at: 2)],
+        ">="    => [:args | (args at: 1) >= (args at: 2)],
+        "car"   => [:args | (args at: 1) first],
+        "cdr"   => [:args | (args at: 1) rest],
+        "cons"  => [:args | (#() add: (args at: 1)) ++ (args at: 2)],
+        "list"  => [:args | args],
+        "not"   => [:args | (args at: 1) not],
+        "null?" => [:args |
+          v := args at: 1
+          v isNil or: [v class =:= List and: [v isEmpty]]]
+      },
+      #parent => nil}
+
+  /// Evaluate `expr` in `env` and return the result.
+  ///
+  /// Dispatches on expression type: self-evaluating atoms are returned
+  /// immediately; symbols trigger an environment lookup; lists are processed
+  /// as special forms or function application.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ev  := SchemeEval new
+  /// env := ev defaultEnv
+  /// ev eval: 42 in: env                          // => 42
+  /// ev eval: (SchemeSymbol withName: "+") in: env  // => a Block
+  /// ```
+  eval: expr in: env =>
+    // Self-evaluating atomic types
+    (expr class =:= Integer) ifTrue: [^expr]
+    (expr class =:= True)    ifTrue: [^expr]
+    (expr class =:= False)   ifTrue: [^expr]
+    (expr class =:= String)  ifTrue: [^expr]
+    expr isNil               ifTrue: [^expr]
+
+    // Symbol: look up the name in the environment
+    (expr class =:= SchemeSymbol) ifTrue: [
+      ^(env lookup: expr name) await]
+
+    // Must be a list — special form or function application
+    (expr class =:= List) ifFalse: [^self error: "Unknown expression type"]
+    expr isEmpty ifTrue: [^#()]
+
+    head := expr first
+    tail := expr rest
+
+    // Special form dispatch on head symbol name
+    (head class =:= SchemeSymbol) ifTrue: [
+      sym := head name
+
+      // (quote expr) — return unevaluated
+      (sym =:= "quote") ifTrue: [^tail first]
+
+      // (define name expr) — bind name in the current environment
+      (sym =:= "define") ifTrue: [
+        varName := (tail at: 1) name
+        val     := self eval: (tail at: 2) in: env
+        (env define: varName value: val) await
+        ^nil]
+
+      // (lambda (params...) body) — create a closure
+      (sym =:= "lambda") ifTrue: [
+        params := (tail at: 1) collect: [:p | p name]
+        ^SchemeLambda withParams: params body: (tail at: 2) env: env]
+
+      // (if test then else?) — conditional branch
+      (sym =:= "if") ifTrue: [
+        condVal := self eval: (tail at: 1) in: env
+        (condVal == false or: [condVal isNil]) ifTrue: [
+          ^(tail size > 2) ifTrue: [self eval: (tail at: 3) in: env] ifFalse: [nil]
+        ] ifFalse: [
+          ^self eval: (tail at: 2) in: env]]
+
+      // (cond (test expr) ... (else expr))
+      (sym =:= "cond") ifTrue: [^self evalCond: tail in: env]
+
+      // (and expr ...) — short-circuit conjunction
+      (sym =:= "and") ifTrue: [^self evalAnd: tail in: env]
+
+      // (or expr ...) — short-circuit disjunction
+      (sym =:= "or") ifTrue: [^self evalOr: tail in: env]
+
+      // (let ((var expr) ...) body) — local bindings
+      (sym =:= "let") ifTrue: [
+        binds    := tail at: 1
+        body     := tail at: 2
+        params   := binds collect: [:b | (b at: 1) name]
+        vals     := binds collect: [:b | self eval: (b at: 2) in: env]
+        childEnv := (env extend: params values: vals) await
+        ^self eval: body in: childEnv]]
+
+    // Function application: evaluate head, evaluate all args, apply
+    func     := self eval: head in: env
+    evalArgs := tail collect: [:a | self eval: a in: env]
+    self apply: func args: evalArgs in: env
+
+  /// Apply `func` to the evaluated argument list `args`.
+  ///
+  /// - `SchemeLambda` — extends the closure env with parameter bindings
+  ///   and recurses into the body.
+  /// - `Block` — calls the block with `args` as a single list argument
+  ///   (the convention for all built-in primitives).
+  /// - Anything else — raises `"Not a procedure: <value>"`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ev apply: [:a | (a at: 1) + (a at: 2)] args: #(3 4) in: env   // => 7
+  /// ```
+  apply: func args: args in: env =>
+    (func class =:= SchemeLambda) ifTrue: [
+      childEnv := (func closureEnv extend: func params values: args) await
+      ^self eval: func body in: childEnv]
+    (func class =:= Block) ifFalse: [
+      ^self error: "Not a procedure: " ++ func printString]
+    // Built-in: block takes the full args list as its single argument
+    func value: args
+
+  /// Evaluate `cond` clauses in order; return the first truthy branch.
+  /// An `else` clause always matches. Returns `nil` if all tests fail.
+  evalCond: clauses in: env =>
+    clauses isEmpty ifTrue: [^nil]
+    clause := clauses first
+    ((clause first class =:= SchemeSymbol) and: [clause first name =:= "else"]) ifTrue: [
+      ^self eval: clause last in: env]
+    condVal := self eval: clause first in: env
+    (condVal == false or: [condVal isNil]) ifTrue: [
+      self evalCond: clauses rest in: env] ifFalse: [
+      self eval: clause last in: env]
+
+  /// Evaluate `(and ...)` — return `false` on the first falsy value,
+  /// otherwise return the last value.
+  evalAnd: exprs in: env =>
+    exprs isEmpty ifTrue: [^true]
+    val := self eval: exprs first in: env
+    (val == false or: [val isNil]) ifTrue: [^false]
+    exprs size =:= 1 ifTrue: [^val]
+    self evalAnd: exprs rest in: env
+
+  /// Evaluate `(or ...)` — return the first truthy value,
+  /// or `false` if all expressions are falsy.
+  evalOr: exprs in: env =>
+    exprs isEmpty ifTrue: [^false]
+    val := self eval: exprs first in: env
+    (val == false or: [val isNil]) ifFalse: [^val]
+    self evalOr: exprs rest in: env
