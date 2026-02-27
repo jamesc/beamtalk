@@ -44,3 +44,7 @@ TestCase subclass: ClassReflectionTest
     self assert: (Counter respondsTo: #isNil).
     // Non-existent methods should return false
     self deny: (Counter respondsTo: #bogus)
+
+  // BT-942: superclass returns correct value via __beamtalk_meta/0 fast path
+  testActorSuperclassReflection =>
+    self assert: (Counter superclass) equals: Actor

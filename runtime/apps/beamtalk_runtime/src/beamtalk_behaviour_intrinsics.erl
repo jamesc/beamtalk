@@ -90,12 +90,26 @@
 %% ADR 0032: Returns a proper #beamtalk_object{} instead of a bare atom,
 %% fixing the inconsistency where `Counter class` returned an object but
 %% `Counter superclass` returned an atom.
+%%
+%% BT-942: Uses __beamtalk_meta/0 when available; falls back to gen_server
+%% for dynamic classes created via beamtalk_class_builder.
 -spec classSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 classSuperclass(Self) ->
     ClassPid = erlang:element(4, Self),
-    case gen_server:call(ClassPid, superclass) of
-        none -> nil;
-        SuperclassName -> atom_to_class_object(SuperclassName)
+    Module = beamtalk_object_class:module_name(ClassPid),
+    SuperclassName =
+        case meta_for_module(Module) of
+            {ok, Meta} ->
+                maps:get(superclass, Meta);
+            not_available ->
+                case gen_server:call(ClassPid, superclass) of
+                    none -> nil;
+                    Name -> Name
+                end
+        end,
+    case SuperclassName of
+        nil -> nil;
+        SuperName -> atom_to_class_object(SuperName)
     end.
 
 %% @doc Return direct subclasses of the receiver as a list of class objects.
@@ -138,10 +152,19 @@ classAllSubclasses(Self) ->
 %%
 %% Returns only methods defined directly in this class, not inherited ones.
 %% Full chain walk for all methods is implemented in Behaviour.methods (pure Beamtalk).
+%%
+%% BT-942: Uses __beamtalk_meta/0 when available; falls back to gen_server
+%% for dynamic classes created via beamtalk_class_builder.
 -spec classLocalMethods(#beamtalk_object{}) -> [atom()].
 classLocalMethods(Self) ->
     ClassPid = erlang:element(4, Self),
-    gen_server:call(ClassPid, methods).
+    Module = beamtalk_object_class:module_name(ClassPid),
+    case meta_for_module(Module) of
+        {ok, Meta} ->
+            [Sel || {Sel, _Arity} <- maps:get(methods, Meta)];
+        not_available ->
+            gen_server:call(ClassPid, methods)
+    end.
 
 %% @doc Return all superclasses of the receiver in order (immediate parent to root).
 -spec classAllSuperclasses(#beamtalk_object{}) -> [#beamtalk_object{}].
@@ -161,6 +184,9 @@ classAllSuperclasses(Self) ->
     lists:reverse(Supers).
 
 %% @doc Return all method selectors understood by instances (full inheritance chain).
+%%
+%% BT-942: Uses __beamtalk_meta/0 at each hierarchy level when available;
+%% falls back to gen_server for dynamic classes.
 -spec classMethods(#beamtalk_object{}) -> [atom()].
 classMethods(Self) ->
     ClassPid = erlang:element(4, Self),
@@ -168,7 +194,14 @@ classMethods(Self) ->
     Acc = walk_hierarchy(
         ClassName,
         fun(_CN, CPid, A) ->
-            Methods = gen_server:call(CPid, methods),
+            Module = beamtalk_object_class:module_name(CPid),
+            Methods =
+                case meta_for_module(Module) of
+                    {ok, Meta} ->
+                        [Sel || {Sel, _Arity} <- maps:get(methods, Meta)];
+                    not_available ->
+                        gen_server:call(CPid, methods)
+                end,
             {cont, ordsets:union(A, ordsets:from_list(Methods))}
         end,
         ordsets:new()
@@ -277,6 +310,9 @@ classWhichIncludesSelector(Self, Selector) ->
     ).
 
 %% @doc Return all field names including inherited, in slot order.
+%%
+%% BT-942: Uses __beamtalk_meta/0 at each hierarchy level when available;
+%% falls back to gen_server for dynamic classes.
 -spec classAllFieldNames(#beamtalk_object{}) -> [atom()].
 classAllFieldNames(Self) ->
     ClassPid = erlang:element(4, Self),
@@ -284,7 +320,14 @@ classAllFieldNames(Self) ->
     walk_hierarchy(
         ClassName,
         fun(_CN, CPid, Acc) ->
-            IVars = gen_server:call(CPid, instance_variables),
+            Module = beamtalk_object_class:module_name(CPid),
+            IVars =
+                case meta_for_module(Module) of
+                    {ok, Meta} ->
+                        maps:get(fields, Meta);
+                    not_available ->
+                        gen_server:call(CPid, instance_variables)
+                end,
             {cont, IVars ++ Acc}
         end,
         []
@@ -301,10 +344,19 @@ classIncludesSelector(Self, Selector) ->
     lists:member(Selector, LocalMethods).
 
 %% @doc Return the names of fields declared in this class (not inherited).
+%%
+%% BT-942: Uses __beamtalk_meta/0 when available; falls back to gen_server
+%% for dynamic classes created via beamtalk_class_builder.
 -spec classFieldNames(#beamtalk_object{}) -> [atom()].
 classFieldNames(Self) ->
     ClassPid = erlang:element(4, Self),
-    gen_server:call(ClassPid, instance_variables).
+    Module = beamtalk_object_class:module_name(ClassPid),
+    case meta_for_module(Module) of
+        {ok, Meta} ->
+            maps:get(fields, Meta);
+        not_available ->
+            gen_server:call(ClassPid, instance_variables)
+    end.
 
 %% @doc Return the name of the class as a Symbol (atom).
 -spec className(#beamtalk_object{}) -> atom().
@@ -597,6 +649,29 @@ metaclassNew() ->
 %%% ============================================================================
 %%% Internal Helpers
 %%% ============================================================================
+
+%% @private
+%% @doc Try to retrieve reflection metadata from a compiled module's __beamtalk_meta/0.
+%%
+%% BT-942: Returns `{ok, Meta}` if the module exports `__beamtalk_meta/0` and
+%% the call succeeds; returns `not_available` otherwise (dynamic classes from
+%% beamtalk_class_builder, or any module that doesn't export the function).
+%%
+%% Note on superclass representation: the meta map uses atom `nil` for root
+%% classes (no superclass), while the gen_server `superclass` message returns
+%% atom `none`. Callers must normalize both to Beamtalk `nil`.
+-spec meta_for_module(atom()) -> {ok, map()} | not_available.
+meta_for_module(Module) ->
+    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
+        true ->
+            try Module:'__beamtalk_meta'() of
+                Meta when is_map(Meta) -> {ok, Meta}
+            catch
+                _:_ -> not_available
+            end;
+        false ->
+            not_available
+    end.
 
 %% @private
 %% @doc Generic fold over the superclass chain starting from ClassName.

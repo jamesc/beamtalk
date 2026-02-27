@@ -1,8 +1,9 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 76
 expression: core_erlang
 ---
-module 'stdlib_class_list' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'first'/1, 'rest'/1, 'last'/1, 'at:'/2, 'includes:'/2, 'sort'/1, 'sort:'/2, 'reversed'/1, 'unique'/1, 'detect:'/2, 'detect:ifNone:'/3, 'do:'/2, 'collect:'/2, 'select:'/2, 'reject:'/2, 'inject:into:'/3, 'take:'/2, 'drop:'/2, 'flatten'/1, 'flatMap:'/2, 'count:'/2, 'anySatisfy:'/2, 'allSatisfy:'/2, '++'/2, 'from:to:'/3, 'indexOf:'/2, 'eachWithIndex:'/2, 'zip:'/2, 'groupBy:'/2, 'partition:'/2, 'takeWhile:'/2, 'dropWhile:'/2, 'intersperse:'/2, 'add:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0]
+module 'stdlib_class_list' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'first'/1, 'rest'/1, 'last'/1, 'at:'/2, 'includes:'/2, 'sort'/1, 'sort:'/2, 'reversed'/1, 'unique'/1, 'detect:'/2, 'detect:ifNone:'/3, 'do:'/2, 'collect:'/2, 'select:'/2, 'reject:'/2, 'inject:into:'/3, 'take:'/2, 'drop:'/2, 'flatten'/1, 'flatMap:'/2, 'count:'/2, 'anySatisfy:'/2, 'allSatisfy:'/2, '++'/2, 'from:to:'/3, 'indexOf:'/2, 'eachWithIndex:'/2, 'zip:'/2, 'groupBy:'/2, 'partition:'/2, 'takeWhile:'/2, 'dropWhile:'/2, 'intersperse:'/2, 'add:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'List', 'Object'}]]
 
@@ -111,6 +112,7 @@ call 'beamtalk_list_ops':'from_to'(Self, _start20, _end21)
         <{'throw', {'$bt_nlr', _CatchTok32, _NlrVal33, _NlrState34}}> when call 'erlang':'=:='(_CatchTok32, _NlrToken23) -> {_NlrVal33, _NlrState34}
         <_OtherPair35> when 'true' -> primop 'raw_raise'(_NlrCls29, _NlrErr30, _NlrStk31)
       end
+
 
 'eachWithIndex:'/2 = fun (Self, _block36) ->
     let _seq37 = call 'beamtalk_collection_ops':'inject_into'(Self, 0, fun (_i38, _each39) -> let NewI = call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(_i38), call 'beamtalk_future':'maybe_await'(1)) in let _Unit = let _Fun40 = _block36 in apply _Fun40 (_each39, NewI) in NewI) in
@@ -324,5 +326,12 @@ call 'erlang':'++'(Self, [_item47|[]])
     of RegResult -> RegResult
     catch <CatchType, CatchError, CatchStack> -> 'ok'
 
+
+'__beamtalk_meta'/0 = fun () ->
+    ~{'class' => 'List',
+      'superclass' => 'Object',
+      'fields' => [],
+      'methods' => [{'size', 0}, {'isEmpty', 0}, {'first', 0}, {'rest', 0}, {'last', 0}, {'at:', 1}, {'includes:', 1}, {'sort', 0}, {'sort:', 1}, {'reversed', 0}, {'unique', 0}, {'detect:', 1}, {'detect:ifNone:', 2}, {'do:', 1}, {'collect:', 1}, {'select:', 1}, {'reject:', 1}, {'inject:into:', 2}, {'take:', 1}, {'drop:', 1}, {'flatten', 0}, {'flatMap:', 1}, {'count:', 1}, {'anySatisfy:', 1}, {'allSatisfy:', 1}, {'++', 1}, {'from:to:', 2}, {'indexOf:', 1}, {'eachWithIndex:', 1}, {'zip:', 1}, {'groupBy:', 1}, {'partition:', 1}, {'takeWhile:', 1}, {'dropWhile:', 1}, {'intersperse:', 1}, {'add:', 1}],
+      'class_methods' => []}~
 
 end

@@ -1015,6 +1015,39 @@ impl CoreErlangGenerator {
         self.self_version = 0;
     }
 
+    /// BT-940: Converts a byte-offset `Span` to a 1-based line number.
+    ///
+    /// Uses `self.source_text` to count newlines before the span's start offset.
+    /// Returns `None` if source text is unavailable or the span is out of range.
+    pub(super) fn span_to_line(&self, span: Span) -> Option<u32> {
+        let source = self.source_text.as_deref()?;
+        let offset = span.start() as usize;
+        if offset > source.len() {
+            return None;
+        }
+        let newline_count = source[..offset].bytes().filter(|&b| b == b'\n').count();
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "source files over 4GB (2^32 lines) are not supported"
+        )]
+        let line = newline_count as u32 + 1;
+        Some(line)
+    }
+
+    /// BT-940: Wraps a Document with a Core Erlang line annotation.
+    ///
+    /// Produces `( Doc -| [{'line', N}] )` which `erlc` preserves into BEAM
+    /// `debug_info`. The BEAM VM surfaces this as `{line, N}` in stacktraces.
+    pub(super) fn annotate_with_line(doc: Document<'static>, line_num: u32) -> Document<'static> {
+        docvec![
+            "( ",
+            doc,
+            " -| [{'line', ",
+            Document::String(line_num.to_string()),
+            "}] )"
+        ]
+    }
+
     /// BT-153/BT-245/BT-598: Check if mutation threading should be used for a block.
     /// In REPL mode, local variable mutations trigger threading.
     /// In actor module mode, field writes, self-sends, OR local variable
@@ -1349,14 +1382,24 @@ impl CoreErlangGenerator {
                 receiver,
                 selector,
                 arguments,
+                span,
                 is_cast,
                 ..
             } => {
-                if *is_cast {
+                let doc = if *is_cast {
                     self.generate_cast_send(receiver, selector, arguments)
                 } else {
                     self.generate_message_send(receiver, selector, arguments)
+                }?;
+                // BT-940: Annotate message sends with source line for BEAM stacktraces.
+                // Only annotate CLOSED expressions — class method sends return open let-chains
+                // (last_open_scope_result is Some after the call) which cannot be annotated.
+                if self.last_open_scope_result.is_none() {
+                    if let Some(line_num) = self.span_to_line(*span) {
+                        return Ok(Self::annotate_with_line(doc, line_num));
+                    }
                 }
+                Ok(doc)
             }
             Expression::Assignment { target, value, .. } => {
                 // BT-852: Stored blocks with mutations are now supported via Tier 2.

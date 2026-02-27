@@ -37,6 +37,24 @@ pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<
     ]
 }
 
+/// BT-940: `'file'` module attribute helper for BEAM stacktrace file names.
+impl CoreErlangGenerator {
+    /// Returns `, 'file' = [{"<path>", 1}]` when `source_path` is set,
+    /// or `Document::Nil` when no source path is available.
+    ///
+    /// The `erlc` compiler uses the `'file'` attribute to populate the BEAM
+    /// `Line` chunk file table, making stacktraces show the `.bt` source file.
+    pub(super) fn file_attr(&self) -> Document<'static> {
+        match &self.source_path {
+            Some(path) => {
+                let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+                docvec![", 'file' = [{\"", Document::String(escaped), "\", 1}]"]
+            }
+            None => Document::Nil,
+        }
+    }
+}
+
 /// Value Object: A class's compile-time identity.
 ///
 /// **DDD Context:** Code Generation
