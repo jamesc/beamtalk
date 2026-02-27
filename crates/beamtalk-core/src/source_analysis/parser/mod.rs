@@ -885,12 +885,19 @@ mod tests {
     use crate::source_analysis::lex_with_eof;
 
     /// Helper to parse a string and check for errors.
+    ///
+    /// Passes if there are no Error or Warning diagnostics. Lint diagnostics
+    /// are ignored here since they do not block compilation.
     fn parse_ok(source: &str) -> Module {
         let tokens = lex_with_eof(source);
         let (module, diagnostics) = parse(tokens);
+        let non_lint: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity != Severity::Lint)
+            .collect();
         assert!(
-            diagnostics.is_empty(),
-            "Expected no errors, got: {diagnostics:?}"
+            non_lint.is_empty(),
+            "Expected no errors, got: {non_lint:?}"
         );
         module
     }
@@ -4451,5 +4458,97 @@ Actor subclass: Counter
             !diagnostics.is_empty(),
             "Expected error for cascade with bang"
         );
+    }
+
+    // =========================================================================
+    // BT-948: Unnecessary period separator warnings
+    // =========================================================================
+
+    /// Helper to extract only lint diagnostics from a parse.
+    fn parse_lints(source: &str) -> Vec<Diagnostic> {
+        let tokens = lex_with_eof(source);
+        let (_module, diagnostics) = parse(tokens);
+        diagnostics
+            .into_iter()
+            .filter(|d| d.severity == Severity::Lint)
+            .collect()
+    }
+
+    #[test]
+    fn trailing_period_before_bracket_in_block_emits_lint() {
+        // `[ foo bar. ]` — trailing period before `]` is redundant
+        let lints = parse_lints("x := [ foo bar. ]");
+        assert_eq!(lints.len(), 1, "expected one lint, got: {lints:?}");
+        assert!(
+            lints[0].message.contains("trailing"),
+            "message: {}",
+            lints[0].message
+        );
+        assert_eq!(lints[0].severity, Severity::Lint);
+        assert!(lints[0].hint.is_some());
+    }
+
+    #[test]
+    fn period_before_newline_in_block_emits_lint() {
+        // `[ foo bar.\n  baz ]` — period before newline is redundant
+        let lints = parse_lints("x := [\n  foo bar.\n  baz\n]");
+        assert_eq!(lints.len(), 1, "expected one lint, got: {lints:?}");
+        assert!(
+            lints[0].message.contains("newline"),
+            "message: {}",
+            lints[0].message
+        );
+        assert_eq!(lints[0].severity, Severity::Lint);
+        assert!(lints[0].hint.is_some());
+    }
+
+    #[test]
+    fn period_between_statements_same_line_in_block_no_lint() {
+        // `[ foo bar. baz quux ]` — period on same line is the separator, no lint
+        let lints = parse_lints("x := [ foo bar. baz quux ]");
+        assert!(lints.is_empty(), "expected no lints, got: {lints:?}");
+    }
+
+    #[test]
+    fn trailing_period_at_end_of_method_emits_lint() {
+        // `increment => self.n := self.n + 1.` — trailing period after last statement
+        let lints = parse_lints(
+            "Object subclass: Counter\n  state: n = 0\n  increment => self.n := self.n + 1.\n",
+        );
+        assert_eq!(lints.len(), 1, "expected one lint, got: {lints:?}");
+        assert!(
+            lints[0].message.contains("end of method"),
+            "message: {}",
+            lints[0].message
+        );
+        assert_eq!(lints[0].severity, Severity::Lint);
+    }
+
+    #[test]
+    fn period_before_newline_in_method_body_emits_lint() {
+        // Two statements in a method body with an explicit period before newline
+        let lints = parse_lints(
+            "Object subclass: Foo\n  go =>\n    x := 1.\n    x + 2\n",
+        );
+        assert_eq!(lints.len(), 1, "expected one lint, got: {lints:?}");
+        assert!(
+            lints[0].message.contains("newline"),
+            "message: {}",
+            lints[0].message
+        );
+    }
+
+    #[test]
+    fn period_between_same_line_statements_in_method_no_lint() {
+        // `go => foo bar. baz quux` — same-line separator, needed
+        let lints = parse_lints("Object subclass: Foo\n  go => foo bar. baz quux\n");
+        assert!(lints.is_empty(), "expected no lints, got: {lints:?}");
+    }
+
+    #[test]
+    fn module_level_period_does_not_lint() {
+        // At module level, periods are optional statement terminators — no lint
+        let lints = parse_lints("foo bar.\nbaz quux.");
+        assert!(lints.is_empty(), "expected no lints at module level, got: {lints:?}");
     }
 }

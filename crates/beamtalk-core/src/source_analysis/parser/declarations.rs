@@ -808,13 +808,29 @@ impl Parser {
             // Period, bang (!), or newline separates statements
             if self.match_token(&TokenKind::Period) {
                 // Explicit period — check if next token starts a new method/state/class
+                let period_span = self.tokens[self.current - 1].span();
                 if self.is_at_end()
                     || self.is_at_class_definition()
                     || self.is_at_method_definition()
                     || self.is_at_standalone_method_definition()
                     || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
                 {
+                    // Trailing period at end of method — not needed (BT-948)
+                    let mut diag = Diagnostic::lint(
+                        "unnecessary trailing `.` at end of method",
+                        period_span,
+                    );
+                    diag.hint = Some("Remove the trailing `.`".into());
+                    self.diagnostics.push(diag);
                     break;
+                } else if !self.is_at_end() && self.current_token().has_leading_newline() {
+                    // Period immediately before a newline — newline already separates statements
+                    let mut diag = Diagnostic::lint(
+                        "unnecessary `.` — the following newline already separates statements",
+                        period_span,
+                    );
+                    diag.hint = Some("Remove the `.` and rely on the newline".into());
+                    self.diagnostics.push(diag);
                 }
                 // Otherwise continue parsing more expressions
             } else if self.match_token(&TokenKind::Bang) {

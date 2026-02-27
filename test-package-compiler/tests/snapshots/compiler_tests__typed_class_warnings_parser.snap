@@ -425,3 +425,7 @@ Module {
         },
     ],
 }
+
+Diagnostics:
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 525, end: 526 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 668, end: 669 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }

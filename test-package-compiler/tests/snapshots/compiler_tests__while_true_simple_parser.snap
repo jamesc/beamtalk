@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -1632,3 +1631,22 @@ Module {
         },
     ],
 }
+
+Diagnostics:
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 149, end: 150 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 198, end: 199 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 275, end: 276 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 312, end: 313 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 463, end: 464 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 489, end: 490 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 671, end: 672 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 697, end: 698 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 796, end: 797 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 841, end: 842 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 1007, end: 1008 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 1033, end: 1034 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 1117, end: 1118 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 1161, end: 1162 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 1292, end: 1293 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 1335, end: 1336 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 1363, end: 1364 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
