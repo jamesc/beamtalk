@@ -176,6 +176,37 @@ fn test_semantic_snapshot(case_name: &str) {
     insta::assert_snapshot!(format!("{}_semantic", case_name), output);
 }
 
+/// Test semantic analysis warnings for a given test case.
+///
+/// Runs the full semantic analysis pipeline and captures WARNING-level
+/// diagnostics in a snapshot. This is used to verify that typed class
+/// annotation warnings are properly emitted.
+fn test_warnings_snapshot(case_name: &str) {
+    let source = read_test_case(case_name);
+    let tokens = lex_with_eof(&source);
+    let (module, _parser_diagnostics) = parse(tokens);
+
+    let result = semantic_analysis::analyse(&module);
+
+    let warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Warning)
+        .collect();
+
+    let mut output = String::new();
+    if warnings.is_empty() {
+        output.push_str("No warnings\n");
+    } else {
+        output.push_str(&format!("Warnings ({}):\n", warnings.len()));
+        for diag in &warnings {
+            output.push_str(&format!("  - {}\n", diag.message));
+        }
+    }
+
+    insta::assert_snapshot!(format!("{}_warnings", case_name), output);
+}
+
 // Test cases will be generated here by build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_tests.rs"));
 
@@ -230,4 +261,13 @@ fn test_workspace_binding_compiles_as_normal_class() {
         !ws_code.contains("persistent_term"),
         "Workspace mode should NOT use persistent_term (ADR 0019 Phase 4), got:\n{ws_code}"
     );
+}
+
+/// BT-941: Smoke test — typed class annotation warnings are emitted correctly.
+///
+/// A `typed` class with missing annotations should surface type checker
+/// warnings. This verifies the warning pipeline works end-to-end.
+#[test]
+fn test_typed_class_warnings_warnings() {
+    test_warnings_snapshot("typed_class_warnings");
 }
