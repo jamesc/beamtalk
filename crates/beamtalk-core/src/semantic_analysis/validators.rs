@@ -14,6 +14,7 @@
 //! - Empty method bodies (BT-631)
 
 use crate::ast::{Block, Expression, Identifier, Module};
+use crate::lint::walker::{for_each_expr_seq, walk_expression, walk_module};
 use crate::semantic_analysis::block_context::{classify_block, is_collection_hof_selector};
 use crate::semantic_analysis::{BlockContext, ClassHierarchy};
 #[cfg(test)]
@@ -31,7 +32,7 @@ pub(crate) fn check_abstract_instantiation(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module_expressions(module, hierarchy, diagnostics, visit_abstract_instantiation);
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_abstract_instantiation);
 }
 
 /// Returns true if the selector name is an instantiation method (spawn, new, etc.)
@@ -109,107 +110,18 @@ fn receiver_class_name(receiver: &Expression) -> Option<&str> {
     }
 }
 
-/// Walks all expressions in a module (top-level + class methods),
-/// calling `visitor` on each expression.
-fn walk_module_expressions(
+/// Walks all expressions in a module, calling `visitor` on each node (pre-order).
+///
+/// This is a thin adapter over [`walk_module`] that threads the `hierarchy`
+/// and `diagnostics` through a closure, allowing callers to pass a simple
+/// `fn(&Expression, &ClassHierarchy, &mut Vec<Diagnostic>)` visitor.
+fn walk_module_with_hierarchy(
     module: &Module,
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
     visitor: fn(&Expression, &ClassHierarchy, &mut Vec<Diagnostic>),
 ) {
-    for expr in &module.expressions {
-        walk_expression(expr, hierarchy, diagnostics, visitor);
-    }
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for expr in &method.body {
-                walk_expression(expr, hierarchy, diagnostics, visitor);
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        for expr in &standalone.method.body {
-            walk_expression(expr, hierarchy, diagnostics, visitor);
-        }
-    }
-}
-
-/// Recursively walks an expression tree, calling `visitor` on each node
-/// before recursing into children.
-fn walk_expression(
-    expr: &Expression,
-    hierarchy: &ClassHierarchy,
-    diagnostics: &mut Vec<Diagnostic>,
-    visitor: fn(&Expression, &ClassHierarchy, &mut Vec<Diagnostic>),
-) {
-    visitor(expr, hierarchy, diagnostics);
-    match expr {
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            walk_expression(receiver, hierarchy, diagnostics, visitor);
-            for arg in arguments {
-                walk_expression(arg, hierarchy, diagnostics, visitor);
-            }
-        }
-        Expression::Block(block) => {
-            for e in &block.body {
-                walk_expression(e, hierarchy, diagnostics, visitor);
-            }
-        }
-        Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
-            walk_expression(value, hierarchy, diagnostics, visitor);
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            walk_expression(receiver, hierarchy, diagnostics, visitor);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    walk_expression(arg, hierarchy, diagnostics, visitor);
-                }
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            walk_expression(expression, hierarchy, diagnostics, visitor);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            walk_expression(receiver, hierarchy, diagnostics, visitor);
-        }
-        Expression::Match { value, arms, .. } => {
-            walk_expression(value, hierarchy, diagnostics, visitor);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    walk_expression(guard, hierarchy, diagnostics, visitor);
-                }
-                walk_expression(&arm.body, hierarchy, diagnostics, visitor);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                walk_expression(&pair.key, hierarchy, diagnostics, visitor);
-                walk_expression(&pair.value, hierarchy, diagnostics, visitor);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                walk_expression(elem, hierarchy, diagnostics, visitor);
-            }
-            if let Some(t) = tail {
-                walk_expression(t, hierarchy, diagnostics, visitor);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for seg in segments {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
-                    walk_expression(e, hierarchy, diagnostics, visitor);
-                }
-            }
-        }
-        _ => {}
-    }
+    walk_module(module, &mut |expr| visitor(expr, hierarchy, diagnostics));
 }
 
 /// BT-563: Warn when Actor subclasses use `new` or `new:` instead of `spawn`.
@@ -218,7 +130,7 @@ pub(crate) fn check_actor_new_usage(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module_expressions(module, hierarchy, diagnostics, visit_actor_new);
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_actor_new);
 }
 
 fn visit_actor_new(
@@ -280,7 +192,7 @@ pub(crate) fn check_new_field_names(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module_expressions(module, hierarchy, diagnostics, visit_new_field_names);
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_new_field_names);
 }
 
 fn visit_new_field_names(
@@ -361,7 +273,7 @@ pub(crate) fn check_class_variable_access(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module_expressions(module, hierarchy, diagnostics, visit_classvar_access);
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_classvar_access);
 }
 
 fn visit_classvar_access(
@@ -508,14 +420,16 @@ pub(crate) fn check_value_slot_assignment(
         for method in &class.methods {
             let method_selector = method.selector.name();
             for expr in &method.body {
-                walk_for_slot_assignments(
-                    expr,
-                    class_name,
-                    &method_selector,
-                    is_value,
-                    hierarchy,
-                    diagnostics,
-                );
+                walk_expression(expr, &mut |e| {
+                    check_slot_assignment_at(
+                        e,
+                        class_name,
+                        &method_selector,
+                        is_value,
+                        hierarchy,
+                        diagnostics,
+                    );
+                });
             }
         }
     }
@@ -529,14 +443,16 @@ pub(crate) fn check_value_slot_assignment(
         let is_value = hierarchy.is_value_subclass(class_name);
         let method_selector = standalone.method.selector.name();
         for expr in &standalone.method.body {
-            walk_for_slot_assignments(
-                expr,
-                class_name,
-                &method_selector,
-                is_value,
-                hierarchy,
-                diagnostics,
-            );
+            walk_expression(expr, &mut |e| {
+                check_slot_assignment_at(
+                    e,
+                    class_name,
+                    &method_selector,
+                    is_value,
+                    hierarchy,
+                    diagnostics,
+                );
+            });
         }
     }
 }
@@ -664,8 +580,12 @@ fn child_expressions(expr: &Expression) -> Vec<&Expression> {
     }
 }
 
-/// Recursively walks an expression tree checking for `self.slot :=` patterns.
-fn walk_for_slot_assignments(
+/// Checks a single expression node for `self.slot :=` patterns.
+///
+/// Called via [`walk_expression`] from [`check_value_slot_assignment`]; the
+/// walker handles recursive traversal, so this function only inspects the
+/// current node.
+fn check_slot_assignment_at(
     expr: &Expression,
     class_name: &str,
     method_selector: &str,
@@ -673,7 +593,6 @@ fn walk_for_slot_assignments(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Detect `self.slot := value` at this level.
     if let Expression::Assignment { target, span, .. } = expr {
         if let Expression::FieldAccess {
             receiver, field, ..
@@ -692,18 +611,6 @@ fn walk_for_slot_assignments(
             }
         }
     }
-
-    // Recurse into children.
-    for child in child_expressions(expr) {
-        walk_for_slot_assignments(
-            child,
-            class_name,
-            method_selector,
-            is_value,
-            hierarchy,
-            diagnostics,
-        );
-    }
 }
 
 // ── BT-950: Redundant assignment ─────────────────────────────────────────────
@@ -714,49 +621,30 @@ fn walk_for_slot_assignments(
 /// This has no effect at runtime and usually indicates a copy-paste error or
 /// leftover code.
 pub(crate) fn check_redundant_assignment(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    for expr in &module.expressions {
-        visit_redundant_assignment(expr, diagnostics);
-    }
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for expr in &method.body {
-                visit_redundant_assignment(expr, diagnostics);
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        for expr in &standalone.method.body {
-            visit_redundant_assignment(expr, diagnostics);
-        }
-    }
-}
-
-fn visit_redundant_assignment(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
-    if let Expression::Assignment {
-        target,
-        value,
-        span,
-        ..
-    } = expr
-    {
-        if let (
-            Expression::Identifier(Identifier { name: lhs, .. }),
-            Expression::Identifier(Identifier { name: rhs, .. }),
-        ) = (target.as_ref(), value.as_ref())
+    walk_module(module, &mut |expr| {
+        if let Expression::Assignment {
+            target,
+            value,
+            span,
+            ..
+        } = expr
         {
-            if lhs == rhs {
-                let mut diag = Diagnostic::warning(
-                    format!("Redundant assignment: `{lhs} := {lhs}` has no effect"),
-                    *span,
-                );
-                diag.hint = Some("Remove this assignment or assign a different value.".into());
-                diagnostics.push(diag);
+            if let (
+                Expression::Identifier(Identifier { name: lhs, .. }),
+                Expression::Identifier(Identifier { name: rhs, .. }),
+            ) = (target.as_ref(), value.as_ref())
+            {
+                if lhs == rhs {
+                    let mut diag = Diagnostic::warning(
+                        format!("Redundant assignment: `{lhs} := {lhs}` has no effect"),
+                        *span,
+                    );
+                    diag.hint = Some("Remove this assignment or assign a different value.".into());
+                    diagnostics.push(diag);
+                }
             }
         }
-    }
-    for child in child_expressions(expr) {
-        visit_redundant_assignment(child, diagnostics);
-    }
+    });
 }
 
 // ── BT-953: Self capture in collection HOF blocks ─────────────────────────────
@@ -774,21 +662,9 @@ pub(crate) fn check_self_capture_in_actor_block(
     module: &Module,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for expr in &module.expressions {
-        visit_self_capture_in_block(expr, diagnostics);
-    }
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for expr in &method.body {
-                visit_self_capture_in_block(expr, diagnostics);
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        for expr in &standalone.method.body {
-            visit_self_capture_in_block(expr, diagnostics);
-        }
-    }
+    walk_module(module, &mut |expr| {
+        check_self_capture_at(expr, diagnostics);
+    });
 }
 
 /// Recursively searches an expression tree for any reference to `self`.
@@ -813,13 +689,12 @@ fn find_self_reference_in_block(block: &Block) -> Option<Span> {
     block.body.iter().find_map(find_self_reference)
 }
 
-/// Walks expressions looking for literal blocks in collection HOF positions
-/// that reference `self`. Emits a hint diagnostic for each such occurrence.
+/// Checks a single expression node for the self-capture pattern.
 ///
-/// Uses `classify_block` to confirm the argument is a literal block in a
-/// control-flow position (Tier 1 codegen site), then additionally checks that
-/// the selector is one of the dangerous collection iteration methods.
-fn visit_self_capture_in_block(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+/// Called by [`walk_module`] via [`check_self_capture_in_actor_block`]; the
+/// walker handles recursive traversal, so this function only inspects the
+/// current node.
+fn check_self_capture_at(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     if let Expression::MessageSend {
         selector,
         arguments,
@@ -857,9 +732,6 @@ fn visit_self_capture_in_block(expr: &Expression, diagnostics: &mut Vec<Diagnost
             }
         }
     }
-    for child in child_expressions(expr) {
-        visit_self_capture_in_block(child, diagnostics);
-    }
 }
 
 // ── BT-955: Literal boolean condition ────────────────────────────────────────
@@ -878,21 +750,9 @@ fn visit_self_capture_in_block(expr: &Expression, diagnostics: &mut Vec<Diagnost
 /// - `true ifTrue: [1] ifFalse: [2]`  → `ifFalse:` branch is dead code
 /// - `false ifTrue: [1] ifFalse: [2]` → `ifTrue:` branch is dead code
 pub(crate) fn check_literal_boolean_condition(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    for expr in &module.expressions {
-        visit_literal_boolean_condition(expr, diagnostics);
-    }
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for expr in &method.body {
-                visit_literal_boolean_condition(expr, diagnostics);
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        for expr in &standalone.method.body {
-            visit_literal_boolean_condition(expr, diagnostics);
-        }
-    }
+    walk_module(module, &mut |expr| {
+        check_literal_boolean_condition_at(expr, diagnostics);
+    });
 }
 
 /// Returns `true` if the selector is a boolean conditional message.
@@ -917,7 +777,11 @@ fn dead_branch_hint(is_true: bool, selector: &str) -> &'static str {
     }
 }
 
-fn visit_literal_boolean_condition(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+/// Checks a single expression node for literal boolean conditional patterns.
+///
+/// Called by [`walk_module`] via [`check_literal_boolean_condition`]; the walker
+/// handles recursive traversal, so this function only inspects the current node.
+fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     if let Expression::MessageSend {
         receiver,
         selector,
@@ -966,9 +830,6 @@ fn visit_literal_boolean_condition(expr: &Expression, diagnostics: &mut Vec<Diag
                 }
             }
         }
-    }
-    for child in child_expressions(expr) {
-        visit_literal_boolean_condition(child, diagnostics);
     }
 }
 
@@ -1186,20 +1047,7 @@ fn check_seq_for_effect_free(exprs: &[Expression], diagnostics: &mut Vec<Diagnos
 /// Uses `Severity::Lint` so the warning is suppressed during normal compilation
 /// and only surfaces when running `beamtalk lint`.
 pub(crate) fn check_effect_free_statements(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    // Module-level expressions
-    check_seq_for_effect_free(&module.expressions, diagnostics);
-
-    // Class instance and class-side methods
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            check_seq_for_effect_free(&method.body, diagnostics);
-        }
-    }
-
-    // Standalone method definitions (Tonel-style: `Counter >> inc => ...`)
-    for standalone in &module.method_definitions {
-        check_seq_for_effect_free(&standalone.method.body, diagnostics);
-    }
+    for_each_expr_seq(module, |seq| check_seq_for_effect_free(seq, diagnostics));
 }
 
 /// BT-919: Error when `!` (cast) is used on a statically-known value type.
@@ -1211,7 +1059,7 @@ pub(crate) fn check_cast_on_value_type(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module_expressions(module, hierarchy, diagnostics, visit_cast_on_value_type);
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_cast_on_value_type);
 }
 
 fn visit_cast_on_value_type(

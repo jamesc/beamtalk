@@ -25,6 +25,7 @@ mod effect_free_statement;
 mod shadowed_block_param;
 mod trailing_caret;
 mod unnecessary_parens;
+pub(crate) mod walker;
 // ── add new lint modules here (alphabetical) ──────────────────────────────
 
 use crate::ast::Module;

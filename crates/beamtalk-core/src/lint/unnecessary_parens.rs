@@ -22,8 +22,9 @@
 //! a + (b * c)                 // right-hand binary operand needs parens
 //! ```
 
-use crate::ast::{Block, Expression, MessageSelector, MethodDefinition, Module};
+use crate::ast::{Block, Expression, MessageSelector, Module};
 use crate::lint::LintPass;
+use crate::lint::walker::for_each_expr_seq;
 use crate::source_analysis::Diagnostic;
 
 /// Lint pass that warns on `Expression::Parenthesized` wrapping expressions
@@ -32,26 +33,11 @@ pub(crate) struct UnnecessaryParensPass;
 
 impl LintPass for UnnecessaryParensPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        for expr in &module.expressions {
-            check_expr(expr, diagnostics);
-        }
-        for class in &module.classes {
-            for method in &class.methods {
-                check_method(method, diagnostics);
+        for_each_expr_seq(module, |seq| {
+            for expr in seq {
+                check_expr(expr, diagnostics);
             }
-            for method in &class.class_methods {
-                check_method(method, diagnostics);
-            }
-        }
-        for standalone in &module.method_definitions {
-            check_method(&standalone.method, diagnostics);
-        }
-    }
-}
-
-fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
-    for expr in &method.body {
-        check_expr(expr, diagnostics);
+        });
     }
 }
 
