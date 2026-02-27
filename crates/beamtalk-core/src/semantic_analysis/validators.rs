@@ -14,6 +14,7 @@
 //! - Empty method bodies (BT-631)
 
 use crate::ast::{Block, Expression, Identifier, Module};
+use crate::lint::walker::{for_each_expr_seq, walk_expression, walk_module};
 use crate::semantic_analysis::block_context::{classify_block, is_collection_hof_selector};
 use crate::semantic_analysis::{BlockContext, ClassHierarchy};
 #[cfg(test)]
@@ -31,7 +32,7 @@ pub(crate) fn check_abstract_instantiation(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module_expressions(module, hierarchy, diagnostics, visit_abstract_instantiation);
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_abstract_instantiation);
 }
 
 /// Returns true if the selector name is an instantiation method (spawn, new, etc.)
@@ -109,107 +110,18 @@ fn receiver_class_name(receiver: &Expression) -> Option<&str> {
     }
 }
 
-/// Walks all expressions in a module (top-level + class methods),
-/// calling `visitor` on each expression.
-fn walk_module_expressions(
+/// Walks all expressions in a module, calling `visitor` on each node (pre-order).
+///
+/// This is a thin adapter over [`walk_module`] that threads the `hierarchy`
+/// and `diagnostics` through a closure, allowing callers to pass a simple
+/// `fn(&Expression, &ClassHierarchy, &mut Vec<Diagnostic>)` visitor.
+fn walk_module_with_hierarchy(
     module: &Module,
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
     visitor: fn(&Expression, &ClassHierarchy, &mut Vec<Diagnostic>),
 ) {
-    for expr in &module.expressions {
-        walk_expression(expr, hierarchy, diagnostics, visitor);
-    }
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for expr in &method.body {
-                walk_expression(expr, hierarchy, diagnostics, visitor);
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        for expr in &standalone.method.body {
-            walk_expression(expr, hierarchy, diagnostics, visitor);
-        }
-    }
-}
-
-/// Recursively walks an expression tree, calling `visitor` on each node
-/// before recursing into children.
-fn walk_expression(
-    expr: &Expression,
-    hierarchy: &ClassHierarchy,
-    diagnostics: &mut Vec<Diagnostic>,
-    visitor: fn(&Expression, &ClassHierarchy, &mut Vec<Diagnostic>),
-) {
-    visitor(expr, hierarchy, diagnostics);
-    match expr {
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            walk_expression(receiver, hierarchy, diagnostics, visitor);
-            for arg in arguments {
-                walk_expression(arg, hierarchy, diagnostics, visitor);
-            }
-        }
-        Expression::Block(block) => {
-            for e in &block.body {
-                walk_expression(e, hierarchy, diagnostics, visitor);
-            }
-        }
-        Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
-            walk_expression(value, hierarchy, diagnostics, visitor);
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            walk_expression(receiver, hierarchy, diagnostics, visitor);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    walk_expression(arg, hierarchy, diagnostics, visitor);
-                }
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            walk_expression(expression, hierarchy, diagnostics, visitor);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            walk_expression(receiver, hierarchy, diagnostics, visitor);
-        }
-        Expression::Match { value, arms, .. } => {
-            walk_expression(value, hierarchy, diagnostics, visitor);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    walk_expression(guard, hierarchy, diagnostics, visitor);
-                }
-                walk_expression(&arm.body, hierarchy, diagnostics, visitor);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                walk_expression(&pair.key, hierarchy, diagnostics, visitor);
-                walk_expression(&pair.value, hierarchy, diagnostics, visitor);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                walk_expression(elem, hierarchy, diagnostics, visitor);
-            }
-            if let Some(t) = tail {
-                walk_expression(t, hierarchy, diagnostics, visitor);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for seg in segments {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
-                    walk_expression(e, hierarchy, diagnostics, visitor);
-                }
-            }
-        }
-        _ => {}
-    }
+    walk_module(module, &mut |expr| visitor(expr, hierarchy, diagnostics));
 }
 
 /// BT-563: Warn when Actor subclasses use `new` or `new:` instead of `spawn`.
@@ -218,7 +130,7 @@ pub(crate) fn check_actor_new_usage(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module_expressions(module, hierarchy, diagnostics, visit_actor_new);
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_actor_new);
 }
 
 fn visit_actor_new(
@@ -280,7 +192,7 @@ pub(crate) fn check_new_field_names(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module_expressions(module, hierarchy, diagnostics, visit_new_field_names);
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_new_field_names);
 }
 
 fn visit_new_field_names(
@@ -361,7 +273,7 @@ pub(crate) fn check_class_variable_access(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module_expressions(module, hierarchy, diagnostics, visit_classvar_access);
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_classvar_access);
 }
 
 fn visit_classvar_access(
@@ -508,14 +420,16 @@ pub(crate) fn check_value_slot_assignment(
         for method in &class.methods {
             let method_selector = method.selector.name();
             for expr in &method.body {
-                walk_for_slot_assignments(
-                    expr,
-                    class_name,
-                    &method_selector,
-                    is_value,
-                    hierarchy,
-                    diagnostics,
-                );
+                walk_expression(expr, &mut |e| {
+                    check_slot_assignment_at(
+                        e,
+                        class_name,
+                        &method_selector,
+                        is_value,
+                        hierarchy,
+                        diagnostics,
+                    );
+                });
             }
         }
     }
@@ -529,14 +443,16 @@ pub(crate) fn check_value_slot_assignment(
         let is_value = hierarchy.is_value_subclass(class_name);
         let method_selector = standalone.method.selector.name();
         for expr in &standalone.method.body {
-            walk_for_slot_assignments(
-                expr,
-                class_name,
-                &method_selector,
-                is_value,
-                hierarchy,
-                diagnostics,
-            );
+            walk_expression(expr, &mut |e| {
+                check_slot_assignment_at(
+                    e,
+                    class_name,
+                    &method_selector,
+                    is_value,
+                    hierarchy,
+                    diagnostics,
+                );
+            });
         }
     }
 }
@@ -664,8 +580,12 @@ fn child_expressions(expr: &Expression) -> Vec<&Expression> {
     }
 }
 
-/// Recursively walks an expression tree checking for `self.slot :=` patterns.
-fn walk_for_slot_assignments(
+/// Checks a single expression node for `self.slot :=` patterns.
+///
+/// Called via [`walk_expression`] from [`check_value_slot_assignment`]; the
+/// walker handles recursive traversal, so this function only inspects the
+/// current node.
+fn check_slot_assignment_at(
     expr: &Expression,
     class_name: &str,
     method_selector: &str,
@@ -673,7 +593,6 @@ fn walk_for_slot_assignments(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Detect `self.slot := value` at this level.
     if let Expression::Assignment { target, span, .. } = expr {
         if let Expression::FieldAccess {
             receiver, field, ..
@@ -692,18 +611,6 @@ fn walk_for_slot_assignments(
             }
         }
     }
-
-    // Recurse into children.
-    for child in child_expressions(expr) {
-        walk_for_slot_assignments(
-            child,
-            class_name,
-            method_selector,
-            is_value,
-            hierarchy,
-            diagnostics,
-        );
-    }
 }
 
 // ── BT-950: Redundant assignment ─────────────────────────────────────────────
@@ -714,49 +621,30 @@ fn walk_for_slot_assignments(
 /// This has no effect at runtime and usually indicates a copy-paste error or
 /// leftover code.
 pub(crate) fn check_redundant_assignment(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    for expr in &module.expressions {
-        visit_redundant_assignment(expr, diagnostics);
-    }
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for expr in &method.body {
-                visit_redundant_assignment(expr, diagnostics);
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        for expr in &standalone.method.body {
-            visit_redundant_assignment(expr, diagnostics);
-        }
-    }
-}
-
-fn visit_redundant_assignment(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
-    if let Expression::Assignment {
-        target,
-        value,
-        span,
-        ..
-    } = expr
-    {
-        if let (
-            Expression::Identifier(Identifier { name: lhs, .. }),
-            Expression::Identifier(Identifier { name: rhs, .. }),
-        ) = (target.as_ref(), value.as_ref())
+    walk_module(module, &mut |expr| {
+        if let Expression::Assignment {
+            target,
+            value,
+            span,
+            ..
+        } = expr
         {
-            if lhs == rhs {
-                let mut diag = Diagnostic::warning(
-                    format!("Redundant assignment: `{lhs} := {lhs}` has no effect"),
-                    *span,
-                );
-                diag.hint = Some("Remove this assignment or assign a different value.".into());
-                diagnostics.push(diag);
+            if let (
+                Expression::Identifier(Identifier { name: lhs, .. }),
+                Expression::Identifier(Identifier { name: rhs, .. }),
+            ) = (target.as_ref(), value.as_ref())
+            {
+                if lhs == rhs {
+                    let mut diag = Diagnostic::warning(
+                        format!("Redundant assignment: `{lhs} := {lhs}` has no effect"),
+                        *span,
+                    );
+                    diag.hint = Some("Remove this assignment or assign a different value.".into());
+                    diagnostics.push(diag);
+                }
             }
         }
-    }
-    for child in child_expressions(expr) {
-        visit_redundant_assignment(child, diagnostics);
-    }
+    });
 }
 
 // ── BT-953: Self capture in collection HOF blocks ─────────────────────────────
@@ -774,21 +662,9 @@ pub(crate) fn check_self_capture_in_actor_block(
     module: &Module,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for expr in &module.expressions {
-        visit_self_capture_in_block(expr, diagnostics);
-    }
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for expr in &method.body {
-                visit_self_capture_in_block(expr, diagnostics);
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        for expr in &standalone.method.body {
-            visit_self_capture_in_block(expr, diagnostics);
-        }
-    }
+    walk_module(module, &mut |expr| {
+        check_self_capture_at(expr, diagnostics);
+    });
 }
 
 /// Recursively searches an expression tree for any reference to `self`.
@@ -813,13 +689,12 @@ fn find_self_reference_in_block(block: &Block) -> Option<Span> {
     block.body.iter().find_map(find_self_reference)
 }
 
-/// Walks expressions looking for literal blocks in collection HOF positions
-/// that reference `self`. Emits a hint diagnostic for each such occurrence.
+/// Checks a single expression node for the self-capture pattern.
 ///
-/// Uses `classify_block` to confirm the argument is a literal block in a
-/// control-flow position (Tier 1 codegen site), then additionally checks that
-/// the selector is one of the dangerous collection iteration methods.
-fn visit_self_capture_in_block(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+/// Called by [`walk_module`] via [`check_self_capture_in_actor_block`]; the
+/// walker handles recursive traversal, so this function only inspects the
+/// current node.
+fn check_self_capture_at(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     if let Expression::MessageSend {
         selector,
         arguments,
@@ -857,9 +732,6 @@ fn visit_self_capture_in_block(expr: &Expression, diagnostics: &mut Vec<Diagnost
             }
         }
     }
-    for child in child_expressions(expr) {
-        visit_self_capture_in_block(child, diagnostics);
-    }
 }
 
 // ── BT-955: Literal boolean condition ────────────────────────────────────────
@@ -878,21 +750,9 @@ fn visit_self_capture_in_block(expr: &Expression, diagnostics: &mut Vec<Diagnost
 /// - `true ifTrue: [1] ifFalse: [2]`  → `ifFalse:` branch is dead code
 /// - `false ifTrue: [1] ifFalse: [2]` → `ifTrue:` branch is dead code
 pub(crate) fn check_literal_boolean_condition(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    for expr in &module.expressions {
-        visit_literal_boolean_condition(expr, diagnostics);
-    }
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for expr in &method.body {
-                visit_literal_boolean_condition(expr, diagnostics);
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        for expr in &standalone.method.body {
-            visit_literal_boolean_condition(expr, diagnostics);
-        }
-    }
+    walk_module(module, &mut |expr| {
+        check_literal_boolean_condition_at(expr, diagnostics);
+    });
 }
 
 /// Returns `true` if the selector is a boolean conditional message.
@@ -917,7 +777,11 @@ fn dead_branch_hint(is_true: bool, selector: &str) -> &'static str {
     }
 }
 
-fn visit_literal_boolean_condition(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+/// Checks a single expression node for literal boolean conditional patterns.
+///
+/// Called by [`walk_module`] via [`check_literal_boolean_condition`]; the walker
+/// handles recursive traversal, so this function only inspects the current node.
+fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     if let Expression::MessageSend {
         receiver,
         selector,
@@ -967,9 +831,6 @@ fn visit_literal_boolean_condition(expr: &Expression, diagnostics: &mut Vec<Diag
             }
         }
     }
-    for child in child_expressions(expr) {
-        visit_literal_boolean_condition(child, diagnostics);
-    }
 }
 
 /// BT-859: Error on empty method bodies.
@@ -1010,6 +871,185 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
     }
 }
 
+// ── BT-951: Effect-free statement detection ───────────────────────────────────
+
+/// Returns `true` if the expression is pure (no observable side effects).
+///
+/// Only a conservative subset is classified as pure: literals, variable reads,
+/// class references, parenthesized pure expressions, and binary sends with a
+/// known arithmetic or comparison operator applied to pure operands.
+fn is_effect_free(expr: &Expression) -> bool {
+    match expr {
+        Expression::Literal(_, _)
+        | Expression::Identifier(_)
+        | Expression::ClassReference { .. } => true,
+        Expression::Parenthesized { expression, .. } => is_effect_free(expression),
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            is_cast,
+            ..
+        } => {
+            if *is_cast {
+                return false;
+            }
+            match selector {
+                crate::ast::MessageSelector::Binary(op) => {
+                    is_pure_binary_op(op)
+                        && is_effect_free(receiver)
+                        && arguments.iter().all(is_effect_free)
+                }
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Returns `true` if a binary operator is a known pure arithmetic/comparison op.
+fn is_pure_binary_op(op: &str) -> bool {
+    matches!(
+        op,
+        "+" | "-"
+            | "*"
+            | "/"
+            | "//"
+            | "\\\\"
+            | "**"
+            | "<"
+            | ">"
+            | "<="
+            | ">="
+            | "="
+            | "~~"
+            | "&"
+            | "|"
+            | "^"
+            | ">>"
+            | "<<"
+    )
+}
+
+/// Returns a short description of the expression kind for diagnostic messages.
+fn effect_free_label(expr: &Expression) -> &'static str {
+    match expr {
+        Expression::Literal(_, _) => "literal",
+        Expression::Identifier(_) => "variable reference",
+        Expression::ClassReference { .. } => "class reference",
+        _ => "pure expression",
+    }
+}
+
+/// Walk an expression to find nested sequences (blocks) that may contain
+/// effect-free non-last statements.
+fn walk_expr_for_effect_free(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    match expr {
+        Expression::Block(block) => {
+            check_seq_for_effect_free(&block.body, diagnostics);
+        }
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            walk_expr_for_effect_free(receiver, diagnostics);
+            for arg in arguments {
+                walk_expr_for_effect_free(arg, diagnostics);
+            }
+        }
+        Expression::Assignment { target, value, .. } => {
+            walk_expr_for_effect_free(target, diagnostics);
+            walk_expr_for_effect_free(value, diagnostics);
+        }
+        Expression::Return { value, .. } => {
+            walk_expr_for_effect_free(value, diagnostics);
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            walk_expr_for_effect_free(receiver, diagnostics);
+            for msg in messages {
+                for arg in &msg.arguments {
+                    walk_expr_for_effect_free(arg, diagnostics);
+                }
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            walk_expr_for_effect_free(expression, diagnostics);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            walk_expr_for_effect_free(receiver, diagnostics);
+        }
+        Expression::Match { value, arms, .. } => {
+            walk_expr_for_effect_free(value, diagnostics);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    walk_expr_for_effect_free(guard, diagnostics);
+                }
+                walk_expr_for_effect_free(&arm.body, diagnostics);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                walk_expr_for_effect_free(&pair.key, diagnostics);
+                walk_expr_for_effect_free(&pair.value, diagnostics);
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for elem in elements {
+                walk_expr_for_effect_free(elem, diagnostics);
+            }
+            if let Some(t) = tail {
+                walk_expr_for_effect_free(t, diagnostics);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                walk_expr_for_effect_free(elem, diagnostics);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for seg in segments {
+                if let crate::ast::StringSegment::Interpolation(e) = seg {
+                    walk_expr_for_effect_free(e, diagnostics);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Check a sequence of expressions: warn on any non-last expression that is
+/// effect-free, then recurse into all expressions for nested sequences.
+fn check_seq_for_effect_free(exprs: &[Expression], diagnostics: &mut Vec<Diagnostic>) {
+    let len = exprs.len();
+    for (i, expr) in exprs.iter().enumerate() {
+        let is_last = i == len - 1;
+        if !is_last && is_effect_free(expr) {
+            let label = effect_free_label(expr);
+            let mut diag = Diagnostic::lint(format!("this {label} has no effect"), expr.span());
+            diag.hint =
+                Some("Remove this expression, or assign its value to a variable if needed.".into());
+            diagnostics.push(diag);
+        }
+        walk_expr_for_effect_free(expr, diagnostics);
+    }
+}
+
+/// BT-951: Warn (as a lint) when a statement is an effect-free expression
+/// whose value is silently discarded.
+///
+/// Checks method bodies, block bodies, and module-level expression sequences.
+/// Effect-free expressions include literals, variable references, and pure
+/// binary arithmetic / comparison expressions composed from pure sub-expressions.
+///
+/// Uses `Severity::Lint` so the warning is suppressed during normal compilation
+/// and only surfaces when running `beamtalk lint`.
+pub(crate) fn check_effect_free_statements(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    for_each_expr_seq(module, |seq| check_seq_for_effect_free(seq, diagnostics));
+}
+
 /// BT-919: Error when `!` (cast) is used on a statically-known value type.
 ///
 /// Value types are not actors — they do not have a mailbox and cannot receive
@@ -1019,7 +1059,7 @@ pub(crate) fn check_cast_on_value_type(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module_expressions(module, hierarchy, diagnostics, visit_cast_on_value_type);
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_cast_on_value_type);
 }
 
 fn visit_cast_on_value_type(
@@ -1269,6 +1309,174 @@ mod tests {
                 .contains("Cannot use ! (cast) on value type"),
             "Expected value-type cast error, got: {}",
             diagnostics[0].message
+        );
+    }
+
+    // ── BT-951: Effect-free statement tests ──────────────────────────────────
+
+    /// A lone literal in a method body is its return value — no lint warning.
+    #[test]
+    fn single_literal_in_method_no_lint() {
+        let src = "Object subclass: Foo\n  bar => 42";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no lint for single literal return value, got: {diagnostics:?}"
+        );
+    }
+
+    /// A literal appearing as a non-last statement should produce a lint.
+    #[test]
+    fn literal_non_last_statement_emits_lint() {
+        let src = "Object subclass: Foo\n  bar =>\n    42\n    self doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded literal, got: {diagnostics:?}"
+        );
+        assert_eq!(
+            diagnostics[0].severity,
+            Severity::Lint,
+            "Expected Lint severity"
+        );
+        assert!(
+            diagnostics[0].message.contains("literal"),
+            "Expected 'literal' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// A string literal as a non-last statement should produce a lint.
+    #[test]
+    fn string_literal_non_last_emits_lint() {
+        let src = "Object subclass: Foo\n  bar =>\n    \"hello\"\n    self doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded string literal, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Lint);
+    }
+
+    /// `x + y` as a non-last statement (pure arithmetic) should produce a lint.
+    #[test]
+    fn pure_binary_expr_non_last_emits_lint() {
+        let src = "Object subclass: Foo\n  bar: x and: y =>\n    x + y\n    self doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for pure binary expression, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Lint);
+        assert!(
+            diagnostics[0].message.contains("pure expression"),
+            "Got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// A message send with side effects (keyword send) should NOT produce a lint.
+    #[test]
+    fn effectful_send_no_lint() {
+        let src = "Object subclass: Foo\n  bar =>\n    self doSomething\n    self doOtherThing";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no lint for effectful sends, got: {diagnostics:?}"
+        );
+    }
+
+    /// A literal inside a block in non-last position should produce a lint.
+    #[test]
+    fn literal_in_block_non_last_emits_lint() {
+        let src = "Object subclass: Foo\n  bar => [42. self doSomething] value";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded literal in block, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Lint);
+    }
+
+    /// Multiple effect-free statements produce one lint each.
+    #[test]
+    fn multiple_effect_free_stmts_emit_multiple_lints() {
+        let src = "Object subclass: Foo\n  bar =>\n    42\n    \"hello\"\n    self doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            2,
+            "Expected 2 lints for two discarded literals, got: {diagnostics:?}"
+        );
+    }
+
+    /// Module-level expressions: non-last literal triggers lint.
+    #[test]
+    fn module_level_effect_free_emits_lint() {
+        let src = "42.\nself doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded literal at module level, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Lint);
+    }
+
+    /// Standalone method definition: non-last literal triggers lint.
+    #[test]
+    fn standalone_method_effect_free_emits_lint() {
+        let src = "Object subclass: Foo\nFoo >> bar =>\n  42\n  self doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        assert_eq!(
+            module.method_definitions.len(),
+            1,
+            "Expected 1 standalone method"
+        );
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded literal in standalone method, got: {diagnostics:?}"
         );
     }
 

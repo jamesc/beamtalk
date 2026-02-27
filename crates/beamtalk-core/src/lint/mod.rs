@@ -21,9 +21,11 @@
 
 mod boolean_literal_comparison;
 mod cascade_candidate;
+mod effect_free_statement;
 mod shadowed_block_param;
 mod trailing_caret;
 mod unnecessary_parens;
+pub(crate) mod walker;
 // ── add new lint modules here (alphabetical) ──────────────────────────────
 
 use crate::ast::Module;
@@ -45,6 +47,7 @@ fn all_passes() -> Vec<Box<dyn LintPass>> {
     vec![
         Box::new(boolean_literal_comparison::BooleanLiteralComparisonPass),
         Box::new(cascade_candidate::CascadeCandidatePass),
+        Box::new(effect_free_statement::EffectFreeStatementPass),
         Box::new(shadowed_block_param::ShadowedBlockParamPass),
         Box::new(trailing_caret::TrailingCaretPass),
         Box::new(unnecessary_parens::UnnecessaryParensPass),

@@ -22,6 +22,7 @@
 
 use crate::ast::{Expression, Identifier, MessageSelector, Module};
 use crate::lint::LintPass;
+use crate::lint::walker::walk_module;
 use crate::source_analysis::{Diagnostic, Span};
 
 /// Lint pass that flags `expr = true` and `expr = false` comparisons.
@@ -29,21 +30,22 @@ pub(crate) struct BooleanLiteralComparisonPass;
 
 impl LintPass for BooleanLiteralComparisonPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        for expr in &module.expressions {
-            walk_expression(expr, diagnostics);
-        }
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for expr in &method.body {
-                    walk_expression(expr, diagnostics);
+        walk_module(module, &mut |expr| {
+            if let Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                span,
+                ..
+            } = expr
+            {
+                if matches!(selector, MessageSelector::Binary(op) if op == "=") {
+                    if let Some(arg) = arguments.first() {
+                        check_boolean_comparison(receiver, arg, *span, diagnostics);
+                    }
                 }
             }
-        }
-        for standalone in &module.method_definitions {
-            for expr in &standalone.method.body {
-                walk_expression(expr, diagnostics);
-            }
-        }
+        });
     }
 }
 
@@ -116,93 +118,6 @@ fn check_boolean_comparison(
     let mut diag = Diagnostic::lint(format!("Redundant boolean comparison: {suggestion}"), span);
     diag.hint = Some(hint_text.into());
     diagnostics.push(diag);
-}
-
-fn walk_expression(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
-    // Check this node.
-    if let Expression::MessageSend {
-        receiver,
-        selector,
-        arguments,
-        span,
-        ..
-    } = expr
-    {
-        if matches!(selector, MessageSelector::Binary(op) if op == "=") {
-            if let Some(arg) = arguments.first() {
-                check_boolean_comparison(receiver, arg, *span, diagnostics);
-            }
-        }
-    }
-
-    // Recurse into children.
-    match expr {
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            walk_expression(receiver, diagnostics);
-            for arg in arguments {
-                walk_expression(arg, diagnostics);
-            }
-        }
-        Expression::Block(block) => {
-            for e in &block.body {
-                walk_expression(e, diagnostics);
-            }
-        }
-        Expression::Assignment { value, .. } | Expression::Return { value, .. } => {
-            walk_expression(value, diagnostics);
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            walk_expression(receiver, diagnostics);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    walk_expression(arg, diagnostics);
-                }
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            walk_expression(expression, diagnostics);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            walk_expression(receiver, diagnostics);
-        }
-        Expression::Match { value, arms, .. } => {
-            walk_expression(value, diagnostics);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    walk_expression(guard, diagnostics);
-                }
-                walk_expression(&arm.body, diagnostics);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                walk_expression(&pair.key, diagnostics);
-                walk_expression(&pair.value, diagnostics);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                walk_expression(elem, diagnostics);
-            }
-            if let Some(t) = tail {
-                walk_expression(t, diagnostics);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for seg in segments {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
-                    walk_expression(e, diagnostics);
-                }
-            }
-        }
-        _ => {}
-    }
 }
 
 #[cfg(test)]
