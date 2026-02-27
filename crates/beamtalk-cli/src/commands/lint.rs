@@ -46,9 +46,15 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             .map_err(|e| miette::miette!("Failed to read '{}': {e}", file))?;
 
         let tokens = lex_with_eof(&source);
-        let (module, _parse_diags) = parse(tokens);
+        let (module, parse_diags) = parse(tokens);
 
-        let lint_diags = beamtalk_core::lint::run_lint_passes(&module);
+        // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
+        // plus AST-level lint passes.
+        let mut lint_diags: Vec<_> = parse_diags
+            .into_iter()
+            .filter(|d| d.severity == Severity::Lint)
+            .collect();
+        lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
 
         for diag in &lint_diags {
             debug_assert_eq!(diag.severity, Severity::Lint);

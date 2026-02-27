@@ -1106,8 +1106,9 @@ mod tests {
     //! Tests for zero-syntax type inference across all expression forms.
     use super::*;
     use crate::ast::{
-        Block, CascadeMessage, ClassDefinition, Identifier, KeywordPart, MethodDefinition,
-        MethodKind, Module, ParameterDefinition, StateDeclaration, TypeAnnotation,
+        Block, CascadeMessage, ClassDefinition, ClassKind, Identifier, KeywordPart,
+        MethodDefinition, MethodKind, Module, ParameterDefinition, StateDeclaration,
+        TypeAnnotation,
     };
     use crate::source_analysis::Span;
 
@@ -1396,6 +1397,7 @@ mod tests {
             vec![ClassDefinition {
                 name: ident("Counter"),
                 superclass: Some(ident("Actor")),
+                class_kind: ClassKind::Actor,
                 is_abstract: false,
                 is_sealed: false,
                 is_typed: false,
@@ -1628,6 +1630,7 @@ mod tests {
             vec![ClassDefinition {
                 name: ident("Greeter"),
                 superclass: Some(ident("Object")),
+                class_kind: ClassKind::Object,
                 is_abstract: false,
                 is_sealed: false,
                 is_typed: false,
@@ -1781,6 +1784,7 @@ mod tests {
         ClassDefinition {
             name: ident(name),
             superclass: Some(ident("Actor")),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -1946,6 +1950,7 @@ mod tests {
         let parent = ClassDefinition {
             name: ident("Parent"),
             superclass: Some(ident("Object")),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -1971,6 +1976,7 @@ mod tests {
         let child = ClassDefinition {
             name: ident("Child"),
             superclass: Some(ident("Parent")),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2017,6 +2023,7 @@ mod tests {
         let parent = ClassDefinition {
             name: ident("Parent"),
             superclass: Some(ident("Object")),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2040,6 +2047,7 @@ mod tests {
         let child = ClassDefinition {
             name: ident("Child"),
             superclass: Some(ident("Parent")),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2959,6 +2967,7 @@ mod tests {
         ClassDefinition {
             name: ident("Counter"),
             superclass: Some(ident("Object")),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,

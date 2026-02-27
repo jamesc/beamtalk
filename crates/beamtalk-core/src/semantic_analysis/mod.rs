@@ -269,6 +269,8 @@ fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> Anal
     );
     // BT-919: Reject cast (!) on value types
     validators::check_cast_on_value_type(module, &result.class_hierarchy, &mut result.diagnostics);
+    // BT-950: Warn on redundant assignment (x := x)
+    validators::check_redundant_assignment(module, &mut result.diagnostics);
 
     // Phase 6: Module-level validation (BT-349)
     let module_diags = module_validator::validate_single_class(module);
@@ -605,8 +607,8 @@ mod tests {
     use super::test_helpers::test_span;
     use super::*;
     use crate::ast::{
-        Block, BlockParameter, ClassDefinition, Expression, Identifier, Literal, MatchArm,
-        MessageSelector, MethodDefinition, Pattern, StateDeclaration, StringSegment,
+        Block, BlockParameter, ClassDefinition, ClassKind, Expression, Identifier, Literal,
+        MatchArm, MessageSelector, MethodDefinition, Pattern, StateDeclaration, StringSegment,
     };
     use crate::source_analysis::{Severity, Span};
 
@@ -1295,7 +1297,8 @@ mod tests {
         //   getValue => self.value
 
         use crate::ast::{
-            ClassDefinition, MessageSelector, MethodDefinition, MethodKind, StateDeclaration,
+            ClassDefinition, ClassKind, MessageSelector, MethodDefinition, MethodKind,
+            StateDeclaration,
         };
 
         let get_value_method = MethodDefinition {
@@ -1323,6 +1326,7 @@ mod tests {
         let class_def = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -1681,11 +1685,14 @@ mod tests {
 
     #[test]
     fn test_analyse_hierarchy_includes_user_classes() {
-        use crate::ast::{ClassDefinition, MethodDefinition, MethodKind, StateDeclaration};
+        use crate::ast::{
+            ClassDefinition, ClassKind, MethodDefinition, MethodKind, StateDeclaration,
+        };
 
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -1732,11 +1739,12 @@ mod tests {
 
     #[test]
     fn test_analyse_reports_sealed_class_diagnostic() {
-        use crate::ast::ClassDefinition;
+        use crate::ast::{ClassDefinition, ClassKind};
 
         let class = ClassDefinition {
             name: Identifier::new("MyInt", test_span()),
             superclass: Some(Identifier::new("Integer", test_span())),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2013,12 +2021,13 @@ mod tests {
 
     #[test]
     fn test_abstract_class_instantiation_error() {
-        use crate::ast::{ClassDefinition, MethodDefinition, MethodKind};
+        use crate::ast::{ClassDefinition, ClassKind, MethodDefinition, MethodKind};
 
         // BT-105: abstract class cannot be instantiated
         let class = ClassDefinition {
             name: Identifier::new("Shape", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: true,
             is_sealed: false,
             is_typed: false,
@@ -2106,6 +2115,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2163,6 +2173,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2232,6 +2243,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2282,6 +2294,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2329,6 +2342,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2378,6 +2392,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2432,6 +2447,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2480,6 +2496,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2532,6 +2549,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2589,6 +2607,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2649,6 +2668,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2712,6 +2732,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2768,6 +2789,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2811,6 +2833,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2880,6 +2903,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -2975,6 +2999,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -3041,6 +3066,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -3105,6 +3131,7 @@ mod tests {
         let class = ClassDefinition {
             name: Identifier::new("Foo", test_span()),
             superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -3248,6 +3275,7 @@ mod tests {
         ClassDefinition {
             name: Identifier::new(name, test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: true,
             is_sealed: false,
             is_typed: false,
@@ -3407,6 +3435,7 @@ mod tests {
         let counter = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: ClassKind::Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,

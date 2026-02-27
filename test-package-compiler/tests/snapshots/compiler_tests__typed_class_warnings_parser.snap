@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -22,6 +23,7 @@ Module {
                     },
                 },
             ),
+            class_kind: Actor,
             is_abstract: false,
             is_sealed: false,
             is_typed: true,
@@ -425,3 +427,7 @@ Module {
         },
     ],
 }
+
+Diagnostics:
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 525, end: 526 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 668, end: 669 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }

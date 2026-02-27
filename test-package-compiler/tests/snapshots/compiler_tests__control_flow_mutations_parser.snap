@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -2596,6 +2595,8 @@ Diagnostics:
 Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 507, end: 508 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 507, end: 508 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 510, end: 511 }, hint: None, category: None }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 687, end: 688 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 715, end: 716 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
 Diagnostic { severity: Error, message: "Expected ')' to close parentheses", span: Span { start: 1577, end: 1578 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 1577, end: 1578 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 1577, end: 1578 }, hint: None, category: None }
@@ -2612,6 +2613,10 @@ Diagnostic { severity: Error, message: "Unexpected token: expected expression, f
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2225, end: 2226 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2233, end: 2234 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2242, end: 2243 }, hint: None, category: None }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 2267, end: 2268 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 2327, end: 2328 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 2353, end: 2354 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 2390, end: 2391 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
 Diagnostic { severity: Error, message: "Assignment target must be an identifier or field access", span: Span { start: 2588, end: 2595 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2636, end: 2637 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2673, end: 2674 }, hint: None, category: None }
@@ -2629,6 +2634,7 @@ Diagnostic { severity: Error, message: "Unexpected token: expected expression, f
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3177, end: 3178 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3192, end: 3193 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3202, end: 3203 }, hint: None, category: None }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 3257, end: 3258 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found state:", span: Span { start: 3332, end: 3338 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 3355, end: 3356 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3358, end: 3359 }, hint: None, category: None }
@@ -2638,3 +2644,4 @@ Diagnostic { severity: Error, message: "Unexpected token: expected expression, f
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3678, end: 3679 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3686, end: 3687 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3694, end: 3695 }, hint: None, category: None }
+Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 3723, end: 3724 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
