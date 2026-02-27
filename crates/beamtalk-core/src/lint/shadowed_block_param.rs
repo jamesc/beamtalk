@@ -71,6 +71,10 @@ impl LintScope {
     }
 
     fn pop(&mut self) {
+        debug_assert!(
+            self.levels.len() > 1,
+            "LintScope::pop called with only root scope"
+        );
         if self.levels.len() > 1 {
             self.levels.pop();
         }
