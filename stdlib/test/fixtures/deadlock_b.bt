@@ -6,7 +6,6 @@
 // already busy handling its own callPeer — creating a circular deadlock.
 
 Actor subclass: DeadlockB
-  state: _ = nil
 
   respondToA: caller =>
     // This call back to caller (DeadlockA) creates a deadlock:
