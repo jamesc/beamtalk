@@ -159,12 +159,11 @@ result_print_string(Result) ->
 %% Public so op handlers can call it directly by class name atom.
 -spec run_class_by_name(atom()) -> map().
 run_class_by_name(ClassName) ->
-    {TestMethods, FlatMethods} = discover_methods_via_registry(ClassName),
+    {TestMethods, FlatMethods, Module} = discover_methods_via_registry(ClassName),
     case TestMethods of
         [] ->
             make_test_result(0, 0, 0, 0.0, []);
         _ ->
-            Module = beamtalk_test_case:resolve_module(ClassName),
             StartTime = erlang:monotonic_time(millisecond),
             Results = lists:map(
                 fun(Method) ->
@@ -181,8 +180,7 @@ run_class_by_name(ClassName) ->
 %% @doc Run a single test method in a class by name.
 -spec run_method_by_name(atom(), atom()) -> map().
 run_method_by_name(ClassName, TestName) ->
-    Module = beamtalk_test_case:resolve_module(ClassName),
-    {_TestMethods, FlatMethods} = discover_methods_via_registry(ClassName),
+    {_TestMethods, FlatMethods, Module} = discover_methods_via_registry(ClassName),
     StartTime = erlang:monotonic_time(millisecond),
     Result = beamtalk_test_case:run_test_method(ClassName, Module, TestName, FlatMethods),
     EndTime = erlang:monotonic_time(millisecond),
@@ -190,13 +188,18 @@ run_method_by_name(ClassName, TestName) ->
     Structured = beamtalk_test_case:structure_results(ClassName, [Result], Duration),
     structured_to_test_result(Structured).
 
-%% @doc Discover methods via class registry gen_server.
+%% @doc Discover methods and module via class registry gen_server.
 %%
-%% Returns {TestMethods, FlatMethods} where TestMethods is the sorted list
-%% of test* selectors and FlatMethods is a map of all methods (used by
-%% run_test_method to check for setUp/tearDown without module_info).
+%% Returns {TestMethods, FlatMethods, Module} where:
+%% - TestMethods is the sorted list of test* selectors
+%% - FlatMethods is a map of all methods (for setUp/tearDown detection)
+%% - Module is the authoritative BEAM module atom from the class gen_server
+%%
+%% Using Module from gen_server state (rather than resolve_module/1) ensures
+%% we use the exact module atom the class was compiled with, avoiding the
+%% "setUp failed: error:undef" misdiagnosis when module naming differs.
 %% Raises a structured error if the class is not registered.
--spec discover_methods_via_registry(atom()) -> {[atom()], map()}.
+-spec discover_methods_via_registry(atom()) -> {[atom()], map(), atom()}.
 discover_methods_via_registry(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
@@ -209,13 +212,14 @@ discover_methods_via_registry(ClassName) ->
             beamtalk_error:raise(Error2);
         ClassPid ->
             Methods = gen_server:call(ClassPid, methods),
+            Module = beamtalk_object_class:module_name(ClassPid),
             FlatMethods = maps:from_list([{M, true} || M <- Methods]),
             TestMethods = [
                 M
              || M <- Methods,
                 lists:prefix("test", atom_to_list(M))
             ],
-            {lists:sort(TestMethods), FlatMethods}
+            {lists:sort(TestMethods), FlatMethods, Module}
     end.
 
 %%====================================================================
