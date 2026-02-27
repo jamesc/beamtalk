@@ -336,6 +336,8 @@ pub enum DiagnosticCategory {
     Unused,
     /// Empty-method-body error (BT-859).
     EmptyBody,
+    /// Style/redundancy lint (BT-959).
+    Lint,
 }
 
 /// A diagnostic message (error, warning, or hint).
@@ -390,6 +392,18 @@ impl Diagnostic {
         }
     }
 
+    /// Creates a new lint diagnostic (style/redundancy check, suppressed during normal compile).
+    #[must_use]
+    pub fn lint(message: impl Into<EcoString>, span: Span) -> Self {
+        Self {
+            severity: Severity::Lint,
+            message: message.into(),
+            span,
+            hint: None,
+            category: Some(DiagnosticCategory::Lint),
+        }
+    }
+
     /// Attaches a semantic category for `@expect` suppression.
     #[must_use]
     pub fn with_category(mut self, category: DiagnosticCategory) -> Self {
@@ -405,6 +419,8 @@ pub enum Severity {
     Error,
     /// A warning that should be addressed.
     Warning,
+    /// A style/redundancy lint check (suppressed during normal compile, shown by `beamtalk lint`).
+    Lint,
     /// A hint or informational note (e.g. DNU that may be intentional).
     Hint,
 }
