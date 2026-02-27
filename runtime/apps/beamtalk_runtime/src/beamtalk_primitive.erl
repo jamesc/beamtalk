@@ -465,12 +465,16 @@ value_type_send(Self, Class, Selector, Args) ->
             end
     end.
 
-%% @private Check if a selector is an ivar method (BT-359).
+%% @private Check if a selector is a mutation method on a value type (BT-359, BT-924).
+%%
+%% `fieldAt:put:` is blocked — value types are immutable, and the `with*:` methods
+%% return new instances rather than mutating in place.
+%%
+%% `fieldAt:` is intentionally NOT blocked here: user-defined value objects store
+%% their slots in the underlying map and support read-only reflection (BT-924).
 -spec is_ivar_method(atom()) -> {true, binary()} | false.
 is_ivar_method('fieldAt:put:') ->
-    {true, <<"Value types are immutable. Use a method that returns a new instance instead.">>};
-is_ivar_method('fieldAt:') ->
-    {true, <<"Value types have no fields">>};
+    {true, <<"Cannot modify slot on value type — use withSlot: to create a new instance">>};
 is_ivar_method(_) ->
     false.
 

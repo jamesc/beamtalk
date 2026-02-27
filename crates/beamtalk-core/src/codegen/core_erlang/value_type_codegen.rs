@@ -1229,14 +1229,58 @@ impl CoreErlangGenerator {
             }
         };
 
-        // fieldAt: error
-        let iva_hint =
-            Self::core_erlang_binary(&format!("{class_name}s are immutable and have no fields."));
+        // BT-924: User-defined value objects (ClassKind::Value) store slots in the
+        // underlying map and support read-only reflection via fieldAt: and fieldNames.
+        // Stdlib primitive types (ClassKind::Object) have no map slots — block both.
+        let is_value_class = class.class_kind == ClassKind::Value;
 
-        // fieldAt:put: error
-        let immutable_hint = Self::core_erlang_binary(&format!(
-            "{class_name}s are immutable. Use assignment (x := newValue) instead."
-        ));
+        // fieldNames arm — returns actual slot names for value objects, empty for primitives
+        let field_names_branch: Document<'static> = if is_value_class {
+            docvec![
+                "        <'fieldNames'> when 'true' ->\n",
+                "            call 'beamtalk_reflection':'field_names'(Self)\n",
+            ]
+        } else {
+            docvec![
+                "        <'fieldNames'> when 'true' ->\n",
+                "            []\n",
+            ]
+        };
+
+        // fieldAt: arm — reads from map for value objects, raises error for primitives
+        let field_at_branch: Document<'static> = if is_value_class {
+            docvec![
+                "        <'fieldAt:'> when 'true' ->\n",
+                "            let <FaName> = call 'erlang':'hd'(Args) in\n",
+                "            call 'beamtalk_reflection':'read_field'(FaName, Self)\n",
+            ]
+        } else {
+            let iva_hint = Self::core_erlang_binary(&format!(
+                "{class_name}s are immutable and have no fields."
+            ));
+            docvec![
+                "        <'fieldAt:'> when 'true' ->\n",
+                "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '",
+                Document::String(class_name.clone()),
+                "') in\n",
+                "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'fieldAt:') in\n",
+                "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, ",
+                Document::String(iva_hint),
+                ") in\n",
+                "            call 'beamtalk_error':'raise'(IvaErr2)\n",
+            ]
+        };
+
+        // fieldAt:put: hint — suggest with*: for value objects, assignment for primitives
+        let immutable_hint = if is_value_class {
+            Self::core_erlang_binary(
+                "Cannot modify slot on value type \u{2014} use withSlot: to create a new instance",
+            )
+        } else {
+            Self::core_erlang_binary(&format!(
+                "{class_name}s are immutable. Use assignment (x := newValue) instead."
+            ))
+        };
 
         // Route each class-defined method to its individual function
         let mut method_branches: Vec<Document<'static>> = Vec::new();
@@ -1335,19 +1379,10 @@ impl CoreErlangGenerator {
             "            end\n",
             // asString (conditional)
             as_string_branch,
-            // fieldNames
-            "        <'fieldNames'> when 'true' ->\n",
-            "            []\n",
-            // fieldAt:
-            "        <'fieldAt:'> when 'true' ->\n",
-            format!(
-                "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', '{class_name}') in\n"
-            ),
-            "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'fieldAt:') in\n",
-            format!(
-                "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, {iva_hint}) in\n"
-            ),
-            "            call 'beamtalk_error':'raise'(IvaErr2)\n",
+            // fieldNames — BT-924: delegates to beamtalk_reflection for value objects
+            field_names_branch,
+            // fieldAt: — BT-924: reads from map for value objects, error for primitives
+            field_at_branch,
             // fieldAt:put:
             "        <'fieldAt:put:'> when 'true' ->\n",
             format!(
