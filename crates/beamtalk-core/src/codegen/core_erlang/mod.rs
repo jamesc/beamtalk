@@ -1835,14 +1835,12 @@ impl CoreErlangGenerator {
         if is_quoted && !self.primitive_bindings.is_empty() {
             let known = self.primitive_bindings.known_runtime_modules();
             if !known.contains(&runtime_module) {
-                self.codegen_warnings.push(
-                    crate::source_analysis::Diagnostic::warning(
-                        format!(
-                            "@primitive '{name}' references module '{runtime_module}' which has not been compiled — ensure the class is included in the stdlib build"
-                        ),
-                        span,
+                self.add_codegen_warning(Diagnostic::warning(
+                    format!(
+                        "@primitive '{name}' references module '{runtime_module}' which has not been compiled — ensure the class is included in the stdlib build"
                     ),
-                );
+                    span,
+                ));
             }
         }
 

@@ -4932,6 +4932,15 @@ sealed Object subclass: Bar
         msg.contains("has not been compiled"),
         "Warning should explain the issue. Got: {msg}"
     );
+    // Verify the span points at the @primitive expression, not a dummy zero span.
+    let primitive_span = match &module.classes[0].methods[0].body[0] {
+        Expression::Primitive { span, .. } => *span,
+        other => panic!("Expected Primitive expression, got: {other:?}"),
+    };
+    assert_eq!(
+        generated.warnings[0].span, primitive_span,
+        "Warning span should point at the @primitive expression"
+    );
 }
 
 #[test]
