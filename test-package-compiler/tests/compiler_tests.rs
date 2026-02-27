@@ -145,66 +145,70 @@ fn test_codegen_compiles(case_name: &str) {
     );
 }
 
-/// Test semantic analysis diagnostics for a given test case.
+/// Shared helper for semantic analysis diagnostic snapshots.
 ///
-/// Runs the full semantic analysis pipeline (class hierarchy, name resolution,
-/// type checking, block analysis) and captures error diagnostics in a snapshot.
-fn test_semantic_snapshot(case_name: &str) {
+/// Runs the full semantic analysis pipeline, filters diagnostics by `severity`,
+/// and captures the result in a snapshot named `{case_name}_{snapshot_suffix}`.
+fn test_diagnostics_snapshot(
+    case_name: &str,
+    severity: beamtalk_core::source_analysis::Severity,
+    heading: &str,
+    none_text: &str,
+    snapshot_suffix: &str,
+) {
     let source = read_test_case(case_name);
     let tokens = lex_with_eof(&source);
     let (module, _parser_diagnostics) = parse(tokens);
 
     let result = semantic_analysis::analyse(&module);
 
-    // Only capture error-level diagnostics (skip warnings for focused testing)
-    let errors: Vec<_> = result
+    let diagnostics: Vec<_> = result
         .diagnostics
         .iter()
-        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+        .filter(|d| d.severity == severity)
         .collect();
 
     let mut output = String::new();
-    if errors.is_empty() {
-        output.push_str("No semantic errors\n");
+    if diagnostics.is_empty() {
+        output.push_str(none_text);
+        output.push('\n');
     } else {
-        output.push_str(&format!("Semantic errors ({}):\n", errors.len()));
-        for diag in &errors {
+        output.push_str(&format!("{} ({}):\n", heading, diagnostics.len()));
+        for diag in &diagnostics {
             output.push_str(&format!("  - {}\n", diag.message));
         }
     }
 
-    insta::assert_snapshot!(format!("{}_semantic", case_name), output);
+    insta::assert_snapshot!(format!("{}_{}", case_name, snapshot_suffix), output);
+}
+
+/// Test semantic analysis error diagnostics for a given test case.
+///
+/// Runs the full semantic analysis pipeline (class hierarchy, name resolution,
+/// type checking, block analysis) and captures error diagnostics in a snapshot.
+fn test_semantic_snapshot(case_name: &str) {
+    test_diagnostics_snapshot(
+        case_name,
+        beamtalk_core::source_analysis::Severity::Error,
+        "Semantic errors",
+        "No semantic errors",
+        "semantic",
+    );
 }
 
 /// Test semantic analysis warnings for a given test case.
 ///
 /// Runs the full semantic analysis pipeline and captures WARNING-level
-/// diagnostics in a snapshot. This is used to verify that typed class
-/// annotation warnings are properly emitted.
+/// diagnostics in a snapshot. Used to verify that typed class annotation
+/// warnings are properly emitted.
 fn test_warnings_snapshot(case_name: &str) {
-    let source = read_test_case(case_name);
-    let tokens = lex_with_eof(&source);
-    let (module, _parser_diagnostics) = parse(tokens);
-
-    let result = semantic_analysis::analyse(&module);
-
-    let warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Warning)
-        .collect();
-
-    let mut output = String::new();
-    if warnings.is_empty() {
-        output.push_str("No warnings\n");
-    } else {
-        output.push_str(&format!("Warnings ({}):\n", warnings.len()));
-        for diag in &warnings {
-            output.push_str(&format!("  - {}\n", diag.message));
-        }
-    }
-
-    insta::assert_snapshot!(format!("{}_warnings", case_name), output);
+    test_diagnostics_snapshot(
+        case_name,
+        beamtalk_core::source_analysis::Severity::Warning,
+        "Warnings",
+        "No warnings",
+        "warnings",
+    );
 }
 
 // Test cases will be generated here by build.rs
