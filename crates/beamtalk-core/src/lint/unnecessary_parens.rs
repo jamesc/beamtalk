@@ -89,6 +89,21 @@ fn is_always_unnecessary(expr: &Expression) -> bool {
     }
 }
 
+/// Like `check_expr`, but skips the unnecessary-parens diagnostic for a
+/// top-level `Parenthesized` node and only recurses into its contents.
+///
+/// Used for map literal keys: `#{(x) => v}` uses parens to prevent the
+/// bare-identifier-to-symbol conversion (BT-591), so `(x)` there is
+/// semantically meaningful.  Deeper nesting (e.g., `#{((x)) => v}`) still
+/// recurses and may flag the inner `(x)`.
+fn check_map_key(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    if let Expression::Parenthesized { expression, .. } = expr {
+        check_expr(expression, diagnostics);
+    } else {
+        check_expr(expr, diagnostics);
+    }
+}
+
 /// Recursively inspects `expr`, emitting a lint for each `Parenthesized`
 /// node whose inner expression is always-unnecessary.
 fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
@@ -156,7 +171,12 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 
         Expression::MapLiteral { pairs, .. } => {
             for pair in pairs {
-                check_expr(&pair.key, diagnostics);
+                // BT-591: bare lowercase identifiers before `=>` become symbols,
+                // so `#{(x) => v}` is the only way to use a variable as a dynamic
+                // key. A top-level `Parenthesized` around the key is therefore
+                // semantically significant — skip that node's lint but still
+                // recurse into the inner expression for further checks.
+                check_map_key(&pair.key, diagnostics);
                 check_expr(&pair.value, diagnostics);
             }
         }
@@ -299,5 +319,28 @@ mod tests {
     fn no_false_positive_on_clean_code() {
         let diags = lint("Object subclass: Foo\n  value: x => x size\n");
         assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    /// BT-591: `#{(key) => val}` uses parens to prevent bare-identifier-to-symbol
+    /// conversion — these parens are semantically required and must NOT be flagged.
+    #[test]
+    fn parens_around_map_key_variable_not_flagged() {
+        let diags = lint("Object subclass: Foo\n  value: k => #{(k) => 1}\n");
+        assert!(
+            diags.is_empty(),
+            "dynamic map key parens must not be flagged, got: {diags:?}"
+        );
+    }
+
+    /// Map value parens are still flagged — only the key is special.
+    #[test]
+    fn parens_around_map_value_still_flagged() {
+        let diags = lint("Object subclass: Foo\n  value => #{#k => (42)}\n");
+        assert_eq!(
+            diags.len(),
+            1,
+            "parens around map value should be flagged, got: {diags:?}"
+        );
+        assert_eq!(diags[0].severity, Severity::Lint);
     }
 }
