@@ -124,11 +124,11 @@ Actor subclass: Counter
 Beamtalk distinguishes between **value types** (immutable data) and **actors** (concurrent processes):
 
 ```beamtalk
-// Value type - plain Erlang map, no process
-Object subclass: Point
+// Value type - immutable data, no process (ADR 0042)
+Value subclass: Point
   state: x = 0
   state: y = 0
-  
+
   // Methods return new instances (immutable)
   plus: other => Point new: #{x => (self.x + other x), y => (self.y + other y)}
   printString => "Point({self.x}, {self.y})"
@@ -136,16 +136,18 @@ Object subclass: Point
 // Actor - process with mailbox
 Actor subclass: Counter
   state: count = 0
-  
+
   // Methods mutate state via message passing
   increment => self.count := self.count + 1
   getCount => ^self.count
 ```
 
+`Object subclass:` also produces a value type (legacy form). Prefer `Value subclass:` for new code to make intent explicit.
+
 **Key differences:**
 
-| Aspect | Value Types (`Object subclass:`) | Actors (`Actor subclass:`) |
-|--------|----------------------------------|----------------------------|
+| Aspect | Value Types (`Value subclass:` / `Object subclass:`) | Actors (`Actor subclass:`) |
+|--------|------------------------------------------------------|----------------------------|
 | Instantiation | `Point new` or `Point new: #{x => 5}` | `Counter spawn` or `Counter spawnWith: #{count => 0}` |
 | Runtime | Plain Erlang map/record | BEAM process (gen_server) |
 | Mutation | Immutable - methods return new instances | Mutable - methods modify state |
@@ -158,7 +160,8 @@ Actor subclass: Counter
 ProtoObject (minimal - identity, DNU)
   └─ Object (reflection + new)
        ├─ Integer, String (primitives)
-       ├─ Point, Color (value types)
+       ├─ Value (immutable value objects - ADR 0042)
+       │    └─ Point, Color (value types)
        └─ Actor (process-based + spawn)
             └─ Counter, Server (actors)
 ```

@@ -92,6 +92,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -116,6 +117,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -145,6 +147,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -166,6 +169,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -182,6 +186,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -208,6 +213,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: true,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -247,6 +253,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -275,6 +282,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: true,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -300,6 +308,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -336,6 +345,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -358,6 +368,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec!["className".into(), "superclassRef".into(), "fieldSpecs".into(), "methodSpecs".into(), "modifiers".into()],
             state_types: HashMap::new(),
             methods: vec![
@@ -382,6 +393,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: true,
             is_typed: true,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -417,6 +429,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -440,6 +453,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -482,6 +496,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -514,6 +529,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -532,6 +548,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -550,6 +567,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -566,6 +584,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -592,6 +611,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -608,6 +628,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -632,6 +653,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -654,6 +676,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -673,6 +696,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -732,6 +756,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -755,6 +780,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -771,6 +797,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -833,6 +860,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -853,6 +881,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: true,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -914,6 +943,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -943,6 +973,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: true,
             is_typed: true,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -970,6 +1001,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1011,6 +1043,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1034,6 +1067,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1056,6 +1090,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: true,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1078,6 +1113,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1102,6 +1138,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1124,6 +1161,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1146,6 +1184,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -1162,6 +1201,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec!["elements".into()],
             state_types: HashMap::new(),
             methods: vec![
@@ -1195,6 +1235,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1220,6 +1261,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1253,6 +1295,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: true,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1328,6 +1371,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1352,6 +1396,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -1377,6 +1422,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1404,6 +1450,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1429,6 +1476,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -1449,6 +1497,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -1465,6 +1514,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1491,6 +1541,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1515,6 +1566,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: true,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1545,6 +1597,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![],
@@ -1561,6 +1614,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1588,6 +1642,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![

@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -22,6 +23,7 @@ Module {
                     },
                 },
             ),
+            class_kind: Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -78,6 +80,7 @@ Module {
                     },
                 },
             ),
+            class_kind: Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -134,6 +137,7 @@ Module {
                     },
                 },
             ),
+            class_kind: Object,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,

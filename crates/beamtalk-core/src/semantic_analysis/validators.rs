@@ -705,6 +705,59 @@ fn walk_for_slot_assignments(
     }
 }
 
+// ── BT-950: Redundant assignment ─────────────────────────────────────────────
+
+/// BT-950: Warn when the RHS of an assignment is the same identifier as the LHS.
+///
+/// Detects `x := x` where both sides are the same plain identifier binding.
+/// This has no effect at runtime and usually indicates a copy-paste error or
+/// leftover code.
+pub(crate) fn check_redundant_assignment(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    for expr in &module.expressions {
+        visit_redundant_assignment(expr, diagnostics);
+    }
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            for expr in &method.body {
+                visit_redundant_assignment(expr, diagnostics);
+            }
+        }
+    }
+    for standalone in &module.method_definitions {
+        for expr in &standalone.method.body {
+            visit_redundant_assignment(expr, diagnostics);
+        }
+    }
+}
+
+fn visit_redundant_assignment(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    if let Expression::Assignment {
+        target,
+        value,
+        span,
+        ..
+    } = expr
+    {
+        if let (
+            Expression::Identifier(Identifier { name: lhs, .. }),
+            Expression::Identifier(Identifier { name: rhs, .. }),
+        ) = (target.as_ref(), value.as_ref())
+        {
+            if lhs == rhs {
+                let mut diag = Diagnostic::warning(
+                    format!("Redundant assignment: `{lhs} := {lhs}` has no effect"),
+                    *span,
+                );
+                diag.hint = Some("Remove this assignment or assign a different value.".into());
+                diagnostics.push(diag);
+            }
+        }
+    }
+    for child in child_expressions(expr) {
+        visit_redundant_assignment(child, diagnostics);
+    }
+}
+
 /// BT-859: Error on empty method bodies.
 ///
 /// Methods declared with `=>` but no body expressions are a compile error.
@@ -1020,5 +1073,116 @@ mod tests {
             diagnostics.is_empty(),
             "Expected no errors for cast on actor type, got: {diagnostics:?}"
         );
+    }
+
+    // ── BT-950: Redundant assignment tests ───────────────────────────────────
+
+    /// `x := x` at the top level emits a warning.
+    #[test]
+    fn redundant_assignment_top_level_warns() {
+        let src = "x := 1.\nx := x";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for redundant assignment, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("Redundant assignment"),
+            "Expected 'Redundant assignment' in message, got: {}",
+            diagnostics[0].message
+        );
+        assert!(
+            diagnostics[0].message.contains("x := x"),
+            "Expected 'x := x' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// `x := y` (different names) does NOT warn.
+    #[test]
+    fn non_redundant_assignment_no_warn() {
+        let src = "x := 1.\ny := 2.\nx := y";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for non-redundant assignment, got: {diagnostics:?}"
+        );
+    }
+
+    /// `x := x` inside a method body (using a parameter) emits a warning.
+    #[test]
+    fn redundant_assignment_in_method_warns() {
+        let src = "Object subclass: Foo\n  withX: x => x := x";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for redundant assignment in method, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+    }
+
+    /// `x := x` nested inside a block emits a warning.
+    #[test]
+    fn redundant_assignment_in_block_warns() {
+        let src = "Object subclass: Foo\n  withX: x => [x := x] value";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for redundant assignment inside block, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+    }
+
+    /// `self.x := self.x` (field access, not plain identifiers) does NOT trigger
+    /// the redundant-assignment check (that's a separate BT-914 concern).
+    #[test]
+    fn field_access_assignment_not_flagged_as_redundant() {
+        let src = "Object subclass: Foo\n  state: x = 0\n  noOp => self.x := self.x";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no redundant-assignment warning for field access, got: {diagnostics:?}"
+        );
+    }
+
+    /// `x := x` inside a standalone method definition warns.
+    #[test]
+    fn redundant_assignment_in_standalone_method_warns() {
+        let src = "Object subclass: Foo\n  value => 1\nFoo >> withX: x => x := x";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_redundant_assignment(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for redundant assignment in standalone method, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
     }
 }

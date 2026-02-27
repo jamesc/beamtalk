@@ -167,6 +167,36 @@ pub enum CommentKind {
     Block,
 }
 
+/// The kind of class based on its declaration form (ADR 0042).
+///
+/// Determined at parse time from the superclass used in the `subclass:` declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ClassKind {
+    /// An ordinary class (`Object subclass:` or any non-Actor, non-Value superclass).
+    #[default]
+    Object,
+    /// An actor class (`Actor subclass:`). Uses `gen_server` semantics.
+    Actor,
+    /// A value class (`Value subclass:`). Immutable value-object semantics (ADR 0042).
+    Value,
+}
+
+impl ClassKind {
+    /// Derive the class kind from the direct superclass name used in a `subclass:` declaration.
+    ///
+    /// - `"Actor"` → [`ClassKind::Actor`]
+    /// - `"Value"` → [`ClassKind::Value`]
+    /// - anything else → [`ClassKind::Object`]
+    #[must_use]
+    pub fn from_superclass_name(name: &str) -> Self {
+        match name {
+            "Actor" => ClassKind::Actor,
+            "Value" => ClassKind::Value,
+            _ => ClassKind::Object,
+        }
+    }
+}
+
 /// A class definition (Aggregate Root).
 ///
 /// Example:
@@ -201,6 +231,8 @@ pub struct ClassDefinition {
     pub name: Identifier,
     /// The superclass name (e.g., `Actor`). `None` for root classes (`ProtoObject`).
     pub superclass: Option<Identifier>,
+    /// The class kind derived from the declaration form (Actor/Value/Object).
+    pub class_kind: ClassKind,
     /// Whether this is an abstract class (cannot be instantiated).
     pub is_abstract: bool,
     /// Whether this is a sealed class (cannot be subclassed).
@@ -231,9 +263,11 @@ impl ClassDefinition {
         methods: Vec<MethodDefinition>,
         span: Span,
     ) -> Self {
+        let class_kind = ClassKind::from_superclass_name(superclass.name.as_str());
         Self {
             name,
             superclass: Some(superclass),
+            class_kind,
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
@@ -257,9 +291,13 @@ impl ClassDefinition {
         methods: Vec<MethodDefinition>,
         span: Span,
     ) -> Self {
+        let class_kind = superclass.as_ref().map_or(ClassKind::Object, |s| {
+            ClassKind::from_superclass_name(s.name.as_str())
+        });
         Self {
             name,
             superclass,
+            class_kind,
             is_abstract,
             is_sealed,
             is_typed: false,
@@ -1913,5 +1951,48 @@ mod tests {
         let module = Module::new(Vec::new(), span);
         assert!(module.classes.is_empty());
         assert!(module.expressions.is_empty());
+    }
+
+    // --- ClassKind tests (BT-922) ---
+
+    #[test]
+    fn class_kind_from_superclass_name() {
+        assert_eq!(ClassKind::from_superclass_name("Actor"), ClassKind::Actor);
+        assert_eq!(ClassKind::from_superclass_name("Value"), ClassKind::Value);
+        assert_eq!(ClassKind::from_superclass_name("Object"), ClassKind::Object);
+        assert_eq!(
+            ClassKind::from_superclass_name("Counter"),
+            ClassKind::Object
+        );
+    }
+
+    #[test]
+    fn class_definition_new_derives_class_kind() {
+        let actor_class = ClassDefinition::new(
+            Identifier::new("Counter", Span::new(0, 7)),
+            Identifier::new("Actor", Span::new(0, 5)),
+            vec![],
+            vec![],
+            Span::new(0, 20),
+        );
+        assert_eq!(actor_class.class_kind, ClassKind::Actor);
+
+        let value_class = ClassDefinition::new(
+            Identifier::new("Point", Span::new(0, 5)),
+            Identifier::new("Value", Span::new(0, 5)),
+            vec![],
+            vec![],
+            Span::new(0, 20),
+        );
+        assert_eq!(value_class.class_kind, ClassKind::Value);
+
+        let object_class = ClassDefinition::new(
+            Identifier::new("MyList", Span::new(0, 6)),
+            Identifier::new("Object", Span::new(0, 6)),
+            vec![],
+            vec![],
+            Span::new(0, 20),
+        );
+        assert_eq!(object_class.class_kind, ClassKind::Object);
     }
 }
