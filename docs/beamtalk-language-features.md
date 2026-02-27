@@ -221,6 +221,7 @@ Binary operators follow standard math precedence (highest to lowest):
 - `==` - Loose equality (Erlang `==`): `5 == 5.0` → `true`
 - `/=` - Loose inequality (Erlang `/=`): `5 /= 6` → `true`
 - `=/=` - Strict inequality (Erlang `=/=`): `5 =/= 6` → `true`
+- `=` - Legacy alias for `=:=` (strict equality). Prefer `=:=` instead. `beamtalk lint` warns on `x = true` / `x = false`.
 
 **Note on `and`/`or`:** These are **not** binary operators. They are keyword messages that take blocks for short-circuit evaluation:
 ```beamtalk
