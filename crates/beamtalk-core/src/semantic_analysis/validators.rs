@@ -752,8 +752,9 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
 /// known arithmetic or comparison operator applied to pure operands.
 fn is_effect_free(expr: &Expression) -> bool {
     match expr {
-        Expression::Literal(_, _) => true,
-        Expression::Identifier(_) | Expression::ClassReference { .. } => true,
+        Expression::Literal(_, _)
+        | Expression::Identifier(_)
+        | Expression::ClassReference { .. } => true,
         Expression::Parenthesized { expression, .. } => is_effect_free(expression),
         Expression::MessageSend {
             receiver,
@@ -895,13 +896,9 @@ fn check_seq_for_effect_free(exprs: &[Expression], diagnostics: &mut Vec<Diagnos
         let is_last = i == len - 1;
         if !is_last && is_effect_free(expr) {
             let label = effect_free_label(expr);
-            let mut diag = Diagnostic::lint(
-                format!("this {label} has no effect"),
-                expr.span(),
-            );
-            diag.hint = Some(
-                "Remove this expression, or assign its value to a variable if needed.".into(),
-            );
+            let mut diag = Diagnostic::lint(format!("this {label} has no effect"), expr.span());
+            diag.hint =
+                Some("Remove this expression, or assign its value to a variable if needed.".into());
             diagnostics.push(diag);
         }
         walk_expr_for_effect_free(expr, diagnostics);
@@ -917,10 +914,7 @@ fn check_seq_for_effect_free(exprs: &[Expression], diagnostics: &mut Vec<Diagnos
 ///
 /// Uses `Severity::Lint` so the warning is suppressed during normal compilation
 /// and only surfaces when running `beamtalk lint`.
-pub(crate) fn check_effect_free_statements(
-    module: &Module,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+pub(crate) fn check_effect_free_statements(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
     // Module-level expressions
     check_seq_for_effect_free(&module.expressions, diagnostics);
 
@@ -1262,8 +1256,7 @@ mod tests {
     /// `x + y` as a non-last statement (pure arithmetic) should produce a lint.
     #[test]
     fn pure_binary_expr_non_last_emits_lint() {
-        let src =
-            "Object subclass: Foo\n  bar: x and: y =>\n    x + y.\n    self doSomething";
+        let src = "Object subclass: Foo\n  bar: x and: y =>\n    x + y.\n    self doSomething";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -1285,8 +1278,7 @@ mod tests {
     /// A message send with side effects (keyword send) should NOT produce a lint.
     #[test]
     fn effectful_send_no_lint() {
-        let src =
-            "Object subclass: Foo\n  bar =>\n    self doSomething.\n    self doOtherThing";
+        let src = "Object subclass: Foo\n  bar =>\n    self doSomething.\n    self doOtherThing";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -1355,7 +1347,11 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-        assert_eq!(module.method_definitions.len(), 1, "Expected 1 standalone method");
+        assert_eq!(
+            module.method_definitions.len(),
+            1,
+            "Expected 1 standalone method"
+        );
         let mut diagnostics = Vec::new();
         check_effect_free_statements(&module, &mut diagnostics);
         assert_eq!(
