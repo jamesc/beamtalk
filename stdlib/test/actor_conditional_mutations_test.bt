@@ -20,7 +20,7 @@ TestCase subclass: ActorConditionalMutationsTest
   testIfTrueWithFalseFlag =>
     // Verify flag=false leaves state unchanged
     c := ConditionalMutationCounter spawn.
-    result := (c conditionalIncrement: false).
+    result := c conditionalIncrement: false.
     self assert: result equals: 0.
     self assert: (c getCount) equals: 0
 
@@ -33,30 +33,30 @@ TestCase subclass: ActorConditionalMutationsTest
   testIfFalseWithTrueFlag =>
     // Verify flag=true leaves state unchanged
     c := ConditionalMutationCounter spawn.
-    result := (c conditionalDecrement: true).
+    result := c conditionalDecrement: true.
     self assert: result equals: 0.
     self assert: (c getCount) equals: 0
 
   testIfTrueIfFalseWithTrueFlag =>
     // Verify true branch of ifTrue:ifFalse: is taken
     c := ConditionalMutationCounter spawn.
-    result := (c conditionalToggle: true).
+    result := c conditionalToggle: true.
     self assert: result equals: 10.
     self assert: (c getCount) equals: 10
 
   testIfTrueIfFalseWithFalseFlag =>
     // Verify false branch of ifTrue:ifFalse: is taken
     c := ConditionalMutationCounter spawn.
-    result := (c conditionalToggle: false).
+    result := c conditionalToggle: false.
     self assert: result equals: -1.
     self assert: (c getCount) equals: -1
 
   testStatePersistedAcrossCalls =>
     // Verify state accumulates across multiple conditional calls
     c := ConditionalMutationCounter spawn.
-    (c conditionalIncrement: true).
-    (c conditionalIncrement: true).
-    (c conditionalIncrement: false).
+    c conditionalIncrement: true.
+    c conditionalIncrement: true.
+    c conditionalIncrement: false.
     self assert: (c getCount) equals: 2
 
   testSequentialConditionals =>
@@ -64,13 +64,13 @@ TestCase subclass: ActorConditionalMutationsTest
     c := ConditionalMutationCounter spawn.
     // a=true, b=true => count = 0 + 1 + 10 = 11
     self assert: (c doubleConditional: true and: true) equals: 11.
-    (c reset).
+    c reset.
     // a=true, b=false => count = 0 + 1 = 1
     self assert: (c doubleConditional: true and: false) equals: 1.
-    (c reset).
+    c reset.
     // a=false, b=true => count = 0 + 10 = 10
     self assert: (c doubleConditional: false and: true) equals: 10.
-    (c reset).
+    c reset.
     // a=false, b=false => count = 0
     self assert: (c doubleConditional: false and: false) equals: 0
 
@@ -79,10 +79,10 @@ TestCase subclass: ActorConditionalMutationsTest
     c := ConditionalMutationCounter spawn.
     // outer=true, inner=true => count = 0 + 100 = 100
     self assert: (c nestedConditional: true and: true) equals: 100.
-    (c reset).
+    c reset.
     // outer=true, inner=false => count = 0 (inner not taken)
     self assert: (c nestedConditional: true and: false) equals: 0.
-    (c reset).
+    c reset.
     // outer=false => count = 0 (outer not taken)
     self assert: (c nestedConditional: false and: true) equals: 0
 
@@ -90,12 +90,12 @@ TestCase subclass: ActorConditionalMutationsTest
     // Verify conditional as the last expression in a method
     c := ConditionalMutationCounter spawn.
     // flag=true returns the assigned value (5) and mutates state
-    result := (c conditionalLast: true).
+    result := c conditionalLast: true.
     self assert: result equals: 5.
     self assert: (c getCount) equals: 5.
-    (c reset).
+    c reset.
     // flag=false returns nil and leaves state unchanged
-    result2 := (c conditionalLast: false).
+    result2 := c conditionalLast: false.
     self assert: result2 equals: nil.
     self assert: (c getCount) equals: 0
 

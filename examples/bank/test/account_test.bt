@@ -19,36 +19,36 @@ TestCase subclass: AccountTest
 
   testDepositReturnsNewBalance =>
     acct := Account spawn.
-    (acct deposit: 200).
+    acct deposit: 200.
     self assert: ((acct deposit: 50)) equals: 250
 
   testWithdraw =>
     acct := Account spawn.
-    (acct deposit: 500).
+    acct deposit: 500.
     self assert: ((acct withdraw: 200)) equals: 300
 
   testWithdrawReturnsNewBalance =>
     acct := Account spawn.
-    (acct deposit: 1000).
-    (acct withdraw: 400).
+    acct deposit: 1000.
+    acct withdraw: 400.
     self assert: (acct balance) equals: 600
 
   testMultipleDeposits =>
     acct := Account spawn.
-    (acct deposit: 100).
-    (acct deposit: 200).
-    (acct deposit: 300).
+    acct deposit: 100.
+    acct deposit: 200.
+    acct deposit: 300.
     self assert: (acct balance) equals: 600
 
   testOverdraftRaisesError =>
     acct := Account spawn.
-    (acct deposit: 100).
+    acct deposit: 100.
     self should: [(acct withdraw: 9999)] raise: #user_error
 
   testWithdrawExactBalance =>
     // Withdrawing exactly the balance is allowed
     acct := Account spawn.
-    (acct deposit: 500).
+    acct deposit: 500.
     self assert: ((acct withdraw: 500)) equals: 0
 
   testNegativeDepositRaisesError =>
@@ -57,12 +57,12 @@ TestCase subclass: AccountTest
 
   testNegativeWithdrawRaisesError =>
     acct := Account spawn.
-    (acct deposit: 100).
+    acct deposit: 100.
     self should: [(acct withdraw: -10)] raise: #user_error
 
   testSetAndGetOwner =>
     acct := Account spawn.
-    (acct setOwner: "Alice").
+    acct setOwner: "Alice".
     self assert: (acct getOwner) equals: "Alice"
 
   testDefaultOwnerIsEmpty =>
@@ -70,16 +70,16 @@ TestCase subclass: AccountTest
 
   testBalanceUnaffectedByOwnerChange =>
     acct := Account spawn.
-    (acct deposit: 300).
-    (acct setOwner: "Bob").
+    acct deposit: 300.
+    acct setOwner: "Bob".
     self assert: (acct balance) equals: 300
 
   testIndependentAccounts =>
     // Each spawned actor has isolated state
     a := Account spawn.
     b := Account spawn.
-    (a deposit: 1000).
-    (b deposit: 500).
-    (a withdraw: 200).
+    a deposit: 1000.
+    b deposit: 500.
+    a withdraw: 200.
     self assert: (a balance) equals: 800.
     self assert: (b balance) equals: 500

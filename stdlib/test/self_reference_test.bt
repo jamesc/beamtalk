@@ -24,7 +24,7 @@ TestCase subclass: SelfReferenceTest
 
   testDynamicDispatchViaPerform =>
     a := SelfRefActor spawn.
-    (a setValue: 99).
+    a setValue: 99.
     // perform: dispatches zero-arg methods dynamically on actors
     self assert: (a perform: #getValue) equals: 99.
     // perform:withArguments: dispatches methods with arguments on actors

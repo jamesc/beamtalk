@@ -13,18 +13,18 @@ TestCase subclass: BankTest
 
   testOpenAccountReturnsAccount =>
     bank := Bank spawn.
-    acct := (bank openAccount: "Alice").
+    acct := bank openAccount: "Alice".
     self assert: (acct balance) equals: 0
 
   testAccountForReturnsExistingAccount =>
     bank := Bank spawn.
-    (bank openAccount: "Alice").
-    acct := (bank accountFor: "Alice").
+    bank openAccount: "Alice".
+    acct := bank accountFor: "Alice".
     self assert: (acct balance) equals: 0
 
   testOpenAccountSetsOwner =>
     bank := Bank spawn.
-    acct := (bank openAccount: "Bob").
+    acct := bank openAccount: "Bob".
     self assert: (acct getOwner) equals: "Bob"
 
   testAccountForUnknownNameRaisesError =>
@@ -33,30 +33,30 @@ TestCase subclass: BankTest
 
   testMultipleAccounts =>
     bank := Bank spawn.
-    alice := (bank openAccount: "Alice").
-    bob := (bank openAccount: "Bob").
-    (alice deposit: 1000).
-    (bob deposit: 500).
+    alice := bank openAccount: "Alice".
+    bob := bank openAccount: "Bob".
+    alice deposit: 1000.
+    bob deposit: 500.
     self assert: (alice balance) equals: 1000.
     self assert: (bob balance) equals: 500
 
   testAccountForReturnsSameActor =>
     // accountFor: returns the same actor reference each time
     bank := Bank spawn.
-    (bank openAccount: "Alice").
-    first := (bank accountFor: "Alice").
-    second := (bank accountFor: "Alice").
+    bank openAccount: "Alice".
+    first := bank accountFor: "Alice".
+    second := bank accountFor: "Alice".
     // Deposit via first reference, read via second
-    (first deposit: 42).
+    first deposit: 42.
     self assert: (second balance) equals: 42
 
   testOpenAccountReturnsFreshAccount =>
     // Each openAccount: creates a new Account actor
     bank := Bank spawn.
-    (bank openAccount: "Alice").
-    (bank openAccount: "Bob").
-    alice := (bank accountFor: "Alice").
-    bob := (bank accountFor: "Bob").
-    (alice deposit: 100).
+    bank openAccount: "Alice".
+    bank openAccount: "Bob".
+    alice := bank accountFor: "Alice".
+    bob := bank accountFor: "Bob".
+    alice deposit: 100.
     self assert: (alice balance) equals: 100.
     self assert: (bob balance) equals: 0

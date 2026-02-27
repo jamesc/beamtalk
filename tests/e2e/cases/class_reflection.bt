@@ -17,7 +17,7 @@
 // ===========================================================================
 
 // Lookup of existing class
-stringClass := (Beamtalk classNamed: #String)
+stringClass := Beamtalk classNamed: #String
 // => String
 
 // Workspace variable persists — name is accessible in next turn
@@ -25,7 +25,7 @@ stringClass name
 // => String
 
 // Lookup of a loaded actor class
-counterClass := (Beamtalk classNamed: #Counter)
+counterClass := Beamtalk classNamed: #Counter
 // => Counter
 
 counterClass name
@@ -44,7 +44,7 @@ Beamtalk classNamed: #NonExistentClass
 // ===========================================================================
 
 // Class object stored in workspace variable is accessible in later turns
-intClass := (Beamtalk classNamed: #Integer)
+intClass := Beamtalk classNamed: #Integer
 // => Integer
 
 intClass name

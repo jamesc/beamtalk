@@ -61,12 +61,12 @@ TestCase subclass: SpeciesTest
   // ===========================================================================
 
   testSetCollectReturnsSetType =>
-    s := (Set new fromList: #(1, 2, 3)).
+    s := Set new fromList: #(1, 2, 3).
     result := s collect: [:x | x * 2].
     self assert: (result class) equals: Set
 
   testSetSelectReturnsSetType =>
-    s := (Set new fromList: #(1, 2, 3, 4)).
+    s := Set new fromList: #(1, 2, 3, 4).
     result := s select: [:x | x > 2].
     self assert: (result class) equals: Set.
     self assert: (result includes: 3).

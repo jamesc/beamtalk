@@ -24,49 +24,49 @@ TestCase subclass: ChatRoomTest
   testMemberJoinsRoom =>
     room := ChatRoom spawn.
     alice := ChatMember spawn.
-    (room join: alice).
+    room join: alice.
     self assert: ((room online) includes: alice)
 
   testMemberLeavesRoom =>
     room := ChatRoom spawn.
     alice := ChatMember spawn.
-    (room join: alice).
-    (room leave: alice).
+    room join: alice.
+    room leave: alice.
     self deny: ((room online) includes: alice)
 
   testSayAddsToHistory =>
     room := ChatRoom spawn.
-    (room say: "Hello!" from: "Alice").
+    room say: "Hello!" from: "Alice".
     self assert: (room getHistory) equals: #("Alice: Hello!")
 
   testSayMultipleMessages =>
     room := ChatRoom spawn.
-    (room say: "Hello!" from: "Alice").
-    (room say: "Hey!" from: "Bob").
+    room say: "Hello!" from: "Alice".
+    room say: "Hey!" from: "Bob".
     self assert: (room getHistory) equals: #("Alice: Hello!", "Bob: Hey!")
 
   testMemberReceivesMessage =>
     room := ChatRoom spawn.
     alice := ChatMember spawn.
-    (room join: alice).
-    (room say: "Hello!" from: "System").
+    room join: alice.
+    room say: "Hello!" from: "System".
     self assert: (alice getInbox) equals: #("System: Hello!")
 
   testMemberDoesNotReceiveAfterLeaving =>
     room := ChatRoom spawn.
     alice := ChatMember spawn.
-    (room join: alice).
-    (room leave: alice).
-    (room say: "Hello?" from: "System").
+    room join: alice.
+    room leave: alice.
+    room say: "Hello?" from: "System".
     self assert: (alice getInbox) equals: #()
 
   testBroadcastToMultipleMembers =>
     room := ChatRoom spawn.
     alice := ChatMember spawn.
     bob := ChatMember spawn.
-    (room join: alice).
-    (room join: bob).
-    (room say: "Hi all!" from: "System").
+    room join: alice.
+    room join: bob.
+    room say: "Hi all!" from: "System".
     self assert: (alice getInbox) equals: #("System: Hi all!").
     self assert: (bob getInbox) equals: #("System: Hi all!")
 
@@ -74,16 +74,16 @@ TestCase subclass: ChatRoomTest
     room := ChatRoom spawn.
     alice := ChatMember spawn.
     bob := ChatMember spawn.
-    (room join: alice).
-    (room join: bob).
-    (room leave: alice).
-    (room say: "Anyone there?" from: "System").
+    room join: alice.
+    room join: bob.
+    room leave: alice.
+    room say: "Anyone there?" from: "System".
     self assert: (alice getInbox) equals: #().
     self assert: (bob getInbox) equals: #("System: Anyone there?")
 
   testMemberSetsName =>
     alice := ChatMember spawn.
-    (alice setName: "Alice").
+    alice setName: "Alice".
     self assert: (alice getName) equals: "Alice"
 
   testMemberDefaultName =>

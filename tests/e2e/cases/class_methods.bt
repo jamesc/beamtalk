@@ -18,7 +18,7 @@
 // BASIC CLASS METHOD DISPATCH
 // ===========================================================================
 
-cls := (Beamtalk classNamed: #Calculator)
+cls := Beamtalk classNamed: #Calculator
 // => Calculator
 
 cls defaultValue
@@ -31,7 +31,7 @@ cls add: 10 to: 20
 // CLASS METHOD TO CLASS METHOD DELEGATION (BT-891)
 // ===========================================================================
 
-del := (Beamtalk classNamed: #Delegator)
+del := Beamtalk classNamed: #Delegator
 // => Delegator
 
 del helper: 5

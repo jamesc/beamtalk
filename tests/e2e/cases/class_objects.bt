@@ -26,7 +26,7 @@
 // Store class in variable and send "new" dynamically
 // ---------------------------------------------------------------------------
 
-cls := (Beamtalk classNamed: #Point)
+cls := Beamtalk classNamed: #Point
 // => Point
 
 cls new
@@ -41,7 +41,7 @@ cls new
 // Dynamic dispatch returns usable value (not a future)
 // ---------------------------------------------------------------------------
 
-cls := (Beamtalk classNamed: #Point)
+cls := Beamtalk classNamed: #Point
 // => Point
 
 p := cls new
@@ -58,7 +58,7 @@ p getX
 // Dynamic methods call
 // ---------------------------------------------------------------------------
 
-cls := (Beamtalk classNamed: #Point)
+cls := Beamtalk classNamed: #Point
 // => Point
 
 // Dynamic methods call: keep wildcard since method list changes when methods are added
@@ -69,7 +69,7 @@ cls methods
 // Dynamic superclass call
 // ---------------------------------------------------------------------------
 
-cls := (Beamtalk classNamed: #Point)
+cls := Beamtalk classNamed: #Point
 // => Point
 
 cls superclass
@@ -79,7 +79,7 @@ cls superclass
 // Dynamic name call
 // ---------------------------------------------------------------------------
 
-cls := (Beamtalk classNamed: #Point)
+cls := Beamtalk classNamed: #Point
 // => Point
 
 cls name
@@ -93,7 +93,7 @@ cls name
 // Store actor class in variable and send "spawn" dynamically
 // ---------------------------------------------------------------------------
 
-actorCls := (Beamtalk classNamed: #Counter)
+actorCls := Beamtalk classNamed: #Counter
 // => Counter
 
 c := actorCls spawn

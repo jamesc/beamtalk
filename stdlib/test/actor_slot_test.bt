@@ -18,9 +18,9 @@ TestCase subclass: ActorSlotTest
   testMultipleSlotAssignmentsInOneMethod =>
     // Both count and total are updated and persist correctly
     c := ActorSlotCounter spawn.
-    result := (c incrementBoth: 10).
+    result := c incrementBoth: 10.
     self assert: result equals: #{#count => 1, #total => 10}.
-    result2 := (c incrementBoth: 5).
+    result2 := c incrementBoth: 5.
     self assert: result2 equals: #{#count => 2, #total => 15}
 
   testMultipleAssignmentsToSameSlot =>
@@ -41,7 +41,7 @@ TestCase subclass: ActorSlotTest
     // Both branches of ifTrue:ifFalse: correctly thread state
     c := ConditionalMutationCounter spawn.
     self assert: (c conditionalToggle: true) equals: 10.
-    (c reset).
+    c reset.
     self assert: (c conditionalToggle: false) equals: -1
 
   testSlotAssignmentInsideDoBlock =>
@@ -54,7 +54,7 @@ TestCase subclass: ActorSlotTest
   testSlotAssignmentInsideDoBlockTwoSlots =>
     // do: with mutations to two different slots both thread correctly
     c := ActorSlotCounter spawn.
-    result := (c countAndSum: #(10, 20, 30)).
+    result := c countAndSum: #(10, 20, 30).
     self assert: result equals: #{#count => 3, #total => 60}.
     self assert: (c getCount) equals: 3.
     self assert: (c getTotal) equals: 60
@@ -62,7 +62,7 @@ TestCase subclass: ActorSlotTest
   testSlotAssignmentInsideCollectBlock =>
     // collect: with self.slot := in block: result is correct and state is updated
     c := ActorSlotCounter spawn.
-    result := (c collectDoubled: #(1, 2, 3)).
+    result := c collectDoubled: #(1, 2, 3).
     self assert: result equals: #(2, 4, 6).
     // count was incremented once per element
     self assert: (c getCount) equals: 3
@@ -71,7 +71,7 @@ TestCase subclass: ActorSlotTest
     // Slot assignment before ifTrue:[^value] preserves the updated state
     c := ActorSlotCounter spawn.
     // count=0+1=1 >= 1, so early return fires
-    result := (c addAndCheckLimit: 1).
+    result := c addAndCheckLimit: 1.
     self assert: result equals: #reached.
     self assert: (c getCount) equals: 1
 
@@ -79,23 +79,23 @@ TestCase subclass: ActorSlotTest
     // When the limit is not reached, normal path runs and state is still updated
     c := ActorSlotCounter spawn.
     // count=0+1=1 < 5, so early return does NOT fire
-    result := (c addAndCheckLimit: 5).
+    result := c addAndCheckLimit: 5.
     self assert: result equals: #not_yet.
     self assert: (c getCount) equals: 1.
     // count=1+1=2 < 5, still not reached
-    result2 := (c addAndCheckLimit: 5).
+    result2 := c addAndCheckLimit: 5.
     self assert: result2 equals: #not_yet.
     self assert: (c getCount) equals: 2.
     // count=2+1=3 < 5, still not reached
-    result3 := (c addAndCheckLimit: 5).
+    result3 := c addAndCheckLimit: 5.
     self assert: result3 equals: #not_yet.
     self assert: (c getCount) equals: 3.
     // count=3+1=4 < 5, still not reached
-    result4 := (c addAndCheckLimit: 5).
+    result4 := c addAndCheckLimit: 5.
     self assert: result4 equals: #not_yet.
     self assert: (c getCount) equals: 4.
     // count=4+1=5 >= 5, early return fires
-    result5 := (c addAndCheckLimit: 5).
+    result5 := c addAndCheckLimit: 5.
     self assert: result5 equals: #reached.
     self assert: (c getCount) equals: 5
 
@@ -103,7 +103,7 @@ TestCase subclass: ActorSlotTest
     // total is incremented before the ^ so the returned value reflects the new state
     c := ActorSlotCounter spawn.
     // total=0+1=1 > 0, so returns total=1
-    result := (c addAndReturnIfAbove: 0).
+    result := c addAndReturnIfAbove: 0.
     self assert: result equals: 1.
     self assert: (c getTotal) equals: 1
 
@@ -111,23 +111,23 @@ TestCase subclass: ActorSlotTest
     // When threshold not exceeded, falls through to -1 but state is still updated
     c := ActorSlotCounter spawn.
     // total=0+1=1, 1 > 100? No, returns -1
-    result := (c addAndReturnIfAbove: 100).
+    result := c addAndReturnIfAbove: 100.
     self assert: result equals: -1.
     self assert: (c getTotal) equals: 1
 
   testStatePersistedAcrossMultipleCalls =>
     // State accumulates correctly across independent method calls
     c := ActorSlotCounter spawn.
-    (c incrementBoth: 10).
-    (c incrementBoth: 20).
-    (c incrementBoth: 30).
+    c incrementBoth: 10.
+    c incrementBoth: 20.
+    c incrementBoth: 30.
     self assert: (c getCount) equals: 3.
     self assert: (c getTotal) equals: 60
 
   testResetClearsBothSlots =>
     // reset clears both slots back to 0
     c := ActorSlotCounter spawn.
-    (c incrementBoth: 42).
-    (c reset).
+    c incrementBoth: 42.
+    c reset.
     self assert: (c getCount) equals: 0.
     self assert: (c getTotal) equals: 0

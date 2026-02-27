@@ -18,7 +18,7 @@ TestCase subclass: ActorNonLocalReturnTest
     self assert: ((a checkFalse: #())) equals: "empty".
     self assert: ((a checkFalse: #(1))) equals: "not empty".
     b := ActorNlrLocalVar spawn.
-    (b store: "x" val: 42).
+    b store: "x" val: 42.
     self assert: (b fetch: "x") equals: 42.
     self assert: (b fetch: "y") equals: "not found".
     c := ActorNlrComputed spawn.

@@ -60,7 +60,7 @@ Beamtalk respondsTo: #allClasses
 
 // Beamtalk allClasses returns a list including core classes
 // Class list changes as classes are added, keep wildcard
-classes := (Beamtalk allClasses)
+classes := Beamtalk allClasses
 // => _
 
 // Validate allClasses returns a non-empty list
@@ -68,7 +68,7 @@ classes isEmpty
 // => false
 
 // Beamtalk version returns a string
-version := (Beamtalk version)
+version := Beamtalk version
 // => 0.1.0
 
 // Validate version is a non-empty string
@@ -88,7 +88,7 @@ Transcript show: "Hello"; cr; show: "World"
 // ===========================================================================
 
 // Beamtalk globals returns a map (class registry snapshot)
-globals := (Beamtalk globals)
+globals := Beamtalk globals
 // => _
 
 // ===========================================================================
@@ -96,7 +96,7 @@ globals := (Beamtalk globals)
 // ===========================================================================
 
 // Beamtalk classNamed: looks up a class by symbol
-intClass := (Beamtalk classNamed: #Integer)
+intClass := Beamtalk classNamed: #Integer
 // => Integer
 
 // ===========================================================================
@@ -112,7 +112,7 @@ Transcript show: "TestOutput"
 // => #Actor<TranscriptStream,_>
 
 // Recent returns buffer contents (list of recent output)
-recent := (Transcript recent)
+recent := Transcript recent
 // => _
 
 // Buffer should not be empty after writing
@@ -124,7 +124,7 @@ Transcript clear
 // => #Actor<TranscriptStream,_>
 
 // Buffer should be empty after clear
-recentAfterClear := (Transcript recent)
+recentAfterClear := Transcript recent
 // => _
 
 recentAfterClear isEmpty

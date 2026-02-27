@@ -14,5 +14,5 @@ TestCase subclass: ActorDeadlockTest
   testMutualCallDeadlockRaisesTimeout =>
     a := DeadlockA spawn.
     b := DeadlockB spawn.
-    (a setPeer: b).
+    a setPeer: b.
     self should: [a callPeer] raise: #timeout
