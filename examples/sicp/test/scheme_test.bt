@@ -1,87 +1,193 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BUnit tests for the Scheme interpreter (SchemeEval).
+// SchemeTest — BUnit tests for the Scheme metacircular evaluator
 //
-// Covers:
-//   - Basic arithmetic evaluation with primitive procedures
-//   - Nested expressions
-//   - Lambda creation and application
-//   - Error: applying a non-procedure raises "Not a procedure: X" (BT-930)
-//
-// Run in the REPL:
-//   > :load src/scheme/lambda.bt
+// Run interactively in the REPL:
+//   > :load src/scheme/symbol.bt
+//   > :load src/scheme/reader.bt
 //   > :load src/scheme/env.bt
+//   > :load src/scheme/lambda.bt
 //   > :load src/scheme/eval.bt
-//   > :load test/scheme_test.bt
+//   > :load src/scheme/printer.bt
+//   > :load src/scheme/scheme_test.bt
 //   > SchemeTest runAll
 
 TestCase subclass: SchemeTest
 
-  testPrimitiveAddition =>
-    eval := SchemeEval new.
-    // (+ 1 2) evaluates to 3
-    self assert: (eval eval: "(+ 1 2)") equals: "3"
+  // Helpers shared across tests
+  eval: str =>
+    reader  := SchemeReader new
+    ev      := SchemeEval new
+    env     := ev defaultEnv
+    ev eval: (reader read: str) in: env
 
-  testPrimitiveMultiplication =>
-    eval := SchemeEval new.
-    // (* 3 4) evaluates to 12
-    self assert: (eval eval: "(* 3 4)") equals: "12"
+  evalStr: str =>
+    SchemePrinter new print: (self eval: str)
 
-  testPrimitiveSubtraction =>
-    eval := SchemeEval new.
-    // (- 10 3) evaluates to 7
-    self assert: (eval eval: "(- 10 3)") equals: "7"
+  // --- Reader ---
 
-  testNestedArithmetic =>
-    eval := SchemeEval new.
-    // (+ 1 (* 2 3)) evaluates to 7
-    self assert: (eval eval: "(+ 1 (* 2 3))") equals: "7"
+  testReaderInteger =>
+    reader := SchemeReader new
+    self assert: (reader read: "42") equals: 42
 
-  testSelfEvaluatingNumber =>
-    eval := SchemeEval new.
-    // A bare number evaluates to itself
-    self assert: (eval eval: "42") equals: "42"
+  testReaderSymbol =>
+    reader := SchemeReader new
+    sym    := reader read: "foo"
+    self assert: (sym class =:= SchemeSymbol)
 
-  testLambdaCreation =>
-    eval := SchemeEval new.
-    // (lambda (x) (* x x)) produces a procedure
-    self assert: (eval eval: "(lambda (x) (* x x))") equals: "<procedure>"
+  testReaderBoolTrue =>
+    reader := SchemeReader new
+    self assert: (reader read: "#t") equals: true
 
-  testLambdaIdentity =>
-    eval := SchemeEval new.
-    // ((lambda (x) x) 5) — identity function
-    result := [eval eval: "((lambda (x) x) 5)"] on: Exception do: [:e | "ERROR: " ++ e message].
-    self assert: result equals: "5"
+  testReaderBoolFalse =>
+    reader := SchemeReader new
+    self assert: (reader read: "#f") equals: false
 
-  testLambdaApplication =>
-    eval := SchemeEval new.
-    // ((lambda (x) (* x x)) 5) applies the square lambda to 5
-    result := [eval eval: "((lambda (x) (* x x)) 5)"] on: Exception do: [:e | "ERROR: " ++ e message].
-    self assert: result equals: "25"
+  testReaderString =>
+    reader := SchemeReader new
+    self assert: (reader read: """hello""") equals: "hello"
 
-  testLambdaMultipleParams =>
-    eval := SchemeEval new.
-    // ((lambda (a b) (+ a b)) 3 7) applies a two-param lambda
-    result := [eval eval: "((lambda (a b) (+ a b)) 3 7)"] on: Exception do: [:e | "ERROR: " ++ e message].
-    self assert: result equals: "10"
+  testReaderStringEscapedQuote =>
+    reader := SchemeReader new
+    self assert: (reader read: """say """"hi"""" please""") equals: "say ""hi"" please"
 
-  testApplyNonProcedureRaisesError =>
-    // (1 + 2) in Scheme treats 1 as the operator.
-    // 1 is not a Block or SchemeLambda, so apply:args:in: must raise
-    // "Not a procedure: 1" rather than crashing with a raw {badfun,1} error.
-    // This is the core fix tracked in BT-930.
-    eval := SchemeEval new.
-    result := [eval eval: "(1 + 2)"] on: Exception do: [:e | e message].
+  testReaderList =>
+    reader := SchemeReader new
+    lst    := reader read: "(1 2 3)"
+    self assert: lst size equals: 3
+
+  // --- Self-evaluating expressions ---
+
+  testEvalInteger =>
+    self assert: (self eval: "99") equals: 99
+
+  testEvalBoolTrue =>
+    self assert: (self eval: "#t") equals: true
+
+  testEvalBoolFalse =>
+    self assert: (self eval: "#f") equals: false
+
+  // --- Arithmetic ---
+
+  testAdd =>
+    self assert: (self eval: "(+ 3 4)") equals: 7
+
+  testMul =>
+    self assert: (self eval: "(* 6 7)") equals: 42
+
+  testSub =>
+    self assert: (self eval: "(- 10 3)") equals: 7
+
+  testDiv =>
+    self assert: (self eval: "(/ 10 2)") equals: 5
+
+  // --- Quote ---
+
+  testQuote =>
+    result := self eval: "(quote hello)"
+    self assert: (result class =:= SchemeSymbol)
+
+  // --- Define and lookup ---
+
+  testDefine =>
+    reader := SchemeReader new
+    ev     := SchemeEval new
+    env    := ev defaultEnv
+    ev eval: (reader read: "(define x 10)") in: env
+    self assert: (ev eval: (reader read: "x") in: env) equals: 10
+
+  // --- Lambda and application ---
+
+  testLambdaApply =>
+    self assert: (self eval: "((lambda (x) (* x x)) 5)") equals: 25
+
+  testLambdaMultiParam =>
+    self assert: (self eval: "((lambda (x y) (+ x y)) 3 4)") equals: 7
+
+  // --- If ---
+
+  testIfTrue =>
+    self assert: (self eval: "(if #t 1 2)") equals: 1
+
+  testIfFalse =>
+    self assert: (self eval: "(if #f 1 2)") equals: 2
+
+  testIfNoElse =>
+    self assert: (self eval: "(if #f 1)") isNil
+
+  // --- Cond ---
+
+  testCond =>
+    self assert: (self eval: "(cond (#f 1) (#t 2) (else 3))") equals: 2
+
+  testCondElse =>
+    self assert: (self eval: "(cond (#f 1) (else 99))") equals: 99
+
+  // --- And / Or ---
+
+  testAndAllTrue =>
+    self assert: (self eval: "(and 1 2 3)") equals: 3
+
+  testAndShortCircuit =>
+    self assert: (self eval: "(and #f 2)") equals: false
+
+  testOrFirstTrue =>
+    self assert: (self eval: "(or 1 2)") equals: 1
+
+  testOrAllFalse =>
+    self assert: (self eval: "(or #f #f)") equals: false
+
+  // --- Let ---
+
+  testLet =>
+    self assert: (self eval: "(let ((x 3) (y 4)) (+ x y))") equals: 7
+
+  // --- Printer ---
+
+  testEvalString =>
+    self assert: (self eval: """hello""") equals: "hello"
+
+  testPrintString =>
+    self assert: (self evalStr: """hello""") equals: """hello"""
+
+  testPrintInt =>
+    self assert: (self evalStr: "42") equals: "42"
+
+  testPrintTrue =>
+    self assert: (self evalStr: "#t") equals: "#t"
+
+  testPrintFalse =>
+    self assert: (self evalStr: "#f") equals: "#f"
+
+  testPrintNil =>
+    printer := SchemePrinter new
+    self assert: (printer print: nil) equals: "()"
+
+  testPrintList =>
+    self assert: (self evalStr: "(list 1 2 3)") equals: "(1 2 3)"
+
+  // --- Closures ---
+
+  testClosure =>
+    reader := SchemeReader new
+    ev     := SchemeEval new
+    env    := ev defaultEnv
+    ev eval: (reader read: "(define make-adder (lambda (n) (lambda (x) (+ n x))))") in: env
+    ev eval: (reader read: "(define add5 (make-adder 5))") in: env
+    self assert: (ev eval: (reader read: "(add5 10)") in: env) equals: 15
+
+  // --- Error handling ---
+
+  testNonProcedureError =>
+    result := [self eval: "(1 + 2)"] on: Error do: [:e | e message]
     self assert: result equals: "Not a procedure: 1"
 
-  testApplyNonProcedureOtherNumber =>
-    // Any non-procedure in operator position should give the same clear error.
-    eval := SchemeEval new.
-    result := [eval eval: "(42 1 2)"] on: Exception do: [:e | e message].
-    self assert: result equals: "Not a procedure: 42"
+  // --- Recursion ---
 
-  testUnboundVariableError =>
-    eval := SchemeEval new.
-    result := [eval eval: "undefined-var"] on: Exception do: [:e | e message].
-    self assert: result equals: "Unbound variable: undefined-var"
+  testFactorial =>
+    reader := SchemeReader new
+    ev     := SchemeEval new
+    env    := ev defaultEnv
+    ev eval: (reader read: "(define fact (lambda (n) (if (= n 0) 1 (* n (fact (- n 1))))))") in: env
+    self assert: (ev eval: (reader read: "(fact 5)") in: env) equals: 120

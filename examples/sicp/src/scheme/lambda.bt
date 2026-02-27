@@ -1,30 +1,40 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// SchemeLambda — a Scheme closure (parameter list + body + captured environment).
-//
-// Created by the `lambda` special form in SchemeEval. Immutable value type.
-//
-// Usage:
-//   lam := SchemeLambda new withParams: #("x") body: #("+", "x", 1) closureEnv: env
-//   lam params    // => #("x")
-//   lam body      // => #("+", "x", 1)
-//   lam printString  // => "<procedure>"
-
+/// SchemeLambda — a user-defined Scheme procedure (closure).
+///
+/// Captures the parameter list, unevaluated body AST, and the lexical
+/// environment at the point of definition. Application is handled by
+/// `SchemeEval>>apply:args:in:`, which extends the closure env with
+/// parameter bindings and recurses into the body.
+///
+/// ## Examples
+/// ```beamtalk
+/// lam := SchemeLambda withParams: #("x") body: bodyExpr env: env
+/// lam params       // => #("x")
+/// lam body         // => bodyExpr
+/// lam closureEnv   // => the SchemeEnv actor
+/// ```
 Object subclass: SchemeLambda
-  state: params = nil
-  state: body = nil
-  state: closureEnv = nil
+  state: params     = #()   // List of parameter name strings
+  state: body       = nil   // Unevaluated body expression (AST)
+  state: closureEnv = nil   // SchemeEnv actor at point of definition
 
-  withParams: p body: b closureEnv: e =>
-    self.params := p.
-    self.body := b.
-    self.closureEnv := e.
-    ^self
+  /// Create a new lambda capturing `p` as parameter names, `b` as the body
+  /// AST, and `e` as the enclosing environment.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SchemeLambda withParams: #("x") body: ast env: env
+  /// ```
+  class withParams: p body: b env: e =>
+    self new: #{#params => p, #body => b, #closureEnv => e}
 
-  params => self.params
-  body => self.body
+  /// Return the list of parameter name strings.
+  params     => self.params
+
+  /// Return the unevaluated body AST node.
+  body       => self.body
+
+  /// Return the `SchemeEnv` actor captured at definition time.
   closureEnv => self.closureEnv
-
-  printString => "<procedure>"
-  displayString => "<procedure>"

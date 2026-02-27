@@ -1,0 +1,59 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SchemePrinter — converts Beamtalk values back to Scheme notation.
+///
+/// Handles every type produced by `SchemeEval`: integers, booleans, strings,
+/// nil, `SchemeSymbol`, `SchemeLambda`, and `List`. The main entry point is
+/// `print:`, which dispatches on the value's class.
+///
+/// ## Examples
+/// ```beamtalk
+/// printer := SchemePrinter new
+/// printer print: 42          // => "42"
+/// printer print: true        // => "#t"
+/// printer print: false       // => "#f"
+/// printer print: nil         // => "()"
+/// printer print: #(1 2 3)    // => "(1 2 3)"
+/// ```
+Object subclass: SchemePrinter
+
+  /// Convert `val` to its Scheme string representation.
+  ///
+  /// Dispatches on `val class`: nil → `"()"`, booleans → `"#t"`/`"#f"`,
+  /// integers → decimal string, strings → double-quoted, symbols → name,
+  /// lambdas → `"#<lambda>"`, lists → `"(elem ...)"`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SchemePrinter new print: 0          // => "0"
+  /// SchemePrinter new print: "hi"       // => "\"hi\""
+  /// SchemePrinter new print: nil        // => "()"
+  /// ```
+  print: val =>
+    val isNil ifTrue: [^"()"]
+    (val class =:= True)         ifTrue: [^"#t"]
+    (val class =:= False)        ifTrue: [^"#f"]
+    (val class =:= Integer)      ifTrue: [^val printString]
+    (val class =:= String)       ifTrue: [^"""" ++ val ++ """"]
+    (val class =:= SchemeSymbol) ifTrue: [^val name]
+    (val class =:= SchemeLambda) ifTrue: [^"#<lambda>"]
+    (val class =:= List) ifTrue: [^self printList: val]
+    "#<unknown>"
+
+  /// Format a list as a Scheme-style `(elem ...)` string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SchemePrinter new printList: #()        // => "()"
+  /// SchemePrinter new printList: #(1 2 3)   // => "(1 2 3)"
+  /// ```
+  printList: lst =>
+    lst isEmpty ifTrue: [^"()"]
+    inner := self printElems: lst
+    "(" ++ inner ++ ")"
+
+  /// Recursively format list elements separated by spaces.
+  printElems: lst =>
+    lst size =:= 1 ifTrue: [^self print: lst first]
+    (self print: lst first) ++ " " ++ (self printElems: lst rest)
