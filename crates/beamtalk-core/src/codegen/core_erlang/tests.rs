@@ -450,6 +450,7 @@ fn test_generate_nested_message_sends_use_unique_variables() {
         receiver: Box::new(inner_receiver),
         selector: inner_selector,
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 11),
     };
 
@@ -755,6 +756,7 @@ fn test_generate_repl_module_block_value_call() {
             ))),
             selector: MessageSelector::Binary("+".into()),
             arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(9, 10))],
+            is_cast: false,
             span: Span::new(5, 10),
         }],
         Span::new(0, 12),
@@ -764,6 +766,7 @@ fn test_generate_repl_module_block_value_call() {
         receiver: Box::new(Expression::Block(block)),
         selector: MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(13, 19))]),
         arguments: vec![Expression::Literal(Literal::Integer(5), Span::new(20, 21))],
+        is_cast: false,
         span: Span::new(0, 22),
     };
 
@@ -811,6 +814,7 @@ fn test_generate_repl_module_with_times_repeat_mutation() {
         receiver: Box::new(count_id.clone()),
         selector: MessageSelector::Binary("+".into()),
         arguments: vec![one],
+        is_cast: false,
         span: Span::new(0, 15),
     };
     let assignment = Expression::Assignment {
@@ -833,6 +837,7 @@ fn test_generate_repl_module_with_times_repeat_mutation() {
             span: Span::new(2, 14),
         }]),
         arguments: vec![body],
+        is_cast: false,
         span: Span::new(0, 40),
     };
 
@@ -880,6 +885,7 @@ fn test_generate_repl_module_with_to_do_mutation() {
         receiver: Box::new(total_id.clone()),
         selector: MessageSelector::Binary("+".into()),
         arguments: vec![n_id],
+        is_cast: false,
         span: Span::new(0, 15),
     };
     let assignment = Expression::Assignment {
@@ -912,6 +918,7 @@ fn test_generate_repl_module_with_to_do_mutation() {
             },
         ]),
         arguments: vec![five, body],
+        is_cast: false,
         span: Span::new(0, 40),
     };
 
@@ -949,6 +956,7 @@ fn test_generate_repl_module_with_while_true_mutation() {
         receiver: Box::new(x_id.clone()),
         selector: MessageSelector::Binary("<".into()),
         arguments: vec![five],
+        is_cast: false,
         span: Span::new(0, 10),
     };
     let condition = Expression::Block(Block {
@@ -963,6 +971,7 @@ fn test_generate_repl_module_with_while_true_mutation() {
         receiver: Box::new(x_id.clone()),
         selector: MessageSelector::Binary("+".into()),
         arguments: vec![one],
+        is_cast: false,
         span: Span::new(0, 10),
     };
     let assignment = Expression::Assignment {
@@ -984,6 +993,7 @@ fn test_generate_repl_module_with_while_true_mutation() {
             span: Span::new(10, 20),
         }]),
         arguments: vec![body],
+        is_cast: false,
         span: Span::new(0, 40),
     };
 
@@ -1131,6 +1141,7 @@ fn test_generate_repl_module_with_arithmetic() {
         receiver: Box::new(x_ref),
         selector: MessageSelector::Binary("+".into()),
         arguments: vec![one],
+        is_cast: false,
         span: Span::new(0, 5),
     };
 
@@ -1182,6 +1193,7 @@ fn test_generate_repl_multi_stmt_times_repeat_then_read() {
         receiver: Box::new(x_id2.clone()),
         selector: MessageSelector::Binary("+".into()),
         arguments: vec![one2],
+        is_cast: false,
         span,
     };
     let loop_assign = Expression::Assignment {
@@ -1202,6 +1214,7 @@ fn test_generate_repl_multi_stmt_times_repeat_then_read() {
             span,
         }]),
         arguments: vec![loop_body],
+        is_cast: false,
         span,
     };
 
@@ -1262,6 +1275,7 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
         receiver: Box::new(x_cond),
         selector: MessageSelector::Binary("<".into()),
         arguments: vec![five],
+        is_cast: false,
         span,
     };
     let condition = Expression::Block(Block {
@@ -1275,6 +1289,7 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
         receiver: Box::new(x_body.clone()),
         selector: MessageSelector::Binary("+".into()),
         arguments: vec![one],
+        is_cast: false,
         span,
     };
     let loop_assign = Expression::Assignment {
@@ -1294,6 +1309,7 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
             span,
         }]),
         arguments: vec![loop_body],
+        is_cast: false,
         span,
     };
 
@@ -1350,6 +1366,7 @@ fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
         receiver: Box::new(x_id2.clone()),
         selector: MessageSelector::Binary("+".into()),
         arguments: vec![one2],
+        is_cast: false,
         span,
     };
     let loop_assign = Expression::Assignment {
@@ -1370,6 +1387,7 @@ fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
             span,
         }]),
         arguments: vec![loop_body],
+        is_cast: false,
         span,
     };
 
@@ -1420,6 +1438,7 @@ fn test_repl_loop_mutations_accumulate_plain_key() {
         receiver: Box::new(x_id.clone()),
         selector: MessageSelector::Binary("+".into()),
         arguments: vec![one],
+        is_cast: false,
         span,
     };
     let assignment = Expression::Assignment {
@@ -1440,6 +1459,7 @@ fn test_repl_loop_mutations_accumulate_plain_key() {
             span,
         }]),
         arguments: vec![body],
+        is_cast: false,
         span,
     };
 
@@ -1500,6 +1520,7 @@ fn test_repl_multi_stmt_loop_accumulates_from_zero() {
         receiver: Box::new(x_id2.clone()),
         selector: MessageSelector::Binary("+".into()),
         arguments: vec![one],
+        is_cast: false,
         span,
     };
     let loop_assign = Expression::Assignment {
@@ -1520,6 +1541,7 @@ fn test_repl_multi_stmt_loop_accumulates_from_zero() {
             span,
         }]),
         arguments: vec![loop_body],
+        is_cast: false,
         span,
     };
 
@@ -1604,6 +1626,7 @@ fn test_block_value_message_one_arg() {
             ))),
             selector: MessageSelector::Binary("+".into()),
             arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(9, 10))],
+            is_cast: false,
             span: Span::new(5, 10),
         }],
         Span::new(0, 12),
@@ -1687,6 +1710,7 @@ fn test_block_while_true_loop() {
             ))),
             selector: MessageSelector::Binary("<".into()),
             arguments: vec![Expression::Literal(Literal::Integer(5), Span::new(11, 12))],
+            is_cast: false,
             span: Span::new(1, 12),
         }],
         Span::new(0, 13),
@@ -2153,6 +2177,7 @@ fn test_cascade_unary_messages() {
         receiver: Box::new(x_ident),
         selector: MessageSelector::Unary("negated".into()),
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 9),
     };
 
@@ -2215,6 +2240,7 @@ fn test_cascade_keyword_messages() {
             Expression::Literal(Literal::Integer(1), Span::new(15, 16)),
             Expression::Literal(Literal::String("a".into()), Span::new(21, 24)),
         ],
+        is_cast: false,
         span: Span::new(0, 24),
     };
 
@@ -2274,6 +2300,7 @@ fn test_cascade_binary_selector_error() {
         receiver: Box::new(counter_ident),
         selector: MessageSelector::Binary("+".into()),
         arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(10, 11))],
+        is_cast: false,
         span: Span::new(0, 11),
     };
 
@@ -2309,6 +2336,7 @@ fn test_cascade_repl_expression() {
         receiver: Box::new(x_ident),
         selector: MessageSelector::Unary("negated".into()),
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 9),
     };
 
@@ -2379,6 +2407,7 @@ fn test_cascade_field_assignment_arg_hoisted() {
         receiver: Box::new(obj_ident),
         selector: MessageSelector::Keyword(vec![KeywordPart::new("msg1:", Span::new(4, 9))]),
         arguments: vec![field_assignment],
+        is_cast: false,
         span: Span::new(0, 22),
     };
 
@@ -2452,6 +2481,7 @@ fn test_cascade_multiple_field_assignments_state_threading() {
         receiver: Box::new(obj_ident),
         selector: MessageSelector::Keyword(vec![KeywordPart::new("msg1:", Span::new(4, 9))]),
         arguments: vec![field_assign_x],
+        is_cast: false,
         span: Span::new(0, 22),
     };
 
@@ -2529,6 +2559,7 @@ fn test_validate_stored_closure_with_captured_mutation() {
                 ))),
                 selector: MessageSelector::Binary("+".into()),
                 arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(18, 19))],
+                is_cast: false,
                 span: Span::new(10, 19),
             }),
             span: Span::new(1, 19),
@@ -2592,6 +2623,7 @@ fn test_validate_stored_closure_with_new_local_used_later() {
                     ))),
                     selector: MessageSelector::Binary("*".into()),
                     arguments: vec![Expression::Literal(Literal::Integer(2), Span::new(17, 18))],
+                    is_cast: false,
                     span: Span::new(13, 18),
                 }),
                 span: Span::new(5, 18),
@@ -2603,6 +2635,7 @@ fn test_validate_stored_closure_with_new_local_used_later() {
                 ))),
                 selector: MessageSelector::Binary("+".into()),
                 arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(27, 28))],
+                is_cast: false,
                 span: Span::new(20, 28),
             },
         ],
@@ -2806,6 +2839,7 @@ fn test_codegen_rejects_stored_closure_with_local_mutation() {
                                         Literal::Integer(1),
                                         Span::new(51, 52),
                                     )],
+                                    is_cast: false,
                                     span: Span::new(43, 52),
                                 }),
                                 span: Span::new(34, 52),
@@ -3285,6 +3319,7 @@ fn test_class_method_call_generation() {
         }),
         selector: MessageSelector::Unary("allClasses".into()),
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 20),
     };
 
@@ -3308,6 +3343,7 @@ fn test_class_method_call_generation() {
         }),
         selector: MessageSelector::Unary("new".into()),
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 10),
     };
 
@@ -3332,6 +3368,7 @@ fn test_class_method_call_generation() {
         }),
         selector: MessageSelector::Unary("spawn".into()),
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 17),
     };
 
@@ -4050,6 +4087,7 @@ fn test_erlang_interop_direct_call_keyword_single_arg() {
         }),
         selector: MessageSelector::Unary("lists".into()),
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 12),
     };
     // Outer: (Erlang lists) reverse: xs
@@ -4090,6 +4128,7 @@ fn test_erlang_interop_direct_call_keyword_multi_arg() {
         }),
         selector: MessageSelector::Unary("lists".into()),
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 12),
     };
     let selector = MessageSelector::Keyword(vec![
@@ -4128,6 +4167,7 @@ fn test_erlang_interop_direct_call_zero_arg() {
         }),
         selector: MessageSelector::Unary("erlang".into()),
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 13),
     };
     // Outer: (Erlang erlang) node — unary selector, zero arguments
@@ -4212,6 +4252,7 @@ fn test_erlang_interop_protocol_selectors_not_optimized() {
         }),
         selector: MessageSelector::Unary("lists".into()),
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 12),
     };
     let selector = MessageSelector::Unary("printString".into());
@@ -4316,6 +4357,7 @@ fn test_bt855_erlang_interop_wrapper_pure_block_no_warning() {
         }),
         selector: MessageSelector::Unary("lists".into()),
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 12),
     };
 
@@ -4329,6 +4371,7 @@ fn test_bt855_erlang_interop_wrapper_pure_block_no_warning() {
             ))),
             selector: MessageSelector::Binary("+".into()),
             arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(9, 10))],
+            is_cast: false,
             span: Span::new(5, 10),
         }],
         Span::new(0, 11),
@@ -4385,6 +4428,7 @@ fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
         }),
         selector: MessageSelector::Unary("lists".into()),
         arguments: vec![],
+        is_cast: false,
         span: Span::new(0, 12),
     };
 
@@ -4407,6 +4451,7 @@ fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
                     "x",
                     Span::new(22, 23),
                 ))],
+                is_cast: false,
                 span: Span::new(14, 23),
             }),
             span: Span::new(5, 23),
@@ -4511,6 +4556,7 @@ fn test_bt855_generate_erlang_interop_wrapper_pure_returns_tier1() {
             ))),
             selector: MessageSelector::Binary("+".into()),
             arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(7, 8))],
+            is_cast: false,
             span: Span::new(3, 8),
         }],
         Span::new(0, 9),
@@ -4564,6 +4610,7 @@ fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
                     "x",
                     Span::new(20, 21),
                 ))],
+                is_cast: false,
                 span: Span::new(12, 21),
             }),
             span: Span::new(3, 21),

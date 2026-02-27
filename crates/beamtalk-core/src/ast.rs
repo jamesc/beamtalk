@@ -49,6 +49,7 @@
 //!                     Literal::Integer(4),
 //!                     Span::new(9, 10)
 //!                 )],
+//!                 is_cast: false,
 //!                 span: Span::new(5, 10),
 //!             }),
 //!             span: Span::new(0, 10),
@@ -736,6 +737,11 @@ pub enum Expression {
         selector: MessageSelector,
         /// Arguments to the message.
         arguments: Vec<Expression>,
+        /// Whether this is a cast (fire-and-forget, terminated with `!`).
+        ///
+        /// `false` means a synchronous call (terminated with `.` or newline).
+        /// `true` means a cast — no return value; codegen uses `gen_server:cast`.
+        is_cast: bool,
         /// Source location of the entire message send.
         span: Span,
     },
@@ -1780,6 +1786,7 @@ mod tests {
                 }),
                 selector: MessageSelector::Binary("+".into()),
                 arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(27, 28))],
+                is_cast: false,
                 span: Span::new(14, 28),
             }),
             span: Span::new(0, 28),
@@ -1867,6 +1874,7 @@ mod tests {
                     }),
                     selector: MessageSelector::Binary("+".into()),
                     arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(77, 78))],
+                    is_cast: false,
                     span: Span::new(64, 78),
                 }),
                 span: Span::new(50, 78),

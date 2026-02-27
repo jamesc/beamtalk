@@ -633,6 +633,7 @@ impl Parser {
         if matches!(
             self.current_kind(),
             TokenKind::Period
+                | TokenKind::Bang
                 | TokenKind::RightBracket
                 | TokenKind::RightParen
                 | TokenKind::RightBrace
@@ -701,8 +702,23 @@ impl Parser {
                 if is_error {
                     self.synchronize();
                 } else {
-                    // Optional statement terminator
-                    self.match_token(&TokenKind::Period);
+                    // Optional statement terminator: `.` or `!` (cast)
+                    if self.match_token(&TokenKind::Period) {
+                        // period consumed — nothing else to do
+                    } else if self.match_token(&TokenKind::Bang) {
+                        // Cast terminator — annotate the last expression as a cast
+                        match expressions.last_mut() {
+                            Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
+                            Some(last) => {
+                                let span = last.span();
+                                self.diagnostics.push(Diagnostic::error(
+                                    "Cast (!) has no return value and cannot be used in an expression. Use . for a synchronous call.",
+                                    span,
+                                ));
+                            }
+                            None => {}
+                        }
+                    }
                 }
             }
         }
@@ -4268,5 +4284,156 @@ Actor subclass: Counter
 
         let class = &module.classes[0];
         assert!(!class.is_typed);
+    }
+
+    // ========================================================================
+    // BT-919: Cast (!) statement terminator tests
+    // ========================================================================
+
+    #[test]
+    fn parse_bang_marks_message_send_as_cast() {
+        // `foo bar!` should parse as a MessageSend with is_cast = true
+        let module = parse_ok("foo bar!");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                is_cast,
+                selector: MessageSelector::Unary(name),
+                ..
+            } => {
+                assert_eq!(name.as_str(), "bar");
+                assert!(
+                    is_cast,
+                    "Expected is_cast = true for bang-terminated message"
+                );
+            }
+            other => panic!("Expected MessageSend, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_period_keeps_message_send_as_call() {
+        // `foo bar.` should parse as a MessageSend with is_cast = false
+        let module = parse_ok("foo bar.");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend { is_cast, .. } => {
+                assert!(
+                    !is_cast,
+                    "Expected is_cast = false for period-terminated message"
+                );
+            }
+            other => panic!("Expected MessageSend, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_bang_keyword_message_is_cast() {
+        // `obj doSomething: 42!` should mark the keyword send as cast
+        let module = parse_ok("obj doSomething: 42!");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                is_cast,
+                selector: MessageSelector::Keyword(_),
+                ..
+            } => {
+                assert!(is_cast, "Expected keyword message with ! to be a cast");
+            }
+            other => panic!("Expected keyword MessageSend, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_bang_in_expression_context_is_error() {
+        // `x := foo bar!` — cast has no return value, can't be used in an expression
+        let diagnostics = parse_err("x := foo bar!");
+        assert!(
+            !diagnostics.is_empty(),
+            "Expected error for cast in expression context"
+        );
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("Cast (!) has no return value"),
+            "Expected cast-in-expression error, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn parse_multiple_statements_with_bang() {
+        // `foo bar! baz qux.` — two statements: first cast, second call
+        let module = parse_ok("foo bar!\nbaz qux.");
+        assert_eq!(module.expressions.len(), 2);
+        match &module.expressions[0] {
+            Expression::MessageSend { is_cast, .. } => assert!(is_cast),
+            other => panic!("Expected cast MessageSend, got: {other:?}"),
+        }
+        match &module.expressions[1] {
+            Expression::MessageSend { is_cast, .. } => assert!(!is_cast),
+            other => panic!("Expected call MessageSend, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_bang_binary_message_is_cast() {
+        // `3 + 4!` — binary message send with cast
+        let module = parse_ok("3 + 4!");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0] {
+            Expression::MessageSend {
+                is_cast,
+                selector: MessageSelector::Binary(op),
+                ..
+            } => {
+                assert_eq!(op.as_str(), "+");
+                assert!(is_cast, "Expected binary message with ! to be a cast");
+            }
+            other => panic!("Expected binary MessageSend, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_bang_in_block_body() {
+        // `[foo bar!]` — cast inside a block body
+        let module = parse_ok("[foo bar!]");
+        assert_eq!(module.expressions.len(), 1);
+        if let Expression::Block(block) = &module.expressions[0] {
+            assert_eq!(block.body.len(), 1);
+            match &block.body[0] {
+                Expression::MessageSend { is_cast, .. } => {
+                    assert!(is_cast, "Expected cast inside block body");
+                }
+                other => panic!("Expected MessageSend in block, got: {other:?}"),
+            }
+        } else {
+            panic!("Expected Block expression");
+        }
+    }
+
+    #[test]
+    fn parse_return_with_bang_is_error() {
+        // `^foo bar!` — can't return a cast (no return value)
+        let diagnostics = parse_err("^foo bar!");
+        assert!(!diagnostics.is_empty(), "Expected error for return of cast");
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("Cast (!) has no return value"),
+            "Expected cast error for return, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn parse_cascade_with_bang_is_error() {
+        // `obj msg1; msg2!` — cascade is not a MessageSend, so ! produces error
+        // (Cascade + cast semantics are deferred to a future issue)
+        let diagnostics = parse_err("obj msg1; msg2!");
+        assert!(
+            !diagnostics.is_empty(),
+            "Expected error for cascade with bang"
+        );
     }
 }

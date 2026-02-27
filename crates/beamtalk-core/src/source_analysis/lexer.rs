@@ -315,6 +315,10 @@ impl<'src> Lexer<'src> {
                 self.advance();
                 TokenKind::Period
             }
+            '!' => {
+                self.advance();
+                TokenKind::Bang
+            }
             '|' => {
                 self.advance();
                 TokenKind::Pipe
@@ -1562,15 +1566,29 @@ mod tests {
     #[test]
     fn lex_punctuation() {
         assert_eq!(
-            lex_kinds(":= ^ ; . | : #"),
+            lex_kinds(":= ^ ; . ! | : #"),
             vec![
                 TokenKind::Assign,
                 TokenKind::Caret,
                 TokenKind::Semicolon,
                 TokenKind::Period,
+                TokenKind::Bang,
                 TokenKind::Pipe,
                 TokenKind::Colon,
                 TokenKind::Hash,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_bang_as_cast_terminator() {
+        // BT-919: `!` is a cast (fire-and-forget) statement terminator
+        assert_eq!(
+            lex_kinds("foo bar!"),
+            vec![
+                TokenKind::Identifier("foo".into()),
+                TokenKind::Identifier("bar".into()),
+                TokenKind::Bang,
             ]
         );
     }

@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -31,6 +32,7 @@ Module {
                     "isNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 664,
                     end: 672,
@@ -65,6 +67,7 @@ Module {
                     "notNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 702,
                     end: 711,
@@ -99,6 +102,7 @@ Module {
                     "isNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 739,
                     end: 746,
@@ -133,6 +137,7 @@ Module {
                     "isNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 831,
                     end: 844,
@@ -167,6 +172,7 @@ Module {
                     "notNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 870,
                     end: 884,
@@ -201,6 +207,7 @@ Module {
                     "isNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 908,
                     end: 916,
@@ -235,6 +242,7 @@ Module {
                     "isNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 1010,
                     end: 1020,
@@ -269,6 +277,7 @@ Module {
                     "notNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 1049,
                     end: 1060,
@@ -303,6 +312,7 @@ Module {
                     "isNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 1087,
                     end: 1098,
@@ -337,6 +347,7 @@ Module {
                     "notNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 1147,
                     end: 1159,
@@ -400,6 +411,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 1716,
                     end: 1737,
@@ -478,6 +490,7 @@ Module {
                                             },
                                         ),
                                     ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 1842,
                                         end: 1849,
@@ -491,6 +504,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 1821,
                     end: 1850,
@@ -586,6 +600,7 @@ Module {
                                         "uppercase",
                                     ),
                                     arguments: [],
+                                    is_cast: false,
                                     span: Span {
                                         start: 1979,
                                         end: 1992,
@@ -599,6 +614,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 1934,
                     end: 1993,
@@ -684,6 +700,7 @@ Module {
                                             },
                                         ),
                                     ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 2120,
                                         end: 2127,
@@ -717,6 +734,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 2099,
                     end: 2139,
@@ -795,6 +813,7 @@ Module {
                                             },
                                         ),
                                     ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 2707,
                                         end: 2713,
@@ -808,6 +827,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 2687,
                     end: 2714,
@@ -876,6 +896,7 @@ Module {
                                         "size",
                                     ),
                                     arguments: [],
+                                    is_cast: false,
                                     span: Span {
                                         start: 2763,
                                         end: 2771,
@@ -889,6 +910,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 2738,
                     end: 2772,
@@ -969,6 +991,7 @@ Module {
                                                     },
                                                 ),
                                             ],
+                                            is_cast: false,
                                             span: Span {
                                                 start: 2857,
                                                 end: 2862,
@@ -993,6 +1016,7 @@ Module {
                                             },
                                         ),
                                     ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 2856,
                                         end: 2867,
@@ -1006,6 +1030,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 2838,
                     end: 2868,
@@ -1086,6 +1111,7 @@ Module {
                                                     },
                                                 ),
                                             ],
+                                            is_cast: false,
                                             span: Span {
                                                 start: 3440,
                                                 end: 3445,
@@ -1099,6 +1125,7 @@ Module {
                                 },
                             ),
                         ],
+                        is_cast: false,
                         span: Span {
                             start: 3421,
                             end: 3446,
@@ -1123,6 +1150,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 3420,
                     end: 3452,
@@ -1235,6 +1263,7 @@ Module {
                                                                 },
                                                             ),
                                                         ],
+                                                        is_cast: false,
                                                         span: Span {
                                                             start: 3561,
                                                             end: 3570,
@@ -1248,6 +1277,7 @@ Module {
                                             },
                                         ),
                                     ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 3535,
                                         end: 3571,
@@ -1261,6 +1291,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 3512,
                     end: 3572,
@@ -1326,6 +1357,7 @@ Module {
                                 },
                             ),
                         ],
+                        is_cast: false,
                         span: Span {
                             start: 3642,
                             end: 3656,
@@ -1350,6 +1382,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 3641,
                     end: 3662,
@@ -1385,6 +1418,7 @@ Module {
                         "notNil",
                     ),
                     arguments: [],
+                    is_cast: false,
                     span: Span {
                         start: 4202,
                         end: 4211,
@@ -1423,6 +1457,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 4202,
                     end: 4223,
@@ -1458,6 +1493,7 @@ Module {
                         "isNil",
                     ),
                     arguments: [],
+                    is_cast: false,
                     span: Span {
                         start: 4249,
                         end: 4261,
@@ -1496,6 +1532,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 4249,
                     end: 4273,
@@ -1531,6 +1568,7 @@ Module {
                         "notNil",
                     ),
                     arguments: [],
+                    is_cast: false,
                     span: Span {
                         start: 4342,
                         end: 4352,
@@ -1596,6 +1634,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 4342,
                     end: 4395,
@@ -1641,6 +1680,7 @@ Module {
                     "isNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 4924,
                     end: 4934,
@@ -1694,6 +1734,7 @@ Module {
                     "isNil",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 4965,
                     end: 4979,
@@ -1759,6 +1800,7 @@ Module {
                                 },
                             ),
                         ],
+                        is_cast: false,
                         span: Span {
                             start: 5560,
                             end: 5576,
@@ -1783,6 +1825,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 5559,
                     end: 5584,
@@ -1867,12 +1910,14 @@ Module {
                                                     },
                                                 ),
                                             ],
+                                            is_cast: false,
                                             span: Span {
                                                 start: 5687,
                                                 end: 5692,
                                             },
                                         },
                                     ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 5683,
                                         end: 5692,
@@ -1886,6 +1931,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 5672,
                     end: 5693,
@@ -1945,6 +1991,7 @@ Module {
                         "isNil",
                     ),
                     arguments: [],
+                    is_cast: false,
                     span: Span {
                         start: 6260,
                         end: 6271,
@@ -2010,6 +2057,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 6260,
                     end: 6300,
@@ -2112,6 +2160,7 @@ Module {
                                             },
                                         ),
                                     ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 6397,
                                         end: 6402,
@@ -2125,6 +2174,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 6374,
                     end: 6403,
@@ -2223,6 +2273,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 6473,
                     end: 6528,
@@ -2321,6 +2372,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 6559,
                     end: 6613,
@@ -2401,6 +2453,7 @@ Module {
                                                     },
                                                 ),
                                             ],
+                                            is_cast: false,
                                             span: Span {
                                                 start: 7179,
                                                 end: 7185,
@@ -2414,6 +2467,7 @@ Module {
                                 },
                             ),
                         ],
+                        is_cast: false,
                         span: Span {
                             start: 7161,
                             end: 7186,
@@ -2438,6 +2492,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 7160,
                     end: 7194,
@@ -2503,6 +2558,7 @@ Module {
                                 },
                             ),
                         ],
+                        is_cast: false,
                         span: Span {
                             start: 7254,
                             end: 7268,
@@ -2527,6 +2583,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 7253,
                     end: 7277,
@@ -2630,6 +2687,7 @@ Module {
                                                 },
                                             ),
                                         ],
+                                        is_cast: false,
                                         span: Span {
                                             start: 7853,
                                             end: 7869,
@@ -2649,6 +2707,7 @@ Module {
                                             },
                                         ),
                                     ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 7853,
                                         end: 7875,
@@ -2662,6 +2721,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 7825,
                     end: 7876,
@@ -2749,6 +2809,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 7972,
                     end: 7992,
@@ -2878,6 +2939,7 @@ Module {
                                             },
                                         ),
                                     ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 8110,
                                         end: 8115,
@@ -2891,6 +2953,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 8071,
                     end: 8116,

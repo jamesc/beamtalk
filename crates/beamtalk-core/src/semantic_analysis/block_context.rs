@@ -363,6 +363,7 @@ mod tests {
                 Span::new(3, 15),
             )]),
             arguments: vec![block_expr],
+            is_cast: false,
             span: Span::new(0, 30),
         };
 
@@ -390,6 +391,7 @@ mod tests {
                 Expression::Literal(crate::ast::Literal::Integer(10), Span::new(6, 8)),
                 block_expr,
             ],
+            is_cast: false,
             span: Span::new(0, 28),
         };
 
@@ -411,6 +413,7 @@ mod tests {
             ))),
             selector: MessageSelector::Keyword(vec![KeywordPart::new("do:", Span::new(6, 9))]),
             arguments: vec![block_var_expr],
+            is_cast: false,
             span: Span::new(0, 17),
         };
 
@@ -435,6 +438,7 @@ mod tests {
                 Span::new(9, 19),
             )]),
             arguments: vec![arg_expr],
+            is_cast: false,
             span: Span::new(0, 34),
         };
 
@@ -460,6 +464,7 @@ mod tests {
                 Span::new(10, 17),
             )]),
             arguments: vec![block_expr],
+            is_cast: false,
             span: Span::new(0, 36),
         };
 
@@ -487,6 +492,7 @@ mod tests {
                 KeywordPart::new("ifFalse:", Span::new(22, 30)),
             ]),
             arguments: vec![block1_expr, block2_expr],
+            is_cast: false,
             span: Span::new(0, 34),
         };
 
@@ -530,6 +536,7 @@ mod tests {
                 Span::new(10, 17),
             )]),
             arguments: vec![block_var_expr],
+            is_cast: false,
             span: Span::new(0, 25),
         };
 

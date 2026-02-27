@@ -14,7 +14,7 @@ use crate::ast::{
 };
 use crate::source_analysis::{Span, TokenKind};
 
-use super::Parser;
+use super::{Diagnostic, Parser};
 
 impl Parser {
     // ========================================================================
@@ -805,7 +805,7 @@ impl Parser {
                 continue;
             }
 
-            // Period or newline separates statements
+            // Period, bang (!), or newline separates statements
             if self.match_token(&TokenKind::Period) {
                 // Explicit period — check if next token starts a new method/state/class
                 if self.is_at_end()
@@ -817,6 +817,29 @@ impl Parser {
                     break;
                 }
                 // Otherwise continue parsing more expressions
+            } else if self.match_token(&TokenKind::Bang) {
+                // Cast terminator — mark the last expression as a cast if it's a MessageSend.
+                // If the expression is not a MessageSend (e.g. `x := foo bar!`), emit an error.
+                match body.last_mut() {
+                    Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
+                    Some(last) => {
+                        let span = last.span();
+                        self.diagnostics.push(Diagnostic::error(
+                            "Cast (!) has no return value and cannot be used in an expression. Use . for a synchronous call.",
+                            span,
+                        ));
+                    }
+                    None => {}
+                }
+                // Check if next token starts a new method/state/class (same as period)
+                if self.is_at_end()
+                    || self.is_at_class_definition()
+                    || self.is_at_method_definition()
+                    || self.is_at_standalone_method_definition()
+                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
+                {
+                    break;
+                }
             } else if !self.is_at_end() && self.current_token().has_leading_newline() {
                 // BT-885: If the next token is at column 0 (no indentation), it's a
                 // top-level expression, not part of this method body. This allows
