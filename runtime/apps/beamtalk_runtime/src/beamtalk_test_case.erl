@@ -359,6 +359,8 @@ filter_stackframes(Frames) ->
             ({Mod, _Fun, _Arity, _Loc}) ->
                 ModStr = atom_to_list(Mod),
                 not lists:prefix("beamtalk_test", ModStr) andalso
+                    not lists:prefix("beamtalk_object", ModStr) andalso
+                    not lists:prefix("beamtalk_class", ModStr) andalso
                     not lists:prefix("erlang", ModStr) andalso
                     Mod =/= gen_server andalso
                     Mod =/= proc_lib;
@@ -382,6 +384,8 @@ format_test_error(exit, Reason, Stacktrace) ->
     Msg = iolist_to_binary([<<"exit: ">>, decode_beam_error(Reason)]),
     ST = format_stacktrace(Stacktrace),
     <<Msg/binary, ST/binary>>;
+%% Erlang only supports error/throw/exit as exception classes, so this
+%% clause is never reached in practice — retained for exhaustiveness.
 format_test_error(Class, Reason, Stacktrace) ->
     ClassBin = atom_to_binary(Class, utf8),
     ReasonBin = decode_beam_error(Reason),
