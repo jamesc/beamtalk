@@ -5011,6 +5011,9 @@ fn test_cast_send_in_actor_method_compiles() {
     assert!(
         code.contains("let _seq"),
         "Cast send should be wrapped in let to discard its result. Got:\n{code}"
+    );
+}
+
 // BT-938: Validate that bt@stdlib@X module exists when generating dispatch calls.
 
 #[test]
