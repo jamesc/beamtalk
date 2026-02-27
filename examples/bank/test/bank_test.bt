@@ -53,10 +53,10 @@ TestCase subclass: BankTest
   testOpenAccountReturnsFreshAccount =>
     // Each openAccount: creates a new Account actor
     bank := Bank spawn.
-    bank openAccount: "Alice".
-    bank openAccount: "Bob".
+    bank openAccount: "Alice"
+    bank openAccount: "Bob"
     alice := bank accountFor: "Alice".
     bob := bank accountFor: "Bob".
-    alice deposit: 100.
+    alice deposit: 100
     self assert: (alice balance) equals: 100.
     self assert: (bob balance) equals: 0
