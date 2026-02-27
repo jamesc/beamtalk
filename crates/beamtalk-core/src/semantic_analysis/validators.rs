@@ -753,9 +753,7 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
 fn is_effect_free(expr: &Expression) -> bool {
     match expr {
         Expression::Literal(_, _) => true,
-        Expression::Identifier(_) | Expression::ClassReference { .. } | Expression::Super(_) => {
-            true
-        }
+        Expression::Identifier(_) | Expression::ClassReference { .. } => true,
         Expression::Parenthesized { expression, .. } => is_effect_free(expression),
         Expression::MessageSend {
             receiver,
@@ -871,6 +869,11 @@ fn walk_expr_for_effect_free(expr: &Expression, diagnostics: &mut Vec<Diagnostic
             }
             if let Some(t) = tail {
                 walk_expr_for_effect_free(t, diagnostics);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                walk_expr_for_effect_free(elem, diagnostics);
             }
         }
         Expression::StringInterpolation { segments, .. } => {
