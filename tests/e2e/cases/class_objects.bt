@@ -4,10 +4,9 @@
 // E2E tests for first-class class objects (BT-246 / ADR 0013 Phase 1)
 //
 // These tests require E2E because they use the Beamtalk workspace binding
-// (an async actor) via `Beamtalk classNamed:`, which requires `await` and
-// workspace variable persistence across REPL turns to hold the returned
-// class objects. BUnit tests cannot drive async workspace binding dispatch
-// with cross-turn variable persistence.
+// (an actor) via `Beamtalk classNamed:`, with workspace variable persistence
+// across REPL turns to hold the returned class objects. BUnit tests cannot
+// drive workspace binding dispatch with cross-turn variable persistence.
 //
 // Tests dynamic class dispatch: storing class objects in variables
 // and sending messages to them at runtime, rather than only supporting
@@ -27,7 +26,7 @@
 // Store class in variable and send "new" dynamically
 // ---------------------------------------------------------------------------
 
-cls := (Beamtalk classNamed: #Point) await
+cls := Beamtalk classNamed: #Point
 // => Point
 
 cls new
@@ -42,7 +41,7 @@ cls new
 // Dynamic dispatch returns usable value (not a future)
 // ---------------------------------------------------------------------------
 
-cls := (Beamtalk classNamed: #Point) await
+cls := Beamtalk classNamed: #Point
 // => Point
 
 p := cls new
@@ -59,7 +58,7 @@ p getX
 // Dynamic methods call
 // ---------------------------------------------------------------------------
 
-cls := (Beamtalk classNamed: #Point) await
+cls := Beamtalk classNamed: #Point
 // => Point
 
 // Dynamic methods call: keep wildcard since method list changes when methods are added
@@ -70,7 +69,7 @@ cls methods
 // Dynamic superclass call
 // ---------------------------------------------------------------------------
 
-cls := (Beamtalk classNamed: #Point) await
+cls := Beamtalk classNamed: #Point
 // => Point
 
 cls superclass
@@ -80,7 +79,7 @@ cls superclass
 // Dynamic name call
 // ---------------------------------------------------------------------------
 
-cls := (Beamtalk classNamed: #Point) await
+cls := Beamtalk classNamed: #Point
 // => Point
 
 cls name
@@ -94,7 +93,7 @@ cls name
 // Store actor class in variable and send "spawn" dynamically
 // ---------------------------------------------------------------------------
 
-actorCls := (Beamtalk classNamed: #Counter) await
+actorCls := Beamtalk classNamed: #Counter
 // => Counter
 
 c := actorCls spawn
@@ -106,5 +105,5 @@ c increment
 c increment
 // => 2
 
-c getValue await
+c getValue
 // => 2

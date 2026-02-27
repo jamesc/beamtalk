@@ -13,20 +13,20 @@ TestCase subclass: TimesRepeatSimpleTest
 
   testZeroTimesIsNoOp =>
     c := Counter spawn.
-    0 timesRepeat: [c increment await].
-    self assert: (c getValue await) equals: 0
+    0 timesRepeat: [c increment].
+    self assert: (c getValue) equals: 0
 
   testOneTimeRunsBlockOnce =>
     c := Counter spawn.
-    1 timesRepeat: [c increment await].
-    self assert: (c getValue await) equals: 1
+    1 timesRepeat: [c increment].
+    self assert: (c getValue) equals: 1
 
   testThreeTimesRunsBlockThreeTimes =>
     c := Counter spawn.
-    3 timesRepeat: [c increment await].
-    self assert: (c getValue await) equals: 3
+    3 timesRepeat: [c increment].
+    self assert: (c getValue) equals: 3
 
   testFiveTimesRunsBlockFiveTimes =>
     c := Counter spawn.
-    5 timesRepeat: [c increment await].
-    self assert: (c getValue await) equals: 5
+    5 timesRepeat: [c increment].
+    self assert: (c getValue) equals: 5

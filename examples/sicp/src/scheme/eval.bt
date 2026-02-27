@@ -37,7 +37,7 @@ Object subclass: SchemeEval
   /// ## Examples
   /// ```beamtalk
   /// env := SchemeEval new defaultEnv
-  /// (env lookup: "+") await   // => a Block
+  /// (env lookup: "+")   // => a Block
   /// ```
   defaultEnv =>
     SchemeEnv spawnWith: #{
@@ -85,7 +85,7 @@ Object subclass: SchemeEval
 
     // Symbol: look up the name in the environment
     (expr class =:= SchemeSymbol) ifTrue: [
-      ^(env lookup: expr name) await]
+      ^(env lookup: expr name)]
 
     // Must be a list — special form or function application
     (expr class =:= List) ifFalse: [^self error: "Unknown expression type"]
@@ -105,7 +105,7 @@ Object subclass: SchemeEval
       (sym =:= "define") ifTrue: [
         varName := (tail at: 1) name
         val     := self eval: (tail at: 2) in: env
-        (env define: varName value: val) await
+        env define: varName value: val
         ^nil]
 
       // (lambda (params...) body) — create a closure
@@ -136,7 +136,7 @@ Object subclass: SchemeEval
         body     := tail at: 2
         params   := binds collect: [:b | (b at: 1) name]
         vals     := binds collect: [:b | self eval: (b at: 2) in: env]
-        childEnv := (env extend: params values: vals) await
+        childEnv := env extend: params values: vals
         ^self eval: body in: childEnv]]
 
     // Function application: evaluate head, evaluate all args, apply
@@ -158,7 +158,7 @@ Object subclass: SchemeEval
   /// ```
   apply: func args: args in: env =>
     (func class =:= SchemeLambda) ifTrue: [
-      childEnv := (func closureEnv extend: func params values: args) await
+      childEnv := func closureEnv extend: func params values: args
       ^self eval: func body in: childEnv]
     (func class =:= Block) ifFalse: [
       ^self error: "Not a procedure: " ++ func printString]

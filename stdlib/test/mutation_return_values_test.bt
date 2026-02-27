@@ -10,24 +10,24 @@ TestCase subclass: MutationReturnValuesTest
 
   testMutationReturnValues =>
     actor := MutationReturnValues spawn.
-    self assert: ((actor setValue: 0) await) equals: 0.
+    self assert: (actor setValue: 0) equals: 0.
     // Block receives (acc, elem) — accumulator first, element second (BT-820)
-    self assert: ((actor sumViaInject: #(1, 2, 3)) await) equals: 6.
+    self assert: (actor sumViaInject: #(1, 2, 3)) equals: 6.
     // self.value += elem: 0 + 1 + 2 + 3 = 6
-    self assert: (actor getValue await) equals: 6.
+    self assert: (actor getValue) equals: 6.
     // State should also be updated (side effect of mutations)
-    self assert: ((actor setValue: 0) await) equals: 0.
+    self assert: (actor setValue: 0) equals: 0.
     // safeAdd: succeeds, should return self.value after mutation (10)
-    self assert: ((actor safeAdd: 10) await) equals: 10.
+    self assert: (actor safeAdd: 10) equals: 10.
     // inject:into: as last expression should return accumulator (6), not nil
-    self assert: (actor getValue await) equals: 10.
-    self assert: ((actor setValue: 0) await) equals: 0.
+    self assert: (actor getValue) equals: 10.
+    self assert: (actor setValue: 0) equals: 0.
     // failingAdd triggers exception, handler returns -999
-    self assert: ((actor failingAdd) await) equals: -999.
+    self assert: (actor failingAdd) equals: -999.
     // Handler's mutation should be applied (0 + 100 = 100)
-    self assert: (actor getValue await) equals: 100.
-    self assert: ((actor setValue: 0) await) equals: 0.
+    self assert: (actor getValue) equals: 100.
+    self assert: (actor setValue: 0) equals: 0.
     // addWithCleanup: 5 — body returns self.value (5), cleanup adds 1000
-    self assert: ((actor addWithCleanup: 5) await) equals: 5.
+    self assert: (actor addWithCleanup: 5) equals: 5.
     // State: body set value to 5, cleanup added 1000 → 1005
-    self assert: (actor getValue await) equals: 1005
+    self assert: (actor getValue) equals: 1005

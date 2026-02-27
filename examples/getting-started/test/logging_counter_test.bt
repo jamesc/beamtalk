@@ -15,36 +15,36 @@ TestCase subclass: LoggingCounterTest
 
   testInitialValueIsZero =>
     // Inherits Counter's initial state
-    self assert: (LoggingCounter spawn getValue await) equals: 0
+    self assert: (LoggingCounter spawn getValue) equals: 0
 
   testIncrementDelegatesToSuper =>
     // LoggingCounter#increment calls super increment — returns new value
-    self assert: (LoggingCounter spawn increment await) equals: 1
+    self assert: (LoggingCounter spawn increment) equals: 1
 
   testDecrementIsInherited =>
     // decrement is inherited from Counter unchanged
-    self assert: (LoggingCounter spawn decrement await) equals: -1
+    self assert: (LoggingCounter spawn decrement) equals: -1
 
   testGetValueIsInherited =>
     lc := LoggingCounter spawn.
-    lc increment await.
-    lc increment await.
-    self assert: (lc getValue await) equals: 2
+    lc increment.
+    lc increment.
+    self assert: (lc getValue) equals: 2
 
   testIncrementAndDecrementInteraction =>
     lc := LoggingCounter spawn.
-    lc increment await.
-    lc increment await.
-    lc increment await.
-    lc decrement await.
-    self assert: (lc getValue await) equals: 2
+    lc increment.
+    lc increment.
+    lc increment.
+    lc decrement.
+    self assert: (lc getValue) equals: 2
 
   testIndependentInstances =>
     // Each spawned actor has independent state
     lc1 := LoggingCounter spawn.
     lc2 := LoggingCounter spawn.
-    lc1 increment await.
-    lc1 increment await.
-    lc2 increment await.
-    self assert: (lc1 getValue await) equals: 2.
-    self assert: (lc2 getValue await) equals: 1
+    lc1 increment.
+    lc1 increment.
+    lc2 increment.
+    self assert: (lc1 getValue) equals: 2.
+    self assert: (lc2 getValue) equals: 1

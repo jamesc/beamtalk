@@ -1,50 +1,46 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-899: Tests that futures are auto-awaited in binary operations.
-// Actor method calls return futures; binary ops (+, ==, <, >, etc.) compile
-// to Erlang BIF calls that cannot handle futures directly. The codegen wraps
-// operands with beamtalk_future:maybe_await/1 so futures are resolved before
-// the BIF is invoked.
-//
-// IMPORTANT: These tests deliberately omit explicit `await` before binary ops
-// to verify that `maybe_await` auto-resolves the future. Using `await` would
-// bypass the feature under test.
+// Tests that actor method results work correctly in binary operations
+// with sync-by-default dispatch. Actor method calls return values directly
+// (via gen_server:call), so binary ops (+, ==, <, >, etc.) receive the
+// resolved value, not a Future. The codegen wraps operands with
+// beamtalk_future:maybe_await/1 for backward compatibility during migration.
 
 
 TestCase subclass: FutureAutoAwaitTest
 
-  // Equality: future auto-awaited before == comparison
+  // Equality: actor method result used in == comparison
   testEqualityWithActorMethod =>
     a := ActorChainingFixture spawn.
     self assert: (a getValue == 0) equals: true
 
-  // Arithmetic: future auto-awaited before + operation
+  // Arithmetic: actor method result used in + operation
   testArithmeticAddWithActorMethod =>
     a := ActorChainingFixture spawn.
     self assert: (a getValue + 1) equals: 1
 
-  // Comparison: future auto-awaited before > comparison
+  // Comparison: actor method result used in > comparison
   testGreaterThanWithActorMethod =>
     a := ActorChainingFixture spawn.
-    a increment await.
+    a increment.
     self assert: (a getValue > 0) equals: true
 
-  // Comparison: future auto-awaited before < comparison
+  // Comparison: actor method result used in < comparison
   testLessThanWithActorMethod =>
     a := ActorChainingFixture spawn.
     self assert: (a getValue < 10) equals: true
 
-  // Arithmetic: future auto-awaited before * operation
+  // Arithmetic: actor method result used in * operation
   testArithmeticAfterIncrement =>
     a := ActorChainingFixture spawn.
-    a increment await.
-    a increment await.
+    a increment.
+    a increment.
     self assert: (a getValue * 3) equals: 6
 
-  // Both operands are futures, both auto-awaited
-  testBothOperandsAreFutures =>
+  // Both operands are actor method results
+  testBothOperandsAreActorResults =>
     a := ActorChainingFixture spawn.
     b := ActorChainingFixture spawn.
-    a increment await.
+    a increment.
     self assert: (a getValue + b getValue) equals: 1

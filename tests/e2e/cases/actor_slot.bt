@@ -7,7 +7,7 @@
 // - The @load-error directive (for compile-time error checking) is a REPL
 //   testing feature — BUnit tests execute already-compiled code and cannot
 //   trigger compile-time errors on new source files.
-// - REPL interaction tests (spawn, send, await) verify the full lifecycle
+// - REPL interaction tests (spawn, send, receive) verify the full lifecycle
 //   including actor creation and stateful message dispatch.
 //
 // Compile-time warning for withSlot: bypass is covered by Rust unit tests

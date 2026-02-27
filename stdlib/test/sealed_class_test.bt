@@ -11,18 +11,18 @@ TestCase subclass: SealedClassTest
   testSealedClassOperations =>
     c := SealedCounter spawn.
     // Basic read: getValue (uses __sealed_getValue direct call internally)
-    self assert: (c getValue await) equals: 0.
+    self assert: (c getValue) equals: 0.
     // Mutation via external call: increment
-    self assert: (c increment await) equals: 1.
+    self assert: (c increment) equals: 1.
     // Verify state persisted after increment
-    self assert: (c getValue await) equals: 1.
+    self assert: (c getValue) equals: 1.
     // Second increment
-    self assert: (c increment await) equals: 2.
+    self assert: (c increment) equals: 2.
     // Decrement
-    self assert: (c decrement await) equals: 1.
+    self assert: (c decrement) equals: 1.
     // Parentheses needed: unary messages bind tighter than keyword messages
-    self assert: ((c addAmount: 10) await) equals: 11.
+    self assert: (c addAmount: 10) equals: 11.
     // Internal self-send: getValuePlusTen calls self getValue (tests __sealed_* direct call)
-    self assert: (c getValuePlusTen await) equals: 21.
+    self assert: (c getValuePlusTen) equals: 21.
     // Final state verification
-    self assert: (c getValue await) equals: 11
+    self assert: (c getValue) equals: 11

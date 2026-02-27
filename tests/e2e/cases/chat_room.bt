@@ -291,7 +291,7 @@ membersBefore includes: bob
 // => true
 
 // Moderator kicks bob from the room
-(mod kick: bob) await
+mod kick: bob
 // => _
 
 membersAfter := room online
@@ -311,7 +311,7 @@ room join: bob
 // => Set(_)
 
 // Moderator say: prefixes with "[MOD] " then calls super (ChatMember say:)
-(mod say: "Welcome!") await
+mod say: "Welcome!"
 // => nil
 
 // Room history should contain the prefixed message

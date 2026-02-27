@@ -48,9 +48,8 @@
 // ## Key Insight: Auto-Await in REPL
 //
 // Notice that both `counter increment` and `proxy increment` return the same
-// thing: `=> 2`. They both generate async futures, but the REPL automatically
-// awaits them (via `beamtalk_repl_eval:maybe_await_future/1`), making the
-// proxy completely transparent to the user.
+// thing: `=> 2`. With sync-by-default dispatch, actor sends return values
+// directly (via gen_server:call), making the proxy completely transparent.
 //
 // =============================================================================
 
@@ -84,14 +83,11 @@ Actor subclass: TransparentProxy
 //
 // 2. Compiler Generates:
 //    ```erlang
-//    let Pid = element(4, Proxy) in  % Extract pid from proxy object
-//    let Future = beamtalk_future:new() in
-//    gen_server:cast(Pid, {"increment", [], Future})
-//    Future  % Returns future
+//    gen_server:call(Pid, {"increment", []})  % Sync call, blocks until result
 //    ```
 //
 // 3. Runtime Dispatch:
-//    - TransparentProxy's gen_server receives {"increment", [], Future}
+//    - TransparentProxy's gen_server receives {"increment", []}
 //    - Looks for "increment" in method table → NOT FOUND
 //    - Checks for "doesNotUnderstand:args:" → FOUND!
 //    - Calls: doesNotUnderstand("increment", [])
@@ -103,48 +99,39 @@ Actor subclass: TransparentProxy
 //
 // 5. perform:withArguments: Generates:
 //    ```erlang
-//    let TargetPid = element(4, Target) in  % Extract counter's pid
-//    let Future2 = beamtalk_future:new() in
-//    gen_server:cast(TargetPid, {"increment", [], Future2})
-//    Future2  % Returns NEW future
+//    gen_server:call(TargetPid, {"increment", []})  % Sync call to counter
 //    ```
 //
 // 6. Counter Receives Message:
 //    - Counter's "increment" method executes
 //    - Counter's value increments: 1 → 2
-//    - Counter resolves Future2 with result (2)
+//    - Counter returns result (2) to TransparentProxy
 //
 // 7. TransparentProxy Returns:
-//    - doesNotUnderstand returns Future2
-//    - Original Future (from step 2) gets resolved with Future2's value
+//    - doesNotUnderstand returns 2 (the counter's result)
+//    - gen_server:call returns 2 to the caller
 //
-// 8. REPL Auto-Awaits:
-//    ```erlang
-//    RawResult = Future,  % PID of future from step 2
-//    Result = maybe_await_future(RawResult),  % Awaits and gets: 2
-//    ```
-//
-// 9. User Sees:
+// 8. User Sees:
 //    ```beamtalk
 //    > proxy increment
 //    => 2          # Exactly like calling counter directly!
 //    ```
 //
 // =============================================================================
-// Why This Works: The Magic of Auto-Await
+// Why This Works: Sync-by-Default Dispatch
 // =============================================================================
 //
 // Both calls look IDENTICAL to the user:
 //
 // | User Action        | Generated Code | Runtime             | REPL Shows |
 // |--------------------|----------------|---------------------|------------|
-// | counter increment  | Future         | Executes increment  | => 2       |
-// | proxy increment    | Future         | Forwards to counter | => 2       |
+// | counter increment  | Integer        | Executes increment  | => 2       |
+// | proxy increment    | Integer        | Forwards to counter | => 2       |
 //
 // The proxy is completely transparent because:
-// 1. Both return futures (PIDs of asynchronous operations)
-// 2. REPL awaits both automatically before displaying
-// 3. User sees the actual result value, not future objects
+// 1. Both return the value directly (sync gen_server:call)
+// 2. REPL displays the result value
+// 3. User sees identical behavior for direct and proxied calls
 //
 // This is the power of ProtoObject's doesNotUnderstand:args: and
 // perform:withArguments: - you can intercept and forward messages

@@ -37,7 +37,7 @@ c add
 c add
 // => 3
 
-c getTotal await
+c getTotal
 // => 3
 
 // ===========================================================================
@@ -76,7 +76,7 @@ CBCounter canUnderstand: #getTotal
 c add
 // => 13
 
-c getTotal await
+c getTotal
 // => 13
 
 // ===========================================================================
@@ -93,7 +93,7 @@ c2 := CBCounter spawn
 c2 add
 // => 10
 
-c2 getTotal await
+c2 getTotal
 // => 10
 
 // ===========================================================================
@@ -104,12 +104,12 @@ c2 getTotal await
 // Attempting to subclass a sealed class raises an error
 // ---------------------------------------------------------------------------
 
-[(Object classBuilder name: #CBBadSeal; superclass: Float; register) await] on: Error do: [:e | "sealed rejected"]
+[Object classBuilder name: #CBBadSeal; superclass: Float; register] on: Error do: [:e | "sealed rejected"]
 // => sealed rejected
 
 // ---------------------------------------------------------------------------
 // Registering without a name raises missing_parameter
 // ---------------------------------------------------------------------------
 
-[(Object classBuilder register) await] on: Error do: [:e | "no name"]
+[Object classBuilder register] on: Error do: [:e | "no name"]
 // => no name

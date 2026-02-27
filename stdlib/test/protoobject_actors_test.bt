@@ -22,21 +22,21 @@ TestCase subclass: ProtoobjectActorsTest
     // Root class has no superclass
     self assert: (ProtoObject superclass) equals: nil
 
-  testActorBasicMessagingWithAwait =>
+  testActorBasicMessaging =>
     counter := Counter spawn.
     // Test initial state
-    self assert: (counter getValue await) equals: 0.
+    self assert: (counter getValue) equals: 0.
     // Test increment
-    self assert: (counter increment await) equals: 1.
+    self assert: (counter increment) equals: 1.
     // Verify state persisted
-    self assert: (counter getValue await) equals: 1.
+    self assert: (counter getValue) equals: 1.
     // Test multiple increments
-    self assert: (counter increment await) equals: 2.
-    self assert: (counter increment await) equals: 3.
+    self assert: (counter increment) equals: 2.
+    self assert: (counter increment) equals: 3.
     // Test decrement
-    self assert: (counter decrement await) equals: 2.
+    self assert: (counter decrement) equals: 2.
     // Final state verification
-    self assert: (counter getValue await) equals: 2
+    self assert: (counter getValue) equals: 2
 
   testBt427ObjectMethodDelegationForActors =>
     counter := Counter spawn.

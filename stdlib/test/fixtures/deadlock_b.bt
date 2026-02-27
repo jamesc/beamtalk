@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// DeadlockB fixture for actor_deadlock_test.bt.
+// respondToA: calls back callPeer on the caller (DeadlockA), which is
+// already busy handling its own callPeer — creating a circular deadlock.
+
+Actor subclass: DeadlockB
+
+  respondToA: caller =>
+    // This call back to caller (DeadlockA) creates a deadlock:
+    // caller is busy handling callPeer, so this gen_server:call blocks,
+    // and after 5000ms the gen_server:call timeout fires.
+    caller callPeer

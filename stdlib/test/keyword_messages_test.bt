@@ -57,12 +57,12 @@ TestCase subclass: KeywordMessagesTest
   test4KeywordMessagesOnObjects =>
     mk := MultiKeyword spawn.
     // 4-keyword method: sum four arguments
-    self assert: ((mk add: 1 and: 2 and: 3 and: 4) await) equals: 10.
+    self assert: (mk add: 1 and: 2 and: 3 and: 4) equals: 10.
     // 4-keyword method: verify argument order (weighted sum)
-    self assert: ((mk first: 1 second: 2 third: 3 fourth: 4) await) equals: 1234.
+    self assert: (mk first: 1 second: 2 third: 3 fourth: 4) equals: 1234.
     // Different argument values to confirm ordering
-    self assert: ((mk first: 9 second: 0 third: 5 fourth: 7) await) equals: 9057.
+    self assert: (mk first: 9 second: 0 third: 5 fourth: 7) equals: 9057.
     // 5-keyword method: sum five arguments
-    self assert: ((mk add: 10 and: 20 and: 30 and: 40 and: 50) await) equals: 150.
+    self assert: (mk add: 10 and: 20 and: 30 and: 40 and: 50) equals: 150.
     // Verify state was updated by add:and:and:and:and:
-    self assert: (mk getResult await) equals: 150
+    self assert: (mk getResult) equals: 150

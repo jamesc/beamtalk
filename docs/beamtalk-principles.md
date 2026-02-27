@@ -94,16 +94,16 @@ Source code lives in the **filesystem**, not in a binary image.
 
 ---
 
-## 7. Async Actors, Sync Primitives
+## 7. Sync-by-Default Actors with Explicit Cast
 
-Inter-actor message sends are **asynchronous**, returning futures. Primitive operations are synchronous.
+Inter-actor `.` message sends are **synchronous** (gen_server:call) — they block the caller until the actor replies. Fire-and-forget sends use the explicit `!` operator (gen_server:cast).
 
-- Sends to actors return immediately with a **future/promise**, not a value
-- Actors don't block waiting for responses - they continue processing
-- Self-sends, primitive operations, and class methods are synchronous
-- BEAM actors shouldn't block on each other - defeats fault isolation
+- `.` sends block until the actor processes the message and returns a value
+- `!` sends are non-blocking (cast) — use for intentional fire-and-forget
+- Self-sends, primitive operations, and class methods are direct synchronous calls
+- The default gen_server:call timeout is 5000ms; circular sync calls deadlock
 
-**Implication:** Inter-actor communication is async with futures; primitives and self-sends are direct calls.
+**Implication:** Actor communication is synchronous by default, giving a natural call-and-return model while preserving full BEAM process isolation. Use `!` when you explicitly want non-blocking dispatch.
 
 ---
 

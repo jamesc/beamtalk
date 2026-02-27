@@ -13,7 +13,7 @@ TestCase subclass: ClassBuilderTest
     self.cls isNil ifFalse: [self.cls removeFromSystem]
 
   testSealedClassRejected =>
-    self should: [(Object classBuilder name: #CBBadSeal; superclass: Float; register) await] raise: #instantiation_error
+    self should: [Object classBuilder name: #CBBadSeal; superclass: Float; register] raise: #instantiation_error
 
   testMissingSuperclassRejected =>
-    self should: [(Object classBuilder register) await] raise: #missing_parameter
+    self should: [Object classBuilder register] raise: #missing_parameter

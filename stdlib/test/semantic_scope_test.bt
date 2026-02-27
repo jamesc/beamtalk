@@ -30,6 +30,6 @@ TestCase subclass: SemanticScopeTest
     // self is valid in method bodies — actor methods use self.field
     c := Counter spawn.
     // --- Self reference in class methods ---
-    self assert: (c increment await) equals: 1.
-    self assert: (c increment await) equals: 2.
-    self assert: (c getValue await) equals: 2
+    self assert: (c increment) equals: 1.
+    self assert: (c increment) equals: 2.
+    self assert: (c getValue) equals: 2

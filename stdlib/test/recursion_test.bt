@@ -34,12 +34,12 @@ TestCase subclass: RecursionTest
     // and cross-method self-sends work correctly (no Future/badarith).
     a := RecursiveActor spawn.
     // Base case (no self-send needed)
-    self assert: ((a factorial: 1) await) equals: 1.
+    self assert: (a factorial: 1) equals: 1.
     // Recursive self-send on Actor
-    self assert: ((a factorial: 5) await) equals: 120.
+    self assert: (a factorial: 5) equals: 120.
     // Actor self-sends use synchronous direct dispatch, so recursive methods
-    self assert: ((a factorial: 10) await) equals: 3628800.
+    self assert: (a factorial: 10) equals: 3628800.
     // Double recursion on Actor
-    self assert: ((a fibonacci: 10) await) equals: 55.
+    self assert: (a fibonacci: 10) equals: 55.
     // Cross-method self-send (self double: n, then * 2)
-    self assert: ((a quadruple: 5) await) equals: 20
+    self assert: (a quadruple: 5) equals: 20

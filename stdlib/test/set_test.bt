@@ -34,38 +34,38 @@ TestCase subclass: SetTest
     self assert: (s3 size) equals: 1
 
   testFromList =>
-    colors := (Set new) fromList: #(#red, #green, #blue).
+    colors := Set new fromList: #(#red, #green, #blue).
     self assert: (colors size) equals: 3.
     self assert: (colors includes: #red).
     self deny: (colors includes: #yellow)
 
   testUnion =>
-    a := (Set new) fromList: #(1, 2, 3).
-    b := (Set new) fromList: #(3, 4, 5).
+    a := Set new fromList: #(1, 2, 3).
+    b := Set new fromList: #(3, 4, 5).
     u := a union: b.
     self assert: (u size) equals: 5.
     self assert: (u includes: 1).
     self assert: (u includes: 5)
 
   testIntersection =>
-    a := (Set new) fromList: #(1, 2, 3).
-    b := (Set new) fromList: #(3, 4, 5).
+    a := Set new fromList: #(1, 2, 3).
+    b := Set new fromList: #(3, 4, 5).
     i := a intersection: b.
     self assert: (i size) equals: 1.
     self assert: (i includes: 3).
     self deny: (i includes: 1)
 
   testDifference =>
-    a := (Set new) fromList: #(1, 2, 3).
-    b := (Set new) fromList: #(3, 4, 5).
+    a := Set new fromList: #(1, 2, 3).
+    b := Set new fromList: #(3, 4, 5).
     d := a difference: b.
     self assert: (d size) equals: 2.
     self assert: (d includes: 1).
     self deny: (d includes: 3)
 
   testIssubsetof =>
-    small := (Set new) fromList: #(1, 2).
-    big := (Set new) fromList: #(1, 2, 3).
+    small := Set new fromList: #(1, 2).
+    big := Set new fromList: #(1, 2, 3).
     self assert: (small isSubsetOf: big).
     self deny: (big isSubsetOf: small)
 

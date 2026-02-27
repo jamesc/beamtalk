@@ -15,25 +15,25 @@
 TestCase subclass: ExampleCounterTest
 
   testInitialValue =>
-    self assert: (Counter spawn getValue await) equals: 0
+    self assert: (Counter spawn getValue) equals: 0
 
   testIncrement =>
-    self assert: (Counter spawn increment await) equals: 1
+    self assert: (Counter spawn increment) equals: 1
 
   testDecrement =>
-    self assert: (Counter spawn decrement await) equals: -1
+    self assert: (Counter spawn decrement) equals: -1
 
   testMultipleIncrements =>
     counter := Counter spawn
-    3 timesRepeat: [counter increment await]
-    self assert: (counter getValue await) equals: 3
+    3 timesRepeat: [counter increment]
+    self assert: (counter getValue) equals: 3
 
   testIncrementAndDecrement =>
     counter := Counter spawn
-    counter increment await
-    counter increment await
-    counter decrement await
-    self assert: (counter getValue await) equals: 1
+    counter increment
+    counter increment
+    counter decrement
+    self assert: (counter getValue) equals: 1
 
   testDenyInitialNonPositive =>
-    self deny: (Counter spawn getValue await) > 0
+    self deny: (Counter spawn getValue) > 0
