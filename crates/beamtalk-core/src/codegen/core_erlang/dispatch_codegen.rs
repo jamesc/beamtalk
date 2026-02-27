@@ -1074,11 +1074,19 @@ impl CoreErlangGenerator {
 
     /// BT-245: Checks if an expression is a self-send in actor context.
     /// These may mutate actor state and need state threading in loop bodies.
+    /// BT-920: Excludes cast sends (`self method!`), which are fire-and-forget
+    /// and must not thread state through the loop accumulator.
     pub(super) fn is_actor_self_send(&self, expr: &Expression) -> bool {
         if self.context != super::CodeGenContext::Actor {
             return false;
         }
-        if let Expression::MessageSend { receiver, .. } = expr {
+        if let Expression::MessageSend {
+            receiver, is_cast, ..
+        } = expr
+        {
+            if *is_cast {
+                return false;
+            }
             if let Expression::Identifier(id) = receiver.as_ref() {
                 return id.name == "self";
             }

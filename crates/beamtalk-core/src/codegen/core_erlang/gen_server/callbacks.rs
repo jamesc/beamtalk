@@ -245,6 +245,32 @@ impl CoreErlangGenerator {
     /// 2. **Async future cast** (legacy): `{Selector, Args, FuturePid}` — sent by
     ///    `beamtalk_actor:async_send/4`. Dispatches and notifies the future PID
     ///    with `{resolve, Result}` or `{reject, Error}`.
+    // BT-920: helper — generates the inner `case safe_dispatch ... end` for fire-and-forget casts.
+    fn cast_dispatch_case(module_name: &str) -> Document<'static> {
+        docvec![
+            line(),
+            // Use safe_dispatch for error isolation; discard result on error
+            docvec![
+                "case call '",
+                Document::String(module_name.to_owned()),
+                "':'safe_dispatch'(CastSelector, CastArgs, State) of"
+            ],
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<{'reply', _CastResult, CastNewState}> when 'true' ->",
+                    nest(INDENT, docvec![line(), "{'noreply', CastNewState}"]),
+                    line(),
+                    "<{'error', _CastError, _CastState}> when 'true' ->",
+                    nest(INDENT, docvec![line(), "{'noreply', State}"]),
+                ]
+            ),
+            line(),
+            "end",
+        ]
+    }
+
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_handle_cast(
         &mut self,
@@ -263,45 +289,7 @@ impl CoreErlangGenerator {
                             // BT-920: Fire-and-forget cast {cast, Selector, Args}
                             line(),
                             "<{'cast', CastSelector, CastArgs}> when 'true' ->",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    // Use safe_dispatch for error isolation; discard result on error
-                                    docvec![
-                                        "case call '",
-                                        Document::String(module_name.clone()),
-                                        "':'safe_dispatch'(CastSelector, CastArgs, State) of"
-                                    ],
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            // Success: update state
-                                            line(),
-                                            "<{'reply', _CastResult, CastNewState}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    "{'noreply', CastNewState}",
-                                                ]
-                                            ),
-                                            // Error: discard and keep current state (fire-and-forget)
-                                            line(),
-                                            "<{'error', _CastError, _CastState}> when 'true' ->",
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    "{'noreply', State}",
-                                                ]
-                                            ),
-                                        ]
-                                    ),
-                                    line(),
-                                    "end",
-                                ]
-                            ),
+                            nest(INDENT, Self::cast_dispatch_case(&module_name)),
                             // Legacy async future cast: {Selector, Args, FuturePid}
                             line(),
                             "<{Selector, Args, FuturePid}> when 'true' ->",
