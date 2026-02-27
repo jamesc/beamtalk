@@ -271,6 +271,10 @@ fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> Anal
     validators::check_cast_on_value_type(module, &result.class_hierarchy, &mut result.diagnostics);
     // BT-950: Warn on redundant assignment (x := x)
     validators::check_redundant_assignment(module, &mut result.diagnostics);
+    // BT-953: Hint on self capture in collection HOF blocks (deadlock risk)
+    validators::check_self_capture_in_actor_block(module, &mut result.diagnostics);
+    // BT-955: Warn on literal boolean conditions (always true / always false)
+    validators::check_literal_boolean_condition(module, &mut result.diagnostics);
 
     // Phase 6: Module-level validation (BT-349)
     let module_diags = module_validator::validate_single_class(module);
@@ -2337,8 +2341,9 @@ mod tests {
     }
 
     #[test]
-    fn test_unused_parameter_no_warning() {
-        // Method parameters should not warn even if unused
+    fn test_unused_parameter_emits_warning() {
+        // BT-954: Unused method parameter should warn
+        // process: newValue => 0  // Warning: parameter newValue unused
         let class = ClassDefinition {
             name: Identifier::new("Counter", test_span()),
             superclass: Some(Identifier::new("Actor", test_span())),
@@ -2381,7 +2386,111 @@ mod tests {
         let warnings: Vec<_> = result
             .diagnostics
             .iter()
-            .filter(|d| d.message.contains("Unused variable"))
+            .filter(|d| d.message.contains("Unused parameter"))
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("newValue"));
+        assert_eq!(warnings[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn test_unused_parameter_underscore_suppresses_warning() {
+        // BT-954: Parameter prefixed with _ should not warn
+        // process: _newValue => 0  // No warning
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            class_kind: crate::ast::ClassKind::Actor,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+                    keyword: "setValue:".into(),
+                    span: test_span(),
+                }]),
+                parameters: vec![crate::ast::ParameterDefinition {
+                    name: Identifier::new("_newValue", test_span()),
+                    type_annotation: None,
+                }],
+                body: vec![Expression::Literal(Literal::Integer(0), test_span())],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused parameter"))
+            .collect();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_used_parameter_no_warning() {
+        // BT-954: Used method parameter should not warn
+        // process: x => x  // No warning
+        let class = ClassDefinition {
+            name: Identifier::new("Counter", test_span()),
+            superclass: Some(Identifier::new("Actor", test_span())),
+            is_abstract: false,
+            class_kind: crate::ast::ClassKind::Actor,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+                    keyword: "process:".into(),
+                    span: test_span(),
+                }]),
+                parameters: vec![crate::ast::ParameterDefinition {
+                    name: Identifier::new("x", test_span()),
+                    type_annotation: None,
+                }],
+                body: vec![Expression::Identifier(Identifier::new("x", test_span()))],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused parameter"))
             .collect();
         assert!(warnings.is_empty());
     }

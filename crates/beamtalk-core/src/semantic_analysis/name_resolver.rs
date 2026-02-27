@@ -156,6 +156,9 @@ impl NameResolver {
         // Collect unused variable warnings before exiting scope
         self.collect_unused_warnings();
 
+        // BT-954: Warn on unused method parameters
+        self.collect_unused_param_warnings();
+
         self.scope.pop(); // Exit method scope
     }
 
@@ -422,6 +425,28 @@ impl NameResolver {
             .collect();
         for (name, span) in unused {
             let mut diag = Diagnostic::warning(format!("Unused variable `{name}`"), span)
+                .with_category(DiagnosticCategory::Unused);
+            diag.hint =
+                Some(format!("If this is intentional, prefix with underscore: _{name}").into());
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// Collects warnings for unused method parameters in the current scope.
+    ///
+    /// A parameter is considered unused if:
+    /// - It is a `Parameter` binding
+    /// - It was never looked up (referenced) in the method body
+    /// - Its name does not start with `_` (underscore prefix suppresses the warning)
+    fn collect_unused_param_warnings(&mut self) {
+        let unused: Vec<_> = self
+            .scope
+            .unused_params()
+            .iter()
+            .map(|b| (b.name.clone(), b.defined_at))
+            .collect();
+        for (name, span) in unused {
+            let mut diag = Diagnostic::warning(format!("Unused parameter `{name}`"), span)
                 .with_category(DiagnosticCategory::Unused);
             diag.hint =
                 Some(format!("If this is intentional, prefix with underscore: _{name}").into());

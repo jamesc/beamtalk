@@ -65,9 +65,9 @@ impl CoreErlangGenerator {
             "/" => "/",
             "%" => "rem",
             "==" => "==",
-            "=:=" => "=:=", // Strict equality (ADR 0002)
-            "/=" => "/=",   // Loose inequality (ADR 0002)
-            "=/=" => "=/=", // Strict inequality (ADR 0002)
+            "=:=" | "=" => "=:=", // Strict equality (ADR 0002) / Legacy strict equality alias (BT-952)
+            "/=" => "/=",         // Loose inequality (ADR 0002)
+            "=/=" => "=/=",       // Strict inequality (ADR 0002)
             "<" => "<",
             ">" => ">",
             "<=" => "=<",
