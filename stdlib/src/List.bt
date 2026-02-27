@@ -17,7 +17,7 @@
 /// #(1, 2, 3) first         // => 1
 /// #(1, 2) ++ #(3, 4)       // => #(1, 2, 3, 4)
 /// ```
-sealed Collection subclass: List
+sealed typed Collection subclass: List
   /// Number of elements in the list.
   ///
   /// ## Examples
@@ -252,7 +252,7 @@ sealed Collection subclass: List
   /// #(10, 20, 30) indexOf: 20        // => 2
   /// #(10, 20, 30) indexOf: 99        // => nil
   /// ```
-  indexOf: item -> Integer | Nil =>
+  indexOf: item: Object -> Integer | Nil =>
     self inject: 0 into: [:i :each |
       newI := i + 1.
       each =:= item ifTrue: [^newI].

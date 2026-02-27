@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Smoke test for typed class annotation warnings (BT-941).
+//
+// A `typed` class with deliberately incomplete annotations, so we can
+// verify the type checker surfaces warnings for missing annotations.
+
+typed Actor subclass: TypedCounter
+  state: value: Integer = 0
+
+  // Fully annotated — no warning expected
+  getValue -> Integer => self.value
+
+  // Missing return type annotation — warning expected
+  increment =>
+    self.value := self.value + 1.
+    self.value
+
+  // Missing parameter type annotation — warning expected
+  add: amount -> Integer =>
+    self.value := self.value + amount.
+    self.value

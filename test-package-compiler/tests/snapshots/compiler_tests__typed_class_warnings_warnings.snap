@@ -1,0 +1,7 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Warnings (2):
+  - Missing return type annotation in typed class `TypedCounter` (method `increment`)
+  - Missing type annotation for parameter `amount` in typed class `TypedCounter` (method `add:`)
