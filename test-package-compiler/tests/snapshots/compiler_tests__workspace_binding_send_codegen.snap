@@ -83,8 +83,9 @@ module 'workspace_binding_send' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
             case call 'workspace_binding_send':'safe_dispatch'(CastSelector, CastArgs, State) of
                 <{'reply', _CastResult, CastNewState}> when 'true' ->
                     {'noreply', CastNewState}
-                <{'error', _CastError, _CastState}> when 'true' ->
-                    {'noreply', State}
+                <{'error', CastError, _CastState}> when 'true' ->
+                    let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => CastError}~)
+                    in {'noreply', State}
             end
         <{Selector, Args, FuturePid}> when 'true' ->
             let _ = call 'erlang':'put'('$bt_future_pid', FuturePid)

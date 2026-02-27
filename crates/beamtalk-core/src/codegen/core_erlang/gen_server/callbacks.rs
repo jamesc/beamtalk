@@ -240,7 +240,7 @@ impl CoreErlangGenerator {
     ///
     /// 1. **Fire-and-forget cast** (BT-920): `{cast, Selector, Args}` — sent by
     ///    `beamtalk_actor:cast_send/3`. Dispatches the message and updates state;
-    ///    errors are silently discarded (fire-and-forget semantics).
+    ///    errors are logged via `logger:warning` and discarded (BT-943).
     ///
     /// 2. **Async future cast** (legacy): `{Selector, Args, FuturePid}` — sent by
     ///    `beamtalk_actor:async_send/4`. Dispatches and notifies the future PID
@@ -262,8 +262,17 @@ impl CoreErlangGenerator {
                     "<{'reply', _CastResult, CastNewState}> when 'true' ->",
                     nest(INDENT, docvec![line(), "{'noreply', CastNewState}"]),
                     line(),
-                    "<{'error', _CastError, _CastState}> when 'true' ->",
-                    nest(INDENT, docvec![line(), "{'noreply', State}"]),
+                    // BT-943: Log error but don't crash — caller expects no reply
+                    "<{'error', CastError, _CastState}> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "let _ = call 'logger':'warning'(~{'selector' => CastSelector, 'reason' => CastError}~)",
+                            line(),
+                            "in {'noreply', State}",
+                        ]
+                    ),
                 ]
             ),
             line(),
