@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -41,6 +42,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 140,
                     end: 145,
@@ -85,6 +87,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 160,
                     end: 166,
@@ -129,6 +132,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 178,
                     end: 183,
@@ -173,6 +177,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 196,
                     end: 202,
@@ -241,6 +246,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 266,
                     end: 272,
@@ -285,6 +291,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 298,
                     end: 303,
@@ -329,6 +336,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 317,
                     end: 323,

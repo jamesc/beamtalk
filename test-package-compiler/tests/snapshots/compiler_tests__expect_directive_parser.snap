@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -28,6 +29,7 @@ Module {
                 "unknownMessage",
             ),
             arguments: [],
+            is_cast: false,
             span: Span {
                 start: 255,
                 end: 272,
@@ -64,6 +66,7 @@ Module {
                     },
                 ),
             ],
+            is_cast: false,
             span: Span {
                 start: 339,
                 end: 351,
@@ -144,6 +147,7 @@ Module {
                 "unknownMessage",
             ),
             arguments: [],
+            is_cast: false,
             span: Span {
                 start: 612,
                 end: 629,

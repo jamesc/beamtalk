@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -166,6 +167,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 234,
                     end: 250,
@@ -218,6 +220,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 258,
                     end: 273,
@@ -297,6 +300,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 312,
                     end: 351,
@@ -365,6 +369,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 397,
                     end: 420,
@@ -433,6 +438,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 448,
                     end: 479,
@@ -467,6 +473,7 @@ Module {
                     "size",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 497,
                     end: 508,
@@ -519,6 +526,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 533,
                     end: 558,
@@ -571,6 +579,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 569,
                     end: 593,
@@ -623,6 +632,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 620,
                     end: 643,
@@ -657,6 +667,7 @@ Module {
                     "keys",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 676,
                     end: 687,
@@ -691,6 +702,7 @@ Module {
                     "values",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 698,
                     end: 711,
@@ -778,6 +790,7 @@ Module {
                                         },
                                     ),
                                 ],
+                                is_cast: false,
                                 span: Span {
                                     start: 782,
                                     end: 800,
@@ -819,6 +832,7 @@ Module {
                                         },
                                     ),
                                 ],
+                                is_cast: false,
                                 span: Span {
                                     start: 803,
                                     end: 821,
@@ -832,6 +846,7 @@ Module {
                     },
                 ),
             ],
+            is_cast: false,
             span: Span {
                 start: 747,
                 end: 823,
@@ -952,6 +967,7 @@ Module {
                                             },
                                         ),
                                     ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 901,
                                         end: 906,
@@ -965,6 +981,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 864,
                     end: 907,
@@ -1159,6 +1176,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 1002,
                     end: 1019,

@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -72,6 +73,7 @@ Module {
                                         },
                                     ),
                                 ],
+                                is_cast: false,
                                 span: Span {
                                     start: 207,
                                     end: 212,
@@ -120,6 +122,7 @@ Module {
                                         },
                                     ),
                                 ],
+                                is_cast: false,
                                 span: Span {
                                     start: 225,
                                     end: 230,
@@ -133,6 +136,7 @@ Module {
                     },
                 ),
             ],
+            is_cast: false,
             span: Span {
                 start: 189,
                 end: 231,
@@ -205,12 +209,14 @@ Module {
                                     },
                                 ),
                             ],
+                            is_cast: false,
                             span: Span {
                                 start: 286,
                                 end: 291,
                             },
                         },
                     ],
+                    is_cast: false,
                     span: Span {
                         start: 282,
                         end: 291,
@@ -254,18 +260,21 @@ Module {
                                     },
                                 ),
                             ],
+                            is_cast: false,
                             span: Span {
                                 start: 303,
                                 end: 308,
                             },
                         },
                     ],
+                    is_cast: false,
                     span: Span {
                         start: 298,
                         end: 308,
                     },
                 },
             ],
+            is_cast: false,
             span: Span {
                 start: 262,
                 end: 308,
@@ -340,6 +349,7 @@ Module {
                             },
                         ),
                     ],
+                    is_cast: false,
                     span: Span {
                         start: 364,
                         end: 377,
@@ -369,12 +379,14 @@ Module {
                             },
                         ),
                     ],
+                    is_cast: false,
                     span: Span {
                         start: 387,
                         end: 398,
                     },
                 },
             ],
+            is_cast: false,
             span: Span {
                 start: 330,
                 end: 398,
@@ -459,6 +471,7 @@ Module {
                                         },
                                     ),
                                 ],
+                                is_cast: false,
                                 span: Span {
                                     start: 458,
                                     end: 468,
@@ -504,6 +517,7 @@ Module {
                             },
                         ),
                     ],
+                    is_cast: false,
                     span: Span {
                         start: 487,
                         end: 500,
@@ -533,12 +547,14 @@ Module {
                             },
                         ),
                     ],
+                    is_cast: false,
                     span: Span {
                         start: 507,
                         end: 520,
                     },
                 },
             ],
+            is_cast: false,
             span: Span {
                 start: 431,
                 end: 520,

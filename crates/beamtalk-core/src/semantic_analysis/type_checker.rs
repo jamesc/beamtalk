@@ -252,14 +252,17 @@ impl TypeChecker {
             // Primitives and errors — no type info available
             Expression::Primitive { .. }
             | Expression::Error { .. }
-            | Expression::ExpectDirective { .. } => InferredType::Dynamic,
+            | Expression::ExpectDirective { .. }
+            | Expression::MessageSend { is_cast: true, .. } => InferredType::Dynamic,
 
             // Message sends — the core of type checking
             Expression::MessageSend {
                 receiver,
                 selector,
                 arguments,
+                is_cast: false,
                 span,
+                ..
             } => self.infer_message_send(
                 receiver,
                 selector,
@@ -1141,6 +1144,7 @@ mod tests {
             receiver: Box::new(receiver),
             selector,
             arguments: args,
+            is_cast: false,
             span: span(),
         }
     }
@@ -1978,6 +1982,7 @@ mod tests {
                     receiver: Box::new(Expression::Super(super_span)),
                     selector: MessageSelector::Unary("reset".into()),
                     arguments: vec![],
+                    is_cast: false,
                     span: msg_span,
                 }],
                 return_type: None,

@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -66,6 +67,7 @@ Module {
                     "value",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 164,
                     end: 175,
@@ -122,6 +124,7 @@ Module {
                                     },
                                 ),
                             ],
+                            is_cast: false,
                             span: Span {
                                 start: 223,
                                 end: 228,
@@ -181,6 +184,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 241,
                     end: 259,
@@ -244,6 +248,7 @@ Module {
                                     },
                                 ),
                             ],
+                            is_cast: false,
                             span: Span {
                                 start: 305,
                                 end: 310,
@@ -319,6 +324,7 @@ Module {
                         },
                     ),
                 ],
+                is_cast: false,
                 span: Span {
                     start: 323,
                     end: 344,
@@ -382,6 +388,7 @@ Module {
                                     },
                                 ),
                             ],
+                            is_cast: false,
                             span: Span {
                                 start: 374,
                                 end: 385,
@@ -444,6 +451,7 @@ Module {
                                             },
                                         ),
                                     ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 410,
                                         end: 421,
@@ -462,6 +470,7 @@ Module {
                     },
                 ),
             ],
+            is_cast: false,
             span: Span {
                 start: 373,
                 end: 422,
@@ -529,6 +538,7 @@ Module {
                                     },
                                 ),
                             ],
+                            is_cast: false,
                             span: Span {
                                 start: 481,
                                 end: 490,
@@ -570,6 +580,7 @@ Module {
                     "value",
                 ),
                 arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 503,
                     end: 521,

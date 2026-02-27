@@ -263,6 +263,7 @@ impl Parser {
             receiver: Box::new(receiver),
             selector: MessageSelector::Keyword(keywords),
             arguments,
+            is_cast: false,
             span,
         }
     }
@@ -328,6 +329,7 @@ impl Parser {
                 receiver: Box::new(left),
                 selector: MessageSelector::Binary(op),
                 arguments: vec![right],
+                is_cast: false,
                 span,
             };
         }
@@ -355,6 +357,7 @@ impl Parser {
                 receiver: Box::new(receiver),
                 selector,
                 arguments: Vec::new(),
+                is_cast: false,
                 span,
             };
         }
@@ -647,9 +650,24 @@ impl Parser {
                 break;
             }
 
-            // Period or newline separates statements
+            // Period, bang (!), or newline separates statements
             if self.match_token(&TokenKind::Period) {
                 // Explicit period — continue
+            } else if self.match_token(&TokenKind::Bang) {
+                // Cast terminator — mark the last expression as a cast if it's a MessageSend.
+                // If the expression is not a MessageSend (e.g. `x := foo bar!`), emit an error.
+                match body.last_mut() {
+                    Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
+                    Some(last) => {
+                        let span = last.span();
+                        self.diagnostics.push(Diagnostic::error(
+                            "Cast (!) has no return value and cannot be used in an expression. Use . for a synchronous call.",
+                            span,
+                        ));
+                    }
+                    None => {}
+                }
+                // Continue (same as period)
             } else if !self.is_at_end()
                 && !self.check(&TokenKind::RightBracket)
                 && self.current_token().has_leading_newline()

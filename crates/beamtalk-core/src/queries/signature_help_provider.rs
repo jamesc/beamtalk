@@ -125,6 +125,7 @@ fn find_signature_in_expr(
             selector,
             arguments,
             span,
+            ..
         } => {
             // Check nested expressions first (inner-most message wins)
             if let Some(help) =
