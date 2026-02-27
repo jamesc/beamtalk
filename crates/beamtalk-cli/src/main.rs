@@ -228,12 +228,34 @@ enum Command {
     },
 }
 
+/// The default stack size (1 MiB on Windows) is too small for deep AST recursion
+/// when compiling large stdlib test suites. Spawn a thread with 8 MiB and run
+/// everything there so every platform gets the same headroom.
+const STACK_SIZE: usize = 8 * 1024 * 1024;
+
+fn main() {
+    let result = std::thread::Builder::new()
+        .stack_size(STACK_SIZE)
+        .spawn(run)
+        .expect("failed to spawn main thread")
+        .join()
+        .expect("main thread panicked");
+
+    match result {
+        Ok(()) => std::process::exit(0),
+        Err(e) => {
+            eprintln!("{e:?}");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// CLI entry point: parse arguments and dispatch to the appropriate subcommand.
 #[expect(
     clippy::too_many_lines,
     reason = "top-level dispatch — each arm is a one-liner"
 )]
-fn main() -> Result<()> {
+fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // Initialize tracing when explicitly requested.
@@ -270,7 +292,7 @@ fn main() -> Result<()> {
         )
     }))?;
 
-    let result = match cli.command {
+    match cli.command {
         Command::Build {
             path,
             allow_primitives,
@@ -352,15 +374,5 @@ fn main() -> Result<()> {
             cookie,
             no_color,
         } => commands::attach::run(workspace.as_deref(), port, cookie.as_deref(), no_color),
-    };
-
-    // Exit with appropriate code
-    match result {
-        Ok(()) => std::process::exit(0),
-        Err(e) => {
-            // miette already provides nice error formatting, just display it
-            eprintln!("{e:?}");
-            std::process::exit(1);
-        }
     }
 }
