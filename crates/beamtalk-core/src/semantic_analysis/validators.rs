@@ -1328,6 +1328,40 @@ mod tests {
         );
     }
 
+    /// Module-level expressions: non-last literal triggers lint.
+    #[test]
+    fn module_level_effect_free_emits_lint() {
+        let src = "42.\nself doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded literal at module level, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Lint);
+    }
+
+    /// Standalone method definition: non-last literal triggers lint.
+    #[test]
+    fn standalone_method_effect_free_emits_lint() {
+        let src = "Object subclass: Foo\nFoo >> bar =>\n  42.\n  self doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        assert_eq!(module.method_definitions.len(), 1, "Expected 1 standalone method");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded literal in standalone method, got: {diagnostics:?}"
+        );
+    }
+
     #[test]
     fn cast_on_actor_type_is_ok() {
         // Actor subclass should NOT produce an error for cast
