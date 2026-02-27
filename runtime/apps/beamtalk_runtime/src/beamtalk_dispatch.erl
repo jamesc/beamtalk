@@ -319,24 +319,41 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                     continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth);
                 true ->
                     ?LOG_DEBUG("Invoking ~p:dispatch(~p, ...)", [ModuleName, Selector]),
-                    %% Normalize the return value: dispatch/4 returns either
-                    %% {reply, Result, NewState} or {error, Error, State} (3-tuple).
-                    %% We call it inside a try/catch to translate raw Erlang exceptions
-                    %% into structured beamtalk errors instead of letting them escape.
-                    try
-                        case ModuleName:dispatch(Selector, Args, Self, State) of
-                            {reply, _, _} = Reply -> Reply;
-                            {error, Error, _State} -> {error, Error};
-                            Other -> Other
-                        end
-                    catch
-                        Type:Reason:Stack ->
-                            ?LOG_ERROR("Erlang error in ~p:dispatch: ~p", [ModuleName, Reason]),
-                            Wrapped = beamtalk_exception_handler:ensure_wrapped(
-                                Type, Reason, Stack
-                            ),
-                            #{error := BtError} = Wrapped,
-                            {error, BtError}
+                    %% Intercept displayString/inspect for actor instances to avoid
+                    %% deadlock. Both compiled Object methods send a message back to
+                    %% Self (displayString calls self printString, inspect delegates
+                    %% to self printString), which produces a second gen_server:call
+                    %% on the same actor process → deadlock.
+                    %% beamtalk_object_ops handles these without any self-sends.
+                    %% Note: printString does NOT deadlock (uses class_of_object → metaclass).
+                    case
+                        is_actor_instance(Self) andalso
+                            (Selector =:= 'displayString' orelse Selector =:= inspect)
+                    of
+                        true ->
+                            beamtalk_object_ops:dispatch(Selector, Args, Self, State);
+                        false ->
+                            %% Normalize the return value: dispatch/4 returns either
+                            %% {reply, Result, NewState} or {error, Error, State} (3-tuple).
+                            %% We call it inside a try/catch to translate raw Erlang exceptions
+                            %% into structured beamtalk errors instead of letting them escape.
+                            try
+                                case ModuleName:dispatch(Selector, Args, Self, State) of
+                                    {reply, _, _} = Reply -> Reply;
+                                    {error, Error, _State} -> {error, Error};
+                                    Other -> Other
+                                end
+                            catch
+                                Type:Reason:Stack ->
+                                    ?LOG_ERROR("Erlang error in ~p:dispatch: ~p", [
+                                        ModuleName, Reason
+                                    ]),
+                                    Wrapped = beamtalk_exception_handler:ensure_wrapped(
+                                        Type, Reason, Stack
+                                    ),
+                                    #{error := BtError} = Wrapped,
+                                    {error, BtError}
+                            end
                     end
             end
     end.
@@ -418,3 +435,16 @@ check_extension(ClassName, Selector) ->
             %% ETS table doesn't exist yet (early bootstrap)
             not_found
     end.
+
+%% @private
+%% @doc Return true if Self is an actor instance (a #beamtalk_object{} with a pid).
+%%
+%% Used to detect the deadlock-prone case where displayString/printString are sent
+%% to an actor while inside the actor's gen_server callback. In that case the
+%% compiled bt@stdlib@object:displayString/1 would call
+%% beamtalk_message_dispatch:send(Self, 'printString', []), causing a second
+%% gen_server:call on the same process → deadlock. beamtalk_object_ops handles
+%% these methods safely without any self-sends.
+-spec is_actor_instance(term()) -> boolean().
+is_actor_instance(#beamtalk_object{pid = Pid}) when is_pid(Pid) -> true;
+is_actor_instance(_) -> false.
