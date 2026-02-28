@@ -243,8 +243,13 @@ impl ProtocolClient {
             if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
                 use std::io::Write;
                 let formatted = format_transcript_chunk(text, &mut self.transcript_bol);
-                let _ = std::io::stdout().lock().write_all(formatted.as_bytes());
-                let _ = std::io::stdout().flush();
+                let mut out = std::io::stdout().lock();
+                if let Err(err) = out
+                    .write_all(formatted.as_bytes())
+                    .and_then(|()| out.flush())
+                {
+                    eprintln!("warning: failed to write transcript output: {err}");
+                }
             }
         }
         true
