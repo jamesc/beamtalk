@@ -16,7 +16,7 @@
 /// #(1, 2, 3) includes: 2       // => true
 /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
 /// ```
-abstract typed Object subclass: Collection
+abstract typed Value subclass: Collection
 
   // === Abstract protocol (subclasses must implement) ===
 

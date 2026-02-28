@@ -12,7 +12,7 @@
 /// 5 isPositive      // => true
 /// -3 isNegative     // => true
 /// ```
-abstract typed Object subclass: Number
+abstract typed Value subclass: Number
 
   // === Abstract protocol (subclasses must implement) ===
 

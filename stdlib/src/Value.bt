@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Value — Base class for immutable value types.
+///
+/// Value types are lightweight, immutable objects that are passed by value
+/// rather than by reference. Examples include `Integer`, `String`, `Exception`,
+/// `Point`, `Association`, and other stdlib types.
+///
+/// ## Key Characteristics
+///
+/// - **Immutable:** slot assignments (e.g., `self.x := 5`) are compile errors.
+///   Use methods that return new instances (e.g., `self withX: 5`).
+/// - **Value Semantics:** Compared by value, not identity.
+/// - **Lightweight:** No actor processes; methods are pure functions.
+///
+/// ## Subclassing
+///
+/// To define a custom value type, use `Value subclass:`:
+///
+/// ```beamtalk
+/// Value subclass: Point
+///   state: x = 0
+///   state: y = 0
+///
+///   x -> Integer => @primitive "x"
+///   y -> Integer => @primitive "y"
+///
+///   withX: newX: Integer -> Point => @primitive "withX:"
+/// ```
+///
+/// @see Object (for reference types / actors)
+Object subclass: Value
