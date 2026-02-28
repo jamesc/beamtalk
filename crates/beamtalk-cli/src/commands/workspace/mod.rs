@@ -1177,6 +1177,98 @@ mod tests {
         assert!(is_node_running(&info3), "restarted node should be running");
     }
 
+    /// Regression test for BT-970: concurrent `get_or_start_workspace` calls on the
+    /// same workspace ID must not both attempt to start a node. The workspace lock must
+    /// cover the full check-is-running + start sequence so the second caller discovers
+    /// the node already running after the first caller starts it.
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
+    fn test_concurrent_get_or_start_workspace_integration() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let tw = TestWorkspace::new("integ_concurrent");
+        let project_path = std::env::current_dir().unwrap();
+
+        let (runtime, workspace, jsx, compiler, stdlib, extra_paths) = beam_dirs_for_tests();
+
+        // Use an Arc<Barrier> so both threads enter get_or_start_workspace at the
+        // same time, maximising the chance of hitting the race window.
+        let barrier = Arc::new(Barrier::new(2));
+
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let barrier = Arc::clone(&barrier);
+                let project_path = project_path.clone();
+                let tw_id = tw.id.clone();
+                let runtime = runtime.clone();
+                let workspace = workspace.clone();
+                let jsx = jsx.clone();
+                let compiler = compiler.clone();
+                let stdlib = stdlib.clone();
+                let extra_paths = extra_paths.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    get_or_start_workspace(
+                        &project_path,
+                        Some(&tw_id),
+                        0,
+                        &runtime,
+                        &workspace,
+                        &jsx,
+                        &compiler,
+                        &stdlib,
+                        &extra_paths,
+                        false,
+                        Some(60),
+                        None,
+                        None, // ssl_dist_optfile
+                        None, // web_port
+                    )
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        // Both calls must succeed
+        for result in &results {
+            assert!(
+                result.is_ok(),
+                "get_or_start_workspace should succeed, got: {:?}",
+                result.as_ref().err()
+            );
+        }
+
+        let infos: Vec<_> = results.into_iter().map(|r| r.unwrap()).collect();
+
+        // Exactly one caller must have started a new node; the other must have joined it
+        let started_count = infos.iter().filter(|(_, started, _)| *started).count();
+        assert_eq!(
+            started_count, 1,
+            "exactly one caller should have started the node; got started_count={started_count}"
+        );
+
+        // Both callers must return the same node (same PID and port)
+        let (info0, _, id0) = &infos[0];
+        let (info1, _, id1) = &infos[1];
+        assert_eq!(id0, id1, "both callers must return the same workspace ID");
+        assert_eq!(
+            info0.pid, info1.pid,
+            "both callers must return the same node PID"
+        );
+        assert_eq!(
+            info0.port, info1.port,
+            "both callers must return the same node port"
+        );
+        assert!(is_node_running(info0), "node should be running after concurrent start");
+
+        // Clean up
+        let _guard = NodeGuard { pid: info0.pid };
+    }
+
     /// Regression test for BT-967: stale port file from a previous aborted startup
     /// causes `start_detached_node` to connect to the wrong BEAM node, producing
     /// auth failures in `wait_for_tcp_ready` for 30 seconds before timing out.
