@@ -1670,17 +1670,19 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// Extracts source text for a method from the original source (BT-101).
+    /// Extracts source text for a method using the AST unparser (BT-977).
+    ///
+    /// The unparser produces complete, comment-inclusive source for all methods,
+    /// whether parsed from a `.bt` file or constructed programmatically by a live
+    /// tool (synthesized methods have no source text but still produce valid output).
+    ///
+    /// Previously this used raw byte-range slicing (`source[span.start..span.end]`),
+    /// which silently dropped leading comments (they appear before `method.span.start()`)
+    /// and fell back to the selector name for synthesized methods. The unparser fixes
+    /// both deficiencies — see ADR 0044 Phase 4.
+    #[allow(clippy::unused_self)]
     fn extract_method_source(&self, method: &MethodDefinition) -> String {
-        if let Some(ref source) = self.source_text {
-            let start = method.span.start() as usize;
-            let end = method.span.end() as usize;
-            if end <= source.len() {
-                return source[start..end].trim().to_string();
-            }
-        }
-        // Fallback: use selector name
-        method.selector.name().to_string()
+        crate::unparse::unparse_method(method)
     }
 
     /// BT-851: Checks if an expression is a `value:` call on a Tier 2 block parameter.
