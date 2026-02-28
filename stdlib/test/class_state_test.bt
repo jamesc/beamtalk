@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-927: BUnit tests for classState declaration and codegen.
+// BT-927: BUnit tests for classState declaration and codegen
 //
 // Verifies that class-side state declared with `classState:` is correctly:
 // - Initialized to the declared default value at class registration time
@@ -9,48 +9,46 @@
 // - Writable via class-side setter methods
 // - Persistent across multiple class method calls
 //
-// Uses the ClassStateActor fixture (stdlib/test/fixtures/class_state_actor.bt).
+// Uses the ClassStateActor fixture (stdlib/test/fixtures/class_state_actor.bt)
 
 TestCase subclass: ClassStateTest
 
   setUp =>
-    // Reset class state before each test to ensure isolation.
-    ClassStateActor reset.
+    // Reset class state before each test to ensure isolation
+    ClassStateActor reset
     self
 
   testGetterReturnsDefaultValue =>
-    // After reset, counter should be 0 (the declared default).
+    // After reset, counter should be 0 (the declared default)
     self assert: ClassStateActor counter equals: 0
 
   testSetterPersistsValue =>
-    // Setting counter to 42 and reading it back should return 42.
-    ClassStateActor counter: 42.
+    // Setting counter to 42 and reading it back should return 42
+    ClassStateActor counter: 42
     self assert: ClassStateActor counter equals: 42
 
   testSetterOverwritesPreviousValue =>
-    // Overwriting the counter value should return the new value.
-    ClassStateActor counter: 10.
-    ClassStateActor counter: 99.
+    // Overwriting the counter value should return the new value
+    ClassStateActor counter: 10
+    ClassStateActor counter: 99
     self assert: ClassStateActor counter equals: 99
 
   testMultipleClassStateVariables =>
-    // Both class state variables are independently settable and readable.
-    ClassStateActor counter: 7.
-    ClassStateActor label: "hello".
-    self assert: ClassStateActor counter equals: 7.
+    // Both class state variables are independently settable and readable
+    ClassStateActor counter: 7
+    ClassStateActor label: "hello"
+    self assert: ClassStateActor counter equals: 7
     self assert: ClassStateActor label equals: "hello"
 
   testClassStateIsolatedFromInstanceState =>
-    // Mutating instance state on a spawned actor does not affect class state.
-    ClassStateActor counter: 55.
-    actor := ClassStateActor spawn.
-    actor increment.
+    // Mutating instance state on a spawned actor does not affect class state
+    ClassStateActor counter: 55
+    actor := ClassStateActor spawn
+    actor increment
     self assert: ClassStateActor counter equals: 55
 
   testResetRestoresDefaultValues =>
-    // After setting values, reset should restore declared defaults.
-    ClassStateActor counter: 999.
-    ClassStateActor label: "modified".
-    ClassStateActor reset.
-    self assert: ClassStateActor counter equals: 0.
+    // After setting values, reset should restore declared defaults
+    ClassStateActor counter: 999; label: "modified"; reset
+    self assert: ClassStateActor counter equals: 0
     self assert: ClassStateActor label equals: "unset"

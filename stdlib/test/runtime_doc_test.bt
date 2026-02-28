@@ -12,40 +12,40 @@ TestCase subclass: RuntimeDocTest
     self assert: DocTestHelper doc equals: nil
 
   testSetClassDoc =>
-    DocTestHelper doc: "A helper for testing".
+    DocTestHelper doc: "A helper for testing"
     self assert: DocTestHelper doc equals: "A helper for testing"
 
   testSetClassDocOverwrites =>
-    DocTestHelper doc: "First doc".
-    DocTestHelper doc: "Second doc".
+    DocTestHelper doc: "First doc"
+    DocTestHelper doc: "Second doc"
     self assert: DocTestHelper doc equals: "Second doc"
 
   // --- Method doc via >> and doc message ---
 
   testMethodDocDefaultsToNil =>
-    m := DocTestHelper >> #greet.
+    m := DocTestHelper >> #greet
     self assert: m doc equals: nil
 
   testSetMethodDoc =>
-    DocTestHelper setDocForMethod: #greet to: "Say hello".
-    m := DocTestHelper >> #greet.
+    DocTestHelper setDocForMethod: #greet to: "Say hello"
+    m := DocTestHelper >> #greet
     self assert: m doc equals: "Say hello"
 
   testSetMethodDocDifferentMethods =>
-    DocTestHelper setDocForMethod: #answer to: "Return 42".
-    m := DocTestHelper >> #answer.
+    DocTestHelper setDocForMethod: #answer to: "Return 42"
+    m := DocTestHelper >> #answer
     self assert: m doc equals: "Return 42"
 
   // --- CompiledMethod doc accessor ---
 
   testCompiledMethodDocField =>
-    DocTestHelper setDocForMethod: #greet to: "Greeting method".
-    m := DocTestHelper >> #greet.
-    self assert: m doc equals: "Greeting method".
+    DocTestHelper setDocForMethod: #greet to: "Greeting method"
+    m := DocTestHelper >> #greet
+    self assert: m doc equals: "Greeting method"
     self assert: m selector equals: #greet
 
   // --- doc: returns self (chainable) ---
 
   testDocSetterReturnsSelf =>
-    result := DocTestHelper doc: "Chainable".
+    result := DocTestHelper doc: "Chainable"
     self assert: result equals: DocTestHelper

@@ -1,39 +1,39 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-915: Actor fixture for testing self.slot := inside conditional blocks.
-// Exercises ifTrue:, ifFalse:, and ifTrue:ifFalse: with field mutation threading.
+// BT-915: Actor fixture for testing self.slot := inside conditional blocks
+// Exercises ifTrue:, ifFalse:, and ifTrue:ifFalse: with field mutation threading
 
 Actor subclass: ConditionalMutationCounter
   state: count = 0
 
   // Increment count only when flag is true
   conditionalIncrement: flag =>
-    flag ifTrue: [self.count := self.count + 1].
+    flag ifTrue: [self.count := self.count + 1]
     self.count
 
   // Decrement count only when flag is false
   conditionalDecrement: flag =>
-    flag ifFalse: [self.count := self.count - 1].
+    flag ifFalse: [self.count := self.count - 1]
     self.count
 
   // Two-branch conditional: +10 if true, -1 if false
   conditionalToggle: flag =>
     flag ifTrue: [self.count := self.count + 10]
-         ifFalse: [self.count := self.count - 1].
+         ifFalse: [self.count := self.count - 1]
     self.count
 
   // Method with two sequential conditional mutations
   doubleConditional: a and: b =>
-    a ifTrue: [self.count := self.count + 1].
-    b ifTrue: [self.count := self.count + 10].
+    a ifTrue: [self.count := self.count + 1]
+    b ifTrue: [self.count := self.count + 10]
     self.count
 
   // Nested conditionals: outer and inner both have mutations
   nestedConditional: outer and: inner =>
     outer ifTrue: [
       inner ifTrue: [self.count := self.count + 100]
-    ].
+    ]
     self.count
 
   // Conditional as last expression (no trailing self.count)

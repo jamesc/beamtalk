@@ -2,21 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-892: Tests that inject:into:, do:, and collect: with self sends
-// work correctly in value-object methods (no State variable).
+// work correctly in value-object methods (no State variable)
 
 TestCase subclass: ValueObjectSelfSendTest
 
   testInjectIntoWithSelfSend =>
-    f := StringFormatter new: #{#prefix => "<", #suffix => ">"}.
-    result := f joinFormatted: #("a", "b", "c").
+    f := StringFormatter new: #{#prefix => "<", #suffix => ">"}
+    result := f joinFormatted: #("a", "b", "c")
     self assert: result equals: "[a][b][c]"
 
   testCollectWithSelfSend =>
-    f := StringFormatter new.
-    result := f collectFormatted: #("x", "y").
+    f := StringFormatter new
+    result := f collectFormatted: #("x", "y")
     self assert: result equals: #("[x]", "[y]")
 
   testInjectIntoWithSelfSendEmptyList =>
-    f := StringFormatter new.
-    result := f joinFormatted: #().
+    f := StringFormatter new
+    result := f joinFormatted: #()
     self assert: result equals: ""

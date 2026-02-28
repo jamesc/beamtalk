@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-893: Class method self-sends (self new:) should not deadlock.
-// Tests the factory pattern where class methods create instances via self new:.
+// BT-893: Class method self-sends (self new:) should not deadlock
+// Tests the factory pattern where class methods create instances via self new:
 
 TestCase subclass: ClassMethodSelfNewTest
 

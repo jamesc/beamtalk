@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-761: ActorNlrRecursive — NLR in recursive Actor methods.
+// BT-761: ActorNlrRecursive — NLR in recursive Actor methods
 
 Actor subclass: ActorNlrRecursive
   state: count = 0

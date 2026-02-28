@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-773: self and explicit class name in class methods should both use
-// direct dispatch (not actor message send) to avoid deadlock.
+// direct dispatch (not actor message send) to avoid deadlock
 
 TestCase subclass: ClassSelfDispatchTest
 

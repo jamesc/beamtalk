@@ -3,36 +3,36 @@
 
 // BT-339: Tests for the Character class — integer codes, equality, comparison,
 // predicates (isLetter, isDigit, isUppercase, isLowercase, isWhitespace),
-// arithmetic on char codes, and conversions (asString, asFloat).
+// arithmetic on char codes, and conversions (asString, asFloat)
 
 TestCase subclass: CharacterTest
 
   testCharacterOperations =>
-    self assert: ($A) equals: 65.
-    self assert: ($a) equals: 97.
-    self assert: ($0) equals: 48.
-    self assert: ($\n) equals: 10.
-    self assert: ($\t) equals: 9.
-    self assert: ($A =:= $A).
-    self deny: ($A =:= $B).
-    self assert: ($A /= $B).
-    self assert: ($A < $B).
-    self assert: ($B > $A).
-    self assert: ($A <= $A).
-    self assert: ($B >= $A).
-    self assert: ($A isLetter).
-    self assert: ($z isLetter).
-    self deny: ($0 isLetter).
-    self assert: ($5 isDigit).
-    self deny: ($A isDigit).
-    self assert: ($A isUppercase).
-    self deny: ($a isUppercase).
-    self assert: ($a isLowercase).
-    self deny: ($A isLowercase).
-    self assert: ($\n isWhitespace).
-    self assert: ($\t isWhitespace).
-    self deny: ($A isWhitespace).
-    self assert: ($A + 1) equals: 66.
-    self assert: ($z - $a) equals: 25.
-    self assert: ($A asString) equals: "65".
-    self assert: ($A asFloat) equals: 65 asFloat
+    self assert: $A equals: 65
+    self assert: $a equals: 97
+    self assert: $0 equals: 48
+    self assert: $\n equals: 10
+    self assert: $\t equals: 9
+    self assert: ($A =:= $A)
+    self deny: ($A =:= $B)
+    self assert: ($A /= $B)
+    self assert: ($A < $B)
+    self assert: ($B > $A)
+    self assert: ($A <= $A)
+    self assert: ($B >= $A)
+    self assert: $A isLetter
+    self assert: $z isLetter
+    self deny: $0 isLetter
+    self assert: $5 isDigit
+    self deny: $A isDigit
+    self assert: $A isUppercase
+    self deny: $a isUppercase
+    self assert: $a isLowercase
+    self deny: $A isLowercase
+    self assert: $\n isWhitespace
+    self assert: $\t isWhitespace
+    self deny: $A isWhitespace
+    self assert: ($A + 1) equals: 66
+    self assert: ($z - $a) equals: 25
+    self assert: $A asString equals: "65"
+    self assert: $A asFloat equals: 65 asFloat

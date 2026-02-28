@@ -1,18 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-932: Helper test class that triggers raw BEAM errors.
+// BT-932: Helper test class that triggers raw BEAM errors
 // ErrorMessageHelperTest defines methods that intentionally trigger raw BEAM
 // errors. They are NOT prefixed with "test" so BUnit will not auto-discover
 // them. ErrorMessageTest runs each helper method via TestRunner run:method:
-// and checks that the resulting failure messages are human-readable.
+// and checks that the resulting failure messages are human-readable
 
 TestCase subclass: ErrorMessageHelperTest
 
-  // Triggers {badkey, Key} BEAM error: maps:get/2 with absent key.
+  // Triggers {badkey, Key} BEAM error: maps:get/2 with absent key
   triggerBadkey =>
     Erlang maps get: #missingKey with: #{#other => 1}
 
-  // Triggers badarith BEAM error: division by zero.
+  // Triggers badarith BEAM error: division by zero
   triggerBadarith =>
     1 / 0

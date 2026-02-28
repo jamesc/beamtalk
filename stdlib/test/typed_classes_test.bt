@@ -8,40 +8,40 @@ TestCase subclass: TypedClassesTest
 
   testAnnotationSyntaxVariations =>
     // Test various type annotation syntax forms
-    math := TypedMath new.
-    self assert: (math identity: 4) equals: 4.
-    self assert: (math identityWithSpace: 5) equals: 5.
-    self assert: (math sum: 2 with: 3) equals: 5.
-    self assert: (math maybeName: true) equals: 1.
-    self assert: (math maybeName: false) equals: "none".
+    math := TypedMath new
+    self assert: (math identity: 4) equals: 4
+    self assert: (math identityWithSpace: 5) equals: 5
+    self assert: (math sum: 2 with: 3) equals: 5
+    self assert: (math maybeName: true) equals: 1
+    self assert: (math maybeName: false) equals: "none"
     // asType: cast
     self assert: ((41 asType: Integer) + 1) equals: 42
 
   testActorBehavior =>
     // Test actor instances with typed methods
-    counter := TypedCounter spawn.
-    self assert: (counter increment) equals: 1.
-    self assert: (counter add: 5) equals: 6.
-    self assert: (counter current) equals: 6.
-    account := TypedAccount spawn.
-    self assert: (account setOwner: "Alice") equals: "Alice".
-    self assert: (account deposit: 10) equals: 10.
-    self assert: (account withdraw: 3) equals: 7.
-    self assert: (account balance) equals: 7.
-    self assert: (account getOwner) equals: "Alice"
+    counter := TypedCounter spawn
+    self assert: counter increment equals: 1
+    self assert: (counter add: 5) equals: 6
+    self assert: counter current equals: 6
+    account := TypedAccount spawn
+    self assert: (account setOwner: "Alice") equals: "Alice"
+    self assert: (account deposit: 10) equals: 10
+    self assert: (account withdraw: 3) equals: 7
+    self assert: account balance equals: 7
+    self assert: account getOwner equals: "Alice"
 
   testNoFalsePositivesRegression =>
     // Regression tests for permissive typing paths
-    ledger := TypedLedger spawn.
-    self assert: (ledger addOne) equals: 1.
-    self assert: (ledger addOne) equals: 2.
-    untyped := UntypedContainer spawn.
-    self assert: (untyped setItem: "hello") equals: "hello".
-    self assert: (untyped setItem: 99) equals: 99.
-    typed := TypedAccount spawn.
-    self assert: (typed deposit: 20) equals: 20.
-    self assert: (typed deposit: (5 asType: Integer)) equals: 25.
-    self assert: (typed balance) equals: 25.
-    math2 := TypedMath new.
-    self assert: (math2 maybeName: false) equals: "none".
+    ledger := TypedLedger spawn
+    self assert: ledger addOne equals: 1
+    self assert: ledger addOne equals: 2
+    untyped := UntypedContainer spawn
+    self assert: (untyped setItem: "hello") equals: "hello"
+    self assert: (untyped setItem: 99) equals: 99
+    typed := TypedAccount spawn
+    self assert: (typed deposit: 20) equals: 20
+    self assert: (typed deposit: (5 asType: Integer)) equals: 25
+    self assert: typed balance equals: 25
+    math2 := TypedMath new
+    self assert: (math2 maybeName: false) equals: "none"
     self assert: (math2 maybeName: true) equals: 1

@@ -13,15 +13,15 @@ TestCase subclass: CodegenDocTest
   // --- Method docs from /// comments ---
 
   testMethodDocFromTripleSlash =>
-    m := DocCounter >> #increment.
+    m := DocCounter >> #increment
     self assert: m doc equals: "Increment the counter by one."
 
   testValueMethodDoc =>
-    m := DocCounter >> #value.
+    m := DocCounter >> #value
     self assert: m doc equals: "Return the current count."
 
   // --- Method without doc comment has nil doc ---
 
   testMethodWithoutDocHasNilDoc =>
-    m := DocCounter >> #reset.
+    m := DocCounter >> #reset
     self assert: m doc equals: nil

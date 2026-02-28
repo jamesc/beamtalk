@@ -7,59 +7,59 @@ TestCase subclass: StackFrameTest
 
   testStackTraceExists =>
     // stackTrace returns a list
-    result := [1 / 0] on: Exception do: [:e | e stackTrace class].
+    result := [1 / 0] on: Exception do: [:e | e stackTrace class]
     self assert: result equals: List
 
   testStackTraceHasEntries =>
     // stackTrace has entries
-    result := [1 / 0] on: Exception do: [:e | e stackTrace size > 0].
+    result := [1 / 0] on: Exception do: [:e | e stackTrace size > 0]
     self assert: result
 
   testStackTraceFromDoesNotUnderstand =>
     // stackTrace from does_not_understand has entries
     @expect dnu
-    result := [42 noSuchMethod] on: Exception do: [:e | e stackTrace size > 0].
+    result := [42 noSuchMethod] on: Exception do: [:e | e stackTrace size > 0]
     self assert: result
 
   testHandlerWithoutArg =>
     // Handler without arg still works
-    result := [1 / 0] on: Exception do: [42].
+    result := [1 / 0] on: Exception do: [42]
     self assert: result equals: 42
 
   testRuntimeErrorStackTrace =>
     // RuntimeError also has stackTrace
     @expect dnu
-    result := [42 noSuchMethod] on: RuntimeError do: [:e | e stackTrace class].
+    result := [42 noSuchMethod] on: RuntimeError do: [:e | e stackTrace class]
     self assert: result equals: List
 
   testStackFrameClass =>
     // stackTrace first is a StackFrame
-    result := [1 / 0] on: Exception do: [:e | e stackTrace first class].
+    result := [1 / 0] on: Exception do: [:e | e stackTrace first class]
     self assert: result equals: StackFrame
 
   testStackFrameMethod =>
     // StackFrame method returns a Symbol
-    result := [1 / 0] on: Exception do: [:e | (e stackTrace first method) class].
+    result := [1 / 0] on: Exception do: [:e | (e stackTrace first method) class]
     self assert: result equals: Symbol
 
   testStackFrameArguments =>
     // StackFrame arguments returns an Integer (arity)
-    result := [1 / 0] on: Exception do: [:e | (e stackTrace first arguments) class].
+    result := [1 / 0] on: Exception do: [:e | (e stackTrace first arguments) class]
     self assert: result equals: Integer
 
   testStackFramePrintString =>
     // StackFrame printString returns a String
-    result := [1 / 0] on: Exception do: [:e | (e stackTrace first printString) class].
+    result := [1 / 0] on: Exception do: [:e | (e stackTrace first printString) class]
     self assert: result equals: String
 
   testStackFrameAccessors =>
     // StackFrame accessors return values without error
-    frame := [1 / 0] on: Exception do: [:e | e stackTrace first].
-    self assert: (frame class) equals: StackFrame.
+    frame := [1 / 0] on: Exception do: [:e | e stackTrace first]
+    self assert: frame class equals: StackFrame
     // line, file, moduleName, receiverClass, sourceLocation may return nil or a value
     // Verify they respond without crashing
-    self assert: (frame respondsTo: #line).
-    self assert: (frame respondsTo: #file).
-    self assert: (frame respondsTo: #moduleName).
-    self assert: (frame respondsTo: #receiverClass).
+    self assert: (frame respondsTo: #line)
+    self assert: (frame respondsTo: #file)
+    self assert: (frame respondsTo: #moduleName)
+    self assert: (frame respondsTo: #receiverClass)
     self assert: (frame respondsTo: #sourceLocation)

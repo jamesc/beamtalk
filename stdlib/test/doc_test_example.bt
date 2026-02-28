@@ -3,7 +3,7 @@
 
 // BUnit test: verify doc test extraction from /// doc comments (BT-441)
 
-/// A simple calculator for testing doc test extraction.
+/// A simple calculator for testing doc test extraction
 ///
 /// ## Examples
 /// ```beamtalk
@@ -12,14 +12,14 @@
 /// ```
 Object subclass: DocTestExample
 
-  /// Compute the answer to life, the universe, and everything.
+  /// Compute the answer to life, the universe, and everything
   ///
   /// ```beamtalk
   /// 42  // => 42
   /// ```
   answer => 42
 
-  /// Demonstrate stateful doc examples with variables.
+  /// Demonstrate stateful doc examples with variables
   ///
   /// ```beamtalk
   /// x := 10

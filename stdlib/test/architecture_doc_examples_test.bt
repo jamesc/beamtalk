@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Tests that the code examples in docs/beamtalk-architecture.md compile and
-// produce correct results — collect: with multiplication, binary math precedence.
+// produce correct results — collect: with multiplication, binary math precedence
 
 TestCase subclass: ArchitectureDocExamplesTest
 
   testCollectAndMathPrecedence =>
-    doubled := #(1, 2, 3) collect: [:x | x * 2].
-    self assert: doubled equals: #(2, 4, 6).
+    doubled := #(1, 2, 3) collect: [:x | x * 2]
+    self assert: doubled equals: #(2, 4, 6)
     // --- Math precedence (doc: "Binary Operations with Math Precedence" section) ---
-    result := 2 + 3 * 4.
+    result := 2 + 3 * 4
     self assert: result equals: 14

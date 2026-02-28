@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-761: ActorNlrComputed — NLR with computed return values in Actor methods.
+// BT-761: ActorNlrComputed — NLR with computed return values in Actor methods
 
 Actor subclass: ActorNlrComputed
   state: x = 0

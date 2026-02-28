@@ -7,47 +7,47 @@
 TestCase subclass: ProtoobjectActorsTest
 
   testActorIdentityTests =>
-    a := Counter spawn.
-    b := a.
-    c := Counter spawn.
+    a := Counter spawn
+    b := a
+    c := Counter spawn
     // Same reference
-    self assert: (a == b).
+    self assert: (a == b)
     // Different processes
-    self deny: (a == c).
+    self deny: (a == c)
     self assert: (a /= c)
 
   testInheritanceTests =>
     // Actor class has superclass
-    self assert: (Counter superclass) equals: Actor.
+    self assert: Counter superclass equals: Actor
     // Root class has no superclass
-    self assert: (ProtoObject superclass) equals: nil
+    self assert: ProtoObject superclass equals: nil
 
   testActorBasicMessaging =>
-    counter := Counter spawn.
+    counter := Counter spawn
     // Test initial state
-    self assert: (counter getValue) equals: 0.
+    self assert: counter getValue equals: 0
     // Test increment
-    self assert: (counter increment) equals: 1.
+    self assert: counter increment equals: 1
     // Verify state persisted
-    self assert: (counter getValue) equals: 1.
+    self assert: counter getValue equals: 1
     // Test multiple increments
-    self assert: (counter increment) equals: 2.
-    self assert: (counter increment) equals: 3.
+    self assert: counter increment equals: 2
+    self assert: counter increment equals: 3
     // Test decrement
-    self assert: (counter decrement) equals: 2.
+    self assert: counter decrement equals: 2
     // Final state verification
-    self assert: (counter getValue) equals: 2
+    self assert: counter getValue equals: 2
 
   testBt427ObjectMethodDelegationForActors =>
-    counter := Counter spawn.
+    counter := Counter spawn
     // isNil and notNil — nil-testing protocol from Object (intrinsic, no await)
-    self deny: (counter isNil).
-    // Actors inherit Object base methods via the class hierarchy walk.
-    self assert: (counter notNil).
+    self deny: counter isNil
+    // Actors inherit Object base methods via the class hierarchy walk
+    self assert: counter notNil
     // respondsTo: — checks both user methods and inherited methods
-    self assert: (counter respondsTo: #increment).
-    self assert: (counter respondsTo: #getValue).
-    self assert: (counter respondsTo: #decrement).
-    self deny: (counter respondsTo: #nonExistent).
+    self assert: (counter respondsTo: #increment)
+    self assert: (counter respondsTo: #getValue)
+    self assert: (counter respondsTo: #decrement)
+    self deny: (counter respondsTo: #nonExistent)
     // class — returns class name from Object
-    self assert: (counter class) equals: Counter
+    self assert: counter class equals: Counter

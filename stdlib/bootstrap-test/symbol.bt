@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Symbol primitive tests (BT-273)
-// Symbols are atoms — interned identifiers used as selectors and names.
+// Symbols are atoms — interned identifiers used as selectors and names
 
 // Class
 #foo class

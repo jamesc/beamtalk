@@ -5,11 +5,11 @@ typed Actor subclass: TypedCounter
   state: value: Integer = 0
 
   increment -> Integer =>
-    self.value := self.value + 1.
+    self.value := self.value + 1
     self.value
 
   add: amount: Integer -> Integer =>
-    self.value := self.value + amount.
+    self.value := self.value + amount
     self.value
 
   current -> Integer => self.value

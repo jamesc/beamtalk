@@ -3,21 +3,21 @@
 
 // BT-909: Tests that non-literal callables (block variables) can be passed
 // to list ops without crashing with badarity. The runtime arity normalization
-// wrapper detects Tier-2 blocks at runtime and wraps them to arity 1.
+// wrapper detects Tier-2 blocks at runtime and wraps them to arity 1
 
 TestCase subclass: NonLiteralCallableTest
 
   // Tier-1 block stored in a variable, passed to collect:
   testCollectWithBlockVar =>
-    actor := NonLiteralCallableActor spawn.
-    self assert: (actor collectWithTier1Block) equals: #(10, 20, 30)
+    actor := NonLiteralCallableActor spawn
+    self assert: actor collectWithTier1Block equals: #(10, 20, 30)
 
   // Tier-1 block stored in a variable, passed to select:
   testSelectWithBlockVar =>
-    actor := NonLiteralCallableActor spawn.
-    self assert: (actor selectWithTier1Block) equals: #(3, 4, 5)
+    actor := NonLiteralCallableActor spawn
+    self assert: actor selectWithTier1Block equals: #(3, 4, 5)
 
   // Tier-2 block stored in a variable, passed to do: — must not crash
   testDoWithTier2BlockVar =>
-    actor := NonLiteralCallableActor spawn.
-    self assert: (actor doWithTier2Block) equals: "done"
+    actor := NonLiteralCallableActor spawn
+    self assert: actor doWithTier2Block equals: "done"

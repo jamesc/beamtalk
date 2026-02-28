@@ -9,11 +9,11 @@ Object subclass: MultiExprCalc
 
   // Two-expression method: first expression is discarded, second is returned
   doubleAfterAdd: x =>
-    x + 100
+    x abs
     x * 2
 
   // Three-expression method: first two are discarded, third is returned
   compute: a with: b =>
-    a + b
-    a - b
+    a abs
+    b abs
     a * b

@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-892: Value object fixture for testing inject:into: with self sends.
-// Self sends in value-object blocks should NOT trigger state threading.
+// BT-892: Value object fixture for testing inject:into: with self sends
+// Self sends in value-object blocks should NOT trigger state threading
 
 Object subclass: StringFormatter
   state: prefix = ""

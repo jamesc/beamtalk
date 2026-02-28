@@ -9,24 +9,24 @@ Actor subclass: FieldMutationAccumulator
   state: product = 1
   state: count = 0
 
-  getSum => ^self.sum
-  getProduct => ^self.product
-  getCount => ^self.count
+  getSum => self.sum
+  getProduct => self.product
+  getCount => self.count
 
   // Multiple fields mutated in do:
   processArray: items =>
     items do: [:item |
-      self.sum := self.sum + item.
-      self.product := self.product * item.
+      self.sum := self.sum + item
+      self.product := self.product * item
       self.count := self.count + 1
-    ].
-    ^#{#sum => self.sum, #product => self.product, #count => self.count}
+    ]
+    #{#sum => self.sum, #product => self.product, #count => self.count}
 
   // BT-598: Local variable mutation in actor method blocks
   processWithLocal: items =>
-    localSum := 0.
+    localSum := 0
     items do: [:item |
-      localSum := localSum + 1.
+      localSum := localSum + 1
       self.sum := self.sum + item
-    ].
-    ^#{#localSum => localSum, #sum => self.sum}
+    ]
+    #{#localSum => localSum, #sum => self.sum}

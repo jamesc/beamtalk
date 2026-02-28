@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-754: NlrSkipper — early return skips later expressions fixture.
+// BT-754: NlrSkipper — early return skips later expressions fixture
 
 Object subclass: NlrSkipper
   test: x =>

@@ -6,25 +6,25 @@
 TestCase subclass: StringAdvancedMethodsTest
 
   testUppercase =>
-    self assert: ("hello" uppercase) equals: "HELLO"
+    self assert: "hello" uppercase equals: "HELLO"
 
   testLowercase =>
-    self assert: ("HELLO" lowercase) equals: "hello"
+    self assert: "HELLO" lowercase equals: "hello"
 
   testTrim =>
     // trim both sides
-    self assert: ("  hello  " trim) equals: "hello".
+    self assert: "  hello  " trim equals: "hello"
     // trim with no whitespace (no-op)
-    self assert: ("hello" trim) equals: "hello"
+    self assert: "hello" trim equals: "hello"
 
   testTrimLeft =>
-    self assert: ("  hello" trimLeft) equals: "hello"
+    self assert: "  hello" trimLeft equals: "hello"
 
   testTrimRight =>
-    self assert: ("hello  " trimRight) equals: "hello"
+    self assert: "hello  " trimRight equals: "hello"
 
   testStringEquality =>
-    self assert: ("hello" =:= "hello").
+    self assert: ("hello" =:= "hello")
     self deny: ("hello" =:= "world")
 
   testStringInequality =>
@@ -40,19 +40,19 @@ TestCase subclass: StringAdvancedMethodsTest
 
   testStringLessOrEqual =>
     // String less than or equal
-    self assert: ("abc" <= "abc").
+    self assert: ("abc" <= "abc")
     self assert: ("abc" <= "def")
 
   testStringGreaterOrEqual =>
     // String greater than or equal
-    self assert: ("def" >= "abc").
+    self assert: ("def" >= "abc")
     self assert: ("abc" >= "abc")
 
   testSplit =>
     self assert: ("a,b,c" split: ",") equals: #("a", "b", "c")
 
   testAsInteger =>
-    self assert: ("42" asInteger) equals: 42
+    self assert: "42" asInteger equals: 42
 
   testAsFloat =>
-    self assert: ("3.14" asFloat) equals: 3.14
+    self assert: "3.14" asFloat equals: 3.14

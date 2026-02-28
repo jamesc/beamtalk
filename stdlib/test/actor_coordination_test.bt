@@ -1,28 +1,25 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-898: Tests actor-to-actor coordination with sync-by-default dispatch.
+// BT-898: Tests actor-to-actor coordination with sync-by-default dispatch
 // bus notify: calls receive: on the collector synchronously — when notify:
-// returns, the collector has already processed the event.
+// returns, the collector has already processed the event
 
 
 TestCase subclass: ActorCoordinationTest
 
   testSyncEventDelivery =>
-    col := EventCollector spawn.
-    bus := EventBus spawn.
-    bus subscribe: col.
-    bus notify: "hello".
+    col := EventCollector spawn
+    bus := EventBus spawn
+    bus subscribe: col
+    bus notify: "hello"
     // notify: is synchronous; no barriers needed
-    self assert: (col eventCount) equals: 1
+    self assert: col eventCount equals: 1
 
   // Multiple events delivered in order
   testMultipleEventsDelivered =>
-    col := EventCollector spawn.
-    bus := EventBus spawn.
-    bus subscribe: col.
-    bus notify: "first".
-    bus notify: "second".
-    bus notify: "third".
-    self assert: (col eventCount) equals: 3.
-    self assert: (col events) equals: #("first", "second", "third")
+    col := EventCollector spawn
+    bus := EventBus spawn
+    bus subscribe: col; notify: "first"; notify: "second"; notify: "third"
+    self assert: col eventCount equals: 3
+    self assert: col events equals: #("first", "second", "third")

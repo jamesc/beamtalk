@@ -2,54 +2,54 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-904: Tests that collect:, select:, reject:, and do: with self-sends
-// work correctly in actor methods (state threading through blocks).
+// work correctly in actor methods (state threading through blocks)
 
 TestCase subclass: ActorSelfSendCollectTest
 
   testCollectWithSelfSend =>
-    c := ActorCollectCounter spawn.
-    result := c doubleAll: #(1, 2, 3).
-    self assert: result equals: #(2, 4, 6).
-    self assert: (c getCount) equals: 3
+    c := ActorCollectCounter spawn
+    result := c doubleAll: #(1, 2, 3)
+    self assert: result equals: #(2, 4, 6)
+    self assert: c getCount equals: 3
 
   testCollectWithFieldMutation =>
-    c := ActorCollectCounter spawn.
-    result := c doubleAllWithFieldMutation: #(1, 2, 3).
-    self assert: result equals: #(2, 4, 6).
-    self assert: (c getCount) equals: 3
+    c := ActorCollectCounter spawn
+    result := c doubleAllWithFieldMutation: #(1, 2, 3)
+    self assert: result equals: #(2, 4, 6)
+    self assert: c getCount equals: 3
 
   testCollectWithSelfSendImplicitReturn =>
-    c := ActorCollectCounter spawn.
-    result := c doubleAllImplicit: #(1, 2, 3).
-    self assert: result equals: #(2, 4, 6).
-    self assert: (c getCount) equals: 3
+    c := ActorCollectCounter spawn
+    result := c doubleAllImplicit: #(1, 2, 3)
+    self assert: result equals: #(2, 4, 6)
+    self assert: c getCount equals: 3
 
   testDoWithSelfSend =>
-    c := ActorCollectCounter spawn.
-    result := c countAll: #(10, 20, 30).
-    self assert: result equals: 3.
-    self assert: (c getCount) equals: 3
+    c := ActorCollectCounter spawn
+    result := c countAll: #(10, 20, 30)
+    self assert: result equals: 3
+    self assert: c getCount equals: 3
 
   testSelectWithSelfSend =>
-    c := ActorCollectCounter spawn.
-    result := c selectPositive: #(-1, 2, -3, 4).
-    self assert: result equals: #(2, 4).
-    self assert: (c getCount) equals: 4
+    c := ActorCollectCounter spawn
+    result := c selectPositive: #(-1, 2, -3, 4)
+    self assert: result equals: #(2, 4)
+    self assert: c getCount equals: 4
 
   testRejectWithSelfSend =>
-    c := ActorCollectCounter spawn.
-    result := c rejectNegative: #(-1, 2, -3, 4).
-    self assert: result equals: #(2, 4).
-    self assert: (c getCount) equals: 4
+    c := ActorCollectCounter spawn
+    result := c rejectNegative: #(-1, 2, -3, 4)
+    self assert: result equals: #(2, 4)
+    self assert: c getCount equals: 4
 
   testCollectWithSelfSendEmptyList =>
-    c := ActorCollectCounter spawn.
-    result := c doubleAll: #().
-    self assert: result equals: #().
-    self assert: (c getCount) equals: 0
+    c := ActorCollectCounter spawn
+    result := c doubleAll: #()
+    self assert: result equals: #()
+    self assert: c getCount equals: 0
 
   testSelectWithSelfSendEmptyList =>
-    c := ActorCollectCounter spawn.
-    result := c selectPositive: #().
-    self assert: result equals: #().
-    self assert: (c getCount) equals: 0
+    c := ActorCollectCounter spawn
+    result := c selectPositive: #()
+    self assert: result equals: #()
+    self assert: c getCount equals: 0

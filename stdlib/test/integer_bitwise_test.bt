@@ -6,30 +6,30 @@
 TestCase subclass: IntegerBitwiseTest
 
   testBitwiseOperations =>
-    self assert: (12 bitAnd: 10) equals: 8.
-    self assert: (255 bitAnd: 15) equals: 15.
+    self assert: (12 bitAnd: 10) equals: 8
+    self assert: (255 bitAnd: 15) equals: 15
     // --- bitOr: ---
-    self assert: (12 bitOr: 10) equals: 14.
-    self assert: (0 bitOr: 255) equals: 255.
+    self assert: (12 bitOr: 10) equals: 14
+    self assert: (0 bitOr: 255) equals: 255
     // --- bitXor: ---
-    self assert: (12 bitXor: 10) equals: 6.
-    self assert: (255 bitXor: 255) equals: 0.
+    self assert: (12 bitXor: 10) equals: 6
+    self assert: (255 bitXor: 255) equals: 0
     // --- bitNot ---
-    self assert: (0 bitNot) equals: -1.
+    self assert: 0 bitNot equals: -1
     // --- bitShift: (positive = left) ---
-    self assert: (1 bitShift: 4) equals: 16.
+    self assert: (1 bitShift: 4) equals: 16
     // --- bitShift: (negative = right) ---
     self assert: (16 bitShift: -2) equals: 4
 
   testMathMethods =>
     // --- factorial ---
-    self assert: (0 factorial) equals: 1.
-    self assert: (1 factorial) equals: 1.
-    self assert: (5 factorial) equals: 120.
+    self assert: 0 factorial equals: 1
+    self assert: 1 factorial equals: 1
+    self assert: 5 factorial equals: 120
     // --- gcd: ---
-    self assert: (12 gcd: 8) equals: 4.
-    self assert: (7 gcd: 5) equals: 1.
-    self assert: (0 gcd: 5) equals: 5.
+    self assert: (12 gcd: 8) equals: 4
+    self assert: (7 gcd: 5) equals: 1
+    self assert: (0 gcd: 5) equals: 5
     // --- lcm: ---
-    self assert: (4 lcm: 6) equals: 12.
+    self assert: (4 lcm: 6) equals: 12
     self assert: (3 lcm: 5) equals: 15

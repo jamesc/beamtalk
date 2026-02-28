@@ -1,47 +1,47 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-857: Fixture for testing NLR state preservation through nested HOMs.
+// BT-857: Fixture for testing NLR state preservation through nested HOMs
 // Verifies that when ^ fires inside a block passed through multiple HOMs,
 // the accumulated state (field mutations) is correctly preserved in the
-// NLR 4-tuple as it propagates through each HOM frame.
+// NLR 4-tuple as it propagates through each HOM frame
 //
-// Pattern: field mutation in method body BEFORE block invocation.
-// Methods return `^self` (updated self) so the caller can verify visitCount.
+// Pattern: field mutation in method body BEFORE block invocation
+// Methods return `^self` (updated self) so the caller can verify visitCount
 //
 // Note: Field mutations inside do: blocks for value types are not
 // yet supported (BT-860). Field mutations here occur in the METHOD BODY
-// before the block invocation.
+// before the block invocation
 
 Object subclass: NlrNestedHom
   state: visitCount = 0
 
-  // Inner HOM: calls aBlock for each element. Has no ^ of its own.
-  // When aBlock throws NLR, it propagates out of this method.
+  // Inner HOM: calls aBlock for each element. Has no ^ of its own
+  // When aBlock throws NLR, it propagates out of this method
   applyBlock: aBlock forEach: items =>
     items do: [:each | aBlock value: each]
 
-  // Outer HOM: delegates to inner HOM. Adds a second frame of indirection.
-  // When aBlock throws NLR through applyBlock:forEach:, it also propagates here.
+  // Outer HOM: delegates to inner HOM. Adds a second frame of indirection
+  // When aBlock throws NLR through applyBlock:forEach:, it also propagates here
   applyBlockNested: aBlock forEach: items =>
     self applyBlock: aBlock forEach: items
 
-  // Searches items for an element equal to target, through one HOM layer.
-  // Field mutation (visitCount := 1) happens before the block with ^.
-  // Uses ^self to return the updated self so callers can verify visitCount.
-  // Verifies state (visitCount) is preserved after NLR through one HOM frame.
+  // Searches items for an element equal to target, through one HOM layer
+  // Field mutation (visitCount := 1) happens before the block with ^
+  // Uses ^self to return the updated self so callers can verify visitCount
+  // Verifies state (visitCount) is preserved after NLR through one HOM frame
   findViaSingleHOM: target in: items =>
-    self.visitCount := 1.
-    self applyBlock: [:x | x =:= target ifTrue: [^self]] forEach: items.
+    self.visitCount := 1
+    self applyBlock: [:x | x =:= target ifTrue: [^self]] forEach: items
     self
 
-  // Searches items for an element equal to target, through TWO HOM layers.
-  // Field mutation (visitCount := 2) happens before the block with ^.
-  // Uses ^self to return the updated self so callers can verify visitCount.
-  // Verifies state (visitCount) is preserved after NLR through two HOM frames.
+  // Searches items for an element equal to target, through TWO HOM layers
+  // Field mutation (visitCount := 2) happens before the block with ^
+  // Uses ^self to return the updated self so callers can verify visitCount
+  // Verifies state (visitCount) is preserved after NLR through two HOM frames
   findViaNestedHOM: target in: items =>
-    self.visitCount := 2.
-    self applyBlockNested: [:x | x =:= target ifTrue: [^self]] forEach: items.
+    self.visitCount := 2
+    self applyBlockNested: [:x | x =:= target ifTrue: [^self]] forEach: items
     self
 
   visitCount => self.visitCount

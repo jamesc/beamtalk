@@ -3,45 +3,45 @@
 
 // BT-97, BT-359, BT-765: Tests the basic reflection API on actor objects —
 // class, respondsTo:, fieldNames, fieldAt:, fieldAt:put:, perform:; and that
-// fieldAt:put: raises immutable_value on primitive types (integers, strings).
+// fieldAt:put: raises immutable_value on primitive types (integers, strings)
 // BT-924: fieldAt: on user-defined Value subclass: objects reads slots — see
 // value_subclass_test.bt. fieldAt: on primitive literals (42, "hello") still
-// raises immutable_value since primitives have no map slots.
+// raises immutable_value since primitives have no map slots
 
 
 TestCase subclass: ReflectionBasicTest
 
   testActorReflectionApi =>
-    c := Counter spawn.
+    c := Counter spawn
     // Test class reflection
-    self assert: (c class) equals: Counter.
+    self assert: c class equals: Counter
     // Test respondsTo: with symbol literal
-    self assert: (c respondsTo: #increment).
+    self assert: (c respondsTo: #increment)
     // Test respondsTo: with non-existent method
-    self deny: (c respondsTo: #nonExistent).
+    self deny: (c respondsTo: #nonExistent)
     // Test fieldNames
-    self assert: (c fieldNames) equals: #(#value).
+    self assert: c fieldNames equals: #(#value)
     // Test fieldAt: - read field value
-    self assert: (c fieldAt: #value) equals: 0.
+    self assert: (c fieldAt: #value) equals: 0
     // Increment to change state
-    self assert: (c increment) equals: 1.
+    self assert: c increment equals: 1
     // Test fieldAt: after state change
-    self assert: (c fieldAt: #value) equals: 1.
+    self assert: (c fieldAt: #value) equals: 1
     // Test fieldAt:put: - set field value
-    self assert: (c fieldAt: #value put: 42) equals: 42.
+    self assert: (c fieldAt: #value put: 42) equals: 42
     // Verify field was set
-    self assert: (c getValue) equals: 42.
+    self assert: c getValue equals: 42
     // Test perform: - dynamic dispatch (zero-arity method)
-    self assert: (c perform: #getValue) equals: 42.
+    self assert: (c perform: #getValue) equals: 42
     // Test perform: with another method
-    self assert: (c perform: #increment) equals: 43.
+    self assert: (c perform: #increment) equals: 43
     // Verify increment worked via getValue
-    self assert: (c getValue) equals: 43.
-    // BT-359: fieldAt: on primitive value types (integers) raises immutable_value.
-    // Note: user-defined Value subclass: objects support fieldAt: for reading (BT-924).
-    self should: [42 fieldAt: #x] raise: #immutable_value.
+    self assert: c getValue equals: 43
+    // BT-359: fieldAt: on primitive value types (integers) raises immutable_value
+    // Note: user-defined Value subclass: objects support fieldAt: for reading (BT-924)
+    self should: [42 fieldAt: #x] raise: #immutable_value
     // BT-765: fieldAt:put: on immutable literals raises immutable_value error
     @expect type
-    self should: [42 fieldAt: #x put: 99] raise: #immutable_value.
+    self should: [42 fieldAt: #x put: 99] raise: #immutable_value
     @expect type
     self should: ["hello" fieldAt: #x put: "world"] raise: #immutable_value

@@ -22,7 +22,6 @@
 //! into a single cascade receiver.
 
 use crate::ast::{Block, Expression, Identifier, Module};
-use crate::ast_walker::for_each_expr_seq;
 use crate::lint::LintPass;
 use crate::source_analysis::Diagnostic;
 
@@ -32,7 +31,19 @@ pub(crate) struct CascadeCandidatePass;
 
 impl LintPass for CascadeCandidatePass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        for_each_expr_seq(module, |seq| check_sequence(seq, diagnostics));
+        // Skip module.expressions — top-level sequences are used in bootstrap-test
+        // files as individual test assertions (each paired with its own `// =>`
+        // comment). Converting those to a cascade would change the semantics
+        // because only the last send's result would be asserted. Only check
+        // method bodies and standalone method definitions.
+        for class in &module.classes {
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
+                check_sequence(&method.body, diagnostics);
+            }
+        }
+        for standalone in &module.method_definitions {
+            check_sequence(&standalone.method.body, diagnostics);
+        }
     }
 }
 
@@ -70,7 +81,13 @@ fn check_sequence(exprs: &[Expression], diagnostics: &mut Vec<Diagnostic>) {
                 i += 1;
             }
             let run_len = i - run_start;
-            if run_len >= 3 {
+            // Skip `self` — consecutive sends to `self` in method bodies are
+            // typically independent assertions or setup steps (e.g. BUnit's
+            // `self assert:…`) that should remain as separate statements for
+            // readability and debuggability.  Cascading them would merge
+            // logically-distinct operations and make test failures harder to
+            // isolate.
+            if run_len >= 3 && recv != "self" {
                 let first_span = exprs[run_start].span();
                 let last_span = exprs[i - 1].span();
                 let span = first_span.merge(last_span);
@@ -212,11 +229,7 @@ mod tests {
     #[test]
     fn three_consecutive_sends_flagged() {
         let diags = lint(
-            "Object subclass: Foo\n\
-             add: arr =>\n\
-             arr add: 1.\n\
-             arr add: 2.\n\
-             arr add: 3\n",
+            "Object subclass: Foo\n  add: arr =>\n    arr add: 1\n    arr add: 2\n    arr add: 3\n",
         );
         assert_eq!(
             diags.len(),
@@ -234,12 +247,7 @@ mod tests {
     #[test]
     fn four_consecutive_sends_flagged_once() {
         let diags = lint(
-            "Object subclass: Foo\n\
-             add: arr =>\n\
-             arr add: 1.\n\
-             arr add: 2.\n\
-             arr add: 3.\n\
-             arr add: 4\n",
+            "Object subclass: Foo\n  add: arr =>\n    arr add: 1\n    arr add: 2\n    arr add: 3\n    arr add: 4\n",
         );
         assert_eq!(
             diags.len(),
@@ -255,12 +263,7 @@ mod tests {
 
     #[test]
     fn two_consecutive_sends_not_flagged() {
-        let diags = lint(
-            "Object subclass: Foo\n\
-             add: arr =>\n\
-             arr add: 1.\n\
-             arr add: 2\n",
-        );
+        let diags = lint("Object subclass: Foo\n  add: arr =>\n    arr add: 1\n    arr add: 2\n");
         assert!(
             diags.is_empty(),
             "two sends should not be flagged, got: {diags:?}"
@@ -270,12 +273,7 @@ mod tests {
     #[test]
     fn interleaved_sends_not_flagged() {
         let diags = lint(
-            "Object subclass: Foo\n\
-             add: arr with: other =>\n\
-             arr add: 1.\n\
-             other add: 99.\n\
-             arr add: 2.\n\
-             arr add: 3\n",
+            "Object subclass: Foo\n  add: arr with: other =>\n    arr add: 1\n    other add: 99\n    arr add: 2\n    arr add: 3\n",
         );
         assert!(
             diags.is_empty(),
@@ -286,11 +284,7 @@ mod tests {
     #[test]
     fn lint_has_category_and_hint() {
         let diags = lint(
-            "Object subclass: Foo\n\
-             add: arr =>\n\
-             arr add: 1.\n\
-             arr add: 2.\n\
-             arr add: 3\n",
+            "Object subclass: Foo\n  add: arr =>\n    arr add: 1\n    arr add: 2\n    arr add: 3\n",
         );
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].category, Some(DiagnosticCategory::Lint));
@@ -298,34 +292,22 @@ mod tests {
     }
 
     #[test]
-    fn self_receiver_flagged() {
-        let diags = lint(
-            "Object subclass: Foo\n\
-             run =>\n\
-             self doA.\n\
-             self doB.\n\
-             self doC\n",
-        );
-        assert_eq!(
-            diags.len(),
-            1,
-            "self sends should be flagged, got: {diags:?}"
-        );
+    fn self_receiver_not_flagged() {
+        // Consecutive sends to `self` (e.g. BUnit assertions) are intentionally
+        // exempt from the cascade lint — they represent independent operations
+        // that should remain as separate statements for debuggability.
+        let diags =
+            lint("Object subclass: Foo\n  run =>\n    self doA\n    self doB\n    self doC\n");
         assert!(
-            diags[0].message.contains("self"),
-            "message: {}",
-            diags[0].message
+            diags.is_empty(),
+            "self sends should NOT be flagged, got: {diags:?}"
         );
     }
 
     #[test]
     fn complex_receiver_not_flagged() {
         let diags = lint(
-            "Object subclass: Foo\n\
-             run: x =>\n\
-             (x builder) add: 1.\n\
-             (x builder) add: 2.\n\
-             (x builder) add: 3\n",
+            "Object subclass: Foo\n  run: x =>\n    (x builder) add: 1\n    (x builder) add: 2\n    (x builder) add: 3\n",
         );
         assert!(
             diags.is_empty(),
@@ -336,9 +318,7 @@ mod tests {
     #[test]
     fn cascade_in_block_body_flagged() {
         let diags = lint(
-            "Object subclass: Foo\n\
-             run: arr =>\n\
-             [:x | arr add: 1. arr add: 2. arr add: 3]\n",
+            "Object subclass: Foo\n  run: arr =>\n    [:x | arr add: 1. arr add: 2. arr add: 3]\n",
         );
         assert_eq!(
             diags.len(),
@@ -351,11 +331,7 @@ mod tests {
     fn mixed_selector_types_flagged() {
         // Unary + keyword sends to the same receiver are still a cascade candidate.
         let diags = lint(
-            "Object subclass: Foo\n\
-             run: arr =>\n\
-             arr add: 1.\n\
-             arr sort.\n\
-             arr add: 2\n",
+            "Object subclass: Foo\n  run: arr =>\n    arr add: 1\n    arr sort\n    arr add: 2\n",
         );
         assert_eq!(
             diags.len(),
@@ -368,11 +344,7 @@ mod tests {
     fn cast_send_breaks_run() {
         // Cast sends (`!`) cannot appear in a cascade, so they break the run.
         let diags = lint(
-            "Object subclass: Foo\n\
-             run: arr =>\n\
-             arr add: 1.\n\
-             arr fire!\n\
-             arr add: 2\n",
+            "Object subclass: Foo\n  run: arr =>\n    arr add: 1\n    arr fire!\n    arr add: 2\n",
         );
         assert!(
             diags.is_empty(),
@@ -385,12 +357,7 @@ mod tests {
         // `@expect` directives are separate expression nodes that break runs.
         // This is correct: an @expect-annotated send has different semantics.
         let diags = lint(
-            "Object subclass: Foo\n\
-             run: arr =>\n\
-             arr add: 1.\n\
-             @expect dnu\n\
-             arr add: 2.\n\
-             arr add: 3\n",
+            "Object subclass: Foo\n  run: arr =>\n    arr add: 1\n    @expect dnu\n    arr add: 2\n    arr add: 3\n",
         );
         assert!(
             diags.is_empty(),
@@ -401,12 +368,7 @@ mod tests {
     #[test]
     fn class_method_body_flagged() {
         let diags = lint(
-            "Object subclass: Foo\n\
-             class\n\
-             setup: arr =>\n\
-             arr add: 1.\n\
-             arr add: 2.\n\
-             arr add: 3\n",
+            "Object subclass: Foo\n  class\n  setup: arr =>\n    arr add: 1\n    arr add: 2\n    arr add: 3\n",
         );
         assert_eq!(
             diags.len(),

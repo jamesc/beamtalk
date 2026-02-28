@@ -7,30 +7,30 @@ TestCase subclass: StringOperationsTest
 
   testAt =>
     // 1-based grapheme access
-    self assert: ("hello" at: 1) equals: "h".
+    self assert: ("hello" at: 1) equals: "h"
     self assert: ("hello" at: 5) equals: "o"
 
   testCapitalize =>
-    self assert: ("hello" capitalize) equals: "Hello".
-    self assert: ("HELLO" capitalize) equals: "HELLO"
+    self assert: "hello" capitalize equals: "Hello"
+    self assert: "HELLO" capitalize equals: "HELLO"
 
   testReverse =>
-    self assert: ("hello" reverse) equals: "olleh"
+    self assert: "hello" reverse equals: "olleh"
 
   testIncludesSubstring =>
-    self assert: ("hello world" includesSubstring: "world").
+    self assert: ("hello world" includesSubstring: "world")
     self deny: ("hello" includesSubstring: "xyz")
 
   testStartsWith =>
-    self assert: ("hello" startsWith: "hel").
+    self assert: ("hello" startsWith: "hel")
     self deny: ("hello" startsWith: "xyz")
 
   testEndsWith =>
-    self assert: ("hello" endsWith: "llo").
+    self assert: ("hello" endsWith: "llo")
     self deny: ("hello" endsWith: "xyz")
 
   testIndexOf =>
-    self assert: ("hello" indexOf: "ell") equals: 2.
+    self assert: ("hello" indexOf: "ell") equals: 2
     self assert: ("hello" indexOf: "xyz") equals: nil
 
   testSplitOn =>
@@ -40,7 +40,7 @@ TestCase subclass: StringOperationsTest
     self assert: ("ab" repeat: 3) equals: "ababab"
 
   testAsList =>
-    self assert: ("hi" asList) equals: #("h", "i")
+    self assert: "hi" asList equals: #("h", "i")
 
   testDo =>
     // do: returns nil
@@ -48,16 +48,16 @@ TestCase subclass: StringOperationsTest
 
   testCollect =>
     // collect: - map over graphemes (returns list)
-    self assert: ("hi" collect: [:ch | ch uppercase]) equals: #("H", "I").
-    self assert: ("abc" collect: [:ch | ch uppercase]) equals: #("A", "B", "C").
+    self assert: ("hi" collect: [:ch | ch uppercase]) equals: #("H", "I")
+    self assert: ("abc" collect: [:ch | ch uppercase]) equals: #("A", "B", "C")
     // on string variables (not just literals)
-    s := "hello".
+    s := "hello"
     self assert: (s collect: [:ch | ch uppercase]) equals: #("H", "E", "L", "L", "O")
 
   testSelect =>
     // select: - filter graphemes (returns string)
-    self assert: ("hello" select: [:ch | ch /= "l"]) equals: "heo".
-    self assert: ("abcd" select: [:ch | ch < "c"]) equals: "ab".
+    self assert: ("hello" select: [:ch | ch /= "l"]) equals: "heo"
+    self assert: ("abcd" select: [:ch | ch < "c"]) equals: "ab"
     // on string variables
-    s := "hello".
+    s := "hello"
     self assert: (s select: [:ch | ch > "h"]) equals: "llo"

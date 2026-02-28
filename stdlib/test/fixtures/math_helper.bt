@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // MathHelper - value type with recursive methods for testing BT-330
-// Value types use direct function calls, so recursive self-dispatch works.
+// Value types use direct function calls, so recursive self-dispatch works
 
 Object subclass: MathHelper
 

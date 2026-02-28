@@ -3,23 +3,23 @@
 
 // BT-413: Tests that value-type (Object subclass) instances can read class
 // variables via self class — same BT-413 invariant as actors but for
-// non-actor classes (e.g. ClassVarPoint).
+// non-actor classes (e.g. ClassVarPoint)
 
 
 TestCase subclass: InstanceClassVarAccessValueTypeTest
 
   testValueTypeInstanceAccessToClassVariable =>
-    self assert: (ClassVarPoint instanceCount) equals: 0.
+    self assert: ClassVarPoint instanceCount equals: 0
     // Create a point via class method (increments instanceCount)
-    p1 := ClassVarPoint create: #{#x => 3, #y => 4}.
+    p1 := ClassVarPoint create: #{#x => 3, #y => 4}
     // Verify it's a value type (has x field)
-    self assert: (p1 x) equals: 3.
+    self assert: p1 x equals: 3
     // Class variable was incremented
-    self assert: (ClassVarPoint instanceCount) equals: 1.
+    self assert: ClassVarPoint instanceCount equals: 1
     // Instance reads class variable via self class (the key BT-413 feature)
-    self assert: (p1 totalPoints) equals: 1.
+    self assert: p1 totalPoints equals: 1
     // Create another point
-    p2 := ClassVarPoint create: #{#x => 1, #y => 2}.
+    p2 := ClassVarPoint create: #{#x => 1, #y => 2}
     // Both instances see updated class variable
-    self assert: (p1 totalPoints) equals: 2.
-    self assert: (p2 totalPoints) equals: 2
+    self assert: p1 totalPoints equals: 2
+    self assert: p2 totalPoints equals: 2

@@ -4,7 +4,7 @@
 // ClassBuilder validation tests (ADR 0038)
 //
 // Tests ClassBuilder error cases: validation failures caught before class
-// registration. Exercises the validate/2 logic in beamtalk_class_builder.erl.
+// registration. Exercises the validate/2 logic in beamtalk_class_builder.erl
 
 TestCase subclass: ClassBuilderTest
   state: cls = nil

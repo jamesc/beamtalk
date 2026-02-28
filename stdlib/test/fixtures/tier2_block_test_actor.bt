@@ -1,65 +1,65 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-851/BT-852/BT-853: Tier 2 block round-trip test fixture (ADR 0041 Phase 1).
+// BT-851/BT-852/BT-853: Tier 2 block round-trip test fixture (ADR 0041 Phase 1)
 // Tests that a block with captured mutations can be passed to a HOM via
-// self-send and the mutation propagates back to the caller through state threading.
+// self-send and the mutation propagates back to the caller through state threading
 
 Actor subclass: Tier2BlockTestActor
 
-  // BT-851: HOM that receives a block and calls it with the Tier 2 protocol.
+  // BT-851: HOM that receives a block and calls it with the Tier 2 protocol
   // The block parameter `aBlock` is compiled with the stateful calling convention
-  // when the compiler detects it receives a Tier 2 (captured-mutation) block.
+  // when the compiler detects it receives a Tier 2 (captured-mutation) block
   applyBlock: aBlock to: anItem =>
     aBlock value: anItem
 
-  // BT-853: HOM where the block call is NOT the last expression.
+  // BT-853: HOM where the block call is NOT the last expression
   // After calling the block (which mutates count via StateAcc), this method
-  // returns a fixed sentinel value. The state update must still propagate back.
+  // returns a fixed sentinel value. The state update must still propagate back
   applyBlockNonLast: aBlock to: anItem =>
-    aBlock value: anItem.
+    aBlock value: anItem
     99
 
-  // BT-853: HOM where the block result is captured in a local variable.
-  // The block returns (count + x) and this HOM adds an extra offset to it.
+  // BT-853: HOM where the block result is captured in a local variable
+  // The block returns (count + x) and this HOM adds an extra offset to it
   applyBlockGetResult: aBlock to: anItem addend: extra =>
-    result := aBlock value: anItem.
+    result := aBlock value: anItem
     result + extra
 
-  // BT-852/BT-853 new_state ordering: HOM with TWO sequential Tier 2 assignment calls.
-  // Verifies state is correctly threaded across multiple Tier 2 assignments.
+  // BT-852/BT-853 new_state ordering: HOM with TWO sequential Tier 2 assignment calls
+  // Verifies state is correctly threaded across multiple Tier 2 assignments
   // If new_state were pre-computed before expression_doc, duplicate StateN bindings
-  // in generated Core Erlang would cause an Erlang compile-time failure.
+  // in generated Core Erlang would cause an Erlang compile-time failure
   applyTwoBlocks: aBlock1 and: aBlock2 to: anItem =>
-    r1 := aBlock1 value: anItem.
-    r2 := aBlock2 value: r1.
+    r1 := aBlock1 value: anItem
+    r2 := aBlock2 value: r1
     r2
 
-  // BT-851: Self-sends applyBlock:to: with a Tier 2 block.
-  // The block `[:x | count := count + x]` captures and mutates `count`.
-  // After the self-send, `count` should reflect the mutation.
+  // BT-851: Self-sends applyBlock:to: with a Tier 2 block
+  // The block `[:x | count := count + x]` captures and mutates `count`
+  // After the self-send, `count` should reflect the mutation
   testRoundTrip =>
-    count := 0.
-    self applyBlock: [:x | count := count + x] to: 5.
+    count := 0
+    self applyBlock: [:x | count := count + x] to: 5
     count
 
-  // BT-853: Non-last Tier 2 value: call — block mutates count, HOM returns sentinel.
-  // The state update (count=3) must propagate back through the self-send.
+  // BT-853: Non-last Tier 2 value: call — block mutates count, HOM returns sentinel
+  // The state update (count=3) must propagate back through the self-send
   testNonLastTier2ValueCall =>
-    count := 0.
-    self applyBlockNonLast: [:x | count := count + x] to: 3.
+    count := 0
+    self applyBlockNonLast: [:x | count := count + x] to: 3
     count
 
-  // BT-853: Tier 2 block result captured in local variable in the HOM.
-  // Block computes (count + x) = (0 + 4) = 4, HOM returns result + 10 = 14.
+  // BT-853: Tier 2 block result captured in local variable in the HOM
+  // Block computes (count + x) = (0 + 4) = 4, HOM returns result + 10 = 14
   testTier2ResultCapture =>
-    count := 0.
+    count := 0
     self applyBlockGetResult: [:x | count := count + x. count] to: 4 addend: 10
 
-  // BT-852/BT-853 new_state ordering: Two sequential Tier 2 assignments in HOM.
-  // block1 adds x to count, block2 multiplies count by x.
-  // applyTwoBlocks:and:to: passes r1 as arg to block2.
+  // BT-852/BT-853 new_state ordering: Two sequential Tier 2 assignments in HOM
+  // block1 adds x to count, block2 multiplies count by x
+  // applyTwoBlocks:and:to: passes r1 as arg to block2
   // count=0 -> block1(2) -> count=2, r1=2 -> block2(2) -> count=4, r2=4
   testTwoBlocks =>
-    count := 0.
+    count := 0
     self applyTwoBlocks: [:x | count := count + x. count] and: [:x | count := count * x. count] to: 2

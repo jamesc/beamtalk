@@ -1,35 +1,35 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-920: Tests fire-and-forget cast sends (! suffix).
+// BT-920: Tests fire-and-forget cast sends (! suffix)
 // Cast sends route through beamtalk_actor:cast_send/3 via gen_server:cast,
 // delivering messages asynchronously. A subsequent sync send acts as a
-// barrier ensuring the cast was processed before asserting.
+// barrier ensuring the cast was processed before asserting
 
 
 TestCase subclass: CastSendTest
 
   testCastSendIncrements =>
     // Cast send fires and forgets; sync getValue acts as ordering barrier
-    c := Counter spawn.
+    c := Counter spawn
     c increment!
     // Sync barrier: forces ordering — cast must be processed before getValue reply
-    self assert: (c getValue) equals: 1
+    self assert: c getValue equals: 1
 
   testMultipleCastSendsAreProcessed =>
-    c := Counter spawn.
+    c := Counter spawn
     c increment!
     c increment!
     c increment!
     // Sync barrier ensures all three casts were processed
-    self assert: (c getValue) equals: 3
+    self assert: c getValue equals: 3
 
   testCastSendDoesNotBlockCaller =>
-    // Cast sends are fire-and-forget: multiple casts return immediately.
-    // The sync getValue at the end acts as an ordering barrier.
-    c := Counter spawn.
+    // Cast sends are fire-and-forget: multiple casts return immediately
+    // The sync getValue at the end acts as an ordering barrier
+    c := Counter spawn
     c increment!
     c decrement!
     c increment!
     // Net effect: +1 -1 +1 = 1
-    self assert: (c getValue) equals: 1
+    self assert: c getValue equals: 1

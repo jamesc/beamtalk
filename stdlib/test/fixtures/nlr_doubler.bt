@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-754: NlrDoubler — non-local return with computed value fixture.
+// BT-754: NlrDoubler — non-local return with computed value fixture
 
 Object subclass: NlrDoubler
   test: x =>

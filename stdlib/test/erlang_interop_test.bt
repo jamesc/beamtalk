@@ -7,17 +7,17 @@ TestCase subclass: ErlangInteropTest
 
   testModuleProxyConstruction =>
     // Unary message on Erlang constructs ErlangModule proxy
-    self assert: ((Erlang lists) class) equals: ErlangModule.
-    self assert: ((Erlang maps) class) equals: ErlangModule.
-    self assert: ((Erlang erlang) class) equals: ErlangModule
+    self assert: (Erlang lists) class equals: ErlangModule
+    self assert: (Erlang maps) class equals: ErlangModule
+    self assert: (Erlang erlang) class equals: ErlangModule
 
   testErlangFunctionCallsKeywordMessages =>
     // Single keyword: lists:reverse/1
-    self assert: (Erlang lists reverse: #(3, 2, 1)) equals: #(1, 2, 3).
+    self assert: (Erlang lists reverse: #(3, 2, 1)) equals: #(1, 2, 3)
     // Multi-keyword: maps:merge/2
-    self assert: (Erlang maps merge: #{#a => 1} with: #{#b => 2}) equals: #{#a => 1, #b => 2}.
+    self assert: (Erlang maps merge: #{#a => 1} with: #{#b => 2}) equals: #{#a => 1, #b => 2}
     // lists:seq/2
-    self assert: (Erlang lists seq: 1 with: 5) equals: #(1, 2, 3, 4, 5).
+    self assert: (Erlang lists seq: 1 with: 5) equals: #(1, 2, 3, 4, 5)
     // lists:nth/2
     self assert: (Erlang lists nth: 2 with: #(10, 20, 30)) equals: 20
 
@@ -27,8 +27,8 @@ TestCase subclass: ErlangInteropTest
 
   testCachedProxy =>
     // Store proxy in variable and reuse
-    proxy := Erlang lists.
-    self assert: (proxy reverse: #(1, 2, 3)) equals: #(3, 2, 1).
+    proxy := Erlang lists
+    self assert: (proxy reverse: #(1, 2, 3)) equals: #(3, 2, 1)
     self assert: (proxy reverse: #(#a, #b, #c)) equals: #(#c, #b, #a)
 
   testClassProtocolOnErlang =>
@@ -37,21 +37,21 @@ TestCase subclass: ErlangInteropTest
     self assert: (Erlang class) isMeta equals: true
 
   testProxyObjectProtocol =>
-    proxy := Erlang lists.
-    self assert: (proxy class) equals: ErlangModule.
-    self assert: (proxy == proxy).
-    self deny: (proxy isNil).
-    self assert: (proxy notNil)
+    proxy := Erlang lists
+    self assert: proxy class equals: ErlangModule
+    self assert: (proxy == proxy)
+    self deny: proxy isNil
+    self assert: proxy notNil
 
   testBt682DirectCallVsProxyEquivalence =>
     // Single-arg keyword: direct vs proxy
-    directResult := Erlang lists reverse: #(1, 2, 3).
-    // produce identical results.
-    proxyLists := Erlang lists.
+    directResult := Erlang lists reverse: #(1, 2, 3)
+    // produce identical results
+    proxyLists := Erlang lists
     // Verify optimized (direct call) and unoptimized (cached proxy) paths
-    proxyResult := proxyLists reverse: #(1, 2, 3).
-    self assert: (directResult =:= proxyResult).
+    proxyResult := proxyLists reverse: #(1, 2, 3)
+    self assert: (directResult =:= proxyResult)
     // Multi-arg keyword: direct vs proxy
-    directSeq := Erlang lists seq: 1 with: 5.
-    proxySeq := proxyLists seq: 1 with: 5.
+    directSeq := Erlang lists seq: 1 with: 5
+    proxySeq := proxyLists seq: 1 with: 5
     self assert: (directSeq =:= proxySeq)

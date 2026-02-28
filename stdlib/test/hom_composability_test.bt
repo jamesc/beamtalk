@@ -1,40 +1,40 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-857: Tests for HOM composability (ADR 0041 Phase 5).
+// BT-857: Tests for HOM composability (ADR 0041 Phase 5)
 //
-// BT-912: Tier 2 block StateAcc threading through stateful do: loop bodies.
+// BT-912: Tier 2 block StateAcc threading through stateful do: loop bodies
 //
 // The BT-912 bug: when `last := aBlock value: each` is in a stateful do:
 // loop body, the Tier 2 block's NewStateAcc was discarded by codegen, so
-// mutations to captured variables (e.g., `count`) were not propagated back.
+// mutations to captured variables (e.g., `count`) were not propagated back
 //
 // Fixed by:
 // 1. generate_local_var_assignment_in_loop: unpack {Result, NewStateAcc} from
-//    Tier 2 block calls and thread NewStateAcc into the maps:put.
+//    Tier 2 block calls and thread NewStateAcc into the maps:put
 // 2. detect_tier2_self_send: treat identifier Tier 2 block parameters as Tier 2
-//    HOM arguments, enabling state threading through nested HOM delegation chains.
+//    HOM arguments, enabling state threading through nested HOM delegation chains
 //
 // Stored blocks passed to HOMs (testStoredBlockPassedToCustomHOM) require
-// type-level tracking of block variables (BT-909) and are not yet tested.
+// type-level tracking of block variables (BT-909) and are not yet tested
 
 TestCase subclass: HomComposabilityTest
 
-  // Test: pure block passed to user-defined HOM — no state overhead, correct result.
-  // sumOf:over: with [:x | x * 2] over #(1,2,3,4,5) = 30.
+  // Test: pure block passed to user-defined HOM — no state overhead, correct result
+  // sumOf:over: with [:x | x * 2] over #(1,2,3,4,5) = 30
   testPureBlockViaHOMCorrectResult =>
-    actor := HomComposabilityActor spawn.
-    self assert: (actor testPureBlockViaHOM) equals: 30
+    actor := HomComposabilityActor spawn
+    self assert: actor testPureBlockViaHOM equals: 30
 
-  // BT-912: Mutating block passed to user-defined HOM accumulates correctly.
-  // [:x | count := count + x] over 1..5 → count = 15.
+  // BT-912: Mutating block passed to user-defined HOM accumulates correctly
+  // [:x | count := count + x] over 1..5 → count = 15
   testMutatingBlockViaMutatingHOM =>
-    actor := HomComposabilityActor spawn.
-    self assert: (actor testMutatingBlockInCustomLoop) equals: 15
+    actor := HomComposabilityActor spawn
+    self assert: actor testMutatingBlockInCustomLoop equals: 15
 
-  // BT-912: Nested HOMs — outer delegates to inner, state threads through both layers.
-  // Same block, same items, same expected result as above.
+  // BT-912: Nested HOMs — outer delegates to inner, state threads through both layers
+  // Same block, same items, same expected result as above
   testNestedHOMsThreadState =>
-    actor := HomComposabilityActor spawn.
-    self assert: (actor testNestedHOMsAccumulate) equals: 15
+    actor := HomComposabilityActor spawn
+    self assert: actor testNestedHOMsAccumulate equals: 15
 

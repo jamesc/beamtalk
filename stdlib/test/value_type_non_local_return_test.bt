@@ -3,23 +3,23 @@
 
 // BT-754: Tests non-local return (^) inside block arguments in Object subclass
 // (non-actor) methods — empty/non-empty arrays, classify, check, double, and
-// on:do: with NLR.
+// on:do: with NLR
 
 
 TestCase subclass: ValueTypeNonLocalReturnTest
 
   testNonLocalReturnInValueTypeMethods =>
-    self assert: (NlrReturnTest new test: #()) equals: "empty".
-    self assert: (NlrReturnTest new test: #(1)) equals: "not empty".
-    self assert: (NlrFoo new classify: 5) equals: "positive".
-    self assert: (NlrFoo new classify: -1) equals: "non-positive".
-    self assert: (NlrFoo new classify: 0) equals: "non-positive".
-    self assert: (NlrBar new check: #()) equals: "empty".
-    self assert: (NlrBar new check: #(1)) equals: "not empty".
-    self assert: (NlrBaz new double: 5) equals: 10.
-    self assert: (NlrSkipper new test: #()) equals: "early".
-    self assert: (NlrSkipper new test: #(1, 2, 3)) equals: "middle".
-    self assert: (NlrDoubler new test: 5) equals: 10.
-    self assert: (NlrDoubler new test: -1) equals: 0.
-    self assert: (NlrOnDo new test: #()) equals: "early".
+    self assert: (NlrReturnTest new test: #()) equals: "empty"
+    self assert: (NlrReturnTest new test: #(1)) equals: "not empty"
+    self assert: (NlrFoo new classify: 5) equals: "positive"
+    self assert: (NlrFoo new classify: -1) equals: "non-positive"
+    self assert: (NlrFoo new classify: 0) equals: "non-positive"
+    self assert: (NlrBar new check: #()) equals: "empty"
+    self assert: (NlrBar new check: #(1)) equals: "not empty"
+    self assert: (NlrBaz new double: 5) equals: 10
+    self assert: (NlrSkipper new test: #()) equals: "early"
+    self assert: (NlrSkipper new test: #(1, 2, 3)) equals: "middle"
+    self assert: (NlrDoubler new test: 5) equals: 10
+    self assert: (NlrDoubler new test: -1) equals: 0
+    self assert: (NlrOnDo new test: #()) equals: "early"
     self assert: (NlrOnDo new test: #(1)) equals: "not early"

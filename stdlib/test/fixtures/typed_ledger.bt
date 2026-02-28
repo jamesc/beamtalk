@@ -5,5 +5,5 @@ typed Actor subclass: TypedLedger
   state: amount: Integer = 0
 
   addOne -> Integer =>
-    self.amount := self.amount + 1.
+    self.amount := self.amount + 1
     self.amount

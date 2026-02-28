@@ -1,18 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// NumberList — a user-defined Collection subclass for testing BT-815.
+// NumberList — a user-defined Collection subclass for testing BT-815
 // Implements only do:, size, and printString; all higher-order collection
-// methods (collect:, select:, inject:into:, etc.) are inherited from Collection.
+// methods (collect:, select:, inject:into:, etc.) are inherited from Collection
 
 Collection subclass: NumberList
   state: items = #()
 
-  // Return number of elements.
+  // Return number of elements
   size -> Integer => self.items size
 
-  // Iterate over each element, evaluating block with each one.
+  // Iterate over each element, evaluating block with each one
   do: block: Block -> Nil => self.items do: block
 
-  // Return a developer-readable string representation.
+  // Return a developer-readable string representation
   printString -> String => "NumberList"

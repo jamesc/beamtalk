@@ -2,48 +2,48 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Tests the System class — getEnv:, getEnv:default:, osPlatform, osFamily,
-// architecture, hostname, erlangVersion, pid, and type-error validation.
+// architecture, hostname, erlangVersion, pid, and type-error validation
 
 TestCase subclass: SystemTest
 
   testSystemEnvironmentAndPlatform =>
-    self assert: ((System getEnv: "PATH") class =:= String).
+    self assert: ((System getEnv: "PATH") class =:= String)
     // Reading a non-existent env var returns nil
-    self assert: (System getEnv: "BEAMTALK_TEST_NONEXISTENT_VAR_XYZ") equals: nil.
+    self assert: (System getEnv: "BEAMTALK_TEST_NONEXISTENT_VAR_XYZ") equals: nil
     // Non-existent var returns the default
-    self assert: (System getEnv: "BEAMTALK_TEST_NONEXISTENT_VAR_XYZ" default: "fallback") equals: "fallback".
+    self assert: (System getEnv: "BEAMTALK_TEST_NONEXISTENT_VAR_XYZ" default: "fallback") equals: "fallback"
     // Existing var returns the actual value (not the default)
-    self deny: ((System getEnv: "PATH" default: "nope") =:= "nope").
+    self deny: ((System getEnv: "PATH" default: "nope") =:= "nope")
     // osPlatform returns a string
-    self assert: (System osPlatform class =:= String).
+    self assert: (System osPlatform class =:= String)
     // Platform is one of the known values
-    self assert: (#("linux", "darwin", "win32") includes: System osPlatform).
+    self assert: (#("linux", "darwin", "win32") includes: System osPlatform)
     // osFamily returns a string
-    self assert: (System osFamily class =:= String).
+    self assert: (System osFamily class =:= String)
     // Family is one of the known values
-    self assert: (#("unix", "win32") includes: System osFamily).
+    self assert: (#("unix", "win32") includes: System osFamily)
     // architecture returns a non-empty string
-    self assert: (System architecture class =:= String).
+    self assert: (System architecture class =:= String)
     // --- architecture ---
-    self assert: (System architecture length > 0).
+    self assert: (System architecture length > 0)
     // hostname returns a non-empty string
-    self assert: (System hostname class =:= String).
+    self assert: (System hostname class =:= String)
     // --- hostname ---
-    self assert: (System hostname length > 0).
+    self assert: (System hostname length > 0)
     // erlangVersion returns a non-empty string
-    self assert: (System erlangVersion class =:= String).
+    self assert: (System erlangVersion class =:= String)
     // --- erlangVersion ---
-    self assert: (System erlangVersion length > 0).
+    self assert: (System erlangVersion length > 0)
     // pid returns a positive integer
-    self assert: (System pid class =:= Integer).
+    self assert: (System pid class =:= Integer)
     // --- pid ---
-    self assert: (System pid > 0).
+    self assert: (System pid > 0)
     // getEnv: requires String argument
     @expect type
-    self should: [System getEnv: 42] raise: #type_error.
+    self should: [System getEnv: 42] raise: #type_error
     // getEnv:default: validates both arguments
     @expect type
-    self should: [System getEnv: 42 default: "fallback"] raise: #type_error.
+    self should: [System getEnv: 42 default: "fallback"] raise: #type_error
     // --- error cases ---
     @expect type
     self should: [System getEnv: "PATH" default: 42] raise: #type_error

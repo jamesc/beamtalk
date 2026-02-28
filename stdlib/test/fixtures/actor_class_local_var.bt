@@ -1,26 +1,26 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-741: Test fixture for class methods on Actor subclasses with local variables.
-// Class methods must NOT inject the actor State parameter.
+// BT-741: Test fixture for class methods on Actor subclasses with local variables
+// Class methods must NOT inject the actor State parameter
 
 Actor subclass: ActorClassLocalVar
   state: value = 0
 
-  // BT-741: Class method with local variable creation and method calls on it.
+  // BT-741: Class method with local variable creation and method calls on it
   // Previously triggered: {unbound_var, 'State', {class_buildDict, 2}}
   class buildDict =>
     d := #{}
     d2 := d at: #key put: 42
     d2
 
-  // BT-741: Class method with arithmetic on local variables.
+  // BT-741: Class method with arithmetic on local variables
   class computeSum =>
     x := 10
     y := 20
     x + y
 
-  // BT-741: Class method with block literal as local variable.
+  // BT-741: Class method with block literal as local variable
   class applyBlock =>
     transform := [:x | x * 2]
     transform value: 21

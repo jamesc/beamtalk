@@ -14,7 +14,7 @@
 //! - Empty method bodies (BT-631)
 
 use crate::ast::{Block, Expression, Identifier, Module};
-use crate::ast_walker::{for_each_expr_seq, walk_expression, walk_module};
+use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::block_context::{classify_block, is_collection_hof_selector};
 use crate::semantic_analysis::{BlockContext, ClassHierarchy};
 #[cfg(test)]
@@ -1077,14 +1077,27 @@ fn check_seq_for_effect_free(exprs: &[Expression], diagnostics: &mut Vec<Diagnos
 /// BT-951: Warn (as a lint) when a statement is an effect-free expression
 /// whose value is silently discarded.
 ///
-/// Checks method bodies, block bodies, and module-level expression sequences.
+/// Checks method bodies and standalone method bodies only. Module-level
+/// expressions (`module.expressions`) are intentionally skipped because
+/// bootstrap-test files use top-level expressions as test assertions
+/// (paired with `// =>` comments) and these are evaluated intentionally.
+///
 /// Effect-free expressions include literals, variable references, and pure
 /// binary arithmetic / comparison expressions composed from pure sub-expressions.
 ///
 /// Uses `Severity::Lint` so the warning is suppressed during normal compilation
 /// and only surfaces when running `beamtalk lint`.
 pub(crate) fn check_effect_free_statements(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    for_each_expr_seq(module, |seq| check_seq_for_effect_free(seq, diagnostics));
+    // Skip module.expressions — those are intentional top-level test assertions.
+    // Only check method bodies and standalone method definitions.
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            check_seq_for_effect_free(&method.body, diagnostics);
+        }
+    }
+    for standalone in &module.method_definitions {
+        check_seq_for_effect_free(&standalone.method.body, diagnostics);
+    }
 }
 
 /// BT-919: Error when `!` (cast) is used on a statically-known value type.
@@ -1479,21 +1492,20 @@ mod tests {
         );
     }
 
-    /// Module-level expressions: non-last literal triggers lint.
+    /// Module-level expressions: NOT linted, because bootstrap-test files use
+    /// top-level expressions as intentional test assertions (paired with `// =>`).
     #[test]
-    fn module_level_effect_free_emits_lint() {
+    fn module_level_effect_free_not_linted() {
         let src = "42.\nself doSomething";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
         let mut diagnostics = Vec::new();
         check_effect_free_statements(&module, &mut diagnostics);
-        assert_eq!(
-            diagnostics.len(),
-            1,
-            "Expected 1 lint for discarded literal at module level, got: {diagnostics:?}"
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no lint for module-level expressions (they are intentional test assertions), got: {diagnostics:?}"
         );
-        assert_eq!(diagnostics[0].severity, Severity::Lint);
     }
 
     /// Standalone method definition: non-last literal triggers lint.

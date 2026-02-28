@@ -6,14 +6,14 @@
 TestCase subclass: ProtoobjectManualTest
 
   testIdentityComparison =>
-    self assert: (42 == 42).
-    self assert: (42 /= 43).
-    self assert: (nil == nil).
-    self deny: (nil == false).
-    self assert: (nil /= false).
+    self assert: (42 == 42)
+    self assert: (42 /= 43)
+    self assert: (nil == nil)
+    self deny: (nil == false)
+    self assert: (nil /= false)
     self deny: (nil /= nil)
 
   testPerformWithargumentsDynamicDispatch =>
-    self assert: (42 perform: #+ withArguments: #(3)) equals: 45.
-    self assert: (42 perform: #asString withArguments: #()) equals: "42".
+    self assert: (42 perform: #+ withArguments: #(3)) equals: 45
+    self assert: (42 perform: #asString withArguments: #()) equals: "42"
     self assert: ("hello" perform: #++ withArguments: #(" world")) equals: "hello world"

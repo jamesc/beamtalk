@@ -48,8 +48,8 @@ true /= false
 
 // Strict vs loose equality
 // Note: 1.0 compiles to integer 1 in Core Erlang (Rust format! truncates .0)
-// so 1.0 =:= 1 is true due to compilation artifact.
-// Use values like 1.5 to demonstrate real strict equality behavior.
+// so 1.0 =:= 1 is true due to compilation artifact
+// Use values like 1.5 to demonstrate real strict equality behavior
 1.5 =:= 1
 // => false
 
