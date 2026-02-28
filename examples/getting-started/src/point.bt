@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Point — a 2D point value object (BT-926 example).
+//
+// Demonstrates the `Value subclass:` pattern (ADR 0042):
+//   - Three construction forms: new, new:, keyword constructor
+//   - Auto-generated getters and with*: functional setters
+//   - Immutability: originals are never modified
+//   - Value equality: two Points with the same coordinates are ==
+//   - User-defined methods on a value type
+//   - Usage in collections (collect:, select:, inject:into:)
+//
+// Try it in the REPL:
+//   $ beamtalk repl
+//   > :load src/point.bt
+//   > p := Point x: 3 y: 4
+//   > p distanceSquared          => 25
+//   > (p withX: 0) distanceSquared     => 16
+//   > (Point x: 3 y: 4) == (Point x: 3 y: 4)   => true
+
+Value subclass: Point
+  state: x = 0
+  state: y = 0
+
+  // Euclidean distance squared from the origin (avoids a Float sqrt dependency)
+  distanceSquared => (self.x * self.x) + (self.y * self.y)
+
+  // Translate by a delta in each axis, returning a new Point
+  translateX: dx y: dy => Point x: self.x + dx y: self.y + dy
+
+  // Return a Point whose coordinates are negated
+  negated => Point x: self.x negated y: self.y negated
+
+  // Human-readable representation
+  printString => "Point({self.x}, {self.y})"
