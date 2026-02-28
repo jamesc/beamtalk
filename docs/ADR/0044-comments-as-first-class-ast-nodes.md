@@ -330,9 +330,17 @@ refactoring and formatting is the expected behaviour in Smalltalk environments. 
 live-edit-then-persist model matches the Pharo workflow of editing methods in a browser
 and filing out to disk.
 
-**Erlang/BEAM developer**: No impact on compiled output — comments never appear in
-Core Erlang or BEAM bytecode. The codegen pipeline simply skips `CommentAttachment`
-fields. The change is internal to the frontend.
+**Erlang/BEAM developer**: No impact on compiled output from this ADR — `CommentAttachment`
+fields (`//` and `/* */`) are skipped by codegen entirely and never appear in Core Erlang
+or BEAM bytecode. `StateDeclaration.doc_comment` and type annotations are also skipped
+for now (deferred to the `FieldDescriptor` ADR).
+
+The `FieldDescriptor` ADR will introduce compilation targets for field doc comments,
+field type annotations, and method type annotations — compiled to message sends that
+populate runtime objects at class load time, following the same pattern as `CompiledMethod.doc`
+(ADR 0033). Those will appear as BEAM module behaviour (class initialisation calls), not
+as bytecode metadata. Regular `//` and `/* */` comments never reach the runtime under
+any scenario.
 
 **Tooling developer** (LSP, formatter, refactoring tools): Major improvement. Every
 tool gets complete AST data in one parse. No secondary pass to recover comments. No
