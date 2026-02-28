@@ -273,24 +273,46 @@ pub(super) fn read_proc_start_time(pid: u32) -> Option<u64> {
     starttime_str.parse::<u64>().ok()
 }
 
-/// Clean up stale node.info file.
-pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
-    let ws_dir = workspace_dir(workspace_id)?;
-    let node_info_path = ws_dir.join("node.info");
-    if node_info_path.exists() {
-        fs::remove_file(node_info_path).into_diagnostic()?;
-    }
-    // Also clean up port file (written by beamtalk_repl_server for ephemeral port discovery)
-    let port_file_path = ws_dir.join("port");
-    if port_file_path.exists() {
-        let _ = fs::remove_file(port_file_path);
-    }
-    // Also clean up PID file (written by BEAM eval command for PID discovery)
-    let pid_file_path = ws_dir.join("pid");
-    if pid_file_path.exists() {
-        let _ = fs::remove_file(pid_file_path);
+/// Remove a single file, ignoring `NotFound` but propagating other errors.
+///
+/// Used by stale-file cleanup to avoid TOCTOU races (`exists()` + `remove_file()`
+/// is racy if another process creates/removes the file between the two calls).
+fn remove_file_if_exists(path: &std::path::Path) -> Result<()> {
+    if let Err(err) = fs::remove_file(path) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            return Err(miette!(
+                "Failed to remove stale file {}: {err}",
+                path.display()
+            ));
+        }
     }
     Ok(())
+}
+
+/// Remove stale runtime files (`node.info`, `port`, `pid`) from a workspace directory.
+///
+/// These files are written during workspace startup and must be cleaned before
+/// restarting a node — a stale `port` file can cause `start_detached_node` to
+/// connect to the wrong BEAM node, and a stale `pid` file can report the wrong
+/// process.
+///
+/// Called by:
+/// - `cleanup_stale_node_info` — after detecting an orphaned workspace
+/// - `start_detached_node` (via `process.rs`) — before spawning a new BEAM node
+pub fn remove_stale_runtime_files(workspace_id: &str) -> Result<()> {
+    let ws_dir = workspace_dir(workspace_id)?;
+    remove_file_if_exists(&ws_dir.join("node.info"))?;
+    remove_file_if_exists(&ws_dir.join("port"))?;
+    remove_file_if_exists(&ws_dir.join("pid"))?;
+    Ok(())
+}
+
+/// Clean up stale node info and runtime files for a workspace.
+///
+/// Removes `node.info`, `port`, and `pid` files. Use when an orphaned workspace
+/// is detected (stale `node.info` but node not running) or after graceful shutdown.
+pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
+    remove_stale_runtime_files(workspace_id)
 }
 
 /// Acquire an exclusive advisory lock for workspace creation.

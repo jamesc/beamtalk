@@ -1177,6 +1177,109 @@ mod tests {
         assert!(is_node_running(&info3), "restarted node should be running");
     }
 
+    /// Regression test for BT-967: stale port file from a previous aborted startup
+    /// causes `start_detached_node` to connect to the wrong BEAM node, producing
+    /// auth failures in `wait_for_tcp_ready` for 30 seconds before timing out.
+    ///
+    /// Scenario:
+    /// 1. A previous node started and wrote its port to the port file.
+    /// 2. The node was force-killed and the workspace directory was partially cleaned
+    ///    (node.info deleted, but port file survived — e.g. because the BEAM process
+    ///    was still holding workspace.log open when `remove_dir_all` ran on Windows, or
+    ///    because a restart was attempted before cleanup completed).
+    /// 3. A new node is started for the same workspace.
+    ///
+    /// Without the fix: port discovery reads the stale port on the first iteration,
+    /// then `wait_for_tcp_ready` connects to a dead port → ECONNREFUSED × 150 → timeout.
+    /// With the fix: `start_detached_node` deletes the stale port file before spawning,
+    /// so port discovery waits for the new node to write its own port file.
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
+    fn test_start_detached_node_ignores_stale_port_file_integration() {
+        let tw = TestWorkspace::new("integ_stale_port");
+        let project_path = std::env::current_dir().unwrap();
+        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+
+        let (runtime, workspace_dir_beam, jsx, compiler, stdlib, extra_paths) =
+            beam_dirs_for_tests();
+
+        // Step 1: Start a node to get a real port, then kill it without cleanup.
+        let first_info = start_detached_node(
+            &tw.id,
+            0,
+            &runtime,
+            &workspace_dir_beam,
+            &jsx,
+            &compiler,
+            &stdlib,
+            &extra_paths,
+            false,
+            Some(60),
+            None,
+            None,
+            None,
+        )
+        .expect("first start should succeed");
+        let stale_port = first_info.port;
+        kill_node_raw(&first_info);
+        // Wait for epmd to deregister the old node name before restarting.
+        // After force-kill, epmd may still hold the registration briefly,
+        // which prevents a new node with the same name from starting.
+        wait_for_epmd_deregistration(&first_info.node_name, 5)
+            .expect("epmd should deregister node name within timeout");
+
+        // Step 2: Remove node.info but deliberately LEAVE the stale port file.
+        // This simulates the scenario where TestWorkspace::Drop's remove_dir_all
+        // failed to remove the workspace directory (the BEAM node held workspace.log
+        // open), so the directory survived with stale runtime files intact.
+        let ws_dir = workspace_dir(&tw.id).unwrap();
+        std::fs::remove_file(ws_dir.join("node.info")).expect("node.info should exist after kill");
+        // Verify stale port file still exists with the old port
+        let port_file_contents = std::fs::read_to_string(ws_dir.join("port"))
+            .expect("stale port file should still exist");
+        assert!(
+            port_file_contents
+                .trim_start()
+                .starts_with(&stale_port.to_string()),
+            "port file should contain stale port {stale_port}: {port_file_contents:?}"
+        );
+
+        // Step 3: Start a new node. `get_or_start_workspace` finds no node.info,
+        // so it calls `start_detached_node` directly (not via cleanup_stale_node_info).
+        // The stale port file must be deleted before discovery, otherwise the loop
+        // reads stale_port immediately and wait_for_tcp_ready times out.
+        let (new_info, started, _) = get_or_start_workspace(
+            &project_path,
+            Some(&tw.id),
+            0,
+            &runtime,
+            &workspace_dir_beam,
+            &jsx,
+            &compiler,
+            &stdlib,
+            &extra_paths,
+            false,
+            Some(60),
+            None,
+            None,
+            None,
+        )
+        .expect("restart with stale port file should succeed without timing out");
+        let _guard = NodeGuard { pid: new_info.pid };
+
+        assert!(started, "should have started a new node");
+        assert_ne!(
+            new_info.pid, first_info.pid,
+            "new node should have a different PID"
+        );
+        assert!(
+            is_node_running(&new_info),
+            "new node should be running and reachable"
+        );
+    }
+
     #[test]
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
