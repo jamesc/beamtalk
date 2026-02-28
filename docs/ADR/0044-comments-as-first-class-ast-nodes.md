@@ -637,6 +637,21 @@ Until that ADR lands, field doc comments and type annotations are collected at p
 time and available throughout the AST pipeline (formatter, LSP, type checker) but not
 compiled to runtime objects.
 
+## Implementation Tracking
+
+**Epic:** BT-972
+**Issues:** BT-973, BT-974, BT-975, BT-976, BT-977, BT-978
+**Status:** Planned
+
+| Issue | Title | Phase |
+|-------|-------|-------|
+| BT-973 | Add CommentAttachment/ExpressionStatement types and comment fields to AST | 1 |
+| BT-974 | Migrate statement-position Vec<Expression> to Vec<ExpressionStatement> | 1 |
+| BT-975 | Parser: attach comments to ClassDefinition, MethodDefinition, StateDeclaration | 2 |
+| BT-976 | Parser: attach comments to ExpressionStatement; handle file_leading_comments | 2 |
+| BT-977 | Implement AST unparser and update extract_method_source | 3 |
+| BT-978 | Implement beamtalk fmt CLI command | 3 |
+
 ## References
 
 - Related issues: BT-962 (lint cleanup epic), BT-963–966 (lint violation fixes)
