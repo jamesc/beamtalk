@@ -304,7 +304,7 @@ impl TypeChecker {
                                 _ => "receiver",
                             };
                             let field_name = field.name.as_str();
-                            let mut diag = Diagnostic::error(
+                            let mut diag = Diagnostic::warning(
                                 format!(
                                     "Cannot assign to `{recv_name}.{field_name}` — objects cannot mutate another object's state"
                                 ),
@@ -3663,6 +3663,38 @@ mod tests {
         assert!(
             dnu_warnings.is_empty(),
             "Integer canUnderstand: should produce no warning, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_non_self_field_assignment_produces_warning_not_error() {
+        // `other.x := 1` should produce a Severity::Warning, not Severity::Error,
+        // consistent with the module's "Warnings only, never errors" design principle.
+        use crate::source_analysis::Severity;
+        let source =
+            "Value subclass: Point\n  state: x\n  state: y\n  bad: other =>\n    other.x := 1";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+            .0
+            .unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let field_diags: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Cannot assign"))
+            .collect();
+        assert_eq!(
+            field_diags.len(),
+            1,
+            "Expected exactly one non-self field assignment diagnostic, got: {field_diags:?}"
+        );
+        assert_eq!(
+            field_diags[0].severity,
+            Severity::Warning,
+            "Non-self field assignment should be a warning, not an error"
         );
     }
 }
