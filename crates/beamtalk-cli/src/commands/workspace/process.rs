@@ -68,8 +68,12 @@ const READINESS_PROBE_DELAY_MS: u64 = 200;
 ///
 /// When the port is not yet bound, `connect()` returns ECONNREFUSED immediately,
 /// so the real budget is RETRIES × `DELAY_MS` (not RETRIES × `connect_timeout`).
-/// 150 × 200ms = 30s budget for the BEAM node to start listening.
-const READINESS_PROBE_MAX_RETRIES: usize = 150;
+/// 300 × 200ms = 60s budget for the BEAM node to start listening.
+///
+/// 60s is needed because CI runners can be heavily loaded immediately after the
+/// workspace integration tests run (which start/stop 12 BEAM nodes), slowing
+/// workspace startup enough to exceed the previous 30s budget.
+const READINESS_PROBE_MAX_RETRIES: usize = 300;
 
 /// TCP read timeout for readiness probe in milliseconds.
 const READINESS_READ_TIMEOUT_MS: u64 = 500;
@@ -305,6 +309,10 @@ pub fn start_detached_node(
     // Write cookie to args file (BT-726: not visible in `ps aux`)
     let cookie_args_file = write_cookie_args_file(workspace_id, &cookie)?;
 
+    // Redirect BEAM node stderr to a log file for crash diagnostics.
+    // On startup failure the log will contain OTP crash reports or error_logger output.
+    let startup_log_path = workspace_dir(workspace_id)?.join("startup.log");
+
     // Start detached BEAM node
     let mut cmd = build_detached_node_command(
         &node_name,
@@ -319,6 +327,27 @@ pub fn start_detached_node(
         &project_path,
         ssl_dist_optfile,
     );
+
+    // Override the default /dev/null stderr with a workspace log file.
+    // Errors opening the log file are non-fatal — we fall back to /dev/null.
+    let startup_log_enabled = match std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&startup_log_path)
+    {
+        Ok(log_file) => {
+            cmd.stderr(Stdio::from(log_file));
+            true
+        }
+        Err(e) => {
+            eprintln!(
+                "Warning: could not open startup log {}: {e}",
+                startup_log_path.display()
+            );
+            false
+        }
+    };
 
     let child = cmd.spawn().map_err(|e| {
         miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
@@ -409,7 +438,13 @@ pub fn start_detached_node(
     };
 
     // Wait for WebSocket health endpoint to be fully ready before returning.
-    wait_for_tcp_ready(node_info.connect_host(), actual_port, pid, &cookie)?;
+    wait_for_tcp_ready(
+        node_info.connect_host(),
+        actual_port,
+        pid,
+        &cookie,
+        startup_log_enabled.then_some(startup_log_path.as_path()),
+    )?;
 
     // Save node info
     save_node_info(workspace_id, &node_info)?;
@@ -441,7 +476,15 @@ fn path_to_erlang_arg(path: &Path) -> String {
 /// Poll until the WebSocket health endpoint responds on the given port.
 ///
 /// Uses short per-attempt timeouts to keep the worst-case total bounded.
-fn wait_for_tcp_ready(host: &str, port: u16, pid: u32, cookie: &str) -> Result<()> {
+/// `log_path` is `Some(path)` only when the startup log file was successfully
+/// opened; it is included in timeout error messages to guide diagnosis.
+fn wait_for_tcp_ready(
+    host: &str,
+    port: u16,
+    pid: u32,
+    cookie: &str,
+    log_path: Option<&std::path::Path>,
+) -> Result<()> {
     for _ in 0..READINESS_PROBE_MAX_RETRIES {
         if let Ok(mut client) = ProtocolClient::connect(
             host,
@@ -456,10 +499,38 @@ fn wait_for_tcp_ready(host: &str, port: u16, pid: u32, cookie: &str) -> Result<(
         }
         std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
     }
-    Err(miette!(
-        "BEAM node started (PID {pid}) but WebSocket health endpoint on port {port} \
-         did not become ready. The workspace may have failed to initialize."
-    ))
+
+    // Check whether the BEAM node is still alive to give a more actionable error.
+    // If the process is gone it crashed during startup; if it's still running
+    // it is either stuck initializing or the WebSocket stack failed to come up.
+    let node_alive = {
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let mut system = System::new();
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+            true,
+            ProcessRefreshKind::nothing(),
+        );
+        system.process(Pid::from_u32(pid)).is_some()
+    };
+
+    // Only mention the log file if we actually opened it (log_path is Some).
+    let log_suffix = log_path
+        .map(|p| format!(" Check {} for startup logs.", p.display()))
+        .unwrap_or_default();
+
+    if node_alive {
+        Err(miette!(
+            "BEAM node started (PID {pid}) but WebSocket health endpoint on port {port} \
+             did not become ready within the timeout. The workspace may be initializing \
+             slowly — try again.{log_suffix}"
+        ))
+    } else {
+        Err(miette!(
+            "BEAM node (PID {pid}) crashed during startup before WebSocket endpoint \
+             on port {port} became ready. Ensure Erlang/OTP is installed correctly.{log_suffix}"
+        ))
+    }
 }
 
 /// Write an Erlang args file containing the cookie for secure distribution.
