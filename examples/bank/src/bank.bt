@@ -1,18 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Bank actor — a registry and factory for Account actors
-//
-// The Bank maintains a Dictionary mapping account names to Account actor
-// references. Opening an account spawns a new Account process and registers
-// it. Looking up an account returns the live actor reference
-//
-// Usage:
-//   bank := Bank spawn
-//   bank openAccount: "Alice"
-//   alice := bank accountFor: "Alice"
-//   alice deposit: 1000
-
+/// Bank actor — a registry and factory for Account actors
+///
+/// The Bank maintains a Dictionary mapping account names to Account actor
+/// references. Opening an account spawns a new Account process and registers
+/// it. Looking up an account returns the live actor reference
+///
+/// Usage:
+///   bank := Bank spawn
+///   bank openAccount: "Alice"
+///   alice := bank accountFor: "Alice"
+///   alice deposit: 1000
 Actor subclass: Bank
   state: accounts = #{}
   state: lastCreated = nil

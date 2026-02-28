@@ -1,19 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Composite Pattern — FsDir (composite)
-// A directory that holds any number of FsEntry objects (files or subdirectories).
-// Because value objects are immutable, add: returns a new FsDir.
-// Implements the same interface as FsFile (name, size, describe:) via duck typing.
-//
-// Usage:
-//   f1  := FsFile name: "main.bt" size: 120.
-//   f2  := FsFile name: "lib.bt"  size: 340.
-//   src := ((FsDir name: "src") add: f1) add: f2.
-//   src size          // => 460
-//   src describe: ""
-//   // => "src/ (460 bytes)\n  main.bt (120 bytes)\n  lib.bt (340 bytes)"
-
+/// Composite Pattern — FsDir (composite)
+/// A directory that holds any number of FsEntry objects (files or subdirectories).
+/// Because value objects are immutable, add: returns a new FsDir.
+/// Implements the same interface as FsFile (name, size, describe:) via duck typing.
+///
+/// Usage:
+///   f1  := FsFile name: "main.bt" size: 120.
+///   f2  := FsFile name: "lib.bt"  size: 340.
+///   src := ((FsDir name: "src") add: f1) add: f2.
+///   src size          // => 460
+///   src describe: ""
+///   // => "src/ (460 bytes)\n  main.bt (120 bytes)\n  lib.bt (340 bytes)"
 FsEntry subclass: FsDir
   state: name     = ""
   state: children = #()

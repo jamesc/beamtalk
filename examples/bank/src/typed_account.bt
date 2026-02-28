@@ -1,13 +1,12 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// TypedAccount — typed variant of the Account actor
-//
-// Demonstrates ADR 0025 syntax:
-// - typed class modifier
-// - typed state fields
-// - typed parameters and return annotations
-
+/// TypedAccount — typed variant of the Account actor
+///
+/// Demonstrates ADR 0025 syntax:
+/// - typed class modifier
+/// - typed state fields
+/// - typed parameters and return annotations
 typed Actor subclass: TypedAccount
   state: balance: Integer = 0
   state: owner: String = ""

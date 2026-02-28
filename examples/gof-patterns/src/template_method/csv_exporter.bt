@@ -1,14 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Template Method Pattern — CsvExporter
-// Formats rows as comma-separated values.
-//
-// Usage:
-//   rows := #(#("Alice", "30"), #("Bob", "25")).
-//   CsvExporter new export: rows
-//   // => "Alice,30\nBob,25\n"
-
+/// Template Method Pattern — CsvExporter
+/// Formats rows as comma-separated values.
+///
+/// Usage:
+///   rows := #(#("Alice", "30"), #("Bob", "25")).
+///   CsvExporter new export: rows
+///   // => "Alice,30\nBob,25\n"
 DataExporter subclass: CsvExporter
   /// No header line for CSV output.
   header => ""

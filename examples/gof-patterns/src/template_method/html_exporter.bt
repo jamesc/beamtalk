@@ -1,14 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Template Method Pattern — HtmlExporter
-// Formats rows as an HTML table.
-//
-// Usage:
-//   rows := #(#("Alice", "30"), #("Bob", "25")).
-//   HtmlExporter new export: rows
-//   // => "<table>\n<tr><td>Alice</td><td>30</td></tr>\n...\n</table>\n"
-
+/// Template Method Pattern — HtmlExporter
+/// Formats rows as an HTML table.
+///
+/// Usage:
+///   rows := #(#("Alice", "30"), #("Bob", "25")).
+///   HtmlExporter new export: rows
+///   // => "<table>\n<tr><td>Alice</td><td>30</td></tr>\n...\n</table>\n"
 DataExporter subclass: HtmlExporter
   /// Return the opening <table> tag.
   header => "<table>\n"

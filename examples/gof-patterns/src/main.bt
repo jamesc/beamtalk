@@ -1,10 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Main entry point for gang_of_four.
-// Auto-runs via [run].entry in beamtalk.toml when you start `beamtalk repl`.
-// Or load manually: :load src/main.bt
-
+/// Main entry point for gang_of_four.
+/// Auto-runs via [run].entry in beamtalk.toml when you start `beamtalk repl`.
+/// Or load manually: :load src/main.bt
 Object subclass: Main
 
   class run =>

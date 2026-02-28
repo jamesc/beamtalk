@@ -1,9 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Command Pattern — InsertCommand (concrete command)
-// Inserts a string at a given position (1-based).
-
+/// Command Pattern — InsertCommand (concrete command)
+/// Inserts a string at a given position (1-based).
 TextCommand subclass: InsertCommand
   state: position = 1
   state: text     = ""

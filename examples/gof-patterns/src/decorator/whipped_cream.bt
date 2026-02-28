@@ -1,8 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Decorator Pattern — WhippedCream (concrete decorator)
-
+/// Decorator Pattern — WhippedCream (concrete decorator)
 CondimentDecorator subclass: WhippedCream
   /// Append ", Whipped Cream" to the wrapped beverage's description.
   description => "{self.beverage description}, Whipped Cream"

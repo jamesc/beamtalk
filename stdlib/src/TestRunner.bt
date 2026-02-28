@@ -14,7 +14,6 @@
 /// TestRunner run: CounterTest                 // => TestResult for one class
 /// TestRunner run: CounterTest method: #testIncrement  // => one method
 /// ```
-
 Object subclass: TestRunner
 
   /// Run all test methods across all discovered TestCase subclasses.

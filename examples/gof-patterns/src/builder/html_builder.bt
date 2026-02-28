@@ -1,18 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Builder Pattern — HtmlBuilder
-// Fluently assembles HtmlElement objects step-by-step. Because all values are
-// immutable, each step returns a new builder — callers chain calls and finish
-// with build to obtain the completed HtmlElement.
-//
-// Usage:
-//   el := ((HtmlBuilder buildTag: "a")
-//             withAttr: "href" value: "https://example.com")
-//             withText: "Click here";
-//             build.
-//   el render   // => "<a href="https://example.com">Click here</a>"
-
+/// Builder Pattern — HtmlBuilder
+/// Fluently assembles HtmlElement objects step-by-step. Because all values are
+/// immutable, each step returns a new builder — callers chain calls and finish
+/// with build to obtain the completed HtmlElement.
+///
+/// Usage:
+///   el := ((HtmlBuilder buildTag: "a")
+///             withAttr: "href" value: "https://example.com")
+///             withText: "Click here";
+///             build.
+///   el render   // => "<a href="https://example.com">Click here</a>"
 Object subclass: HtmlBuilder
   state: element = nil
 

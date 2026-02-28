@@ -1,28 +1,27 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Chat Member Actor — Part of Chat Room Demo (BT-431, BT-568)
-//
-// ChatMember represents a chat participant with a name, inbox, and room ref
-// It demonstrates:
-// - Actor-to-actor references (room field)
-// - Receiving formatted messages from other actors
-// - State mutations (name, inbox, room)
-//
-// Try it in the REPL:
-//   $ beamtalk repl
-//   > :load examples/chat-room/message.bt
-//   > :load examples/chat-room/chat_room.bt
-//   > :load examples/chat-room/chat_member.bt
-//   > room := ChatRoom spawn
-//   > alice := ChatMember spawn
-//   > alice setName: "Alice"
-//   > alice setRoom: room
-//   > room join: alice
-//   > room say: "Hello!" from: "Alice"
-//
-// See examples/chat-room/README.md for a full walkthrough
-
+/// Chat Member Actor — Part of Chat Room Demo (BT-431, BT-568)
+///
+/// ChatMember represents a chat participant with a name, inbox, and room ref
+/// It demonstrates:
+/// - Actor-to-actor references (room field)
+/// - Receiving formatted messages from other actors
+/// - State mutations (name, inbox, room)
+///
+/// Try it in the REPL:
+///   $ beamtalk repl
+///   > :load examples/chat-room/message.bt
+///   > :load examples/chat-room/chat_room.bt
+///   > :load examples/chat-room/chat_member.bt
+///   > room := ChatRoom spawn
+///   > alice := ChatMember spawn
+///   > alice setName: "Alice"
+///   > alice setRoom: room
+///   > room join: alice
+///   > room say: "Hello!" from: "Alice"
+///
+/// See examples/chat-room/README.md for a full walkthrough
 Actor subclass: ChatMember
   state: name = "Guest"        // Member's display name
   state: inbox = #()           // List of received messages

@@ -1,14 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Command Pattern — TextBuffer (receiver)
-// Intent: Encapsulate a request as an object, letting you parameterise clients
-// with different requests, queue or log requests, and support undoable operations.
-//
-// TextBuffer holds text content. Commands operate on it by calling insertAt:text:
-// and deleteFrom:length:. Because value objects are immutable, both methods return
-// a new TextBuffer — CommandHistory stores the successive snapshots.
-
+/// Command Pattern — TextBuffer (receiver)
+/// Intent: Encapsulate a request as an object, letting you parameterise clients
+/// with different requests, queue or log requests, and support undoable operations.
+///
+/// TextBuffer holds text content. Commands operate on it by calling insertAt:text:
+/// and deleteFrom:length:. Because value objects are immutable, both methods return
+/// a new TextBuffer — CommandHistory stores the successive snapshots.
 Object subclass: TextBuffer
   state: text = ""
 

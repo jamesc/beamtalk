@@ -1,19 +1,18 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Account actor — an independent process managing a single bank balance
-//
-// Each Account is a BEAM process. Deposits and withdrawals are message sends,
-// making them inherently serialised per-account. Overdraft protection raises
-// a structured error via `self error:`
-//
-// Usage:
-//   acct := Account spawn
-//   acct deposit: 500
-//   acct balance          // => 500
-//   acct withdraw: 200    // => 300
-//   acct withdraw: 9999   // => ERROR: Insufficient funds
-
+/// Account actor — an independent process managing a single bank balance
+///
+/// Each Account is a BEAM process. Deposits and withdrawals are message sends,
+/// making them inherently serialised per-account. Overdraft protection raises
+/// a structured error via `self error:`
+///
+/// Usage:
+///   acct := Account spawn
+///   acct deposit: 500
+///   acct balance          // => 500
+///   acct withdraw: 200    // => 300
+///   acct withdraw: 9999   // => ERROR: Insufficient funds
 Actor subclass: Account
   state: balance = 0
   state: owner = ""

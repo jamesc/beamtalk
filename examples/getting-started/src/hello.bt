@@ -1,15 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Simple hello world example
-//
-// Try it in the REPL:
-//   $ beamtalk repl
-//   > :load examples/hello.bt
-//   Loaded Hello
-//   > Hello new
-//   {__class__: Hello}
-
+/// Simple hello world example
+///
+/// Try it in the REPL:
+///   $ beamtalk repl
+///   > :load examples/hello.bt
+///   Loaded Hello
+///   > Hello new
+///   {__class__: Hello}
 Object subclass: Hello
 
   greeting => "Hello, World!"

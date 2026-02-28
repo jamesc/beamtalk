@@ -1,14 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Template Method Pattern — DataExporter (abstract base)
-// Intent: Define the skeleton of an algorithm in a base-class method, deferring
-// specific steps to subclasses. The overall structure stays fixed; only the
-// customisable steps change.
-//
-// export: is the template method. It calls header, formatRow:, and footer in
-// order. Subclasses (CsvExporter, HtmlExporter) implement those three hooks.
-
+/// Template Method Pattern — DataExporter (abstract base)
+/// Intent: Define the skeleton of an algorithm in a base-class method, deferring
+/// specific steps to subclasses. The overall structure stays fixed; only the
+/// customisable steps change.
+///
+/// export: is the template method. It calls header, formatRow:, and footer in
+/// order. Subclasses (CsvExporter, HtmlExporter) implement those three hooks.
 Object subclass: DataExporter
 
   /// Template method — fixed algorithm skeleton.

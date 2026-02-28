@@ -1,8 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Factory Method Pattern — CircleFactory (concrete creator)
-
+/// Factory Method Pattern — CircleFactory (concrete creator)
 ShapeFactory subclass: CircleFactory
   state: radius = 1.0
 

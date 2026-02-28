@@ -1,23 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Counter actor class example
-// A simple stateful actor that can increment, decrement, and return its value
-//
-// Try it in the REPL:
-//   $ beamtalk repl
-//   > :load examples/counter.bt
-//   > c := Counter spawn
-//   > c increment
-//   > c increment
-//   > c getValue
-//   2
-//   > c decrement
-//   > c getValue
-//   1
-//
-// See examples/repl-tutorial.md for a full beginner's guide
-
+/// Counter actor class example
+/// A simple stateful actor that can increment, decrement, and return its value
+///
+/// Try it in the REPL:
+///   $ beamtalk repl
+///   > :load examples/counter.bt
+///   > c := Counter spawn
+///   > c increment
+///   > c increment
+///   > c getValue
+///   2
+///   > c decrement
+///   > c getValue
+///   1
+///
+/// See examples/repl-tutorial.md for a full beginner's guide
 Actor subclass: Counter
   state: value = 0
 

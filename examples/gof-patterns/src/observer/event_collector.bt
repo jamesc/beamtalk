@@ -1,10 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Observer Pattern — EventCollector (concrete observer)
-// Accumulates every event it receives. Useful as a test double and as a simple
-// audit log. Real observers would react to events (update UI, write to DB, etc.).
-
+/// Observer Pattern — EventCollector (concrete observer)
+/// Accumulates every event it receives. Useful as a test double and as a simple
+/// audit log. Real observers would react to events (update UI, write to DB, etc.).
 Actor subclass: EventCollector
   state: events = #()
 

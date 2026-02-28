@@ -15,7 +15,6 @@
 /// result summary      // => "5 tests, 5 passed (0.1s)"
 /// result failures     // => [] or [#{ name => ..., error => ... }, ...]
 /// ```
-
 Object subclass: TestResult
 
   /// Number of test methods that passed.
