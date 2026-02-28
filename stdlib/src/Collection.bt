@@ -119,6 +119,9 @@ abstract typed Value subclass: Collection
   /// ```
   collect: block: Block -> Collection =>
     result := (self inject: #() into: [:acc :each | acc addFirst: (block value: each)]) reversed
+    // species returns the receiver's class at runtime — withAll: is a class-side
+    // method not visible to the static type checker on the Object return type.
+    @expect dnu
     self species withAll: result
 
   /// Select elements for which `block` returns true.
@@ -134,6 +137,8 @@ abstract typed Value subclass: Collection
     result := (self inject: #() into: [:acc :each |
       (block value: each) ifTrue: [acc addFirst: each] ifFalse: [acc]
     ]) reversed
+    // species pattern: see collect: above
+    @expect dnu
     self species withAll: result
 
   /// Reject elements for which `block` returns true.

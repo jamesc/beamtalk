@@ -57,6 +57,9 @@ pub struct ProtocolClient {
     cookie: String,
     /// Read timeout to reapply on reconnect.
     read_timeout: Option<Duration>,
+    /// Whether the transcript output cursor is at the beginning of a line.
+    /// Used to insert the `│ ` gutter prefix only at line starts.
+    transcript_bol: bool,
 }
 
 impl ProtocolClient {
@@ -107,6 +110,7 @@ impl ProtocolClient {
             port,
             cookie: cookie.to_string(),
             read_timeout,
+            transcript_bol: true,
         };
 
         // Read auth-required message (pre-auth, no session yet)
@@ -191,9 +195,12 @@ impl ProtocolClient {
                 return Err(e);
             }
         };
-        // Swap in websocket and session id
+        // Swap in websocket and session id.
+        // Reset transcript_bol: the display context is fresh regardless of
+        // whether the session was resumed, so the next chunk always gets a prefix.
         self.ws = new_client.ws;
         self.session_id.clone_from(&new_client.session_id);
+        self.transcript_bol = true;
         let resumed = requested_session.is_some()
             && requested_session.as_deref() == new_client.session_id.as_deref();
         tracing::debug!(
@@ -217,7 +224,39 @@ impl ProtocolClient {
             .into_diagnostic()
     }
 
-    /// Read a single JSON response from the WebSocket, skipping push messages.
+    /// Handle a server-initiated push message (ADR 0017).
+    ///
+    /// Transcript push messages are printed inline to stdout with a `│ `
+    /// gutter prefix at the start of each line so they are visually distinct
+    /// from eval results. Other push types (actor lifecycle, etc.) are
+    /// silently ignored.
+    ///
+    /// Returns `true` if the message was a push and should be skipped for
+    /// response parsing.
+    fn handle_push(&mut self, parsed: &serde_json::Value) -> bool {
+        let is_push = parsed.get("push").is_some()
+            || parsed.get("type").and_then(|v| v.as_str()) == Some("push");
+        if !is_push {
+            return false;
+        }
+        if parsed.get("push").and_then(|v| v.as_str()) == Some("transcript") {
+            if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
+                use std::io::Write;
+                let formatted = format_transcript_chunk(text, &mut self.transcript_bol);
+                let mut out = std::io::stdout().lock();
+                if let Err(err) = out
+                    .write_all(formatted.as_bytes())
+                    .and_then(|()| out.flush())
+                {
+                    eprintln!("warning: failed to write transcript output: {err}");
+                }
+            }
+        }
+        true
+    }
+
+    /// Read a single JSON response from the WebSocket, printing any transcript
+    /// push messages inline and skipping other push messages.
     fn read_response(&mut self) -> Result<serde_json::Value> {
         loop {
             let msg = self
@@ -228,10 +267,7 @@ impl ProtocolClient {
                 Message::Text(text) => {
                     let parsed: serde_json::Value = serde_json::from_str(&text)
                         .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {text}"))?;
-                    // Skip push messages (e.g. Transcript, actor lifecycle from ADR 0017)
-                    if parsed.get("push").is_some()
-                        || parsed.get("type").and_then(|v| v.as_str()) == Some("push")
-                    {
+                    if self.handle_push(&parsed) {
                         continue;
                     }
                     return Ok(parsed);
@@ -246,18 +282,15 @@ impl ProtocolClient {
     }
 
     /// Read a single response line from the connection (WebSocket text frame).
-    /// Skips push messages (server-initiated, e.g. Transcript).
+    /// Prints transcript push messages inline; skips other push messages.
     /// Returns `Ok(line)` on success, or an error.
     /// When a read timeout is set and expires, returns `Err` with `WouldBlock` kind.
     pub fn read_response_line(&mut self) -> std::io::Result<String> {
         loop {
             match self.ws.read() {
                 Ok(Message::Text(text)) => {
-                    // Skip push messages (e.g. Transcript, actor lifecycle from ADR 0017)
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if parsed.get("push").is_some()
-                            || parsed.get("type").and_then(|v| v.as_str()) == Some("push")
-                        {
+                        if self.handle_push(&parsed) {
                             continue;
                         }
                     }
@@ -315,11 +348,8 @@ impl ProtocolClient {
             loop {
                 match self.ws.read() {
                     Ok(Message::Text(text)) => {
-                        // Skip push messages (e.g. Transcript, actor lifecycle from ADR 0017)
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                            if parsed.get("push").is_some()
-                                || parsed.get("type").and_then(|v| v.as_str()) == Some("push")
-                            {
+                            if self.handle_push(&parsed) {
                                 continue;
                             }
                         }
@@ -349,5 +379,110 @@ impl ProtocolClient {
             }
         }
         unreachable!("send_request loop always returns")
+    }
+}
+
+/// Apply `│ ` gutter prefix to transcript text at each line start.
+///
+/// `bol` tracks whether the cursor is at the beginning of a line across
+/// successive calls (since `show:` and `cr` arrive as separate push chunks).
+/// Returns the formatted string ready to write to stdout.
+pub fn format_transcript_chunk(text: &str, bol: &mut bool) -> String {
+    let mut out = String::with_capacity(text.len() + 3);
+    for ch in text.chars() {
+        if *bol && ch != '\n' {
+            out.push_str("│ ");
+        }
+        out.push(ch);
+        *bol = ch == '\n';
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_transcript_chunk;
+
+    #[test]
+    fn prefix_at_start_of_line() {
+        let mut bol = true;
+        assert_eq!(format_transcript_chunk("hello", &mut bol), "│ hello");
+        assert!(!bol);
+    }
+
+    #[test]
+    fn no_prefix_mid_line() {
+        let mut bol = false;
+        assert_eq!(format_transcript_chunk(" world", &mut bol), " world");
+        assert!(!bol);
+    }
+
+    #[test]
+    fn newline_resets_bol() {
+        let mut bol = false;
+        assert_eq!(format_transcript_chunk("\n", &mut bol), "\n");
+        assert!(bol);
+    }
+
+    #[test]
+    fn show_then_cr_as_separate_chunks() {
+        // Simulates `Transcript show: "hello"` followed by `Transcript cr`
+        let mut bol = true;
+        let s1 = format_transcript_chunk("hello", &mut bol);
+        assert_eq!(s1, "│ hello");
+        assert!(!bol);
+        let s2 = format_transcript_chunk("\n", &mut bol);
+        assert_eq!(s2, "\n");
+        assert!(bol);
+    }
+
+    #[test]
+    fn multiline_in_single_chunk() {
+        let mut bol = true;
+        assert_eq!(
+            format_transcript_chunk("hello\nworld", &mut bol),
+            "│ hello\n│ world"
+        );
+        assert!(!bol);
+    }
+
+    #[test]
+    fn trailing_newline_leaves_bol_true() {
+        let mut bol = true;
+        assert_eq!(format_transcript_chunk("hello\n", &mut bol), "│ hello\n");
+        assert!(bol);
+    }
+
+    #[test]
+    fn reconnect_mid_line_state_resets_on_reconnect() {
+        // After a reconnect the display context is fresh — even if the old
+        // connection dropped mid-line (bol=false), the next chunk must prefix.
+        // We simulate this by calling format_transcript_chunk with bol=false
+        // (mid-line state), then manually resetting bol as reconnect() does,
+        // and verifying the next chunk gets the │ prefix.
+        let mut bol = true;
+        let _ = format_transcript_chunk("partial", &mut bol);
+        assert!(!bol, "mid-line after partial chunk");
+        // reconnect() resets to true
+        bol = true;
+        assert_eq!(
+            format_transcript_chunk("next line", &mut bol),
+            "│ next line"
+        );
+    }
+
+    #[test]
+    fn empty_chunk_is_noop() {
+        let mut bol = true;
+        assert_eq!(format_transcript_chunk("", &mut bol), "");
+        assert!(bol); // unchanged
+    }
+
+    #[test]
+    fn newline_only_chunk_does_not_prefix() {
+        // A bare `cr` push: starts mid-line, just a newline — no prefix
+        let mut bol = false;
+        assert_eq!(format_transcript_chunk("\n", &mut bol), "\n");
+        assert!(bol);
     }
 }

@@ -18,7 +18,9 @@
 //! **References:**
 //! - `docs/ADR/0025-gradual-typing-and-protocols.md` — Phase 1
 
-use crate::ast::{Expression, Literal, MessageSelector, Module, TypeAnnotation};
+use crate::ast::{
+    Expression, ExpressionStatement, Literal, MessageSelector, Module, TypeAnnotation,
+};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -119,9 +121,7 @@ impl TypeChecker {
         let mut env = TypeEnv::new();
 
         // Check top-level expressions
-        for stmt in &module.expressions {
-            self.infer_expr(&stmt.expression, hierarchy, &mut env, false);
-        }
+        self.infer_stmts(&module.expressions, hierarchy, &mut env, false);
 
         // Check method bodies inside class definitions
         for class in &module.classes {
@@ -134,14 +134,8 @@ impl TypeChecker {
                 let mut method_env = TypeEnv::new();
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
-                let mut body_type = InferredType::Dynamic;
-                for stmt in &method.body {
-                    let expr = &stmt.expression;
-                    body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
-                    if matches!(expr, Expression::Return { .. }) {
-                        break; // Explicit return ends the body; later expressions are unreachable
-                    }
-                }
+                let body_type =
+                    self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
                 self.check_override_param_compatibility(method, &class.name.name, hierarchy);
                 if is_typed {
@@ -153,14 +147,8 @@ impl TypeChecker {
                 method_env.in_class_method = true;
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
-                let mut body_type = InferredType::Dynamic;
-                for stmt in &method.body {
-                    let expr = &stmt.expression;
-                    body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
-                    if matches!(expr, Expression::Return { .. }) {
-                        break;
-                    }
-                }
+                let body_type =
+                    self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
@@ -179,14 +167,12 @@ impl TypeChecker {
             method_env.in_class_method = standalone.is_class_method;
             method_env.set("self", InferredType::Known(class_name.clone()));
             Self::set_param_types(&mut method_env, &standalone.method.parameters);
-            let mut body_type = InferredType::Dynamic;
-            for stmt in &standalone.method.body {
-                let expr = &stmt.expression;
-                body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
-                if matches!(expr, Expression::Return { .. }) {
-                    break;
-                }
-            }
+            let body_type = self.infer_stmts(
+                &standalone.method.body,
+                hierarchy,
+                &mut method_env,
+                is_abstract,
+            );
             self.check_return_type(&standalone.method, &body_type, class_name, hierarchy);
         }
     }
@@ -391,14 +377,7 @@ impl TypeChecker {
                 for param in &block.parameters {
                     block_env.set(param.name.as_str(), InferredType::Dynamic);
                 }
-                for body_stmt in &block.body {
-                    self.infer_expr(
-                        &body_stmt.expression,
-                        hierarchy,
-                        &mut block_env,
-                        in_abstract_method,
-                    );
-                }
+                self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
                 InferredType::Known("Block".into())
             }
 
@@ -669,24 +648,30 @@ impl TypeChecker {
         // Check each parameter for missing type annotation
         for param in &method.parameters {
             if param.type_annotation.is_none() {
-                self.diagnostics.push(Diagnostic::warning(
-                    format!(
-                        "Missing type annotation for parameter `{}` in typed class `{class_name}` (method `{selector}`)",
-                        param.name.name
-                    ),
-                    param.name.span,
-                ));
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        format!(
+                            "Missing type annotation for parameter `{}` in typed class `{class_name}` (method `{selector}`)",
+                            param.name.name
+                        ),
+                        param.name.span,
+                    )
+                    .with_category(DiagnosticCategory::Type),
+                );
             }
         }
 
         // Check for missing return type
         if method.return_type.is_none() {
-            self.diagnostics.push(Diagnostic::warning(
-                format!(
-                    "Missing return type annotation in typed class `{class_name}` (method `{selector}`)"
-                ),
-                method.span,
-            ));
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "Missing return type annotation in typed class `{class_name}` (method `{selector}`)"
+                    ),
+                    method.span,
+                )
+                .with_category(DiagnosticCategory::Type),
+            );
         }
     }
 
@@ -843,7 +828,8 @@ impl TypeChecker {
                         "Parameter {param_pos} of '{selector}' in {class_name} has type {child_t}, incompatible with parent's {parent_t}"
                     ),
                     method.span,
-                );
+                )
+                .with_category(DiagnosticCategory::Type);
                 diag.hint = Some(
                     format!("Parent class {superclass} declares parameter type {parent_t}").into(),
                 );
@@ -937,7 +923,8 @@ impl TypeChecker {
                     field.name
                 ),
                 span,
-            );
+            )
+            .with_category(DiagnosticCategory::Type);
             diag.hint = Some(format!("Expected {declared_type} but assigning {value_type}").into());
             self.diagnostics.push(diag);
         }
@@ -970,7 +957,8 @@ impl TypeChecker {
                         decl.name.name
                     ),
                     decl.span,
-                );
+                )
+                .with_category(DiagnosticCategory::Type);
                 diag.hint = Some(
                     format!(
                         "Default value type {value_type} is not compatible with {declared_type}"
@@ -1011,6 +999,43 @@ impl TypeChecker {
             .superclass_chain(value_type)
             .iter()
             .any(|ancestor| ancestor == declared_type)
+    }
+
+    /// Infer types for a sequence of expression statements.
+    ///
+    /// Skips `@expect` directive nodes so they don't reset the inferred body type
+    /// to `Dynamic` and interfere with return-type checking.  Suppression of matching
+    /// diagnostics is handled separately by `apply_expect_directives` in
+    /// `diagnostic_provider` after all diagnostics have been collected.
+    ///
+    /// Returns the inferred type of the last non-directive expression, or `Dynamic`
+    /// for an empty list.
+    fn infer_stmts(
+        &mut self,
+        stmts: &[ExpressionStatement],
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
+        let mut body_type = InferredType::Dynamic;
+
+        for stmt in stmts {
+            let expr = &stmt.expression;
+
+            // @expect directives are compile-time only; skip them so they don't
+            // clobber body_type and affect return-type inference.
+            if matches!(expr, Expression::ExpectDirective { .. }) {
+                continue;
+            }
+
+            body_type = self.infer_expr(expr, hierarchy, env, in_abstract_method);
+
+            if matches!(expr, Expression::Return { .. }) {
+                break;
+            }
+        }
+
+        body_type
     }
 
     /// Emit a warning diagnostic for an unknown selector.
@@ -2729,6 +2754,85 @@ mod tests {
         assert!(
             return_warnings.is_empty(),
             "method without return type should not warn about return type"
+        );
+    }
+
+    // Helper: lex + parse a source string into a Module.
+    fn parse_source(source: &str) -> Module {
+        use crate::source_analysis::{lex_with_eof, parse};
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        module
+    }
+
+    // Helper: run the full diagnostic pipeline (type check + @expect suppression).
+    // Suppression is owned by `apply_expect_directives` in diagnostic_provider —
+    // the type checker itself does NOT suppress.
+    fn run_with_expect(module: &Module, hierarchy: &ClassHierarchy) -> Vec<Diagnostic> {
+        let mut checker = TypeChecker::new();
+        checker.check_module(module, hierarchy);
+        let mut diags = checker.take_diagnostics();
+        crate::queries::diagnostic_provider::apply_expect_directives(module, &mut diags);
+        diags
+    }
+
+    #[test]
+    fn test_expect_dnu_suppresses_dnu_warning() {
+        // @expect dnu before a DNU-producing send suppresses the hint.
+        // Real-world use: `self species withAll: result` in Collection.bt.
+        // Spans must be real for apply_expect_directives to match by span.
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // Without @expect: should warn
+        let module_bare = parse_source("42 unknownSelector");
+        let diags_without = run_with_expect(&module_bare, &hierarchy);
+        assert!(
+            !diags_without.is_empty(),
+            "42 unknownSelector should produce a DNU hint without @expect"
+        );
+
+        // With @expect dnu: should be suppressed
+        let module_with = parse_source("@expect dnu\n42 unknownSelector");
+        let diags_with = run_with_expect(&module_with, &hierarchy);
+        assert!(
+            diags_with.is_empty(),
+            "@expect dnu should suppress DNU hint, got: {diags_with:?}"
+        );
+    }
+
+    #[test]
+    fn test_expect_type_suppresses_type_warning() {
+        // @expect type before a type-mismatch expression suppresses the warning.
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // Without @expect: should warn
+        let module_bare = parse_source("1 + \"hello\"");
+        let diags_without = run_with_expect(&module_bare, &hierarchy);
+        assert!(
+            !diags_without.is_empty(),
+            "1 + \"hello\" should produce a type warning without @expect"
+        );
+
+        // With @expect type: should be suppressed
+        let module_with = parse_source("@expect type\n1 + \"hello\"");
+        let diags_with = run_with_expect(&module_with, &hierarchy);
+        assert!(
+            diags_with.is_empty(),
+            "@expect type should suppress type warning, got: {diags_with:?}"
+        );
+    }
+
+    #[test]
+    fn test_expect_does_not_suppress_next_next_expression() {
+        // @expect dnu only suppresses the immediately following expression.
+        // Here @expect applies to `42` (no DNU) → stale error is emitted,
+        // and `42 unknownSelector` still produces its own DNU hint.
+        let module = parse_source("@expect dnu\n42\n42 unknownSelector");
+        let hierarchy = ClassHierarchy::with_builtins();
+        let diags = run_with_expect(&module, &hierarchy);
+        assert!(
+            !diags.is_empty(),
+            "@expect dnu on `42` must not suppress DNU on the following expression"
         );
     }
 
