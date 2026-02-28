@@ -1224,6 +1224,11 @@ mod tests {
         .expect("first start should succeed");
         let stale_port = first_info.port;
         kill_node_raw(&first_info);
+        // Wait for epmd to deregister the old node name before restarting.
+        // After force-kill, epmd may still hold the registration briefly,
+        // which prevents a new node with the same name from starting.
+        wait_for_epmd_deregistration(&first_info.node_name, 5)
+            .expect("epmd should deregister node name within timeout");
 
         // Step 2: Remove node.info but deliberately LEAVE the stale port file.
         // This simulates the scenario where TestWorkspace::Drop's remove_dir_all
