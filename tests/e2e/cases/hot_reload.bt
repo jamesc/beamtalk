@@ -67,7 +67,7 @@ Actor subclass: LiveActor
   bump => self.count := self.count + 1
 // => _
 
-LiveActor >> getCount => ^self.count
+LiveActor >> getCount => self.count
 // => _
 
 la := LiveActor spawn

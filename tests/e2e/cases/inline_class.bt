@@ -29,7 +29,7 @@ Actor subclass: InlineCounter
 // Add more methods using Tonel-style standalone method defs
 // ---------------------------------------------------------------------------
 
-InlineCounter >> getValue => ^self.value
+InlineCounter >> getValue => self.value
 // => _
 
 // ---------------------------------------------------------------------------
