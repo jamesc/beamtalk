@@ -294,6 +294,36 @@ impl TypeChecker {
                         if let Expression::Identifier(recv_id) = receiver.as_ref() {
                             if recv_id.name == "self" {
                                 self.check_field_assignment(field, &ty, *span, hierarchy, env);
+                            } else {
+                                // `other.field := value` — objects cannot mutate
+                                // another object's state.  Value types are immutable;
+                                // actors can only mutate their own state via `self.x :=`.
+                                // Suggest the functional `withField:` pattern.
+                                let with_sel = {
+                                    let mut chars = field.name.chars();
+                                    match chars.next() {
+                                        None => "with:".to_string(),
+                                        Some(first) => {
+                                            let cap: String = first.to_uppercase().collect();
+                                            format!("with{}{}:", cap, chars.as_str())
+                                        }
+                                    }
+                                };
+                                let recv_name = recv_id.name.as_str();
+                                let field_name = field.name.as_str();
+                                let mut diag = Diagnostic::error(
+                                    format!(
+                                        "Cannot assign to `{recv_name}.{field_name}` — objects cannot mutate another object's state"
+                                    ),
+                                    *span,
+                                );
+                                diag.hint = Some(
+                                    format!(
+                                        "Use `{recv_name} := {recv_name} {with_sel} newValue` to get an updated copy"
+                                    )
+                                    .into(),
+                                );
+                                self.diagnostics.push(diag);
                             }
                         }
                     }

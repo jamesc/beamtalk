@@ -23,14 +23,14 @@ use crate::docvec;
 ///
 /// Only populated when `class_kind == ClassKind::Value`.
 /// Skips any slot whose getter/setter selector the user has already defined.
-struct AutoSlotMethods {
+pub(super) struct AutoSlotMethods {
     /// Field names for which a getter `fieldName/1` is auto-generated.
-    getters: Vec<String>,
+    pub(super) getters: Vec<String>,
     /// Field names for which a `withFieldName:/2` setter is auto-generated.
-    setters: Vec<String>,
+    pub(super) setters: Vec<String>,
     /// Keyword constructor selector (e.g., `"x:y:"` for a Point with slots x, y),
     /// `None` if the class has no slots or the user already defined it.
-    keyword_constructor: Option<String>,
+    pub(super) keyword_constructor: Option<String>,
 }
 
 impl AutoSlotMethods {
@@ -39,7 +39,7 @@ impl AutoSlotMethods {
     /// Capitalises the first letter of the field name and prepends `"with"`:
     /// - `"x"` → `"withX:"`
     /// - `"firstName"` → `"withFirstName:"`
-    fn with_star_selector(field_name: &str) -> String {
+    pub(super) fn with_star_selector(field_name: &str) -> String {
         let mut chars = field_name.chars();
         match chars.next() {
             None => "with:".to_string(),
@@ -67,7 +67,7 @@ impl AutoSlotMethods {
 ///
 /// Returns `None` for `ClassKind::Object` and `ClassKind::Actor` — only
 /// `ClassKind::Value` classes get auto-generated slot accessors.
-fn compute_auto_slot_methods(class: &ClassDefinition) -> Option<AutoSlotMethods> {
+pub(super) fn compute_auto_slot_methods(class: &ClassDefinition) -> Option<AutoSlotMethods> {
     if class.class_kind != ClassKind::Value {
         return None;
     }
