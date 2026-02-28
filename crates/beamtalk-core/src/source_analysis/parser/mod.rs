@@ -755,9 +755,15 @@ impl Parser {
                 let method_def = self.parse_standalone_method_definition();
                 method_definitions.push(method_def);
             } else {
+                let pos_before = self.current;
                 let mut comments = self.collect_comment_attachment();
                 let expr = self.parse_expression();
-                comments.trailing = self.collect_trailing_comment();
+                // Only collect trailing comment if parse_expression consumed tokens;
+                // otherwise collect_trailing_comment() reads the previous token's
+                // trivia, which belongs to the prior statement.
+                if self.current > pos_before {
+                    comments.trailing = self.collect_trailing_comment();
+                }
                 let is_error = expr.is_error();
                 expressions.push(ExpressionStatement {
                     comments,
@@ -4867,5 +4873,34 @@ Actor subclass: Counter
             "content: {}",
             block.body[0].comments.leading[0].content
         );
+    }
+
+    #[test]
+    fn standalone_method_leading_comment_attached() {
+        // A `//` comment before a standalone method definition (`ClassName >> ...`)
+        // must appear as a leading comment on the MethodDefinition.
+        // Regression test: previously parse_standalone_method_definition() dropped
+        // comments from the class-name token's leading trivia.
+        let source = "// Note about Counter\nCounter >> increment => self.n := self.n + 1\n";
+        let (module, diagnostics) = parse(lex_with_eof(source));
+        assert!(
+            diagnostics.is_empty(),
+            "expected no diagnostics: {diagnostics:?}"
+        );
+        assert_eq!(module.method_definitions.len(), 1);
+        let method = &module.method_definitions[0].method;
+        assert_eq!(
+            method.comments.leading.len(),
+            1,
+            "expected one leading comment on standalone method"
+        );
+        assert!(
+            method.comments.leading[0]
+                .content
+                .contains("Note about Counter"),
+            "content: {}",
+            method.comments.leading[0].content
+        );
+        assert!(module.file_leading_comments.is_empty());
     }
 }
