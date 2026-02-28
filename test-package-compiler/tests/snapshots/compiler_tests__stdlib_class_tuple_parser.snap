@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -53,7 +54,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Size and access",
+                                span: Span {
+                                    start: 294,
+                                    end: 298,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -140,7 +150,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Pattern matching for Erlang result types",
+                                span: Span {
+                                    start: 401,
+                                    end: 405,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -208,7 +227,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Unwrapping",
+                                span: Span {
+                                    start: 480,
+                                    end: 486,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -348,7 +376,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Conversion",
+                                span: Span {
+                                    start: 627,
+                                    end: 635,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -361,7 +398,48 @@ Module {
             class_methods: [],
             class_variables: [],
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 240,
+                            end: 246,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 240,
+                            end: 246,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test Tuple class compilation as a value type (not gen_server).",
+                        span: Span {
+                            start: 240,
+                            end: 246,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Tuple is a sealed Object subclass backed by Erlang tuples.",
+                        span: Span {
+                            start: 240,
+                            end: 246,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// new/0 should return {} (empty tuple).",
+                        span: Span {
+                            start: 240,
+                            end: 246,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             doc_comment: None,

@@ -50,7 +50,9 @@
 //! assert_eq!(module.expressions.len(), 1);
 //! ```
 
-use crate::ast::{Comment, CommentKind, Expression, ExpressionStatement, Module};
+use crate::ast::{
+    Comment, CommentAttachment, CommentKind, Expression, ExpressionStatement, Module,
+};
 #[cfg(test)]
 use crate::ast::{Literal, MessageSelector};
 use crate::source_analysis::{Span, Token, TokenKind, Trivia, lex_with_eof};
@@ -579,6 +581,41 @@ impl Parser {
             None
         } else {
             Some(lines.join("\n"))
+        }
+    }
+
+    /// Extracts regular (non-doc) comments from the current token's leading trivia.
+    ///
+    /// Collects `//` line comments and `/* */` block comments into
+    /// [`CommentAttachment::leading`].  `///` doc comments are intentionally
+    /// **skipped** — they are handled by [`collect_doc_comment`] and must not
+    /// be duplicated here.  Call this *after* [`collect_doc_comment`] so both
+    /// functions operate on the same trivia snapshot before any token is
+    /// consumed.
+    ///
+    /// # Ordering dependency
+    ///
+    /// `collect_doc_comment()` must run first, then `collect_comment_attachment()`
+    /// on the same leading trivia.  Both methods are `&self` / immutable reads,
+    /// so no token is consumed between the two calls.
+    pub(super) fn collect_comment_attachment(&self) -> CommentAttachment {
+        let token_span = self.current_token().span();
+        let mut leading = Vec::new();
+        for trivia in self.current_token().leading_trivia() {
+            match trivia {
+                super::Trivia::LineComment(text) => {
+                    leading.push(Comment::line(text.clone(), token_span));
+                }
+                super::Trivia::BlockComment(text) => {
+                    leading.push(Comment::block(text.clone(), token_span));
+                }
+                // DocComment is handled by collect_doc_comment — skip here.
+                super::Trivia::DocComment(_) | super::Trivia::Whitespace(_) => {}
+            }
+        }
+        CommentAttachment {
+            leading,
+            trailing: None,
         }
     }
 
@@ -4566,6 +4603,109 @@ Actor subclass: Counter
         assert!(
             lints.is_empty(),
             "expected no lints at module level, got: {lints:?}"
+        );
+    }
+
+    // ========================================================================
+    // Comment attachment tests (BT-975)
+    // ========================================================================
+
+    #[test]
+    fn class_line_comment_attached_to_leading() {
+        // A `//` comment immediately before a class definition should appear in
+        // `ClassDefinition.comments.leading`.
+        let module = parse_ok("// A useful class\nObject subclass: Foo\n");
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(
+            class.comments.leading.len(),
+            1,
+            "expected one leading comment"
+        );
+        assert_eq!(class.comments.leading[0].kind, CommentKind::Line);
+        assert!(
+            class.comments.leading[0].content.contains("A useful class"),
+            "content: {}",
+            class.comments.leading[0].content
+        );
+    }
+
+    #[test]
+    fn class_doc_comment_not_duplicated_in_attachment() {
+        // A `///` doc comment must NOT appear in `comments.leading`; it goes to
+        // `doc_comment` only.
+        let module = parse_ok("/// Doc text\nObject subclass: Foo\n");
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert!(
+            class.doc_comment.is_some(),
+            "expected doc_comment to be populated"
+        );
+        assert!(
+            class.comments.leading.is_empty(),
+            "doc comment must not be duplicated into leading comments"
+        );
+    }
+
+    #[test]
+    fn method_mixed_doc_and_line_comment_separated() {
+        // `//` goes to `comments.leading`, `///` goes to `doc_comment`.
+        // The `//` must appear BEFORE `///` so the doc comment collection is
+        // not reset (a `//` after `///` would reset the doc-comment buffer).
+        let source = "Object subclass: Foo\n  // Line comment\n  /// Doc comment\n  go => 42\n";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert!(
+            method.doc_comment.is_some(),
+            "expected doc_comment on method"
+        );
+        assert_eq!(
+            method.comments.leading.len(),
+            1,
+            "expected one leading comment on method"
+        );
+        assert_eq!(method.comments.leading[0].kind, CommentKind::Line);
+    }
+
+    #[test]
+    fn state_declaration_doc_comment_populated() {
+        // A `///` doc comment before a state declaration is captured in `doc_comment`.
+        let source = "Object subclass: Foo\n  /// The count\n  state: count = 0\n";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        let state = &module.classes[0].state[0];
+        assert!(
+            state.doc_comment.is_some(),
+            "expected doc_comment on state declaration"
+        );
+        assert!(
+            state
+                .doc_comment
+                .as_deref()
+                .unwrap_or("")
+                .contains("The count"),
+            "doc_comment: {:?}",
+            state.doc_comment
+        );
+    }
+
+    #[test]
+    fn state_declaration_line_comment_attached() {
+        // A `//` comment before `state:` is attached to `comments.leading`.
+        let source = "Object subclass: Foo\n  // The x field\n  state: x = 1\n";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        let state = &module.classes[0].state[0];
+        assert_eq!(
+            state.comments.leading.len(),
+            1,
+            "expected one leading comment on state declaration"
+        );
+        assert!(
+            state.comments.leading[0].content.contains("The x field"),
+            "content: {}",
+            state.comments.leading[0].content
         );
     }
 }
