@@ -195,9 +195,12 @@ impl ProtocolClient {
                 return Err(e);
             }
         };
-        // Swap in websocket and session id
+        // Swap in websocket and session id.
+        // Reset transcript_bol: the display context is fresh regardless of
+        // whether the session was resumed, so the next chunk always gets a prefix.
         self.ws = new_client.ws;
         self.session_id.clone_from(&new_client.session_id);
+        self.transcript_bol = true;
         let resumed = requested_session.is_some()
             && requested_session.as_deref() == new_client.session_id.as_deref();
         tracing::debug!(
@@ -443,6 +446,24 @@ mod tests {
         let mut bol = true;
         assert_eq!(format_transcript_chunk("hello\n", &mut bol), "│ hello\n");
         assert!(bol);
+    }
+
+    #[test]
+    fn reconnect_mid_line_state_resets_on_reconnect() {
+        // After a reconnect the display context is fresh — even if the old
+        // connection dropped mid-line (bol=false), the next chunk must prefix.
+        // We simulate this by calling format_transcript_chunk with bol=false
+        // (mid-line state), then manually resetting bol as reconnect() does,
+        // and verifying the next chunk gets the │ prefix.
+        let mut bol = true;
+        let _ = format_transcript_chunk("partial", &mut bol);
+        assert!(!bol, "mid-line after partial chunk");
+        // reconnect() resets to true
+        bol = true;
+        assert_eq!(
+            format_transcript_chunk("next line", &mut bol),
+            "│ next line"
+        );
     }
 
     #[test]
