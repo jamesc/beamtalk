@@ -385,8 +385,25 @@ approximation."
 
 **Tension:** Tree-sitter is a parser *framework*, not a language compiler. The overhead
 of handling comment siblings in every AST walk, and the rearchitecture required, is not
-justified when the language already has a working compiler pipeline. The CST approach is
-worth reconsidering if Beamtalk ever adopts tree-sitter as its primary parser.
+justified today. The decision point to revisit Option C is when **all three** of these
+conditions hold:
+
+1. **A tree-sitter grammar exists for editor integration** (Neovim/Helix/Zed syntax
+   highlighting). This is a separate grammar from the compiler parser — editor integration
+   alone does not force Option C.
+2. **The two-parser problem is causing real maintenance cost.** Once a tree-sitter grammar
+   exists, the compiler parser and the tree-sitter grammar will diverge under language
+   changes. When patching that divergence is taking more effort than a one-time
+   rearchitecture, the "tooling == compiler" principle (ADR 0024) makes the answer clear.
+3. **Error recovery or incremental parse latency is a measurable user complaint.**
+   Tree-sitter's incremental reparsing is its key advantage. Beamtalk files are small by
+   Smalltalk convention, so full-reparse latency is unlikely to matter soon. The trigger
+   is profiling evidence or LSP user complaints about broken diagnostics on malformed input.
+
+Option A is deliberately forward-compatible with this migration. `CommentAttachment` is
+the shape a CST lowering pass would produce anyway. Moving to Option C replaces *where*
+`CommentAttachment` is populated (parser → CST lowering pass), not how AST consumers
+use it. All Phase 3 and Phase 4 work survives the migration intact.
 
 ### Option D: Preserve Token Stream (TypeScript/Roslyn style)
 
