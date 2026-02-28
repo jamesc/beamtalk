@@ -89,11 +89,18 @@ This rule is unambiguous and eliminates the dual-storage anti-pattern.
 
 This avoids Go's dual-storage anti-pattern: each comment type has exactly one home.
 
-| Comment syntax | Storage location | Established by |
-|---------------|-----------------|----------------|
-| `///` doc comment | `doc_comment: Option<String>` | ADR 0008 |
-| `//` line comment | `CommentAttachment.leading` or `.trailing` | This ADR |
-| `/* */` block comment | `CommentAttachment.leading` or `.trailing` | This ADR |
+| Comment syntax | AST storage | Runtime storage | Established by |
+|---------------|-------------|-----------------|----------------|
+| `///` doc comment | `doc_comment: Option<String>` | `CompiledMethod.doc` (object state) | ADR 0008 (AST field), ADR 0033 (runtime path) |
+| `//` line comment | `CommentAttachment.leading` or `.trailing` | Not compiled — formatter only | This ADR |
+| `/* */` block comment | `CommentAttachment.leading` or `.trailing` | Not compiled — formatter only | This ADR |
+
+Note: ADR 0033 superseded ADR 0008's EEP-48 doc chunk generation. `///` comments now
+compile to `doc:` message sends that populate `CompiledMethod.doc` at class load time,
+rather than being embedded as BEAM file chunks. The `doc_comment` AST field remains the
+correct vehicle for carrying this data through compilation. Regular `//` and `/* */`
+comments have no runtime representation — they exist in the AST solely for the
+formatter/unparser.
 
 ### Synthesised AST Nodes
 
@@ -502,7 +509,8 @@ persistence can be selective.
 
 - Related issues: BT-962 (lint cleanup epic), BT-963–966 (lint violation fixes)
 - Related ADRs:
-  - ADR 0008 — Doc Comments and API Documentation (established `doc_comment` on classes/methods; this ADR generalises that pattern)
+  - ADR 0008 — Doc Comments and API Documentation (established `doc_comment: Option<String>` on AST nodes)
+  - ADR 0033 — Runtime-Embedded Documentation (superseded ADR 0008's EEP-48 chunk generation; `///` now compiles to `doc:` message sends populating `CompiledMethod.doc` at load time)
   - ADR 0018 — Document Tree Code Generation (Wadler-Lindig; unparser will use the same `Document` API)
   - ADR 0024 — Static-First, Live-Augmented IDE Tooling ("tooling == compiler" principle)
 - Prior art:
