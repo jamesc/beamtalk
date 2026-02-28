@@ -57,6 +57,9 @@ pub struct ProtocolClient {
     cookie: String,
     /// Read timeout to reapply on reconnect.
     read_timeout: Option<Duration>,
+    /// Whether the transcript output cursor is at the beginning of a line.
+    /// Used to insert the `│ ` gutter prefix only at line starts.
+    transcript_bol: bool,
 }
 
 impl ProtocolClient {
@@ -107,6 +110,7 @@ impl ProtocolClient {
             port,
             cookie: cookie.to_string(),
             read_timeout,
+            transcript_bol: true,
         };
 
         // Read auth-required message (pre-auth, no session yet)
@@ -219,12 +223,14 @@ impl ProtocolClient {
 
     /// Handle a server-initiated push message (ADR 0017).
     ///
-    /// Transcript push messages are printed inline to stdout. Other push
-    /// types (actor lifecycle, etc.) are silently ignored.
+    /// Transcript push messages are printed inline to stdout with a `│ `
+    /// gutter prefix at the start of each line so they are visually distinct
+    /// from eval results. Other push types (actor lifecycle, etc.) are
+    /// silently ignored.
     ///
     /// Returns `true` if the message was a push and should be skipped for
     /// response parsing.
-    fn handle_push(parsed: &serde_json::Value) -> bool {
+    fn handle_push(&mut self, parsed: &serde_json::Value) -> bool {
         let is_push = parsed.get("push").is_some()
             || parsed.get("type").and_then(|v| v.as_str()) == Some("push");
         if !is_push {
@@ -233,8 +239,16 @@ impl ProtocolClient {
         if parsed.get("push").and_then(|v| v.as_str()) == Some("transcript") {
             if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
                 use std::io::Write;
-                print!("{text}");
-                let _ = std::io::stdout().flush();
+                let stdout = std::io::stdout();
+                let mut out = stdout.lock();
+                for ch in text.chars() {
+                    if self.transcript_bol && ch != '\n' {
+                        let _ = write!(out, "│ ");
+                    }
+                    let _ = write!(out, "{ch}");
+                    self.transcript_bol = ch == '\n';
+                }
+                let _ = out.flush();
             }
         }
         true
@@ -252,7 +266,7 @@ impl ProtocolClient {
                 Message::Text(text) => {
                     let parsed: serde_json::Value = serde_json::from_str(&text)
                         .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {text}"))?;
-                    if Self::handle_push(&parsed) {
+                    if self.handle_push(&parsed) {
                         continue;
                     }
                     return Ok(parsed);
@@ -275,7 +289,7 @@ impl ProtocolClient {
             match self.ws.read() {
                 Ok(Message::Text(text)) => {
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if Self::handle_push(&parsed) {
+                        if self.handle_push(&parsed) {
                             continue;
                         }
                     }
@@ -334,7 +348,7 @@ impl ProtocolClient {
                 match self.ws.read() {
                     Ok(Message::Text(text)) => {
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                            if Self::handle_push(&parsed) {
+                            if self.handle_push(&parsed) {
                                 continue;
                             }
                         }
