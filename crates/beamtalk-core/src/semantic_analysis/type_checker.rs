@@ -468,6 +468,14 @@ impl TypeChecker {
             .map(|arg| self.infer_expr(arg, hierarchy, env, in_abstract_method))
             .collect();
 
+        // Handle `species` — returns the receiver's metaclass at runtime (the
+        // species pattern from Smalltalk).  The actual class object is always
+        // Dynamic because it depends on the concrete type of `self`, so any
+        // subsequent send (e.g. `withAll:`) cannot be type-checked statically.
+        if selector_name == "species" {
+            return InferredType::Dynamic;
+        }
+
         // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
         // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
         if selector_name == "asType:" {
@@ -2699,6 +2707,31 @@ mod tests {
         assert!(
             return_warnings.is_empty(),
             "method without return type should not warn about return type"
+        );
+    }
+
+    #[test]
+    fn test_species_returns_dynamic() {
+        // `self species` uses the species pattern — the returned class object is
+        // dynamic (depends on the concrete type of self), so sends on the result
+        // must not produce type warnings.
+        // e.g. `self species withAll: result` should NOT warn.
+        let module = make_module(vec![msg_send(
+            msg_send(
+                var("self"),
+                MessageSelector::Unary("species".into()),
+                vec![],
+            ),
+            MessageSelector::Keyword(vec![KeywordPart::new("withAll:", span())]),
+            vec![var("result")],
+        )]);
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "species result should be Dynamic — no type warnings, got: {:?}",
+            checker.diagnostics()
         );
     }
 
