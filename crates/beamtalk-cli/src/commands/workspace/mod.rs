@@ -1280,6 +1280,99 @@ mod tests {
         );
     }
 
+    /// Regression test for BT-969: a `starting` tombstone left by a mid-startup
+    /// crash is detected on the next `start_detached_node` call, all stale runtime
+    /// files are cleaned up, and the node starts successfully.
+    ///
+    /// Scenario:
+    /// 1. A previous node started successfully (port/pid/node.info written).
+    /// 2. After that run, we force-kill the node without cleanup.
+    /// 3. We manually write a `starting` tombstone to simulate a partial startup
+    ///    (i.e. as if a future startup crashed before completing).
+    /// 4. `start_detached_node` is called again — it must detect `starting`,
+    ///    clean all stale runtime files, and start successfully.
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
+    fn test_start_detached_node_cleans_up_tombstone_integration() {
+        let tw = TestWorkspace::new("integ_tombstone");
+        let project_path = std::env::current_dir().unwrap();
+        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+
+        let (runtime, workspace_dir_beam, jsx, compiler, stdlib, extra_paths) =
+            beam_dirs_for_tests();
+
+        // Step 1: Start a node to produce real runtime files, then kill it.
+        let first_info = start_detached_node(
+            &tw.id,
+            0,
+            &runtime,
+            &workspace_dir_beam,
+            &jsx,
+            &compiler,
+            &stdlib,
+            &extra_paths,
+            false,
+            Some(60),
+            None,
+            None,
+            None,
+        )
+        .expect("first start should succeed");
+        kill_node_raw(&first_info);
+        wait_for_epmd_deregistration(&first_info.node_name, 5)
+            .expect("epmd should deregister node name within timeout");
+
+        // Step 2: Write a `starting` tombstone to simulate a partial startup that
+        // was interrupted before the node finished initialising.
+        let ws_dir = workspace_dir(&tw.id).unwrap();
+        std::fs::write(ws_dir.join("starting"), b"")
+            .expect("should be able to write starting tombstone");
+
+        // Verify stale runtime files exist (port, pid written by first run).
+        assert!(
+            ws_dir.join("pid").exists(),
+            "stale pid file should exist after kill"
+        );
+
+        // Step 3: Start a new node.  The tombstone must be detected, all stale
+        // files cleaned, and startup must succeed.
+        let (new_info, started, _) = get_or_start_workspace(
+            &project_path,
+            Some(&tw.id),
+            0,
+            &runtime,
+            &workspace_dir_beam,
+            &jsx,
+            &compiler,
+            &stdlib,
+            &extra_paths,
+            false,
+            Some(60),
+            None,
+            None,
+            None,
+        )
+        .expect("restart with tombstone present should succeed");
+        let _guard = NodeGuard { pid: new_info.pid };
+
+        assert!(started, "should have started a new node");
+        assert_ne!(
+            new_info.pid, first_info.pid,
+            "new node should have a different PID"
+        );
+        assert!(
+            is_node_running(&new_info),
+            "new node should be running and reachable"
+        );
+        // Tombstone must be gone after successful startup.
+        assert!(
+            !ws_dir.join("starting").exists(),
+            "starting tombstone should be removed after successful startup"
+        );
+    }
+
     #[test]
     #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
