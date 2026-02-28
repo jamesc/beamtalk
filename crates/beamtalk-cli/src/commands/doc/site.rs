@@ -182,7 +182,7 @@ pub(super) fn write_site_landing_page(
     let highlighted_code = highlight_beamtalk(LANDING_CODE_SNIPPET);
 
     let mut html = String::new();
-    html.push_str(&page_header("Beamtalk", "style.css", ""));
+    html.push_str(&page_header("Beamtalk", "style.css", "./"));
     html.push_str("<div class=\"page-wrapper landing-wrapper\">\n");
     html.push_str("<main class=\"landing-content\">\n");
 
