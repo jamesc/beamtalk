@@ -1,7 +1,7 @@
 # ADR 0044: Comments as First-Class AST Nodes
 
 ## Status
-Proposed 2026-02-28
+Accepted 2026-02-28
 
 ## Context
 
