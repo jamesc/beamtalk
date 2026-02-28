@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ValuePoint — a Point value object used in E2E tests (BT-926).
+// Exercises Value subclass: auto-generated getters, with*: setters,
+// keyword constructor, and value equality.
+
+Value subclass: ValuePoint
+  state: x = 0
+  state: y = 0
+
+  // User-defined method: Euclidean distance squared from origin
+  distanceSquared => (self.x * self.x) + (self.y * self.y)
