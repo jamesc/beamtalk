@@ -197,7 +197,7 @@ fn write_hierarchy_node(
         let separator = " — ";
         let text = summary
             .find(separator)
-            .map_or(summary, |i| summary[i + separator.len()..].trim());
+            .map_or(*summary, |i| summary[i + separator.len()..].trim());
         if !text.is_empty() {
             let _ = write!(
                 html,
