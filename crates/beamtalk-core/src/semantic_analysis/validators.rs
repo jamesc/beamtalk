@@ -13,7 +13,7 @@
 //! - Class variable access (BT-563)
 //! - Empty method bodies (BT-631)
 
-use crate::ast::{Block, ClassKind, Expression, Identifier, Module};
+use crate::ast::{Block, Expression, Identifier, Module};
 use crate::ast_walker::{for_each_expr_seq, walk_expression, walk_module};
 use crate::semantic_analysis::block_context::{classify_block, is_collection_hof_selector};
 use crate::semantic_analysis::{BlockContext, ClassHierarchy};
@@ -660,10 +660,11 @@ pub(crate) fn check_redundant_assignment(module: &Module, diagnostics: &mut Vec<
 /// Example: `items collect: [:x | self process: x]`  ← deadlock risk (Actor only)
 pub(crate) fn check_self_capture_in_actor_block(
     module: &Module,
+    hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for class in &module.classes {
-        if class.class_kind != ClassKind::Actor {
+        if !hierarchy.is_actor_subclass(class.name.name.as_str()) {
             continue;
         }
         for method in class.methods.iter().chain(class.class_methods.iter()) {
@@ -677,12 +678,7 @@ pub(crate) fn check_self_capture_in_actor_block(
 
     // Also cover Tonel-style standalone method definitions for Actor classes.
     for standalone in &module.method_definitions {
-        let class_name = standalone.class_name.name.as_str();
-        let is_actor_class = module
-            .classes
-            .iter()
-            .any(|c| c.name.name.as_str() == class_name && c.class_kind == ClassKind::Actor);
-        if !is_actor_class {
+        if !hierarchy.is_actor_subclass(standalone.class_name.name.as_str()) {
             continue;
         }
         for expr in &standalone.method.body {
@@ -1644,8 +1640,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             1,
@@ -1666,8 +1664,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             1,
@@ -1684,8 +1684,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
             "Expected no hints when self is not in block, got: {diagnostics:?}"
@@ -1699,8 +1701,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
             "Expected no hints for self in ifTrue: block, got: {diagnostics:?}"
@@ -1714,8 +1718,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
             "Expected no hints for Object subclass: (no calling_self dispatch), got: {diagnostics:?}"
@@ -1730,8 +1736,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
             "Expected no hints for Value subclass: (synchronous dispatch), got: {diagnostics:?}"
@@ -1745,8 +1753,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             1,
@@ -1762,8 +1772,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             1,
@@ -1780,8 +1792,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
             "Expected no hints for block variable (not literal), got: {diagnostics:?}"
@@ -1795,8 +1809,10 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             1,
@@ -1812,12 +1828,33 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
-        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
             "Expected no hints for standalone Object subclass: method, got: {diagnostics:?}"
         );
+    }
+
+    /// Transitive Actor subclass: class inheriting from an Actor also gets the hint.
+    #[test]
+    fn self_capture_in_transitive_actor_subclass_hints() {
+        let src = "Actor subclass: BaseActor\nBaseActor subclass: SpecificActor\n  process: items => items collect: [:x | self handle: x]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 hint for transitive Actor subclass, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Hint);
     }
 
     // ── BT-955: Literal boolean condition tests ───────────────────────────────
