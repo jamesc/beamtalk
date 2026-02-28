@@ -431,10 +431,7 @@ fn landing_card_meta(output_file: &str) -> (&'static str, &'static str) {
             "🔒",
             "Security model, threat analysis, and sandboxing for untrusted code.",
         ),
-        "tooling.html" => (
-            "🛠",
-            "CLI, REPL, VS Code extension, and testing framework.",
-        ),
+        "tooling.html" => ("🛠", "CLI, REPL, VS Code extension, and testing framework."),
         "known-limitations.html" => (
             "⚠️",
             "Current limitations and unimplemented features to be aware of.",

@@ -418,9 +418,18 @@ mod tests {
         // Multi-line block comment (as seen in stdlib/src/README.md)
         let multiline = "<!--\nCopyright 2026 James Casey\nSPDX-License-Identifier: Apache-2.0\n-->\n# Title\n\nBody.";
         let html = render_doc(multiline);
-        assert!(!html.contains("<!--"), "HTML comment delimiters should be removed");
-        assert!(!html.contains("Copyright"), "license text should not appear in output");
-        assert!(html.contains("<h1>Title</h1>"), "content after comment should render");
+        assert!(
+            !html.contains("<!--"),
+            "HTML comment delimiters should be removed"
+        );
+        assert!(
+            !html.contains("Copyright"),
+            "license text should not appear in output"
+        );
+        assert!(
+            html.contains("<h1>Title</h1>"),
+            "content after comment should render"
+        );
 
         // Single-line inline comment
         let inline = "<!-- short comment -->\n# Title\n";
@@ -430,7 +439,10 @@ mod tests {
         // Inline comment within paragraph text
         let inline2 = "Before <!-- note --> after.";
         let html = render_doc(inline2);
-        assert!(!html.contains("<!--"), "inline comment in paragraph should be removed");
+        assert!(
+            !html.contains("<!--"),
+            "inline comment in paragraph should be removed"
+        );
     }
 
     #[test]
