@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,435 +7,537 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "noArgs",
-                    span: Span {
-                        start: 171,
-                        end: 177,
-                    },
-                },
-            ),
-            value: Block(
-                Block {
-                    parameters: [],
-                    body: [
-                        Literal(
-                            Integer(
-                                42,
-                            ),
-                            Span {
-                                start: 182,
-                                end: 184,
-                            },
-                        ),
-                    ],
-                    span: Span {
-                        start: 181,
-                        end: 185,
-                    },
-                },
-            ),
-            span: Span {
-                start: 171,
-                end: 185,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result1",
-                    span: Span {
-                        start: 186,
-                        end: 193,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
                         name: "noArgs",
                         span: Span {
-                            start: 197,
-                            end: 203,
+                            start: 171,
+                            end: 177,
                         },
                     },
                 ),
-                selector: Unary(
-                    "value",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 197,
-                    end: 209,
-                },
-            },
-            span: Span {
-                start: 186,
-                end: 209,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "outer",
-                    span: Span {
-                        start: 259,
-                        end: 264,
-                    },
-                },
-            ),
-            value: Literal(
-                Integer(
-                    10,
-                ),
-                Span {
-                    start: 268,
-                    end: 270,
-                },
-            ),
-            span: Span {
-                start: 259,
-                end: 270,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "captureBlock",
-                    span: Span {
-                        start: 271,
-                        end: 283,
-                    },
-                },
-            ),
-            value: Block(
-                Block {
-                    parameters: [],
-                    body: [
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "outer",
-                                    span: Span {
-                                        start: 288,
-                                        end: 293,
-                                    },
-                                },
-                            ),
-                            selector: Binary(
-                                "+",
-                            ),
-                            arguments: [
-                                Literal(
-                                    Integer(
-                                        5,
-                                    ),
-                                    Span {
-                                        start: 296,
-                                        end: 297,
-                                    },
-                                ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 288,
-                                end: 297,
-                            },
-                        },
-                    ],
-                    span: Span {
-                        start: 287,
-                        end: 298,
-                    },
-                },
-            ),
-            span: Span {
-                start: 271,
-                end: 298,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result2",
-                    span: Span {
-                        start: 299,
-                        end: 306,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
-                    Identifier {
-                        name: "captureBlock",
-                        span: Span {
-                            start: 310,
-                            end: 322,
-                        },
-                    },
-                ),
-                selector: Unary(
-                    "value",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 310,
-                    end: 328,
-                },
-            },
-            span: Span {
-                start: 299,
-                end: 328,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "condition",
-                    span: Span {
-                        start: 383,
-                        end: 392,
-                    },
-                },
-            ),
-            value: Block(
-                Block {
-                    parameters: [],
-                    body: [
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "counter",
-                                    span: Span {
-                                        start: 397,
-                                        end: 404,
-                                    },
-                                },
-                            ),
-                            selector: Binary(
-                                ">",
-                            ),
-                            arguments: [
-                                Literal(
-                                    Integer(
-                                        0,
-                                    ),
-                                    Span {
-                                        start: 407,
-                                        end: 408,
-                                    },
-                                ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 397,
-                                end: 408,
-                            },
-                        },
-                    ],
-                    span: Span {
-                        start: 396,
-                        end: 409,
-                    },
-                },
-            ),
-            span: Span {
-                start: 383,
-                end: 409,
-            },
-        },
-        MessageSend {
-            receiver: Identifier(
-                Identifier {
-                    name: "condition",
-                    span: Span {
-                        start: 410,
-                        end: 419,
-                    },
-                },
-            ),
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "whileTrue:",
-                        span: Span {
-                            start: 420,
-                            end: 430,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Block(
+                value: Block(
                     Block {
                         parameters: [],
                         body: [
-                            Assignment {
-                                target: Identifier(
-                                    Identifier {
-                                        name: "counter",
-                                        span: Span {
-                                            start: 432,
-                                            end: 439,
-                                        },
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: Literal(
+                                    Integer(
+                                        42,
+                                    ),
+                                    Span {
+                                        start: 182,
+                                        end: 184,
                                     },
                                 ),
-                                value: MessageSend {
+                            },
+                        ],
+                        span: Span {
+                            start: 181,
+                            end: 185,
+                        },
+                    },
+                ),
+                span: Span {
+                    start: 171,
+                    end: 185,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "result1",
+                        span: Span {
+                            start: 186,
+                            end: 193,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "noArgs",
+                            span: Span {
+                                start: 197,
+                                end: 203,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "value",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 197,
+                        end: 209,
+                    },
+                },
+                span: Span {
+                    start: 186,
+                    end: 209,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "outer",
+                        span: Span {
+                            start: 259,
+                            end: 264,
+                        },
+                    },
+                ),
+                value: Literal(
+                    Integer(
+                        10,
+                    ),
+                    Span {
+                        start: 268,
+                        end: 270,
+                    },
+                ),
+                span: Span {
+                    start: 259,
+                    end: 270,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "captureBlock",
+                        span: Span {
+                            start: 271,
+                            end: 283,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
                                     receiver: Identifier(
                                         Identifier {
-                                            name: "counter",
+                                            name: "outer",
                                             span: Span {
-                                                start: 443,
-                                                end: 450,
+                                                start: 288,
+                                                end: 293,
                                             },
                                         },
                                     ),
                                     selector: Binary(
-                                        "-",
+                                        "+",
                                     ),
                                     arguments: [
                                         Literal(
                                             Integer(
-                                                1,
+                                                5,
                                             ),
                                             Span {
-                                                start: 453,
-                                                end: 454,
+                                                start: 296,
+                                                end: 297,
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 443,
-                                        end: 454,
+                                        start: 288,
+                                        end: 297,
                                     },
-                                },
-                                span: Span {
-                                    start: 432,
-                                    end: 454,
                                 },
                             },
                         ],
                         span: Span {
-                            start: 431,
-                            end: 455,
+                            start: 287,
+                            end: 298,
                         },
                     },
                 ),
-            ],
-            is_cast: false,
-            span: Span {
-                start: 410,
-                end: 455,
+                span: Span {
+                    start: 271,
+                    end: 298,
+                },
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "block1",
-                    span: Span {
-                        start: 489,
-                        end: 495,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "result2",
+                        span: Span {
+                            start: 299,
+                            end: 306,
+                        },
                     },
-                },
-            ),
-            value: Block(
-                Block {
-                    parameters: [],
-                    body: [
-                        Literal(
-                            Integer(
-                                1,
-                            ),
-                            Span {
-                                start: 500,
-                                end: 501,
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "captureBlock",
+                            span: Span {
+                                start: 310,
+                                end: 322,
                             },
-                        ),
-                    ],
+                        },
+                    ),
+                    selector: Unary(
+                        "value",
+                    ),
+                    arguments: [],
+                    is_cast: false,
                     span: Span {
-                        start: 499,
-                        end: 502,
+                        start: 310,
+                        end: 328,
                     },
                 },
-            ),
-            span: Span {
-                start: 489,
-                end: 502,
+                span: Span {
+                    start: 299,
+                    end: 328,
+                },
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "block2",
-                    span: Span {
-                        start: 503,
-                        end: 509,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "condition",
+                        span: Span {
+                            start: 383,
+                            end: 392,
+                        },
                     },
-                },
-            ),
-            value: Block(
-                Block {
-                    parameters: [],
-                    body: [
-                        Literal(
-                            Integer(
-                                2,
-                            ),
-                            Span {
-                                start: 514,
-                                end: 515,
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "counter",
+                                            span: Span {
+                                                start: 397,
+                                                end: 404,
+                                            },
+                                        },
+                                    ),
+                                    selector: Binary(
+                                        ">",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                0,
+                                            ),
+                                            Span {
+                                                start: 407,
+                                                end: 408,
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 397,
+                                        end: 408,
+                                    },
+                                },
                             },
-                        ),
-                    ],
-                    span: Span {
-                        start: 513,
-                        end: 516,
+                        ],
+                        span: Span {
+                            start: 396,
+                            end: 409,
+                        },
                     },
+                ),
+                span: Span {
+                    start: 383,
+                    end: 409,
                 },
-            ),
-            span: Span {
-                start: 503,
-                end: 516,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "block3",
-                    span: Span {
-                        start: 517,
-                        end: 523,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "condition",
+                        span: Span {
+                            start: 410,
+                            end: 419,
+                        },
                     },
-                },
-            ),
-            value: Block(
-                Block {
-                    parameters: [],
-                    body: [
-                        Literal(
-                            Integer(
-                                3,
-                            ),
-                            Span {
-                                start: 528,
-                                end: 529,
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "whileTrue:",
+                            span: Span {
+                                start: 420,
+                                end: 430,
                             },
-                        ),
+                        },
                     ],
-                    span: Span {
-                        start: 527,
-                        end: 530,
-                    },
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                ExpressionStatement {
+                                    comments: CommentAttachment {
+                                        leading: [],
+                                        trailing: None,
+                                    },
+                                    expression: Assignment {
+                                        target: Identifier(
+                                            Identifier {
+                                                name: "counter",
+                                                span: Span {
+                                                    start: 432,
+                                                    end: 439,
+                                                },
+                                            },
+                                        ),
+                                        value: MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "counter",
+                                                    span: Span {
+                                                        start: 443,
+                                                        end: 450,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "-",
+                                            ),
+                                            arguments: [
+                                                Literal(
+                                                    Integer(
+                                                        1,
+                                                    ),
+                                                    Span {
+                                                        start: 453,
+                                                        end: 454,
+                                                    },
+                                                ),
+                                            ],
+                                            is_cast: false,
+                                            span: Span {
+                                                start: 443,
+                                                end: 454,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 432,
+                                            end: 454,
+                                        },
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 431,
+                                end: 455,
+                            },
+                        },
+                    ),
+                ],
+                is_cast: false,
+                span: Span {
+                    start: 410,
+                    end: 455,
                 },
-            ),
-            span: Span {
-                start: 517,
-                end: 530,
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "block1",
+                        span: Span {
+                            start: 489,
+                            end: 495,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: Literal(
+                                    Integer(
+                                        1,
+                                    ),
+                                    Span {
+                                        start: 500,
+                                        end: 501,
+                                    },
+                                ),
+                            },
+                        ],
+                        span: Span {
+                            start: 499,
+                            end: 502,
+                        },
+                    },
+                ),
+                span: Span {
+                    start: 489,
+                    end: 502,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "block2",
+                        span: Span {
+                            start: 503,
+                            end: 509,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: Literal(
+                                    Integer(
+                                        2,
+                                    ),
+                                    Span {
+                                        start: 514,
+                                        end: 515,
+                                    },
+                                ),
+                            },
+                        ],
+                        span: Span {
+                            start: 513,
+                            end: 516,
+                        },
+                    },
+                ),
+                span: Span {
+                    start: 503,
+                    end: 516,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "block3",
+                        span: Span {
+                            start: 517,
+                            end: 523,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: Literal(
+                                    Integer(
+                                        3,
+                                    ),
+                                    Span {
+                                        start: 528,
+                                        end: 529,
+                                    },
+                                ),
+                            },
+                        ],
+                        span: Span {
+                            start: 527,
+                            end: 530,
+                        },
+                    },
+                ),
+                span: Span {
+                    start: 517,
+                    end: 530,
+                },
             },
         },
     ],
@@ -444,7 +545,7 @@ Module {
         start: 171,
         end: 530,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

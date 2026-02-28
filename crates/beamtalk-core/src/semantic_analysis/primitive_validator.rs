@@ -87,8 +87,8 @@ pub fn validate_primitives(module: &Module, options: &CompilerOptions) -> Vec<Di
     let is_stdlib = is_stdlib_module(options);
 
     // Check top-level expressions
-    for expr in &module.expressions {
-        validate_expr(expr, is_stdlib, options, &mut diagnostics);
+    for stmt in &module.expressions {
+        validate_expr(&stmt.expression, is_stdlib, options, &mut diagnostics);
     }
 
     // Check class methods and state default values
@@ -99,8 +99,8 @@ pub fn validate_primitives(module: &Module, options: &CompilerOptions) -> Vec<Di
             }
         }
         for method in &class.methods {
-            for expr in &method.body {
-                validate_expr(expr, is_stdlib, options, &mut diagnostics);
+            for stmt in &method.body {
+                validate_expr(&stmt.expression, is_stdlib, options, &mut diagnostics);
             }
         }
     }
@@ -151,8 +151,8 @@ fn validate_expr(
             }
         }
         Expression::Block(block) => {
-            for body_expr in &block.body {
-                validate_expr(body_expr, is_stdlib, options, diagnostics);
+            for body_stmt in &block.body {
+                validate_expr(&body_stmt.expression, is_stdlib, options, diagnostics);
             }
         }
         Expression::Return { value, .. }

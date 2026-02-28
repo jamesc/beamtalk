@@ -78,8 +78,8 @@ impl NameResolver {
         self.scope.define("nil", module.span, BindingKind::Local);
 
         // Resolve top-level expressions
-        for expr in &module.expressions {
-            self.resolve_expression(expr);
+        for stmt in &module.expressions {
+            self.resolve_expression(&stmt.expression);
         }
 
         // Resolve classes
@@ -161,7 +161,10 @@ impl NameResolver {
         // parameters are forwarded implicitly to the underlying Erlang function;
         // none of them appear as identifiers in the AST, so the normal
         // "never referenced" heuristic produces false positives.
-        let is_primitive_body = matches!(method.body.as_slice(), [Expression::Primitive { .. }]);
+        let is_primitive_body = matches!(
+            method.body.as_slice(),
+            [s] if matches!(s.expression, Expression::Primitive { .. })
+        );
         if !is_primitive_body {
             self.collect_unused_param_warnings();
         }
@@ -394,11 +397,12 @@ impl NameResolver {
     /// Iterates through expressions, resolving each one. If a `Return` expression
     /// is encountered and there are subsequent expressions, emits a warning for the
     /// first unreachable expression only (avoids diagnostic spam).
-    fn resolve_body(&mut self, body: &[Expression]) {
+    fn resolve_body(&mut self, body: &[crate::ast::ExpressionStatement]) {
         let mut saw_return = false;
         let mut warned = false;
 
-        for expr in body {
+        for stmt in body {
+            let expr = &stmt.expression;
             if saw_return && !warned {
                 // First unreachable expression after early return — warn once
                 let mut diag =

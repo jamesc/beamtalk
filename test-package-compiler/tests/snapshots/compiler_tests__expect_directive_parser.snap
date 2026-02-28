@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,149 +7,215 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        ExpectDirective {
-            category: Dnu,
-            span: Span {
-                start: 243,
-                end: 254,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        },
-        MessageSend {
-            receiver: Literal(
-                Integer(
-                    42,
-                ),
-                Span {
-                    start: 255,
-                    end: 257,
+            expression: ExpectDirective {
+                category: Dnu,
+                span: Span {
+                    start: 243,
+                    end: 254,
                 },
-            ),
-            selector: Unary(
-                "unknownMessage",
-            ),
-            arguments: [],
-            is_cast: false,
-            span: Span {
-                start: 255,
-                end: 272,
             },
         },
-        ExpectDirective {
-            category: Type,
-            span: Span {
-                start: 326,
-                end: 338,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        },
-        MessageSend {
-            receiver: Literal(
-                Integer(
-                    42,
-                ),
-                Span {
-                    start: 339,
-                    end: 341,
-                },
-            ),
-            selector: Binary(
-                "+",
-            ),
-            arguments: [
-                Literal(
-                    String(
-                        "hello",
+            expression: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        42,
                     ),
                     Span {
-                        start: 344,
-                        end: 351,
+                        start: 255,
+                        end: 257,
                     },
                 ),
-            ],
-            is_cast: false,
-            span: Span {
-                start: 339,
-                end: 351,
-            },
-        },
-        ExpectDirective {
-            category: Unused,
-            span: Span {
-                start: 409,
-                end: 423,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "tempVar",
-                    span: Span {
-                        start: 424,
-                        end: 431,
-                    },
+                selector: Unary(
+                    "unknownMessage",
+                ),
+                arguments: [],
+                is_cast: false,
+                span: Span {
+                    start: 255,
+                    end: 272,
                 },
-            ),
-            value: Literal(
-                Integer(
-                    99,
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: ExpectDirective {
+                category: Type,
+                span: Span {
+                    start: 326,
+                    end: 338,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        42,
+                    ),
+                    Span {
+                        start: 339,
+                        end: 341,
+                    },
                 ),
-                Span {
-                    start: 435,
+                selector: Binary(
+                    "+",
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "hello",
+                        ),
+                        Span {
+                            start: 344,
+                            end: 351,
+                        },
+                    ),
+                ],
+                is_cast: false,
+                span: Span {
+                    start: 339,
+                    end: 351,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: ExpectDirective {
+                category: Unused,
+                span: Span {
+                    start: 409,
+                    end: 423,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "tempVar",
+                        span: Span {
+                            start: 424,
+                            end: 431,
+                        },
+                    },
+                ),
+                value: Literal(
+                    Integer(
+                        99,
+                    ),
+                    Span {
+                        start: 435,
+                        end: 437,
+                    },
+                ),
+                span: Span {
+                    start: 424,
                     end: 437,
                 },
-            ),
-            span: Span {
-                start: 424,
-                end: 437,
             },
         },
-        ExpectDirective {
-            category: All,
-            span: Span {
-                start: 482,
-                end: 493,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        },
-        Identifier(
-            Identifier {
-                name: "someUndefinedMethod",
+            expression: ExpectDirective {
+                category: All,
                 span: Span {
-                    start: 494,
-                    end: 513,
+                    start: 482,
+                    end: 493,
                 },
             },
-        ),
-        ExpectDirective {
-            category: Dnu,
-            span: Span {
-                start: 587,
-                end: 598,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Identifier(
+                Identifier {
+                    name: "someUndefinedMethod",
+                    span: Span {
+                        start: 494,
+                        end: 513,
+                    },
+                },
+            ),
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: ExpectDirective {
+                category: Dnu,
+                span: Span {
+                    start: 587,
+                    end: 598,
+                },
             },
         },
-        ExpectDirective {
-            category: Type,
-            span: Span {
-                start: 599,
-                end: 611,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: ExpectDirective {
+                category: Type,
+                span: Span {
+                    start: 599,
+                    end: 611,
+                },
             },
         },
-        MessageSend {
-            receiver: Literal(
-                Integer(
-                    42,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        42,
+                    ),
+                    Span {
+                        start: 612,
+                        end: 614,
+                    },
                 ),
-                Span {
+                selector: Unary(
+                    "unknownMessage",
+                ),
+                arguments: [],
+                is_cast: false,
+                span: Span {
                     start: 612,
-                    end: 614,
+                    end: 629,
                 },
-            ),
-            selector: Unary(
-                "unknownMessage",
-            ),
-            arguments: [],
-            is_cast: false,
-            span: Span {
-                start: 612,
-                end: 629,
             },
         },
     ],
@@ -158,7 +223,7 @@ Module {
         start: 243,
         end: 629,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

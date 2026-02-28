@@ -324,8 +324,8 @@ impl Analyser {
         // No need to re-define them here.
 
         // Analyse top-level expressions
-        for expr in &module.expressions {
-            self.analyse_expression(expr, None);
+        for stmt in &module.expressions {
+            self.analyse_expression(&stmt.expression, None);
         }
 
         // Analyse classes
@@ -376,8 +376,8 @@ impl Analyser {
         }
 
         // Analyse method body
-        for expr in &method.body {
-            self.analyse_expression(expr, None);
+        for stmt in &method.body {
+            self.analyse_expression(&stmt.expression, None);
         }
 
         self.scope.pop(); // Exit method scope
@@ -619,10 +619,14 @@ mod tests {
     use super::*;
     use crate::ast::{
         Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, Expression,
-        Identifier, Literal, MatchArm, MessageSelector, MethodDefinition, Pattern,
-        StateDeclaration, StringSegment,
+        ExpressionStatement, Identifier, Literal, MatchArm, MessageSelector, MethodDefinition,
+        Pattern, StateDeclaration, StringSegment,
     };
     use crate::source_analysis::{Severity, Span};
+
+    fn bare(expr: Expression) -> ExpressionStatement {
+        ExpressionStatement::bare(expr)
+    }
 
     #[test]
     fn test_analyse_empty_module() {
@@ -728,11 +732,14 @@ mod tests {
         // Create a simple block: [:x | x + 1]
         let block = Block::new(
             vec![BlockParameter::new("x", test_span())],
-            vec![Expression::Identifier(Identifier::new("x", test_span()))],
+            vec![bare(Expression::Identifier(Identifier::new(
+                "x",
+                test_span(),
+            )))],
             test_span(),
         );
         let expr = Expression::Block(block);
-        let module = Module::new(vec![expr], test_span());
+        let module = Module::new(vec![bare(expr)], test_span());
 
         let result = analyse(&module);
 
@@ -758,14 +765,17 @@ mod tests {
 
         let block = Block::new(
             vec![BlockParameter::new("x", test_span())],
-            vec![Expression::Identifier(Identifier::new(
+            vec![bare(Expression::Identifier(Identifier::new(
                 "count",
                 test_span(),
-            ))],
+            )))],
             Span::new(10, 20),
         );
 
-        let module = Module::new(vec![count_def, Expression::Block(block)], test_span());
+        let module = Module::new(
+            vec![bare(count_def), bare(Expression::Block(block))],
+            test_span(),
+        );
 
         let result = analyse(&module);
 
@@ -782,17 +792,17 @@ mod tests {
         let block = Block::new(
             vec![BlockParameter::new("x", test_span())],
             vec![
-                Expression::Assignment {
+                bare(Expression::Assignment {
                     target: Box::new(Expression::Identifier(Identifier::new("temp", test_span()))),
                     value: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
                     span: test_span(),
-                },
-                Expression::Identifier(Identifier::new("temp", test_span())),
+                }),
+                bare(Expression::Identifier(Identifier::new("temp", test_span()))),
             ],
             Span::new(10, 20),
         );
 
-        let module = Module::new(vec![Expression::Block(block)], test_span());
+        let module = Module::new(vec![bare(Expression::Block(block))], test_span());
 
         let result = analyse(&module);
 
@@ -823,18 +833,21 @@ mod tests {
 
         let block = Block::new(
             vec![BlockParameter::new("x", test_span())],
-            vec![Expression::Assignment {
+            vec![bare(Expression::Assignment {
                 target: Box::new(Expression::Identifier(Identifier::new(
                     "count",
                     test_span(),
                 ))),
                 value: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
                 span: test_span(),
-            }],
+            })],
             Span::new(10, 20),
         );
 
-        let module = Module::new(vec![count_def, Expression::Block(block)], test_span());
+        let module = Module::new(
+            vec![bare(count_def), bare(Expression::Block(block))],
+            test_span(),
+        );
 
         let result = analyse(&module);
 
@@ -853,14 +866,14 @@ mod tests {
         // Create: 5 timesRepeat: [x := 1]
         let block = Block::new(
             vec![],
-            vec![Expression::Assignment {
+            vec![bare(Expression::Assignment {
                 target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
                 value: Box::new(Expression::Literal(
                     crate::ast::Literal::Integer(1),
                     test_span(),
                 )),
                 span: test_span(),
-            }],
+            })],
             Span::new(20, 30),
         );
 
@@ -878,7 +891,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![message_send], test_span());
+        let module = Module::new(vec![bare(message_send)], test_span());
 
         let result = analyse(&module);
 
@@ -896,10 +909,10 @@ mod tests {
         // Code: myBlock := [:x | x + 1]
         let block = Block::new(
             vec![BlockParameter::new("x", Span::new(15, 16))],
-            vec![Expression::Identifier(Identifier::new(
+            vec![bare(Expression::Identifier(Identifier::new(
                 "x",
                 Span::new(19, 20),
-            ))],
+            )))],
             Span::new(12, 25),
         );
 
@@ -912,7 +925,7 @@ mod tests {
             span: Span::new(0, 25),
         };
 
-        let module = Module::new(vec![assignment], Span::new(0, 25));
+        let module = Module::new(vec![bare(assignment)], Span::new(0, 25));
         let result = analyse(&module);
 
         // Block should have Stored context
@@ -927,10 +940,10 @@ mod tests {
         // Code: array at: 1 put: [:x | x + 1]
         let block = Block::new(
             vec![BlockParameter::new("x", Span::new(23, 24))],
-            vec![Expression::Identifier(Identifier::new(
+            vec![bare(Expression::Identifier(Identifier::new(
                 "x",
                 Span::new(27, 28),
-            ))],
+            )))],
             Span::new(20, 33),
         );
 
@@ -951,7 +964,7 @@ mod tests {
             span: Span::new(0, 33),
         };
 
-        let module = Module::new(vec![message], Span::new(0, 33));
+        let module = Module::new(vec![bare(message)], Span::new(0, 33));
         let result = analyse(&module);
 
         // Block should have Passed context
@@ -977,7 +990,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![match_expr], test_span());
+        let module = Module::new(vec![bare(match_expr)], test_span());
         let result = analyse(&module);
 
         // Should have diagnostic for 'value' only, not 'x'
@@ -1007,7 +1020,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![match_expr], test_span());
+        let module = Module::new(vec![bare(match_expr)], test_span());
         let result = analyse(&module);
 
         // Should have diagnostic for 'value' only, not 'x' (used in guard and body)
@@ -1041,7 +1054,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![match_expr], test_span());
+        let module = Module::new(vec![bare(match_expr)], test_span());
         let result = analyse(&module);
 
         // Should have diagnostic for 'result' only, not 'value' (pattern-bound)
@@ -1092,7 +1105,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![match_expr], test_span());
+        let module = Module::new(vec![bare(match_expr)], test_span());
         let result = analyse(&module);
 
         // Should have diagnostic for 'result' only, not 'value' or 'msg' (pattern-bound)
@@ -1124,7 +1137,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![match_expr], test_span());
+        let module = Module::new(vec![bare(match_expr)], test_span());
         let result = analyse(&module);
 
         // Should have diagnostic for 'list' only, not 'head' or 'tail' (pattern-bound)
@@ -1160,7 +1173,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![match_expr], test_span());
+        let module = Module::new(vec![bare(match_expr)], test_span());
         let result = analyse(&module);
 
         // Should have diagnostic for 'value' only, not 'x' or 'y' (pattern-bound in separate arms)
@@ -1189,7 +1202,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![match_expr], test_span());
+        let module = Module::new(vec![bare(match_expr)], test_span());
         let result = analyse(&module);
 
         // Should have 2 diagnostics: value and undefined_var
@@ -1219,7 +1232,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![match_expr], test_span());
+        let module = Module::new(vec![bare(match_expr)], test_span());
         let result = analyse(&module);
 
         // Should have diagnostic for undefined_var in guard
@@ -1249,7 +1262,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![match_expr], test_span());
+        let module = Module::new(vec![bare(match_expr)], test_span());
         let result = analyse(&module);
 
         // Should only have diagnostic for 'value', not 'x'
@@ -1290,7 +1303,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![match_expr], test_span());
+        let module = Module::new(vec![bare(match_expr)], test_span());
         let result = analyse(&module);
 
         // Should only error on 'result', not 'x' or 'y'
@@ -1316,11 +1329,11 @@ mod tests {
         let get_value_method = MethodDefinition {
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
-            body: vec![Expression::FieldAccess {
+            body: vec![bare(Expression::FieldAccess {
                 receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
                 field: Identifier::new("value", test_span()),
                 span: test_span(),
-            }],
+            })],
             return_type: None,
             is_sealed: false,
             kind: MethodKind::Primary,
@@ -1358,7 +1371,7 @@ mod tests {
             classes: vec![class_def],
             method_definitions: Vec::new(),
             expressions: vec![],
-            leading_comments: vec![],
+            file_leading_comments: vec![],
             span: test_span(),
         };
         let result = analyse(&module);
@@ -1388,7 +1401,7 @@ mod tests {
 
         let block = Expression::Block(crate::ast::Block {
             parameters: vec![],
-            body: vec![field_assignment],
+            body: vec![bare(field_assignment)],
             span: test_span(),
         });
 
@@ -1402,7 +1415,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![assignment], test_span());
+        let module = Module::new(vec![bare(assignment)], test_span());
         let result = analyse(&module);
 
         // Should have at least 1 error diagnostic for field assignment in stored block
@@ -1435,7 +1448,7 @@ mod tests {
 
         let block = Expression::Block(crate::ast::Block {
             parameters: vec![crate::ast::BlockParameter::new("x", test_span())],
-            body: vec![field_assignment],
+            body: vec![bare(field_assignment)],
             span: test_span(),
         });
 
@@ -1451,7 +1464,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![message_send], test_span());
+        let module = Module::new(vec![bare(message_send)], test_span());
         let result = analyse(&module);
 
         // Should have at least 1 error diagnostic for field assignment in passed block
@@ -1503,7 +1516,7 @@ mod tests {
 
         let block = Expression::Block(crate::ast::Block {
             parameters: vec![],
-            body: vec![count_mutation],
+            body: vec![bare(count_mutation)],
             span: test_span(),
         });
 
@@ -1517,7 +1530,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![count_def, block_assignment], test_span());
+        let module = Module::new(vec![bare(count_def), bare(block_assignment)], test_span());
         let result = analyse(&module);
 
         // Should have NO diagnostic — captured variable mutations in stored blocks are valid
@@ -1544,7 +1557,7 @@ mod tests {
 
         let block = Expression::Block(crate::ast::Block {
             parameters: vec![],
-            body: vec![field_assignment],
+            body: vec![bare(field_assignment)],
             span: test_span(),
         });
 
@@ -1560,7 +1573,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![message_send], test_span());
+        let module = Module::new(vec![bare(message_send)], test_span());
         let result = analyse(&module);
 
         // Should have NO diagnostics for field assignment in control flow blocks
@@ -1600,7 +1613,7 @@ mod tests {
 
         let block = Expression::Block(crate::ast::Block {
             parameters: vec![],
-            body: vec![x_def, x_mutation],
+            body: vec![bare(x_def), bare(x_mutation)],
             span: test_span(),
         });
 
@@ -1614,7 +1627,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![block_assignment], test_span());
+        let module = Module::new(vec![bare(block_assignment)], test_span());
         let result = analyse(&module);
 
         // Should have NO diagnostics - local variables can be mutated
@@ -1632,7 +1645,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![expr], test_span());
+        let module = Module::new(vec![bare(expr)], test_span());
 
         // Without known vars - should report undefined
         let result_without = analyse(&module);
@@ -1671,7 +1684,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![expr], test_span());
+        let module = Module::new(vec![bare(expr)], test_span());
 
         // With 'x' known, the RHS reference should not report undefined
         let result = analyse_with_known_vars(&module, &["x"]);
@@ -1744,7 +1757,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -1783,7 +1796,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -1820,7 +1833,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![expr], test_span());
+        let module = Module::new(vec![bare(expr)], test_span());
         let result = analyse_with_known_vars(&module, &["counter"]);
 
         // No symbol-related diagnostics
@@ -1854,7 +1867,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![expr], test_span());
+        let module = Module::new(vec![bare(expr)], test_span());
         let result = analyse_with_known_vars(&module, &["counter"]);
 
         let symbol_errors: Vec<_> = result
@@ -1905,7 +1918,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![expr], test_span());
+        let module = Module::new(vec![bare(expr)], test_span());
         let result = analyse(&module);
 
         let symbol_errors: Vec<_> = result
@@ -1943,7 +1956,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![expr], test_span());
+        let module = Module::new(vec![bare(expr)], test_span());
         let result = analyse_with_known_vars(&module, &["obj"]);
 
         let symbol_errors: Vec<_> = result
@@ -1982,7 +1995,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![expr], test_span());
+        let module = Module::new(vec![bare(expr)], test_span());
         let result = analyse_with_known_vars(&module, &["obj"]);
 
         assert!(
@@ -2024,7 +2037,7 @@ mod tests {
             span: test_span(),
         };
 
-        let module = Module::new(vec![cascade], test_span());
+        let module = Module::new(vec![bare(cascade)], test_span());
         let result = analyse_with_known_vars(&module, &["counter"]);
 
         let symbol_errors: Vec<_> = result
@@ -2059,7 +2072,7 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("area".into()),
                 parameters: vec![],
-                body: vec![Expression::Literal(Literal::Integer(42), test_span())],
+                body: vec![bare(Expression::Literal(Literal::Integer(42), test_span()))],
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
@@ -2089,9 +2102,9 @@ mod tests {
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
-            expressions: vec![spawn_expr],
+            expressions: vec![bare(spawn_expr)],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
 
         let result = analyse(&module);
@@ -2117,7 +2130,7 @@ mod tests {
     fn test_self_outside_method_gives_specialized_error() {
         // Using self at module top level should give a specialized message
         let self_expr = Expression::Identifier(Identifier::new("self", Span::new(0, 4)));
-        let module = Module::new(vec![self_expr], test_span());
+        let module = Module::new(vec![bare(self_expr)], test_span());
         let result = analyse(&module);
 
         let self_errors: Vec<_> = result
@@ -2156,14 +2169,14 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
-                body: vec![Expression::FieldAccess {
+                body: vec![bare(Expression::FieldAccess {
                     receiver: Box::new(Expression::Identifier(Identifier::new(
                         "self",
                         test_span(),
                     ))),
                     field: Identifier::new("value", test_span()),
                     span: test_span(),
-                }],
+                })],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -2183,7 +2196,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2219,22 +2232,22 @@ mod tests {
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
                 body: vec![
-                    Expression::Assignment {
+                    bare(Expression::Assignment {
                         target: Box::new(Expression::Identifier(Identifier::new(
                             "x",
                             Span::new(10, 11),
                         ))),
                         value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
                         span: test_span(),
-                    },
-                    Expression::FieldAccess {
+                    }),
+                    bare(Expression::FieldAccess {
                         receiver: Box::new(Expression::Identifier(Identifier::new(
                             "self",
                             test_span(),
                         ))),
                         field: Identifier::new("value", test_span()),
                         span: test_span(),
-                    },
+                    }),
                 ],
                 return_type: None,
                 is_sealed: false,
@@ -2255,7 +2268,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2286,12 +2299,12 @@ mod tests {
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
                 body: vec![
-                    Expression::Assignment {
+                    bare(Expression::Assignment {
                         target: Box::new(Expression::Identifier(Identifier::new("x", test_span()))),
                         value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
                         span: test_span(),
-                    },
-                    Expression::Identifier(Identifier::new("x", test_span())),
+                    }),
+                    bare(Expression::Identifier(Identifier::new("x", test_span()))),
                 ],
                 return_type: None,
                 is_sealed: false,
@@ -2312,7 +2325,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2338,11 +2351,11 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("doSomething".into()),
                 parameters: vec![],
-                body: vec![Expression::Assignment {
+                body: vec![bare(Expression::Assignment {
                     target: Box::new(Expression::Identifier(Identifier::new("_x", test_span()))),
                     value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
                     span: test_span(),
-                }],
+                })],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -2362,7 +2375,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2395,7 +2408,7 @@ mod tests {
                     name: Identifier::new("newValue", test_span()),
                     type_annotation: None,
                 }],
-                body: vec![Expression::Literal(Literal::Integer(0), test_span())],
+                body: vec![bare(Expression::Literal(Literal::Integer(0), test_span()))],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -2415,7 +2428,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2450,7 +2463,7 @@ mod tests {
                     name: Identifier::new("_newValue", test_span()),
                     type_annotation: None,
                 }],
-                body: vec![Expression::Literal(Literal::Integer(0), test_span())],
+                body: vec![bare(Expression::Literal(Literal::Integer(0), test_span()))],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -2470,7 +2483,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2503,7 +2516,10 @@ mod tests {
                     name: Identifier::new("x", test_span()),
                     type_annotation: None,
                 }],
-                body: vec![Expression::Identifier(Identifier::new("x", test_span()))],
+                body: vec![bare(Expression::Identifier(Identifier::new(
+                    "x",
+                    test_span(),
+                )))],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -2523,7 +2539,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2557,11 +2573,11 @@ mod tests {
                     name: Identifier::new("index", test_span()),
                     type_annotation: None,
                 }],
-                body: vec![Expression::Primitive {
+                body: vec![bare(Expression::Primitive {
                     name: "at:".into(),
                     is_quoted: true,
                     span: test_span(),
-                }],
+                })],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -2580,7 +2596,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
         let warnings: Vec<_> = result
@@ -2616,11 +2632,11 @@ mod tests {
                     name: Identifier::new("initArgs", test_span()),
                     type_annotation: None,
                 }],
-                body: vec![Expression::Primitive {
+                body: vec![bare(Expression::Primitive {
                     name: "actorSpawnWith".into(),
                     is_quoted: false,
                     span: test_span(),
-                }],
+                })],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -2639,7 +2655,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
         let warnings: Vec<_> = result
@@ -2669,15 +2685,15 @@ mod tests {
                 selector: MessageSelector::Unary("create".into()),
                 parameters: vec![],
                 body: vec![
-                    Expression::Assignment {
+                    bare(Expression::Assignment {
                         target: Box::new(Expression::Identifier(Identifier::new(
                             "temp",
                             Span::new(10, 14),
                         ))),
                         value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
                         span: test_span(),
-                    },
-                    Expression::Identifier(Identifier::new("nil", test_span())),
+                    }),
+                    bare(Expression::Identifier(Identifier::new("nil", test_span()))),
                 ],
                 return_type: None,
                 is_sealed: false,
@@ -2697,7 +2713,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2724,11 +2740,14 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
-                body: vec![Expression::Block(Block::new(
+                body: vec![bare(Expression::Block(Block::new(
                     vec![BlockParameter::new("x", test_span())],
-                    vec![Expression::Identifier(Identifier::new("x", test_span()))],
+                    vec![bare(Expression::Identifier(Identifier::new(
+                        "x",
+                        test_span(),
+                    )))],
                     test_span(),
-                ))],
+                )))],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -2748,7 +2767,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2775,7 +2794,7 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
-                body: vec![Expression::Match {
+                body: vec![bare(Expression::Match {
                     value: Box::new(Expression::Literal(Literal::Integer(1), test_span())),
                     arms: vec![MatchArm::new(
                         Pattern::Variable(Identifier::new("result", test_span())),
@@ -2783,7 +2802,7 @@ mod tests {
                         test_span(),
                     )],
                     span: test_span(),
-                }],
+                })],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -2803,7 +2822,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2830,18 +2849,18 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
-                body: vec![Expression::Block(Block::new(
+                body: vec![bare(Expression::Block(Block::new(
                     vec![],
-                    vec![Expression::Assignment {
+                    vec![bare(Expression::Assignment {
                         target: Box::new(Expression::Identifier(Identifier::new(
                             "unused",
                             Span::new(10, 16),
                         ))),
                         value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
                         span: test_span(),
-                    }],
+                    })],
                     test_span(),
-                ))],
+                )))],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -2861,7 +2880,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2891,19 +2910,22 @@ mod tests {
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
                 body: vec![
-                    Expression::Assignment {
+                    bare(Expression::Assignment {
                         target: Box::new(Expression::Identifier(Identifier::new(
                             "x",
                             Span::new(10, 11),
                         ))),
                         value: Box::new(Expression::Literal(Literal::Integer(1), test_span())),
                         span: test_span(),
-                    },
-                    Expression::Block(Block::new(
+                    }),
+                    bare(Expression::Block(Block::new(
                         vec![],
-                        vec![Expression::Identifier(Identifier::new("x", test_span()))],
+                        vec![bare(Expression::Identifier(Identifier::new(
+                            "x",
+                            test_span(),
+                        )))],
                         test_span(),
-                    )),
+                    ))),
                 ],
                 return_type: None,
                 is_sealed: false,
@@ -2924,7 +2946,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -2954,11 +2976,11 @@ mod tests {
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
                 body: vec![
-                    Expression::Return {
+                    bare(Expression::Return {
                         value: Box::new(Expression::Literal(Literal::Integer(42), Span::new(0, 4))),
                         span: Span::new(0, 4),
-                    },
-                    Expression::MessageSend {
+                    }),
+                    bare(Expression::MessageSend {
                         receiver: Box::new(Expression::Identifier(Identifier::new(
                             "self",
                             Span::new(5, 9),
@@ -2967,7 +2989,7 @@ mod tests {
                         arguments: vec![],
                         is_cast: false,
                         span: Span::new(5, 20),
-                    },
+                    }),
                 ],
                 return_type: None,
                 is_sealed: false,
@@ -2988,7 +3010,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -3019,7 +3041,7 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
-                body: vec![Expression::Literal(Literal::Integer(42), test_span())],
+                body: vec![bare(Expression::Literal(Literal::Integer(42), test_span()))],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -3039,7 +3061,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -3057,11 +3079,11 @@ mod tests {
         let block = Expression::Block(Block {
             parameters: vec![],
             body: vec![
-                Expression::Return {
+                bare(Expression::Return {
                     value: Box::new(Expression::Literal(Literal::Integer(42), Span::new(0, 4))),
                     span: Span::new(0, 4),
-                },
-                Expression::Literal(Literal::Integer(99), Span::new(5, 7)),
+                }),
+                bare(Expression::Literal(Literal::Integer(99), Span::new(5, 7))),
             ],
             span: test_span(),
         });
@@ -3078,7 +3100,7 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
                 parameters: vec![],
-                body: vec![block],
+                body: vec![bare(block)],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -3098,7 +3120,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -3124,10 +3146,10 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
-                body: vec![Expression::Return {
+                body: vec![bare(Expression::Return {
                     value: Box::new(Expression::Literal(Literal::Integer(42), test_span())),
                     span: test_span(),
-                }],
+                })],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -3147,7 +3169,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -3165,7 +3187,7 @@ mod tests {
     fn test_super_outside_method_gives_error() {
         // Using super at module top level should error
         let super_expr = Expression::Super(Span::new(0, 5));
-        let module = Module::new(vec![super_expr], test_span());
+        let module = Module::new(vec![bare(super_expr)], test_span());
         let result = analyse(&module);
 
         let super_errors: Vec<_> = result
@@ -3196,13 +3218,13 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
                 parameters: vec![],
-                body: vec![Expression::MessageSend {
+                body: vec![bare(Expression::MessageSend {
                     receiver: Box::new(Expression::Super(test_span())),
                     selector: MessageSelector::Unary("reset".into()),
                     arguments: vec![],
                     is_cast: false,
                     span: test_span(),
-                }],
+                })],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -3222,7 +3244,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -3239,7 +3261,7 @@ mod tests {
         // super at class level (not inside method) should error
         // This tests depth 1 (class scope, not method scope)
         let super_expr = Expression::Super(Span::new(0, 5));
-        let module = Module::new(vec![super_expr], test_span());
+        let module = Module::new(vec![bare(super_expr)], test_span());
         let result = analyse(&module);
 
         let super_errors: Vec<_> = result
@@ -3260,7 +3282,7 @@ mod tests {
                 name: "x".into(),
                 span: Span::new(10, 11),
             }],
-            body: vec![Expression::MessageSend {
+            body: vec![bare(Expression::MessageSend {
                 receiver: Box::new(Expression::Identifier(Identifier::new(
                     "x",
                     Span::new(14, 15),
@@ -3269,7 +3291,7 @@ mod tests {
                 arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(18, 19))],
                 is_cast: false,
                 span: Span::new(14, 19),
-            }],
+            })],
             span: Span::new(8, 20),
         });
 
@@ -3278,7 +3300,7 @@ mod tests {
                 name: "x".into(),
                 span: Span::new(1, 2),
             }],
-            body: vec![inner_block],
+            body: vec![bare(inner_block)],
             span: Span::new(0, 21),
         });
 
@@ -3294,7 +3316,7 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
                 parameters: vec![],
-                body: vec![outer_block],
+                body: vec![bare(outer_block)],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -3314,7 +3336,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -3336,10 +3358,10 @@ mod tests {
                 name: "_x".into(),
                 span: Span::new(10, 12),
             }],
-            body: vec![Expression::Identifier(Identifier::new(
+            body: vec![bare(Expression::Identifier(Identifier::new(
                 "_x",
                 Span::new(15, 17),
-            ))],
+            )))],
             span: Span::new(8, 18),
         });
 
@@ -3348,7 +3370,7 @@ mod tests {
                 name: "_x".into(),
                 span: Span::new(1, 3),
             }],
-            body: vec![inner_block],
+            body: vec![bare(inner_block)],
             span: Span::new(0, 19),
         });
 
@@ -3363,7 +3385,7 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
                 parameters: vec![],
-                body: vec![outer_block],
+                body: vec![bare(outer_block)],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -3383,7 +3405,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -3403,10 +3425,10 @@ mod tests {
                 name: "y".into(),
                 span: Span::new(10, 11),
             }],
-            body: vec![Expression::Identifier(Identifier::new(
+            body: vec![bare(Expression::Identifier(Identifier::new(
                 "y",
                 Span::new(14, 15),
-            ))],
+            )))],
             span: Span::new(8, 16),
         });
 
@@ -3415,7 +3437,7 @@ mod tests {
                 name: "x".into(),
                 span: Span::new(1, 2),
             }],
-            body: vec![inner_block],
+            body: vec![bare(inner_block)],
             span: Span::new(0, 17),
         });
 
@@ -3430,7 +3452,7 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
                 parameters: vec![],
-                body: vec![outer_block],
+                body: vec![bare(outer_block)],
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
@@ -3450,7 +3472,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let result = analyse(&module);
 
@@ -3493,11 +3515,14 @@ mod tests {
 
         let block = Block::new(
             vec![BlockParameter::new("val", test_span())],
-            vec![match_expr],
+            vec![bare(match_expr)],
             block_span,
         );
 
-        let module = Module::new(vec![outer_x, Expression::Block(block)], test_span());
+        let module = Module::new(
+            vec![bare(outer_x), bare(Expression::Block(block))],
+            test_span(),
+        );
 
         let result = analyse(&module);
 
@@ -3544,11 +3569,14 @@ mod tests {
 
         let block = Block::new(
             vec![BlockParameter::new("val", test_span())],
-            vec![match_expr],
+            vec![bare(match_expr)],
             block_span,
         );
 
-        let module = Module::new(vec![outer_y, Expression::Block(block)], test_span());
+        let module = Module::new(
+            vec![bare(outer_y), bare(Expression::Block(block))],
+            test_span(),
+        );
 
         let result = analyse(&module);
 
@@ -3605,7 +3633,7 @@ mod tests {
         shape.class_methods.push(MethodDefinition {
             selector: MessageSelector::Unary("create".into()),
             parameters: vec![],
-            body: vec![make_spawn_expr("Shape")],
+            body: vec![bare(make_spawn_expr("Shape"))],
             return_type: None,
             is_sealed: false,
             kind: MethodKind::Primary,
@@ -3619,7 +3647,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: Vec::new(),
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
 
         let result = analyse(&module);
@@ -3654,9 +3682,9 @@ mod tests {
         let module = Module {
             classes: vec![shape],
             method_definitions: Vec::new(),
-            expressions: vec![interp],
+            expressions: vec![bare(interp)],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
 
         let result = analyse(&module);
@@ -3688,7 +3716,7 @@ mod tests {
             method: MethodDefinition {
                 selector: MessageSelector::Unary("build".into()),
                 parameters: vec![],
-                body: vec![make_spawn_expr("Shape")],
+                body: vec![bare(make_spawn_expr("Shape"))],
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
@@ -3704,7 +3732,7 @@ mod tests {
             method_definitions: vec![standalone],
             expressions: Vec::new(),
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
 
         let result = analyse(&module);
@@ -3762,7 +3790,7 @@ mod tests {
             method: MethodDefinition {
                 selector: MessageSelector::Unary("build".into()),
                 parameters: vec![],
-                body: vec![new_expr],
+                body: vec![bare(new_expr)],
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
@@ -3778,7 +3806,7 @@ mod tests {
             method_definitions: vec![standalone],
             expressions: Vec::new(),
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
 
         let result = analyse(&module);

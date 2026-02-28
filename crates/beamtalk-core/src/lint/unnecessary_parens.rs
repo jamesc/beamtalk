@@ -34,8 +34,8 @@ pub(crate) struct UnnecessaryParensPass;
 impl LintPass for UnnecessaryParensPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
         for_each_expr_seq(module, |seq| {
-            for expr in seq {
-                check_expr(expr, diagnostics);
+            for stmt in seq {
+                check_expr(&stmt.expression, diagnostics);
             }
         });
     }
@@ -131,8 +131,8 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
         }
 
         Expression::Block(Block { body, .. }) => {
-            for e in body {
-                check_expr(e, diagnostics);
+            for stmt in body {
+                check_expr(&stmt.expression, diagnostics);
             }
         }
 

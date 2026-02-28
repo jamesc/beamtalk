@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,1007 +7,1151 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "greeting",
-                    span: Span {
-                        start: 177,
-                        end: 185,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "greeting",
+                        span: Span {
+                            start: 177,
+                            end: 185,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                String(
-                    "Hello",
                 ),
-                Span {
-                    start: 189,
+                value: Literal(
+                    String(
+                        "Hello",
+                    ),
+                    Span {
+                        start: 189,
+                        end: 196,
+                    },
+                ),
+                span: Span {
+                    start: 177,
                     end: 196,
                 },
-            ),
-            span: Span {
-                start: 177,
-                end: 196,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "name",
-                    span: Span {
-                        start: 197,
-                        end: 201,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "name",
+                        span: Span {
+                            start: 197,
+                            end: 201,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                String(
-                    "World",
                 ),
-                Span {
-                    start: 205,
+                value: Literal(
+                    String(
+                        "World",
+                    ),
+                    Span {
+                        start: 205,
+                        end: 212,
+                    },
+                ),
+                span: Span {
+                    start: 197,
                     end: 212,
                 },
-            ),
-            span: Span {
-                start: 197,
-                end: 212,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "message",
-                    span: Span {
-                        start: 213,
-                        end: 220,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "message",
+                        span: Span {
+                            start: 213,
+                            end: 220,
+                        },
                     },
-                },
-            ),
-            value: MessageSend {
-                receiver: MessageSend {
+                ),
+                value: MessageSend {
                     receiver: MessageSend {
-                        receiver: Identifier(
-                            Identifier {
-                                name: "greeting",
-                                span: Span {
-                                    start: 224,
-                                    end: 232,
+                        receiver: MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "greeting",
+                                    span: Span {
+                                        start: 224,
+                                        end: 232,
+                                    },
                                 },
+                            ),
+                            selector: Binary(
+                                "++",
+                            ),
+                            arguments: [
+                                Literal(
+                                    String(
+                                        ", ",
+                                    ),
+                                    Span {
+                                        start: 236,
+                                        end: 240,
+                                    },
+                                ),
+                            ],
+                            is_cast: false,
+                            span: Span {
+                                start: 224,
+                                end: 240,
                             },
-                        ),
+                        },
                         selector: Binary(
                             "++",
                         ),
                         arguments: [
-                            Literal(
-                                String(
-                                    ", ",
-                                ),
-                                Span {
-                                    start: 236,
-                                    end: 240,
+                            Identifier(
+                                Identifier {
+                                    name: "name",
+                                    span: Span {
+                                        start: 244,
+                                        end: 248,
+                                    },
                                 },
                             ),
                         ],
                         is_cast: false,
                         span: Span {
                             start: 224,
-                            end: 240,
+                            end: 248,
                         },
                     },
                     selector: Binary(
                         "++",
                     ),
                     arguments: [
-                        Identifier(
-                            Identifier {
-                                name: "name",
-                                span: Span {
-                                    start: 244,
-                                    end: 248,
-                                },
+                        Literal(
+                            String(
+                                "!",
+                            ),
+                            Span {
+                                start: 252,
+                                end: 255,
                             },
                         ),
                     ],
                     is_cast: false,
                     span: Span {
                         start: 224,
-                        end: 248,
+                        end: 255,
                     },
                 },
-                selector: Binary(
-                    "++",
-                ),
-                arguments: [
-                    Literal(
-                        String(
-                            "!",
-                        ),
-                        Span {
-                            start: 252,
-                            end: 255,
-                        },
-                    ),
-                ],
-                is_cast: false,
                 span: Span {
-                    start: 224,
+                    start: 213,
                     end: 255,
                 },
             },
-            span: Span {
-                start: 213,
-                end: 255,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "len",
-                    span: Span {
-                        start: 286,
-                        end: 289,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
-                        name: "greeting",
+                        name: "len",
                         span: Span {
-                            start: 293,
-                            end: 301,
+                            start: 286,
+                            end: 289,
                         },
                     },
                 ),
-                selector: Unary(
-                    "length",
-                ),
-                arguments: [],
-                is_cast: false,
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "greeting",
+                            span: Span {
+                                start: 293,
+                                end: 301,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "length",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 293,
+                        end: 308,
+                    },
+                },
                 span: Span {
-                    start: 293,
+                    start: 286,
                     end: 308,
                 },
             },
-            span: Span {
-                start: 286,
-                end: 308,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isEqual",
-                    span: Span {
-                        start: 343,
-                        end: 350,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    String(
-                        "hello",
-                    ),
-                    Span {
-                        start: 354,
-                        end: 361,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isEqual",
+                        span: Span {
+                            start: 343,
+                            end: 350,
+                        },
                     },
                 ),
-                selector: Binary(
-                    "=:=",
-                ),
-                arguments: [
-                    Literal(
+                value: MessageSend {
+                    receiver: Literal(
                         String(
                             "hello",
                         ),
                         Span {
-                            start: 366,
-                            end: 373,
+                            start: 354,
+                            end: 361,
                         },
                     ),
-                ],
-                is_cast: false,
+                    selector: Binary(
+                        "=:=",
+                    ),
+                    arguments: [
+                        Literal(
+                            String(
+                                "hello",
+                            ),
+                            Span {
+                                start: 366,
+                                end: 373,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 354,
+                        end: 373,
+                    },
+                },
                 span: Span {
-                    start: 354,
+                    start: 343,
                     end: 373,
                 },
             },
-            span: Span {
-                start: 343,
-                end: 373,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "notEqual",
-                    span: Span {
-                        start: 374,
-                        end: 382,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    String(
-                        "hello",
-                    ),
-                    Span {
-                        start: 386,
-                        end: 393,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "notEqual",
+                        span: Span {
+                            start: 374,
+                            end: 382,
+                        },
                     },
                 ),
-                selector: Binary(
-                    "/=",
-                ),
-                arguments: [
-                    Literal(
+                value: MessageSend {
+                    receiver: Literal(
                         String(
-                            "world",
+                            "hello",
                         ),
                         Span {
-                            start: 397,
-                            end: 404,
+                            start: 386,
+                            end: 393,
                         },
                     ),
-                ],
-                is_cast: false,
+                    selector: Binary(
+                        "/=",
+                    ),
+                    arguments: [
+                        Literal(
+                            String(
+                                "world",
+                            ),
+                            Span {
+                                start: 397,
+                                end: 404,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 386,
+                        end: 404,
+                    },
+                },
                 span: Span {
-                    start: 386,
+                    start: 374,
                     end: 404,
                 },
             },
-            span: Span {
-                start: 374,
-                end: 404,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isLess",
-                    span: Span {
-                        start: 405,
-                        end: 411,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    String(
-                        "apple",
-                    ),
-                    Span {
-                        start: 415,
-                        end: 422,
-                    },
-                ),
-                selector: Binary(
-                    "<",
-                ),
-                arguments: [
-                    Literal(
-                        String(
-                            "banana",
-                        ),
-                        Span {
-                            start: 425,
-                            end: 433,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isLess",
+                        span: Span {
+                            start: 405,
+                            end: 411,
                         },
-                    ),
-                ],
-                is_cast: false,
-                span: Span {
-                    start: 415,
-                    end: 433,
-                },
-            },
-            span: Span {
-                start: 405,
-                end: 433,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isGreater",
-                    span: Span {
-                        start: 434,
-                        end: 443,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    String(
-                        "zebra",
-                    ),
-                    Span {
-                        start: 447,
-                        end: 454,
                     },
                 ),
-                selector: Binary(
-                    ">",
-                ),
-                arguments: [
-                    Literal(
+                value: MessageSend {
+                    receiver: Literal(
                         String(
                             "apple",
                         ),
                         Span {
-                            start: 457,
-                            end: 464,
+                            start: 415,
+                            end: 422,
                         },
                     ),
-                ],
-                is_cast: false,
+                    selector: Binary(
+                        "<",
+                    ),
+                    arguments: [
+                        Literal(
+                            String(
+                                "banana",
+                            ),
+                            Span {
+                                start: 425,
+                                end: 433,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 415,
+                        end: 433,
+                    },
+                },
                 span: Span {
-                    start: 447,
+                    start: 405,
+                    end: 433,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isGreater",
+                        span: Span {
+                            start: 434,
+                            end: 443,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        String(
+                            "zebra",
+                        ),
+                        Span {
+                            start: 447,
+                            end: 454,
+                        },
+                    ),
+                    selector: Binary(
+                        ">",
+                    ),
+                    arguments: [
+                        Literal(
+                            String(
+                                "apple",
+                            ),
+                            Span {
+                                start: 457,
+                                end: 464,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 447,
+                        end: 464,
+                    },
+                },
+                span: Span {
+                    start: 434,
                     end: 464,
                 },
             },
-            span: Span {
-                start: 434,
-                end: 464,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "upper",
-                    span: Span {
-                        start: 508,
-                        end: 513,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
-                    Identifier {
-                        name: "greeting",
-                        span: Span {
-                            start: 517,
-                            end: 525,
-                        },
-                    },
-                ),
-                selector: Unary(
-                    "uppercase",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 517,
-                    end: 535,
-                },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-            span: Span {
-                start: 508,
-                end: 535,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "lower",
-                    span: Span {
-                        start: 536,
-                        end: 541,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
                         name: "upper",
                         span: Span {
-                            start: 545,
-                            end: 550,
+                            start: 508,
+                            end: 513,
                         },
                     },
                 ),
-                selector: Unary(
-                    "lowercase",
-                ),
-                arguments: [],
-                is_cast: false,
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "greeting",
+                            span: Span {
+                                start: 517,
+                                end: 525,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "uppercase",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 517,
+                        end: 535,
+                    },
+                },
                 span: Span {
-                    start: 545,
+                    start: 508,
+                    end: 535,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "lower",
+                        span: Span {
+                            start: 536,
+                            end: 541,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "upper",
+                            span: Span {
+                                start: 545,
+                                end: 550,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "lowercase",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 545,
+                        end: 560,
+                    },
+                },
+                span: Span {
+                    start: 536,
                     end: 560,
                 },
             },
-            span: Span {
-                start: 536,
-                end: 560,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "padded",
-                    span: Span {
-                        start: 593,
-                        end: 599,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "  hello  ",
-                ),
-                Span {
-                    start: 603,
-                    end: 614,
-                },
-            ),
-            span: Span {
-                start: 593,
-                end: 614,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "trimmed",
-                    span: Span {
-                        start: 615,
-                        end: 622,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
                         name: "padded",
                         span: Span {
-                            start: 626,
-                            end: 632,
+                            start: 593,
+                            end: 599,
                         },
                     },
                 ),
-                selector: Unary(
-                    "trim",
+                value: Literal(
+                    String(
+                        "  hello  ",
+                    ),
+                    Span {
+                        start: 603,
+                        end: 614,
+                    },
                 ),
-                arguments: [],
-                is_cast: false,
                 span: Span {
-                    start: 626,
+                    start: 593,
+                    end: 614,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "trimmed",
+                        span: Span {
+                            start: 615,
+                            end: 622,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "padded",
+                            span: Span {
+                                start: 626,
+                                end: 632,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "trim",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 626,
+                        end: 637,
+                    },
+                },
+                span: Span {
+                    start: 615,
                     end: 637,
                 },
             },
-            span: Span {
-                start: 615,
-                end: 637,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "empty",
-                    span: Span {
-                        start: 684,
-                        end: 689,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "",
-                ),
-                Span {
-                    start: 693,
-                    end: 695,
-                },
-            ),
-            span: Span {
-                start: 684,
-                end: 695,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isEmpty",
-                    span: Span {
-                        start: 696,
-                        end: 703,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
                         name: "empty",
                         span: Span {
-                            start: 707,
-                            end: 712,
+                            start: 684,
+                            end: 689,
                         },
                     },
                 ),
-                selector: Unary(
-                    "isEmpty",
+                value: Literal(
+                    String(
+                        "",
+                    ),
+                    Span {
+                        start: 693,
+                        end: 695,
+                    },
                 ),
-                arguments: [],
-                is_cast: false,
                 span: Span {
-                    start: 707,
+                    start: 684,
+                    end: 695,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isEmpty",
+                        span: Span {
+                            start: 696,
+                            end: 703,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "empty",
+                            span: Span {
+                                start: 707,
+                                end: 712,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "isEmpty",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 707,
+                        end: 720,
+                    },
+                },
+                span: Span {
+                    start: 696,
                     end: 720,
                 },
             },
-            span: Span {
-                start: 696,
-                end: 720,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isNotEmpty",
-                    span: Span {
-                        start: 721,
-                        end: 731,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
-                        name: "message",
+                        name: "isNotEmpty",
                         span: Span {
-                            start: 735,
-                            end: 742,
+                            start: 721,
+                            end: 731,
                         },
                     },
                 ),
-                selector: Unary(
-                    "isNotEmpty",
-                ),
-                arguments: [],
-                is_cast: false,
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "message",
+                            span: Span {
+                                start: 735,
+                                end: 742,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "isNotEmpty",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 735,
+                        end: 753,
+                    },
+                },
                 span: Span {
-                    start: 735,
+                    start: 721,
                     end: 753,
                 },
             },
-            span: Span {
-                start: 721,
-                end: 753,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "firstChar",
-                    span: Span {
-                        start: 813,
-                        end: 822,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    String(
-                        "hello",
-                    ),
-                    Span {
-                        start: 826,
-                        end: 833,
-                    },
-                ),
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "at:",
-                            span: Span {
-                                start: 834,
-                                end: 837,
-                            },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "firstChar",
+                        span: Span {
+                            start: 813,
+                            end: 822,
                         },
-                    ],
+                    },
                 ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            1,
+                value: MessageSend {
+                    receiver: Literal(
+                        String(
+                            "hello",
                         ),
                         Span {
-                            start: 838,
-                            end: 839,
+                            start: 826,
+                            end: 833,
                         },
                     ),
-                ],
-                is_cast: false,
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "at:",
+                                span: Span {
+                                    start: 834,
+                                    end: 837,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                1,
+                            ),
+                            Span {
+                                start: 838,
+                                end: 839,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 826,
+                        end: 839,
+                    },
+                },
                 span: Span {
-                    start: 826,
+                    start: 813,
                     end: 839,
                 },
             },
-            span: Span {
-                start: 813,
-                end: 839,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "thirdChar",
-                    span: Span {
-                        start: 840,
-                        end: 849,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    String(
-                        "hello",
-                    ),
-                    Span {
-                        start: 853,
-                        end: 860,
-                    },
-                ),
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "at:",
-                            span: Span {
-                                start: 861,
-                                end: 864,
-                            },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "thirdChar",
+                        span: Span {
+                            start: 840,
+                            end: 849,
                         },
-                    ],
+                    },
                 ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            3,
+                value: MessageSend {
+                    receiver: Literal(
+                        String(
+                            "hello",
                         ),
                         Span {
-                            start: 865,
-                            end: 866,
+                            start: 853,
+                            end: 860,
                         },
                     ),
-                ],
-                is_cast: false,
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "at:",
+                                span: Span {
+                                    start: 861,
+                                    end: 864,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                3,
+                            ),
+                            Span {
+                                start: 865,
+                                end: 866,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 853,
+                        end: 866,
+                    },
+                },
                 span: Span {
-                    start: 853,
+                    start: 840,
                     end: 866,
                 },
             },
-            span: Span {
-                start: 840,
-                end: 866,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "found",
-                    span: Span {
-                        start: 908,
-                        end: 913,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
-                        name: "message",
+                        name: "found",
                         span: Span {
-                            start: 917,
-                            end: 924,
+                            start: 908,
+                            end: 913,
                         },
                     },
                 ),
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "includesSubstring:",
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "message",
                             span: Span {
-                                start: 925,
-                                end: 943,
+                                start: 917,
+                                end: 924,
                             },
                         },
-                    ],
-                ),
-                arguments: [
-                    Literal(
-                        String(
-                            "World",
-                        ),
-                        Span {
-                            start: 944,
-                            end: 951,
-                        },
                     ),
-                ],
-                is_cast: false,
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "includesSubstring:",
+                                span: Span {
+                                    start: 925,
+                                    end: 943,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            String(
+                                "World",
+                            ),
+                            Span {
+                                start: 944,
+                                end: 951,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 917,
+                        end: 951,
+                    },
+                },
                 span: Span {
-                    start: 917,
+                    start: 908,
                     end: 951,
                 },
             },
-            span: Span {
-                start: 908,
-                end: 951,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "notFound",
-                    span: Span {
-                        start: 952,
-                        end: 960,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
-                        name: "message",
+                        name: "notFound",
                         span: Span {
-                            start: 964,
-                            end: 971,
+                            start: 952,
+                            end: 960,
                         },
                     },
                 ),
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "includesSubstring:",
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "message",
                             span: Span {
-                                start: 972,
-                                end: 990,
+                                start: 964,
+                                end: 971,
                             },
                         },
-                    ],
-                ),
-                arguments: [
-                    Literal(
-                        String(
-                            "xyz",
-                        ),
-                        Span {
-                            start: 991,
-                            end: 996,
-                        },
                     ),
-                ],
-                is_cast: false,
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "includesSubstring:",
+                                span: Span {
+                                    start: 972,
+                                    end: 990,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            String(
+                                "xyz",
+                            ),
+                            Span {
+                                start: 991,
+                                end: 996,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 964,
+                        end: 996,
+                    },
+                },
                 span: Span {
-                    start: 964,
+                    start: 952,
                     end: 996,
                 },
             },
-            span: Span {
-                start: 952,
-                end: 996,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "starts",
-                    span: Span {
-                        start: 1041,
-                        end: 1047,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
-                        name: "message",
+                        name: "starts",
                         span: Span {
-                            start: 1051,
-                            end: 1058,
+                            start: 1041,
+                            end: 1047,
                         },
                     },
                 ),
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "startsWith:",
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "message",
                             span: Span {
-                                start: 1059,
-                                end: 1070,
+                                start: 1051,
+                                end: 1058,
                             },
                         },
-                    ],
-                ),
-                arguments: [
-                    Literal(
-                        String(
-                            "Hello",
-                        ),
-                        Span {
-                            start: 1071,
-                            end: 1078,
-                        },
                     ),
-                ],
-                is_cast: false,
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "startsWith:",
+                                span: Span {
+                                    start: 1059,
+                                    end: 1070,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            String(
+                                "Hello",
+                            ),
+                            Span {
+                                start: 1071,
+                                end: 1078,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 1051,
+                        end: 1078,
+                    },
+                },
                 span: Span {
-                    start: 1051,
+                    start: 1041,
                     end: 1078,
                 },
             },
-            span: Span {
-                start: 1041,
-                end: 1078,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "ends",
-                    span: Span {
-                        start: 1079,
-                        end: 1083,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
-                        name: "message",
+                        name: "ends",
                         span: Span {
-                            start: 1087,
-                            end: 1094,
+                            start: 1079,
+                            end: 1083,
                         },
                     },
                 ),
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "endsWith:",
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "message",
                             span: Span {
-                                start: 1095,
-                                end: 1104,
+                                start: 1087,
+                                end: 1094,
                             },
                         },
-                    ],
-                ),
-                arguments: [
-                    Literal(
-                        String(
-                            "!",
-                        ),
-                        Span {
-                            start: 1105,
-                            end: 1108,
-                        },
                     ),
-                ],
-                is_cast: false,
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "endsWith:",
+                                span: Span {
+                                    start: 1095,
+                                    end: 1104,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            String(
+                                "!",
+                            ),
+                            Span {
+                                start: 1105,
+                                end: 1108,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 1087,
+                        end: 1108,
+                    },
+                },
                 span: Span {
-                    start: 1087,
+                    start: 1079,
                     end: 1108,
                 },
             },
-            span: Span {
-                start: 1079,
-                end: 1108,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "csv",
-                    span: Span {
-                        start: 1142,
-                        end: 1145,
-                    },
-                },
-            ),
-            value: Literal(
-                String(
-                    "a,b,c,d",
-                ),
-                Span {
-                    start: 1149,
-                    end: 1158,
-                },
-            ),
-            span: Span {
-                start: 1142,
-                end: 1158,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "parts",
-                    span: Span {
-                        start: 1159,
-                        end: 1164,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
                         name: "csv",
                         span: Span {
-                            start: 1168,
-                            end: 1171,
+                            start: 1142,
+                            end: 1145,
                         },
                     },
                 ),
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "split:",
+                value: Literal(
+                    String(
+                        "a,b,c,d",
+                    ),
+                    Span {
+                        start: 1149,
+                        end: 1158,
+                    },
+                ),
+                span: Span {
+                    start: 1142,
+                    end: 1158,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "parts",
+                        span: Span {
+                            start: 1159,
+                            end: 1164,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "csv",
                             span: Span {
-                                start: 1172,
-                                end: 1178,
+                                start: 1168,
+                                end: 1171,
                             },
                         },
-                    ],
-                ),
-                arguments: [
-                    Literal(
-                        String(
-                            ",",
-                        ),
-                        Span {
-                            start: 1179,
-                            end: 1182,
-                        },
                     ),
-                ],
-                is_cast: false,
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "split:",
+                                span: Span {
+                                    start: 1172,
+                                    end: 1178,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            String(
+                                ",",
+                            ),
+                            Span {
+                                start: 1179,
+                                end: 1182,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 1168,
+                        end: 1182,
+                    },
+                },
                 span: Span {
-                    start: 1168,
+                    start: 1159,
                     end: 1182,
                 },
             },
-            span: Span {
-                start: 1159,
-                end: 1182,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "reversed",
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "reversed",
+                        span: Span {
+                            start: 1214,
+                            end: 1222,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        String(
+                            "hello",
+                        ),
+                        Span {
+                            start: 1226,
+                            end: 1233,
+                        },
+                    ),
+                    selector: Unary(
+                        "reverse",
+                    ),
+                    arguments: [],
+                    is_cast: false,
                     span: Span {
-                        start: 1214,
-                        end: 1222,
+                        start: 1226,
+                        end: 1241,
                     },
                 },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    String(
-                        "hello",
-                    ),
-                    Span {
-                        start: 1226,
-                        end: 1233,
-                    },
-                ),
-                selector: Unary(
-                    "reverse",
-                ),
-                arguments: [],
-                is_cast: false,
                 span: Span {
-                    start: 1226,
+                    start: 1214,
                     end: 1241,
                 },
-            },
-            span: Span {
-                start: 1214,
-                end: 1241,
             },
         },
     ],
@@ -1016,7 +1159,7 @@ Module {
         start: 177,
         end: 1241,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

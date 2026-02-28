@@ -48,9 +48,9 @@ impl Analyser {
         let mut mutations = Vec::new();
 
         // Analyse block body
-        for expr in &block.body {
-            self.collect_captures_and_mutations(expr, &mut captures, &mut mutations);
-            self.analyse_expression(expr, None);
+        for stmt in &block.body {
+            self.collect_captures_and_mutations(&stmt.expression, &mut captures, &mut mutations);
+            self.analyse_expression(&stmt.expression, None);
         }
 
         // Store block info before emitting diagnostics (avoids unnecessary clones)

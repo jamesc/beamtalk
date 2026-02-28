@@ -7,73 +7,103 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "x",
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "x",
+                        span: Span {
+                            start: 179,
+                            end: 180,
+                        },
+                    },
+                ),
+                value: Error {
+                    message: "Unexpected token: expected expression, found :=",
                     span: Span {
-                        start: 179,
-                        end: 180,
+                        start: 184,
+                        end: 186,
                     },
                 },
-            ),
-            value: Error {
-                message: "Unexpected token: expected expression, found :=",
                 span: Span {
-                    start: 184,
+                    start: 179,
                     end: 186,
                 },
             },
-            span: Span {
-                start: 179,
-                end: 186,
-            },
         },
-        Literal(
-            Integer(
-                5,
-            ),
-            Span {
-                start: 187,
-                end: 188,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        ),
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "y",
-                    span: Span {
-                        start: 209,
-                        end: 210,
-                    },
+            expression: Literal(
+                Integer(
+                    5,
+                ),
+                Span {
+                    start: 187,
+                    end: 188,
                 },
             ),
-            value: Error {
-                message: "Invalid assignment target",
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "y",
+                        span: Span {
+                            start: 209,
+                            end: 210,
+                        },
+                    },
+                ),
+                value: Error {
+                    message: "Invalid assignment target",
+                    span: Span {
+                        start: 214,
+                        end: 251,
+                    },
+                },
                 span: Span {
-                    start: 214,
+                    start: 209,
                     end: 251,
                 },
             },
-            span: Span {
-                start: 209,
-                end: 251,
-            },
         },
-        Identifier(
-            Identifier {
-                name: "value",
-                span: Span {
-                    start: 255,
-                    end: 260,
-                },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        ),
-        Error {
-            message: "Invalid assignment target",
-            span: Span {
-                start: 306,
-                end: 365,
+            expression: Identifier(
+                Identifier {
+                    name: "value",
+                    span: Span {
+                        start: 255,
+                        end: 260,
+                    },
+                },
+            ),
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Invalid assignment target",
+                span: Span {
+                    start: 306,
+                    end: 365,
+                },
             },
         },
     ],
@@ -81,7 +111,7 @@ Module {
         start: 179,
         end: 372,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

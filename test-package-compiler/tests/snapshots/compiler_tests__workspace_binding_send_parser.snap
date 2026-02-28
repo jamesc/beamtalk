@@ -34,46 +34,52 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        MessageSend {
-                            receiver: ClassReference {
-                                name: Identifier {
-                                    name: "Transcript",
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: ClassReference {
+                                    name: Identifier {
+                                        name: "Transcript",
+                                        span: Span {
+                                            start: 183,
+                                            end: 193,
+                                        },
+                                    },
                                     span: Span {
                                         start: 183,
                                         end: 193,
                                     },
                                 },
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "show:",
+                                            span: Span {
+                                                start: 194,
+                                                end: 199,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Literal(
+                                        String(
+                                            "Hello, World!",
+                                        ),
+                                        Span {
+                                            start: 200,
+                                            end: 215,
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
                                 span: Span {
                                     start: 183,
-                                    end: 193,
+                                    end: 215,
                                 },
-                            },
-                            selector: Keyword(
-                                [
-                                    KeywordPart {
-                                        keyword: "show:",
-                                        span: Span {
-                                            start: 194,
-                                            end: 199,
-                                        },
-                                    },
-                                ],
-                            ),
-                            arguments: [
-                                Literal(
-                                    String(
-                                        "Hello, World!",
-                                    ),
-                                    Span {
-                                        start: 200,
-                                        end: 215,
-                                    },
-                                ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 183,
-                                end: 215,
                             },
                         },
                     ],
@@ -110,7 +116,7 @@ Module {
         start: 148,
         end: 215,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// BT-374: Workspace binding dispatch via persistent_term.",
             span: Span {

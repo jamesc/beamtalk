@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,140 +7,224 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "point",
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "point",
+                        span: Span {
+                            start: 122,
+                            end: 127,
+                        },
+                    },
+                ),
+                value: Error {
+                    message: "Unexpected token: expected expression, found {",
                     span: Span {
-                        start: 122,
-                        end: 127,
+                        start: 131,
+                        end: 132,
                     },
                 },
-            ),
-            value: Error {
-                message: "Unexpected token: expected expression, found {",
                 span: Span {
-                    start: 131,
+                    start: 122,
                     end: 132,
                 },
             },
-            span: Span {
-                start: 122,
-                end: 132,
-            },
         },
-        Literal(
-            Integer(
-                10,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Literal(
+                Integer(
+                    10,
+                ),
+                Span {
+                    start: 132,
+                    end: 134,
+                },
             ),
-            Span {
-                start: 132,
-                end: 134,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        ),
-        Error {
-            message: "Unexpected token: expected expression, found ,",
-            span: Span {
-                start: 134,
-                end: 135,
+            expression: Error {
+                message: "Unexpected token: expected expression, found ,",
+                span: Span {
+                    start: 134,
+                    end: 135,
+                },
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found }",
-            span: Span {
-                start: 138,
-                end: 139,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found }",
-            span: Span {
-                start: 159,
-                end: 160,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found }",
-            span: Span {
-                start: 171,
-                end: 172,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 423,
-                end: 424,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 479,
-                end: 480,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 529,
-                end: 530,
-            },
-        },
-        Error {
-            message: "Unexpected token: expected expression, found ]",
-            span: Span {
-                start: 590,
-                end: 591,
-            },
-        },
-        MessageSend {
-            receiver: Error {
+            expression: Error {
                 message: "Unexpected token: expected expression, found }",
                 span: Span {
-                    start: 675,
-                    end: 676,
+                    start: 138,
+                    end: 139,
                 },
             },
-            selector: Binary(
-                "++",
-            ),
-            arguments: [
-                Error {
-                    message: "Unexpected token: expected expression, found {",
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found }",
+                span: Span {
+                    start: 159,
+                    end: 160,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found }",
+                span: Span {
+                    start: 171,
+                    end: 172,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 423,
+                    end: 424,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 479,
+                    end: 480,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 529,
+                    end: 530,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 590,
+                    end: 591,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Error {
+                    message: "Unexpected token: expected expression, found }",
                     span: Span {
-                        start: 680,
-                        end: 681,
+                        start: 675,
+                        end: 676,
                     },
                 },
-            ],
-            is_cast: false,
-            span: Span {
-                start: 675,
-                end: 681,
+                selector: Binary(
+                    "++",
+                ),
+                arguments: [
+                    Error {
+                        message: "Unexpected token: expected expression, found {",
+                        span: Span {
+                            start: 680,
+                            end: 681,
+                        },
+                    },
+                ],
+                is_cast: false,
+                span: Span {
+                    start: 675,
+                    end: 681,
+                },
             },
         },
-        Literal(
-            Integer(
-                3,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Literal(
+                Integer(
+                    3,
+                ),
+                Span {
+                    start: 681,
+                    end: 682,
+                },
             ),
-            Span {
-                start: 681,
-                end: 682,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        ),
-        Error {
-            message: "Unexpected token: expected expression, found ,",
-            span: Span {
-                start: 682,
-                end: 683,
+            expression: Error {
+                message: "Unexpected token: expected expression, found ,",
+                span: Span {
+                    start: 682,
+                    end: 683,
+                },
             },
         },
-        Error {
-            message: "Unexpected token: expected expression, found }",
-            span: Span {
-                start: 685,
-                end: 686,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found }",
+                span: Span {
+                    start: 685,
+                    end: 686,
+                },
             },
         },
     ],
@@ -149,7 +232,7 @@ Module {
         start: 122,
         end: 732,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

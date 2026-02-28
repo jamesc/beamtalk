@@ -241,7 +241,7 @@ fn detect_erlang_class_context(module: &Module, trimmed: &str, offset: u32) -> b
 
 /// Walks the AST to find a `ClassReference("Erlang")` expression near the cursor.
 fn find_erlang_class_ref(module: &Module, offset: u32) -> bool {
-    let all_exprs = module.expressions.iter().chain(
+    let all_exprs = module.expressions.iter().map(|s| &s.expression).chain(
         module
             .classes
             .iter()
@@ -249,13 +249,13 @@ fn find_erlang_class_ref(module: &Module, offset: u32) -> bool {
                 c.methods
                     .iter()
                     .chain(c.class_methods.iter())
-                    .flat_map(|m| m.body.iter())
+                    .flat_map(|m| m.body.iter().map(|s| &s.expression))
             })
             .chain(
                 module
                     .method_definitions
                     .iter()
-                    .flat_map(|smd| smd.method.body.iter()),
+                    .flat_map(|smd| smd.method.body.iter().map(|s| &s.expression)),
             ),
     );
 
@@ -291,7 +291,7 @@ fn has_erlang_class_ref_at(expr: &Expression, offset: u32) -> bool {
         Expression::Block(block) => block
             .body
             .iter()
-            .any(|e| has_erlang_class_ref_at(e, offset)),
+            .any(|s| has_erlang_class_ref_at(&s.expression, offset)),
         Expression::Cascade {
             receiver, messages, ..
         } => {
@@ -330,8 +330,8 @@ fn add_identifier_completions(module: &Module, completions: &mut Vec<Completion>
     let mut identifiers = HashSet::new();
 
     // Collect all identifiers from the module
-    for expr in &module.expressions {
-        collect_identifiers_from_expr(expr, &mut identifiers);
+    for stmt in &module.expressions {
+        collect_identifiers_from_expr(&stmt.expression, &mut identifiers);
     }
 
     // Add them as completions
@@ -427,8 +427,8 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
             for param in &block.parameters {
                 identifiers.insert(param.name.clone());
             }
-            for expr in &block.body {
-                collect_identifiers_from_expr(expr, identifiers);
+            for stmt in &block.body {
+                collect_identifiers_from_expr(&stmt.expression, identifiers);
             }
         }
         Expression::Return { value, .. } => {
@@ -491,17 +491,18 @@ fn find_receiver_type(module: &Module, offset: u32, type_map: &TypeMap) -> Optio
     let expressions = module
         .expressions
         .iter()
+        .map(|s| &s.expression)
         .chain(module.classes.iter().flat_map(|c| {
             c.methods
                 .iter()
                 .chain(c.class_methods.iter())
-                .flat_map(|m| m.body.iter())
+                .flat_map(|m| m.body.iter().map(|s| &s.expression))
         }))
         .chain(
             module
                 .method_definitions
                 .iter()
-                .flat_map(|smd| smd.method.body.iter()),
+                .flat_map(|smd| smd.method.body.iter().map(|s| &s.expression)),
         );
 
     for expr in expressions {
@@ -600,7 +601,7 @@ fn find_receiver_in_expr(
         Expression::Block(block) => block
             .body
             .iter()
-            .find_map(|e| find_receiver_in_expr(e, offset, type_map)),
+            .find_map(|s| find_receiver_in_expr(&s.expression, offset, type_map)),
         _ => None,
     }
 }

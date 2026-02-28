@@ -454,8 +454,8 @@ impl CoreErlangGenerator {
         let prim_name = new_method
             .body
             .iter()
-            .find_map(|expr| {
-                if let crate::ast::Expression::Primitive { name, .. } = expr {
+            .find_map(|stmt| {
+                if let crate::ast::Expression::Primitive { name, .. } = &stmt.expression {
                     Some(name.clone())
                 } else {
                     None
@@ -737,7 +737,7 @@ impl CoreErlangGenerator {
         let needs_nlr = method
             .body
             .iter()
-            .any(|expr| Self::expr_has_block_nlr(expr, false));
+            .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
 
         let nlr_token_var = if needs_nlr {
             let token_var = self.fresh_temp_var("NlrToken");
@@ -758,6 +758,7 @@ impl CoreErlangGenerator {
         let body: Vec<&Expression> = method
             .body
             .iter()
+            .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
 
@@ -1082,7 +1083,10 @@ impl CoreErlangGenerator {
     /// Returns `true` if the block (or any expression inside it, recursively)
     /// contains a `^` (Return) expression.
     fn block_has_nlr(block: &Block) -> bool {
-        block.body.iter().any(|e| Self::expr_has_block_nlr(e, true))
+        block
+            .body
+            .iter()
+            .any(|s| Self::expr_has_block_nlr(&s.expression, true))
     }
 
     /// Returns true if the class is a non-instantiable primitive type.
@@ -1294,7 +1298,7 @@ impl CoreErlangGenerator {
             let has_nlr = method
                 .body
                 .iter()
-                .any(|expr| Self::expr_has_block_nlr(expr, false));
+                .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
 
             // Build the method call arguments: (Self) or (Self, DispArg0, DispArg1, ...)
             if !method.parameters.is_empty() {

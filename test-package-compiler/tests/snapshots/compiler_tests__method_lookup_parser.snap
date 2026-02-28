@@ -34,38 +34,44 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        MessageSend {
-                            receiver: ClassReference {
-                                name: Identifier {
-                                    name: "Counter",
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: ClassReference {
+                                    name: Identifier {
+                                        name: "Counter",
+                                        span: Span {
+                                            start: 396,
+                                            end: 403,
+                                        },
+                                    },
                                     span: Span {
                                         start: 396,
                                         end: 403,
                                     },
                                 },
+                                selector: Binary(
+                                    ">>",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Symbol(
+                                            "increment",
+                                        ),
+                                        Span {
+                                            start: 407,
+                                            end: 417,
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
                                 span: Span {
                                     start: 396,
-                                    end: 403,
+                                    end: 417,
                                 },
-                            },
-                            selector: Binary(
-                                ">>",
-                            ),
-                            arguments: [
-                                Literal(
-                                    Symbol(
-                                        "increment",
-                                    ),
-                                    Span {
-                                        start: 407,
-                                        end: 417,
-                                    },
-                                ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 396,
-                                end: 417,
                             },
                         },
                     ],
@@ -107,34 +113,40 @@ Module {
                         },
                     ],
                     body: [
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "cls",
-                                    span: Span {
-                                        start: 518,
-                                        end: 521,
-                                    },
-                                },
-                            ),
-                            selector: Binary(
-                                ">>",
-                            ),
-                            arguments: [
-                                Literal(
-                                    Symbol(
-                                        "getValue",
-                                    ),
-                                    Span {
-                                        start: 525,
-                                        end: 534,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "cls",
+                                        span: Span {
+                                            start: 518,
+                                            end: 521,
+                                        },
                                     },
                                 ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 518,
-                                end: 534,
+                                selector: Binary(
+                                    ">>",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Symbol(
+                                            "getValue",
+                                        ),
+                                        Span {
+                                            start: 525,
+                                            end: 534,
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 518,
+                                    end: 534,
+                                },
                             },
                         },
                     ],
@@ -171,7 +183,7 @@ Module {
         start: 286,
         end: 534,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

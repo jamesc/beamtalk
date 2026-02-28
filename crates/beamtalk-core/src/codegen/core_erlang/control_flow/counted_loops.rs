@@ -207,11 +207,15 @@ impl CoreErlangGenerator {
 
         // BT-478: Check if body has direct field assignments. If not, mutations
         // come from nested constructs and the last expression's result must be bound.
-        let has_direct_field_assignments = body.body.iter().any(Self::is_field_assignment);
+        let has_direct_field_assignments = body
+            .body
+            .iter()
+            .any(|s| Self::is_field_assignment(&s.expression));
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
-        for (i, expr) in body.body.iter().enumerate() {
+        for (i, stmt) in body.body.iter().enumerate() {
+            let expr = &stmt.expression;
             if i > 0 {
                 docs.push(Document::Str(" "));
             }
@@ -449,12 +453,16 @@ impl CoreErlangGenerator {
         // Direct field assignments update StateAcc via generate_field_assignment_open.
         // Nested mutations (e.g., inner to:do: with field writes) return the updated
         // state as the expression result.
-        let has_direct_field_assignments = body.body.iter().any(Self::is_field_assignment);
+        let has_direct_field_assignments = body
+            .body
+            .iter()
+            .any(|s| Self::is_field_assignment(&s.expression));
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         // Generate body expressions
-        for (i, expr) in body.body.iter().enumerate() {
+        for (i, stmt) in body.body.iter().enumerate() {
+            let expr = &stmt.expression;
             let is_last = i == body.body.len() - 1;
 
             if Self::is_field_assignment(expr) {

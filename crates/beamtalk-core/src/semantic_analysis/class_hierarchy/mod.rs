@@ -1109,7 +1109,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, _diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -1181,7 +1181,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -1202,7 +1202,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let h = ClassHierarchy::build(&module).0.unwrap();
 
@@ -1224,7 +1224,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let h = ClassHierarchy::build(&module).0.unwrap();
 
@@ -1247,7 +1247,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -1266,7 +1266,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (_, diags) = ClassHierarchy::build(&module);
         assert_eq!(diags.len(), 1);
@@ -1280,7 +1280,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -1298,7 +1298,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build_with_options(&module, true);
         let h = h.unwrap();
@@ -1317,7 +1317,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build_with_options(&module, false);
         let h = h.unwrap();
@@ -1336,7 +1336,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (_, diags) = ClassHierarchy::build_with_options(&module, true);
         assert_eq!(diags.len(), 1);
@@ -1448,7 +1448,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -1472,7 +1472,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (_, diags) = ClassHierarchy::build(&module);
         assert!(diags.is_empty());
@@ -1490,7 +1490,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -1512,7 +1512,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -1534,7 +1534,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -1556,7 +1556,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let h = ClassHierarchy::build(&module).0.unwrap();
         let methods = h.all_methods("Counter");
@@ -1684,7 +1684,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -1704,7 +1704,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -1768,7 +1768,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (_, diags) = ClassHierarchy::build(&module);
 
@@ -1826,7 +1826,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (_, diags) = ClassHierarchy::build(&module);
 
@@ -1881,7 +1881,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (_, diags) = ClassHierarchy::build(&module);
 
@@ -1900,7 +1900,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         assert!(
@@ -1922,7 +1922,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
@@ -1947,7 +1947,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
@@ -1969,7 +1969,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
@@ -2039,7 +2039,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let method = hierarchy
@@ -2087,7 +2087,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let method = hierarchy
@@ -2131,7 +2131,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -2149,7 +2149,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let h = ClassHierarchy::build(&module).0.unwrap();
         assert_eq!(h.state_field_type("Counter", "label"), None);
@@ -2162,7 +2162,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let h = ClassHierarchy::build(&module).0.unwrap();
         assert_eq!(h.state_field_type("Counter", "nonexistent"), None);
@@ -2202,7 +2202,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (h, diags) = ClassHierarchy::build(&module);
         let h = h.unwrap();
@@ -2259,7 +2259,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let h = ClassHierarchy::build(&module).0.unwrap();
 
@@ -2440,7 +2440,7 @@ mod tests {
             method_definitions: vec![],
             expressions: vec![],
             span: test_span(),
-            leading_comments: vec![],
+            file_leading_comments: vec![],
         };
         let (Ok(h), _) = ClassHierarchy::build(&module) else {
             panic!("build should succeed");

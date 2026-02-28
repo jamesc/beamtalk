@@ -17,8 +17,8 @@
 //! - Field access (`object.field`)
 
 use crate::ast::{
-    Block, BlockParameter, CascadeMessage, ExpectCategory, Expression, Identifier, KeywordPart,
-    Literal, MapPair, MatchArm, MessageSelector, Pattern, StringSegment,
+    Block, BlockParameter, CascadeMessage, ExpectCategory, Expression, ExpressionStatement,
+    Identifier, KeywordPart, Literal, MapPair, MatchArm, MessageSelector, Pattern, StringSegment,
 };
 use crate::source_analysis::{Token, TokenKind};
 use ecow::EcoString;
@@ -642,7 +642,7 @@ impl Parser {
         while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
             let pos_before = self.current;
             let expr = self.parse_expression();
-            body.push(expr);
+            body.push(ExpressionStatement::bare(expr));
 
             // If parse_expression didn't consume any tokens (e.g. nesting
             // depth exceeded), break to avoid an infinite loop.
@@ -672,7 +672,7 @@ impl Parser {
             } else if self.match_token(&TokenKind::Bang) {
                 // Cast terminator — mark the last expression as a cast if it's a MessageSend.
                 // If the expression is not a MessageSend (e.g. `x := foo bar!`), emit an error.
-                match body.last_mut() {
+                match body.last_mut().map(|s| &mut s.expression) {
                     Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
                     Some(last) => {
                         let span = last.span();

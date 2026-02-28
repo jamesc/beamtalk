@@ -189,6 +189,7 @@ impl CoreErlangGenerator {
     ///
     /// Returns `(body_doc, final_state_version)`. The generated code ends with
     /// `{<result>, <final_state>}`.
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_conditional_branch_inline(
         &mut self,
         block: &Block,
@@ -199,6 +200,7 @@ impl CoreErlangGenerator {
         let body: Vec<&Expression> = block
             .body
             .iter()
+            .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
 

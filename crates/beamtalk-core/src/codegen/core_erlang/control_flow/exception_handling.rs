@@ -502,12 +502,16 @@ impl CoreErlangGenerator {
         let previous_in_loop_body = self.in_loop_body;
         self.in_loop_body = true;
 
-        let has_direct_field_assignments = body.body.iter().any(Self::is_field_assignment);
+        let has_direct_field_assignments = body
+            .body
+            .iter()
+            .any(|s| Self::is_field_assignment(&s.expression));
 
         let mut result_var = "'nil'".to_string();
         let mut docs: Vec<Document<'static>> = Vec::new();
 
-        for (i, expr) in body.body.iter().enumerate() {
+        for (i, stmt) in body.body.iter().enumerate() {
+            let expr = &stmt.expression;
             if i > 0 {
                 docs.push(Document::Str(" "));
             }

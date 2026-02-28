@@ -84,26 +84,32 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        FieldAccess {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "self",
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 321,
+                                            end: 325,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
                                     span: Span {
-                                        start: 321,
-                                        end: 325,
+                                        start: 326,
+                                        end: 331,
                                     },
                                 },
-                            ),
-                            field: Identifier {
-                                name: "value",
                                 span: Span {
-                                    start: 326,
+                                    start: 321,
                                     end: 331,
                                 },
-                            },
-                            span: Span {
-                                start: 321,
-                                end: 331,
                             },
                         },
                     ],
@@ -160,7 +166,7 @@ Module {
         start: 244,
         end: 354,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

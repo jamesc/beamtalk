@@ -68,8 +68,8 @@ pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
     }
 
     // Analyze all expressions in the block body
-    for expr in &block.body {
-        analyze_expression(expr, &mut analysis, &mut ctx);
+    for stmt in &block.body {
+        analyze_expression(&stmt.expression, &mut analysis, &mut ctx);
     }
 
     analysis
@@ -303,7 +303,7 @@ pub fn is_control_flow_construct(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BlockParameter, Identifier};
+    use crate::ast::{BlockParameter, ExpressionStatement, Identifier};
     use crate::source_analysis::Span;
 
     fn make_id(name: &str) -> Identifier {
@@ -312,6 +312,10 @@ mod tests {
 
     fn make_expr_id(name: &str) -> Expression {
         Expression::Identifier(make_id(name))
+    }
+
+    fn bare(expr: Expression) -> ExpressionStatement {
+        ExpressionStatement::bare(expr)
     }
 
     #[test]
@@ -328,7 +332,7 @@ mod tests {
     fn test_analyze_local_variable_read() {
         let block = Block::new(
             vec![BlockParameter::new("x", Span::new(0, 1))],
-            vec![make_expr_id("x")],
+            vec![bare(make_expr_id("x"))],
             Span::new(0, 5),
         );
         let analysis = analyze_block(&block);
@@ -340,14 +344,14 @@ mod tests {
     fn test_analyze_local_variable_write() {
         let block = Block::new(
             vec![],
-            vec![Expression::Assignment {
+            vec![bare(Expression::Assignment {
                 target: Box::new(make_expr_id("count")),
                 value: Box::new(Expression::Literal(
                     crate::ast::Literal::Integer(0),
                     Span::new(9, 10),
                 )),
                 span: Span::new(0, 10),
-            }],
+            })],
             Span::new(0, 12),
         );
         let analysis = analyze_block(&block);
@@ -360,7 +364,7 @@ mod tests {
         // Variable is a parameter, so it's in scope for both read and write
         let block = Block::new(
             vec![BlockParameter::new("count", Span::new(1, 6))],
-            vec![Expression::Assignment {
+            vec![bare(Expression::Assignment {
                 target: Box::new(make_expr_id("count")),
                 value: Box::new(Expression::MessageSend {
                     receiver: Box::new(make_expr_id("count")),
@@ -373,7 +377,7 @@ mod tests {
                     span: Span::new(9, 17),
                 }),
                 span: Span::new(0, 17),
-            }],
+            })],
             Span::new(0, 19),
         );
         let analysis = analyze_block(&block);
@@ -388,11 +392,11 @@ mod tests {
         // [self.value]
         let block = Block::new(
             vec![],
-            vec![Expression::FieldAccess {
+            vec![bare(Expression::FieldAccess {
                 receiver: Box::new(make_expr_id("self")),
                 field: make_id("value"),
                 span: Span::new(0, 10),
-            }],
+            })],
             Span::new(0, 12),
         );
         let analysis = analyze_block(&block);
@@ -405,7 +409,7 @@ mod tests {
         // [self.value := 0]
         let block = Block::new(
             vec![],
-            vec![Expression::Assignment {
+            vec![bare(Expression::Assignment {
                 target: Box::new(Expression::FieldAccess {
                     receiver: Box::new(make_expr_id("self")),
                     field: make_id("value"),
@@ -416,7 +420,7 @@ mod tests {
                     Span::new(14, 15),
                 )),
                 span: Span::new(0, 15),
-            }],
+            })],
             Span::new(0, 17),
         );
         let analysis = analyze_block(&block);
@@ -430,7 +434,7 @@ mod tests {
         // Field writes in nested blocks must propagate to outer analysis
         let inner_block = Expression::Block(Block::new(
             vec![BlockParameter::new("j", Span::new(1, 2))],
-            vec![Expression::Assignment {
+            vec![bare(Expression::Assignment {
                 target: Box::new(Expression::FieldAccess {
                     receiver: Box::new(make_expr_id("self")),
                     field: make_id("value"),
@@ -451,13 +455,13 @@ mod tests {
                     span: Span::new(0, 21),
                 }),
                 span: Span::new(0, 21),
-            }],
+            })],
             Span::new(0, 25),
         ));
 
         let outer_block = Block::new(
             vec![BlockParameter::new("i", Span::new(1, 2))],
-            vec![inner_block],
+            vec![bare(inner_block)],
             Span::new(0, 30),
         );
 
@@ -513,7 +517,7 @@ mod tests {
         // BT-665: [count := count + 1] — `count` is read before being locally defined
         let block = Block::new(
             vec![],
-            vec![Expression::Assignment {
+            vec![bare(Expression::Assignment {
                 target: Box::new(make_expr_id("count")),
                 value: Box::new(Expression::MessageSend {
                     receiver: Box::new(make_expr_id("count")),
@@ -526,7 +530,7 @@ mod tests {
                     span: Span::new(9, 17),
                 }),
                 span: Span::new(0, 17),
-            }],
+            })],
             Span::new(0, 19),
         );
         let analysis = analyze_block(&block);
@@ -543,7 +547,7 @@ mod tests {
         let block = Block::new(
             vec![BlockParameter::new("x", Span::new(1, 2))],
             vec![
-                Expression::Assignment {
+                bare(Expression::Assignment {
                     target: Box::new(make_expr_id("temp")),
                     value: Box::new(Expression::MessageSend {
                         receiver: Box::new(make_expr_id("x")),
@@ -556,8 +560,8 @@ mod tests {
                         span: Span::new(9, 17),
                     }),
                     span: Span::new(0, 17),
-                },
-                Expression::MessageSend {
+                }),
+                bare(Expression::MessageSend {
                     receiver: Box::new(make_expr_id("temp")),
                     selector: MessageSelector::Binary("+".into()),
                     arguments: vec![Expression::Literal(
@@ -566,7 +570,7 @@ mod tests {
                     )],
                     is_cast: false,
                     span: Span::new(19, 27),
-                },
+                }),
             ],
             Span::new(0, 29),
         );
@@ -584,7 +588,7 @@ mod tests {
         // BT-665: [:x | x + 1] — `x` is a block param, not a captured read
         let block = Block::new(
             vec![BlockParameter::new("x", Span::new(1, 2))],
-            vec![Expression::MessageSend {
+            vec![bare(Expression::MessageSend {
                 receiver: Box::new(make_expr_id("x")),
                 selector: MessageSelector::Binary("+".into()),
                 arguments: vec![Expression::Literal(
@@ -593,7 +597,7 @@ mod tests {
                 )],
                 is_cast: false,
                 span: Span::new(3, 7),
-            }],
+            })],
             Span::new(0, 9),
         );
         let analysis = analyze_block(&block);

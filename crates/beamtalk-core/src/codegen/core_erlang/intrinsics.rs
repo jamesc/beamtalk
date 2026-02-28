@@ -1256,14 +1256,17 @@ impl CoreErlangGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Block, BlockParameter, Literal};
+    use crate::ast::{Block, BlockParameter, ExpressionStatement, Literal};
     use crate::source_analysis::Span;
 
     #[test]
     fn test_validate_if_not_nil_block_zero_args() {
         let block = Expression::Block(Block {
             parameters: vec![],
-            body: vec![Expression::Literal(Literal::Integer(1), Span::new(1, 2))],
+            body: vec![ExpressionStatement::bare(Expression::Literal(
+                Literal::Integer(1),
+                Span::new(1, 2),
+            ))],
             span: Span::new(0, 3),
         });
         assert!(!validate_if_not_nil_block(&block, "ifNotNil:").unwrap());
@@ -1273,7 +1276,10 @@ mod tests {
     fn test_validate_if_not_nil_block_one_arg() {
         let block = Expression::Block(Block {
             parameters: vec![BlockParameter::new("v", Span::new(1, 2))],
-            body: vec![Expression::Literal(Literal::Integer(1), Span::new(5, 6))],
+            body: vec![ExpressionStatement::bare(Expression::Literal(
+                Literal::Integer(1),
+                Span::new(5, 6),
+            ))],
             span: Span::new(0, 7),
         });
         assert!(validate_if_not_nil_block(&block, "ifNotNil:").unwrap());
@@ -1286,7 +1292,10 @@ mod tests {
                 BlockParameter::new("a", Span::new(1, 2)),
                 BlockParameter::new("b", Span::new(3, 4)),
             ],
-            body: vec![Expression::Literal(Literal::Integer(1), Span::new(7, 8))],
+            body: vec![ExpressionStatement::bare(Expression::Literal(
+                Literal::Integer(1),
+                Span::new(7, 8),
+            ))],
             span: Span::new(0, 9),
         });
         let result = validate_if_not_nil_block(&block, "ifNotNil:");
@@ -1319,7 +1328,10 @@ mod tests {
             .collect();
         Expression::Block(Block {
             parameters: params,
-            body: vec![Expression::Literal(Literal::Integer(1), Span::new(1, 2))],
+            body: vec![ExpressionStatement::bare(Expression::Literal(
+                Literal::Integer(1),
+                Span::new(1, 2),
+            ))],
             span: Span::new(0, 10),
         })
     }

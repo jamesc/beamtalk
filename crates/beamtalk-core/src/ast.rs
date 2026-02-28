@@ -34,7 +34,7 @@
 //!     classes: Vec::new(),
 //!     method_definitions: Vec::new(),
 //!     expressions: vec![
-//!         Expression::Assignment {
+//!         ExpressionStatement::bare(Expression::Assignment {
 //!             target: Box::new(Expression::Identifier(Identifier {
 //!                 name: "x".into(),
 //!                 span: Span::new(0, 1),
@@ -53,10 +53,10 @@
 //!                 span: Span::new(5, 10),
 //!             }),
 //!             span: Span::new(0, 10),
-//!         }
+//!         })
 //!     ],
 //!     span: Span::new(0, 10),
-//!     leading_comments: Vec::new(),
+//!     file_leading_comments: Vec::new(),
 //! };
 //! # assert_eq!(module.expressions.len(), 1);
 //! ```
@@ -96,23 +96,25 @@ pub struct Module {
     /// Standalone method definitions (Tonel-style `Class >> method => body`).
     pub method_definitions: Vec<StandaloneMethodDefinition>,
     /// Top-level expressions (scripts, REPL input).
-    pub expressions: Vec<Expression>,
+    pub expressions: Vec<ExpressionStatement>,
     /// Source location spanning the entire module.
     pub span: Span,
-    /// Leading comments (module documentation).
-    pub leading_comments: Vec<Comment>,
+    /// File-level leading comments (ADR 0044).
+    ///
+    /// Comments at the very start of the file, before any expressions or class definitions.
+    pub file_leading_comments: Vec<Comment>,
 }
 
 impl Module {
     /// Creates a new module with the given expressions and span.
     #[must_use]
-    pub fn new(expressions: Vec<Expression>, span: Span) -> Self {
+    pub fn new(expressions: Vec<ExpressionStatement>, span: Span) -> Self {
         Self {
             classes: Vec::new(),
             method_definitions: Vec::new(),
             expressions,
             span,
-            leading_comments: Vec::new(),
+            file_leading_comments: Vec::new(),
         }
     }
 
@@ -124,23 +126,23 @@ impl Module {
             method_definitions: Vec::new(),
             expressions: Vec::new(),
             span,
-            leading_comments: Vec::new(),
+            file_leading_comments: Vec::new(),
         }
     }
 
-    /// Creates a new module with comments.
+    /// Creates a new module with file-level leading comments.
     #[must_use]
     pub fn with_comments(
-        expressions: Vec<Expression>,
+        expressions: Vec<ExpressionStatement>,
         span: Span,
-        leading_comments: Vec<Comment>,
+        file_leading_comments: Vec<Comment>,
     ) -> Self {
         Self {
             classes: Vec::new(),
             method_definitions: Vec::new(),
             expressions,
             span,
-            leading_comments,
+            file_leading_comments,
         }
     }
 }
@@ -215,8 +217,7 @@ impl CommentAttachment {
 ///
 /// Wraps an [`Expression`] with a [`CommentAttachment`] for preserving comments
 /// between statements. Statement-position fields (method bodies, block bodies,
-/// module expressions) will migrate from `Vec<Expression>` to
-/// `Vec<ExpressionStatement>` in BT-974.
+/// module expressions) use `Vec<ExpressionStatement>` (BT-974).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExpressionStatement {
     /// Comments attached to this statement.
@@ -547,7 +548,7 @@ pub struct MethodDefinition {
     /// Method parameters with optional type annotations.
     pub parameters: Vec<ParameterDefinition>,
     /// The method body expressions.
-    pub body: Vec<Expression>,
+    pub body: Vec<ExpressionStatement>,
     /// Optional return type annotation.
     pub return_type: Option<TypeAnnotation>,
     /// Whether this method is sealed (cannot be overridden).
@@ -568,7 +569,7 @@ impl MethodDefinition {
     pub fn new(
         selector: MessageSelector,
         parameters: Vec<ParameterDefinition>,
-        body: Vec<Expression>,
+        body: Vec<ExpressionStatement>,
         span: Span,
     ) -> Self {
         Self {
@@ -589,7 +590,7 @@ impl MethodDefinition {
     pub fn with_return_type(
         selector: MessageSelector,
         parameters: Vec<ParameterDefinition>,
-        body: Vec<Expression>,
+        body: Vec<ExpressionStatement>,
         return_type: TypeAnnotation,
         span: Span,
     ) -> Self {
@@ -611,7 +612,7 @@ impl MethodDefinition {
     pub fn with_options(
         selector: MessageSelector,
         parameters: Vec<ParameterDefinition>,
-        body: Vec<Expression>,
+        body: Vec<ExpressionStatement>,
         return_type: Option<TypeAnnotation>,
         is_sealed: bool,
         kind: MethodKind,
@@ -1251,7 +1252,7 @@ pub struct Block {
     /// Block parameters.
     pub parameters: Vec<BlockParameter>,
     /// The expressions in the block body.
-    pub body: Vec<Expression>,
+    pub body: Vec<ExpressionStatement>,
     /// Source location of the entire block (including brackets).
     pub span: Span,
 }
@@ -1259,7 +1260,11 @@ pub struct Block {
 impl Block {
     /// Creates a new block.
     #[must_use]
-    pub fn new(parameters: Vec<BlockParameter>, body: Vec<Expression>, span: Span) -> Self {
+    pub fn new(
+        parameters: Vec<BlockParameter>,
+        body: Vec<ExpressionStatement>,
+        span: Span,
+    ) -> Self {
         Self {
             parameters,
             body,
@@ -1541,7 +1546,7 @@ mod tests {
         let module = Module::new(Vec::new(), span);
         assert!(module.expressions.is_empty());
         assert_eq!(module.span, span);
-        assert!(module.leading_comments.is_empty());
+        assert!(module.file_leading_comments.is_empty());
     }
 
     #[test]
@@ -1896,7 +1901,7 @@ mod tests {
     #[test]
     fn method_definition_unary() {
         let selector = MessageSelector::Unary("increment".into());
-        let body = vec![Expression::Assignment {
+        let body = vec![ExpressionStatement::bare(Expression::Assignment {
             target: Box::new(Expression::FieldAccess {
                 receiver: Box::new(Expression::Identifier(Identifier::new(
                     "self",
@@ -1920,7 +1925,7 @@ mod tests {
                 span: Span::new(14, 28),
             }),
             span: Span::new(0, 28),
-        }];
+        })];
         let method = MethodDefinition::new(selector, Vec::new(), body, Span::new(0, 28));
         assert_eq!(method.selector.name(), "increment");
         assert!(method.parameters.is_empty());
@@ -1935,9 +1940,8 @@ mod tests {
             "index",
             Span::new(4, 9),
         ))];
-        let body = vec![Expression::Identifier(Identifier::new(
-            "result",
-            Span::new(13, 19),
+        let body = vec![ExpressionStatement::bare(Expression::Identifier(
+            Identifier::new("result", Span::new(13, 19)),
         ))];
         let method = MethodDefinition::new(selector, params, body, Span::new(0, 19));
         assert_eq!(method.selector.name(), "at:");
@@ -1948,7 +1952,7 @@ mod tests {
     #[test]
     fn method_definition_with_return_type() {
         let selector = MessageSelector::Unary("getValue".into());
-        let body = vec![Expression::Return {
+        let body = vec![ExpressionStatement::bare(Expression::Return {
             value: Box::new(Expression::FieldAccess {
                 receiver: Box::new(Expression::Identifier(Identifier::new(
                     "self",
@@ -1958,7 +1962,7 @@ mod tests {
                 span: Span::new(0, 10),
             }),
             span: Span::new(0, 10),
-        }];
+        })];
         let return_type = TypeAnnotation::simple("Integer", Span::new(12, 19));
         let method = MethodDefinition::with_return_type(
             selector,
@@ -1984,7 +1988,7 @@ mod tests {
         let methods = vec![MethodDefinition::new(
             MessageSelector::Unary("increment".into()),
             Vec::new(),
-            vec![Expression::Assignment {
+            vec![ExpressionStatement::bare(Expression::Assignment {
                 target: Box::new(Expression::FieldAccess {
                     receiver: Box::new(Expression::Identifier(Identifier::new(
                         "self",
@@ -2008,7 +2012,7 @@ mod tests {
                     span: Span::new(64, 78),
                 }),
                 span: Span::new(50, 78),
-            }],
+            })],
             Span::new(45, 78),
         )];
 

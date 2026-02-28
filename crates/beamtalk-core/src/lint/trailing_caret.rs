@@ -38,11 +38,11 @@ impl LintPass for TrailingCaretPass {
 }
 
 fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
-    let Some(last_expr) = method.body.last() else {
+    let Some(last_stmt) = method.body.last() else {
         return;
     };
 
-    if let Expression::Return { span, .. } = last_expr {
+    if let Expression::Return { span, .. } = &last_stmt.expression {
         let method_name = method.selector.name();
         let mut diag = Diagnostic::lint(
             format!(

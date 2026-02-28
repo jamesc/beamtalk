@@ -29,7 +29,7 @@
 //! awareness (e.g. `cascade_candidate`) keep their own recursive traversal.
 //! This module handles the common pre-order-visitor pattern.
 
-use crate::ast::{Expression, Module, StringSegment};
+use crate::ast::{Expression, ExpressionStatement, Module, StringSegment};
 
 // ── Module-level iterators ────────────────────────────────────────────────────
 
@@ -44,7 +44,7 @@ use crate::ast::{Expression, Module, StringSegment};
 /// not top-level statement sequences.
 pub(crate) fn for_each_expr_seq<F>(module: &Module, mut f: F)
 where
-    F: FnMut(&[Expression]),
+    F: FnMut(&[ExpressionStatement]),
 {
     f(&module.expressions);
     for class in &module.classes {
@@ -81,8 +81,8 @@ where
             }
         }
         Expression::Block(block) => {
-            for e in &block.body {
-                walk_expression(e, f);
+            for stmt in &block.body {
+                walk_expression(&stmt.expression, f);
             }
         }
         Expression::Assignment { target, value, .. } => {
@@ -165,8 +165,8 @@ where
     F: FnMut(&Expression),
 {
     for_each_expr_seq(module, |seq| {
-        for expr in seq {
-            walk_expression(expr, f);
+        for stmt in seq {
+            walk_expression(&stmt.expression, f);
         }
     });
 }

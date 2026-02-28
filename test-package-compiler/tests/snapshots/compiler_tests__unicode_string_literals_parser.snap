@@ -7,100 +7,124 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "cafe",
-                    span: Span {
-                        start: 180,
-                        end: 184,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "cafe",
+                        span: Span {
+                            start: 180,
+                            end: 184,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                String(
-                    "café",
                 ),
-                Span {
-                    start: 188,
+                value: Literal(
+                    String(
+                        "café",
+                    ),
+                    Span {
+                        start: 188,
+                        end: 195,
+                    },
+                ),
+                span: Span {
+                    start: 180,
                     end: 195,
                 },
-            ),
-            span: Span {
-                start: 180,
-                end: 195,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "japanese",
-                    span: Span {
-                        start: 196,
-                        end: 204,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "japanese",
+                        span: Span {
+                            start: 196,
+                            end: 204,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                String(
-                    "日本語",
                 ),
-                Span {
-                    start: 208,
+                value: Literal(
+                    String(
+                        "日本語",
+                    ),
+                    Span {
+                        start: 208,
+                        end: 219,
+                    },
+                ),
+                span: Span {
+                    start: 196,
                     end: 219,
                 },
-            ),
-            span: Span {
-                start: 196,
-                end: 219,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "emoji",
-                    span: Span {
-                        start: 220,
-                        end: 225,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "emoji",
+                        span: Span {
+                            start: 220,
+                            end: 225,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                String(
-                    "🎉",
                 ),
-                Span {
-                    start: 229,
+                value: Literal(
+                    String(
+                        "🎉",
+                    ),
+                    Span {
+                        start: 229,
+                        end: 235,
+                    },
+                ),
+                span: Span {
+                    start: 220,
                     end: 235,
                 },
-            ),
-            span: Span {
-                start: 220,
-                end: 235,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "mixed",
-                    span: Span {
-                        start: 278,
-                        end: 283,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "mixed",
+                        span: Span {
+                            start: 278,
+                            end: 283,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                String(
-                    "Hello, 世界!",
                 ),
-                Span {
-                    start: 287,
+                value: Literal(
+                    String(
+                        "Hello, 世界!",
+                    ),
+                    Span {
+                        start: 287,
+                        end: 303,
+                    },
+                ),
+                span: Span {
+                    start: 278,
                     end: 303,
                 },
-            ),
-            span: Span {
-                start: 278,
-                end: 303,
             },
         },
     ],
@@ -108,7 +132,7 @@ Module {
         start: 180,
         end: 303,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

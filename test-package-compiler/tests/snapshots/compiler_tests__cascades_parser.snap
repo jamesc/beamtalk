@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,78 +7,90 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "runCascade",
-                    span: Span {
-                        start: 208,
-                        end: 218,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "runCascade",
+                        span: Span {
+                            start: 208,
+                            end: 218,
+                        },
                     },
-                },
-            ),
-            value: Block(
-                Block {
-                    parameters: [],
-                    body: [
-                        Cascade {
-                            receiver: MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "counter",
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: Cascade {
+                                    receiver: MessageSend {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "counter",
+                                                span: Span {
+                                                    start: 224,
+                                                    end: 231,
+                                                },
+                                            },
+                                        ),
+                                        selector: Unary(
+                                            "increment",
+                                        ),
+                                        arguments: [],
+                                        is_cast: false,
                                         span: Span {
                                             start: 224,
-                                            end: 231,
+                                            end: 241,
                                         },
                                     },
-                                ),
-                                selector: Unary(
-                                    "increment",
-                                ),
-                                arguments: [],
-                                is_cast: false,
-                                span: Span {
-                                    start: 224,
-                                    end: 241,
-                                },
-                            },
-                            messages: [
-                                CascadeMessage {
-                                    selector: Unary(
-                                        "increment",
-                                    ),
-                                    arguments: [],
+                                    messages: [
+                                        CascadeMessage {
+                                            selector: Unary(
+                                                "increment",
+                                            ),
+                                            arguments: [],
+                                            span: Span {
+                                                start: 243,
+                                                end: 252,
+                                            },
+                                        },
+                                        CascadeMessage {
+                                            selector: Unary(
+                                                "getValue",
+                                            ),
+                                            arguments: [],
+                                            span: Span {
+                                                start: 254,
+                                                end: 262,
+                                            },
+                                        },
+                                    ],
                                     span: Span {
-                                        start: 243,
-                                        end: 252,
-                                    },
-                                },
-                                CascadeMessage {
-                                    selector: Unary(
-                                        "getValue",
-                                    ),
-                                    arguments: [],
-                                    span: Span {
-                                        start: 254,
+                                        start: 224,
                                         end: 262,
                                     },
                                 },
-                            ],
-                            span: Span {
-                                start: 224,
-                                end: 262,
                             },
+                        ],
+                        span: Span {
+                            start: 222,
+                            end: 264,
                         },
-                    ],
-                    span: Span {
-                        start: 222,
-                        end: 264,
                     },
+                ),
+                span: Span {
+                    start: 208,
+                    end: 264,
                 },
-            ),
-            span: Span {
-                start: 208,
-                end: 264,
             },
         },
     ],
@@ -87,7 +98,7 @@ Module {
         start: 208,
         end: 264,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

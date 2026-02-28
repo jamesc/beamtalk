@@ -1521,8 +1521,8 @@ impl CoreErlangGenerator {
         self.tier2_method_info.clear();
 
         for method in &class.methods {
-            for expr in &method.body {
-                self.scan_expr_for_tier2(expr, &analyze_block);
+            for stmt in &method.body {
+                self.scan_expr_for_tier2(&stmt.expression, &analyze_block);
             }
         }
     }
@@ -1573,8 +1573,8 @@ impl CoreErlangGenerator {
                 self.scan_expr_for_tier2(value, analyze);
             }
             Expression::Block(block) => {
-                for body_expr in &block.body {
-                    self.scan_expr_for_tier2(body_expr, analyze);
+                for body_stmt in &block.body {
+                    self.scan_expr_for_tier2(&body_stmt.expression, analyze);
                 }
             }
             Expression::Return { value, .. } => {

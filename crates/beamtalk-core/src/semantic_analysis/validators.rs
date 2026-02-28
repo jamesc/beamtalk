@@ -419,8 +419,8 @@ pub(crate) fn check_value_slot_assignment(
         // separate and not subject to value-type immutability rules.
         for method in &class.methods {
             let method_selector = method.selector.name();
-            for expr in &method.body {
-                walk_expression(expr, &mut |e| {
+            for stmt in &method.body {
+                walk_expression(&stmt.expression, &mut |e| {
                     check_slot_assignment_at(
                         e,
                         class_name,
@@ -442,8 +442,8 @@ pub(crate) fn check_value_slot_assignment(
         let class_name = standalone.class_name.name.as_str();
         let is_value = hierarchy.is_value_subclass(class_name);
         let method_selector = standalone.method.selector.name();
-        for expr in &standalone.method.body {
-            walk_expression(expr, &mut |e| {
+        for stmt in &standalone.method.body {
+            walk_expression(&stmt.expression, &mut |e| {
                 check_slot_assignment_at(
                     e,
                     class_name,
@@ -531,7 +531,7 @@ fn child_expressions(expr: &Expression) -> Vec<&Expression> {
             children.extend(arguments.iter());
             children
         }
-        Expression::Block(block) => block.body.iter().collect(),
+        Expression::Block(block) => block.body.iter().map(|s| &s.expression).collect(),
         Expression::Assignment { target, value, .. } => vec![target.as_ref(), value.as_ref()],
         Expression::Return { value, .. } => vec![value.as_ref()],
         Expression::Cascade {
@@ -668,8 +668,8 @@ pub(crate) fn check_self_capture_in_actor_block(
             continue;
         }
         for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for expr in &method.body {
-                walk_expression(expr, &mut |e| {
+            for stmt in &method.body {
+                walk_expression(&stmt.expression, &mut |e| {
                     check_self_capture_at(e, diagnostics);
                 });
             }
@@ -681,8 +681,8 @@ pub(crate) fn check_self_capture_in_actor_block(
         if !hierarchy.is_actor_subclass(standalone.class_name.name.as_str()) {
             continue;
         }
-        for expr in &standalone.method.body {
-            walk_expression(expr, &mut |e| {
+        for stmt in &standalone.method.body {
+            walk_expression(&stmt.expression, &mut |e| {
                 check_self_capture_at(e, diagnostics);
             });
         }
@@ -723,7 +723,10 @@ fn find_self_message_send(expr: &Expression) -> Option<Span> {
 
 /// Searches a block's body for a message send or cascade directly to `self`.
 fn find_self_reference_in_block(block: &Block) -> Option<Span> {
-    block.body.iter().find_map(find_self_message_send)
+    block
+        .body
+        .iter()
+        .find_map(|s| find_self_message_send(&s.expression))
 }
 
 /// Checks a single expression node for the self-capture pattern.
@@ -1059,9 +1062,13 @@ fn walk_expr_for_effect_free(expr: &Expression, diagnostics: &mut Vec<Diagnostic
 
 /// Check a sequence of expressions: warn on any non-last expression that is
 /// effect-free, then recurse into all expressions for nested sequences.
-fn check_seq_for_effect_free(exprs: &[Expression], diagnostics: &mut Vec<Diagnostic>) {
+fn check_seq_for_effect_free(
+    exprs: &[crate::ast::ExpressionStatement],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let len = exprs.len();
-    for (i, expr) in exprs.iter().enumerate() {
+    for (i, stmt) in exprs.iter().enumerate() {
+        let expr = &stmt.expression;
         let is_last = i == len - 1;
         if !is_last && is_effect_free(expr) {
             let label = effect_free_label(expr);

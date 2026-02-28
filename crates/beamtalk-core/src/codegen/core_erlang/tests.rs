@@ -7,6 +7,10 @@ use super::*;
 use crate::ast::*;
 use crate::source_analysis::Span;
 
+fn bare(expr: Expression) -> ExpressionStatement {
+    ExpressionStatement::bare(expr)
+}
+
 #[test]
 fn test_generate_empty_module() {
     let module = Module::new(Vec::new(), Span::new(0, 0));
@@ -536,7 +540,7 @@ fn test_generate_spawn_function() {
         span: Span::new(0, 10),
     };
 
-    let module = Module::new(vec![value_assignment], Span::new(0, 10));
+    let module = Module::new(vec![bare(value_assignment)], Span::new(0, 10));
     let code =
         generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
 
@@ -612,7 +616,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
         expressions: vec![],
         method_definitions: vec![],
         span: Span::new(0, 50),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
 
     // Use a subdirectory-qualified module name (package mode with subdirectories)
@@ -753,7 +757,7 @@ fn test_generate_repl_module_block_value_call() {
     // Expression: [:x | x + 1] value: 5
     let block = Block::new(
         vec![BlockParameter::new("x", Span::new(1, 2))],
-        vec![Expression::MessageSend {
+        vec![bare(Expression::MessageSend {
             receiver: Box::new(Expression::Identifier(Identifier::new(
                 "x",
                 Span::new(5, 6),
@@ -762,7 +766,7 @@ fn test_generate_repl_module_block_value_call() {
             arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(9, 10))],
             is_cast: false,
             span: Span::new(5, 10),
-        }],
+        })],
         Span::new(0, 12),
     );
 
@@ -828,7 +832,7 @@ fn test_generate_repl_module_with_times_repeat_mutation() {
     };
     let body = Expression::Block(Block {
         parameters: vec![],
-        body: vec![assignment],
+        body: vec![bare(assignment)],
         span: Span::new(0, 25),
     });
 
@@ -902,7 +906,7 @@ fn test_generate_repl_module_with_to_do_mutation() {
             name: "n".into(),
             span: Span::new(0, 1),
         }],
-        body: vec![assignment],
+        body: vec![bare(assignment)],
         span: Span::new(0, 25),
     });
 
@@ -965,7 +969,7 @@ fn test_generate_repl_module_with_while_true_mutation() {
     };
     let condition = Expression::Block(Block {
         parameters: vec![],
-        body: vec![compare],
+        body: vec![bare(compare)],
         span: Span::new(0, 12),
     });
 
@@ -985,7 +989,7 @@ fn test_generate_repl_module_with_while_true_mutation() {
     };
     let body = Expression::Block(Block {
         parameters: vec![],
-        body: vec![assignment],
+        body: vec![bare(assignment)],
         span: Span::new(0, 17),
     });
 
@@ -1032,8 +1036,15 @@ fn test_repl_multi_stmt_times_repeat_intermediate() {
     let src = "x := 1. 5 timesRepeat: [x := x + 1]. x";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
-    let code = generate_repl_expressions(&module.expressions, "repl_multi_times_test")
-        .expect("codegen should work");
+    let code = generate_repl_expressions(
+        &module
+            .expressions
+            .iter()
+            .map(|s| s.expression.clone())
+            .collect::<Vec<_>>(),
+        "repl_multi_times_test",
+    )
+    .expect("codegen should work");
 
     eprintln!("Generated code for `x := 1. 5 timesRepeat: [x := x + 1]. x`:");
     eprintln!("{code}");
@@ -1071,8 +1082,15 @@ fn test_repl_multi_stmt_while_true_intermediate() {
     let src = "x := 0. [x < 3] whileTrue: [x := x + 1]. x";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
-    let code = generate_repl_expressions(&module.expressions, "repl_multi_while_test")
-        .expect("codegen should work");
+    let code = generate_repl_expressions(
+        &module
+            .expressions
+            .iter()
+            .map(|s| s.expression.clone())
+            .collect::<Vec<_>>(),
+        "repl_multi_while_test",
+    )
+    .expect("codegen should work");
 
     eprintln!("Generated code for `x := 0. [x < 3] whileTrue: [x := x + 1]. x`:");
     eprintln!("{code}");
@@ -1104,8 +1122,15 @@ fn test_repl_multi_stmt_assignment_then_loop_then_plain() {
     let src = "count := 0. 3 timesRepeat: [count := count + 1]. count";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
-    let code = generate_repl_expressions(&module.expressions, "repl_multi_chain_test")
-        .expect("codegen should work");
+    let code = generate_repl_expressions(
+        &module
+            .expressions
+            .iter()
+            .map(|s| s.expression.clone())
+            .collect::<Vec<_>>(),
+        "repl_multi_chain_test",
+    )
+    .expect("codegen should work");
 
     eprintln!("Generated code for `count := 0. 3 timesRepeat: [count := count + 1]. count`:");
     eprintln!("{code}");
@@ -1207,7 +1232,7 @@ fn test_generate_repl_multi_stmt_times_repeat_then_read() {
     };
     let loop_body = Expression::Block(Block {
         parameters: vec![],
-        body: vec![loop_assign],
+        body: vec![bare(loop_assign)],
         span,
     });
     let five = Expression::Literal(Literal::Integer(5), span);
@@ -1284,7 +1309,7 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
     };
     let condition = Expression::Block(Block {
         parameters: vec![],
-        body: vec![cmp],
+        body: vec![bare(cmp)],
         span,
     });
     let x_body = Expression::Identifier(Identifier::new("x", span));
@@ -1303,7 +1328,7 @@ fn test_generate_repl_multi_stmt_while_true_then_read() {
     };
     let loop_body = Expression::Block(Block {
         parameters: vec![],
-        body: vec![loop_assign],
+        body: vec![bare(loop_assign)],
         span,
     });
     let while_true = Expression::MessageSend {
@@ -1380,7 +1405,7 @@ fn test_generate_repl_multi_stmt_loop_does_not_corrupt_final_expr() {
     };
     let loop_body = Expression::Block(Block {
         parameters: vec![],
-        body: vec![loop_assign],
+        body: vec![bare(loop_assign)],
         span,
     });
     let five = Expression::Literal(Literal::Integer(5), span);
@@ -1452,7 +1477,7 @@ fn test_repl_loop_mutations_accumulate_plain_key() {
     };
     let body = Expression::Block(Block {
         parameters: vec![],
-        body: vec![assignment],
+        body: vec![bare(assignment)],
         span,
     });
     let five = Expression::Literal(Literal::Integer(5), span);
@@ -1534,7 +1559,7 @@ fn test_repl_multi_stmt_loop_accumulates_from_zero() {
     };
     let loop_body = Expression::Block(Block {
         parameters: vec![],
-        body: vec![loop_assign],
+        body: vec![bare(loop_assign)],
         span,
     });
     let five = Expression::Literal(Literal::Integer(5), span);
@@ -1595,7 +1620,10 @@ fn test_block_value_message_no_args() {
 
     let block = Block::new(
         vec![],
-        vec![Expression::Literal(Literal::Integer(42), Span::new(1, 3))],
+        vec![bare(Expression::Literal(
+            Literal::Integer(42),
+            Span::new(1, 3),
+        ))],
         Span::new(0, 4),
     );
     let receiver = Expression::Block(block);
@@ -1623,7 +1651,7 @@ fn test_block_value_message_one_arg() {
 
     let block = Block::new(
         vec![BlockParameter::new("x", Span::new(1, 2))],
-        vec![Expression::MessageSend {
+        vec![bare(Expression::MessageSend {
             receiver: Box::new(Expression::Identifier(Identifier::new(
                 "x",
                 Span::new(5, 6),
@@ -1632,7 +1660,7 @@ fn test_block_value_message_one_arg() {
             arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(9, 10))],
             is_cast: false,
             span: Span::new(5, 10),
-        }],
+        })],
         Span::new(0, 12),
     );
     let receiver = Expression::Block(block);
@@ -1672,7 +1700,10 @@ fn test_block_value_message_two_args() {
             BlockParameter::new("x", Span::new(1, 2)),
             BlockParameter::new("y", Span::new(4, 5)),
         ],
-        vec![Expression::Literal(Literal::Integer(0), Span::new(8, 9))], // placeholder body
+        vec![bare(Expression::Literal(
+            Literal::Integer(0),
+            Span::new(8, 9),
+        ))], // placeholder body
         Span::new(0, 11),
     );
     let receiver = Expression::Block(block);
@@ -1707,7 +1738,7 @@ fn test_block_while_true_loop() {
     // Condition block: [counter < 5]
     let condition_block = Block::new(
         vec![],
-        vec![Expression::MessageSend {
+        vec![bare(Expression::MessageSend {
             receiver: Box::new(Expression::Identifier(Identifier::new(
                 "counter",
                 Span::new(1, 8),
@@ -1716,14 +1747,17 @@ fn test_block_while_true_loop() {
             arguments: vec![Expression::Literal(Literal::Integer(5), Span::new(11, 12))],
             is_cast: false,
             span: Span::new(1, 12),
-        }],
+        })],
         Span::new(0, 13),
     );
 
     // Body block: [counter := counter + 1]
     let body_block = Block::new(
         vec![],
-        vec![Expression::Literal(Literal::Integer(0), Span::new(0, 1))], // simplified body
+        vec![bare(Expression::Literal(
+            Literal::Integer(0),
+            Span::new(0, 1),
+        ))], // simplified body
         Span::new(15, 38),
     );
 
@@ -1766,10 +1800,10 @@ fn test_block_while_false_loop() {
 
     let condition_block = Block::new(
         vec![],
-        vec![Expression::Identifier(Identifier::new(
+        vec![bare(Expression::Identifier(Identifier::new(
             "done",
             Span::new(1, 5),
-        ))],
+        )))],
         Span::new(0, 6),
     );
     let body_block = Block::new(vec![], vec![], Span::new(8, 10));
@@ -1804,7 +1838,10 @@ fn test_block_repeat_infinite_loop() {
 
     let body_block = Block::new(
         vec![],
-        vec![Expression::Literal(Literal::Integer(1), Span::new(1, 2))],
+        vec![bare(Expression::Literal(
+            Literal::Integer(1),
+            Span::new(1, 2),
+        ))],
         Span::new(0, 3),
     );
 
@@ -1871,15 +1908,18 @@ fn test_while_true_compiles_through_erlc() {
     // This creates a loop that runs once (returns nil after first iteration)
     let condition_block = Block::new(
         vec![],
-        vec![Expression::Identifier(Identifier::new(
+        vec![bare(Expression::Identifier(Identifier::new(
             "false",
             Span::new(1, 6),
-        ))],
+        )))],
         Span::new(0, 7),
     );
     let body_block = Block::new(
         vec![],
-        vec![Expression::Literal(Literal::Integer(42), Span::new(9, 11))],
+        vec![bare(Expression::Literal(
+            Literal::Integer(42),
+            Span::new(9, 11),
+        ))],
         Span::new(8, 12),
     );
 
@@ -1941,10 +1981,10 @@ fn test_temp_vars_dont_shadow_user_identifiers() {
     // First, generate a whileTrue: which creates internal _Loop, _Cond, _Body temps
     let condition_block = Block::new(
         vec![],
-        vec![Expression::Identifier(Identifier::new(
+        vec![bare(Expression::Identifier(Identifier::new(
             "false",
             Span::new(1, 6),
-        ))],
+        )))],
         Span::new(0, 7),
     );
     let body_block = Block::new(vec![], vec![], Span::new(8, 10));
@@ -2551,7 +2591,7 @@ fn test_validate_stored_closure_with_captured_mutation() {
     // `count` is read (captured from outer scope) and written → should error
     let block = Block {
         parameters: vec![],
-        body: vec![Expression::Assignment {
+        body: vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "count",
                 Span::new(1, 6),
@@ -2567,7 +2607,7 @@ fn test_validate_stored_closure_with_captured_mutation() {
                 span: Span::new(10, 19),
             }),
             span: Span::new(1, 19),
-        }],
+        })],
         span: Span::new(0, 20),
     };
 
@@ -2590,14 +2630,14 @@ fn test_validate_stored_closure_with_new_local_definition() {
     // `temp` is never read from outer scope → should be allowed
     let block = Block {
         parameters: vec![],
-        body: vec![Expression::Assignment {
+        body: vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "temp",
                 Span::new(1, 5),
             ))),
             value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(9, 10))),
             span: Span::new(1, 10),
-        }],
+        })],
         span: Span::new(0, 11),
     };
 
@@ -2615,7 +2655,7 @@ fn test_validate_stored_closure_with_new_local_used_later() {
     let block = Block {
         parameters: vec![BlockParameter::new("x", Span::new(1, 2))],
         body: vec![
-            Expression::Assignment {
+            bare(Expression::Assignment {
                 target: Box::new(Expression::Identifier(Identifier::new(
                     "temp",
                     Span::new(5, 9),
@@ -2631,8 +2671,8 @@ fn test_validate_stored_closure_with_new_local_used_later() {
                     span: Span::new(13, 18),
                 }),
                 span: Span::new(5, 18),
-            },
-            Expression::MessageSend {
+            }),
+            bare(Expression::MessageSend {
                 receiver: Box::new(Expression::Identifier(Identifier::new(
                     "temp",
                     Span::new(20, 24),
@@ -2641,7 +2681,7 @@ fn test_validate_stored_closure_with_new_local_used_later() {
                 arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(27, 28))],
                 is_cast: false,
                 span: Span::new(20, 28),
-            },
+            }),
         ],
         span: Span::new(0, 29),
     };
@@ -2658,7 +2698,7 @@ fn test_validate_stored_closure_with_field_assignment() {
     // Block with field assignment: [self.value := 1]
     let block = Block {
         parameters: vec![],
-        body: vec![Expression::Assignment {
+        body: vec![bare(Expression::Assignment {
             target: Box::new(Expression::FieldAccess {
                 receiver: Box::new(Expression::Identifier(Identifier::new(
                     "self",
@@ -2669,7 +2709,7 @@ fn test_validate_stored_closure_with_field_assignment() {
             }),
             value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(15, 16))),
             span: Span::new(1, 16),
-        }],
+        })],
         span: Span::new(0, 17),
     };
 
@@ -2696,15 +2736,15 @@ fn test_validate_stored_closure_field_takes_precedence() {
     let block = Block {
         parameters: vec![],
         body: vec![
-            Expression::Assignment {
+            bare(Expression::Assignment {
                 target: Box::new(Expression::Identifier(Identifier::new(
                     "count",
                     Span::new(1, 6),
                 ))),
                 value: Box::new(Expression::Literal(Literal::Integer(0), Span::new(10, 11))),
                 span: Span::new(1, 11),
-            },
-            Expression::Assignment {
+            }),
+            bare(Expression::Assignment {
                 target: Box::new(Expression::FieldAccess {
                     receiver: Box::new(Expression::Identifier(Identifier::new(
                         "self",
@@ -2715,7 +2755,7 @@ fn test_validate_stored_closure_field_takes_precedence() {
                 }),
                 value: Box::new(Expression::Literal(Literal::Integer(1), Span::new(27, 28))),
                 span: Span::new(13, 28),
-            },
+            }),
         ],
         span: Span::new(0, 29),
     };
@@ -2740,7 +2780,7 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
     let module = Module {
         classes: vec![],
         method_definitions: Vec::new(),
-        expressions: vec![Expression::Assignment {
+        expressions: vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "test",
                 Span::new(0, 4),
@@ -2749,14 +2789,14 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
                 parameters: vec![],
                 body: vec![
                     // myBlock := [self.value := self.value + 1]
-                    Expression::Assignment {
+                    bare(Expression::Assignment {
                         target: Box::new(Expression::Identifier(Identifier::new(
                             "myBlock",
                             Span::new(10, 17),
                         ))),
                         value: Box::new(Expression::Block(Block {
                             parameters: vec![],
-                            body: vec![Expression::Assignment {
+                            body: vec![bare(Expression::Assignment {
                                 target: Box::new(Expression::FieldAccess {
                                     receiver: Box::new(Expression::Identifier(Identifier::new(
                                         "self",
@@ -2770,19 +2810,22 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
                                     Span::new(36, 37),
                                 )),
                                 span: Span::new(22, 37),
-                            }],
+                            })],
                             span: Span::new(21, 38),
                         })),
                         span: Span::new(10, 38),
-                    },
-                    Expression::Identifier(Identifier::new("myBlock", Span::new(40, 47))),
+                    }),
+                    bare(Expression::Identifier(Identifier::new(
+                        "myBlock",
+                        Span::new(40, 47),
+                    ))),
                 ],
                 span: Span::new(8, 49),
             })),
             span: Span::new(0, 49),
-        }],
+        })],
         span: Span::new(0, 50),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
 
     // BT-852: Stored closures with field assignments are now allowed via Tier 2 protocol.
@@ -2800,7 +2843,7 @@ fn test_codegen_rejects_stored_closure_with_local_mutation() {
     let module = Module {
         classes: vec![],
         method_definitions: Vec::new(),
-        expressions: vec![Expression::Assignment {
+        expressions: vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "test",
                 Span::new(0, 4),
@@ -2809,7 +2852,7 @@ fn test_codegen_rejects_stored_closure_with_local_mutation() {
                 parameters: vec![],
                 body: vec![
                     // count := 0
-                    Expression::Assignment {
+                    bare(Expression::Assignment {
                         target: Box::new(Expression::Identifier(Identifier::new(
                             "count",
                             Span::new(10, 15),
@@ -2819,16 +2862,16 @@ fn test_codegen_rejects_stored_closure_with_local_mutation() {
                             Span::new(19, 20),
                         )),
                         span: Span::new(10, 20),
-                    },
+                    }),
                     // myBlock := [count := count + 1]
-                    Expression::Assignment {
+                    bare(Expression::Assignment {
                         target: Box::new(Expression::Identifier(Identifier::new(
                             "myBlock",
                             Span::new(22, 29),
                         ))),
                         value: Box::new(Expression::Block(Block {
                             parameters: vec![],
-                            body: vec![Expression::Assignment {
+                            body: vec![bare(Expression::Assignment {
                                 target: Box::new(Expression::Identifier(Identifier::new(
                                     "count",
                                     Span::new(34, 39),
@@ -2847,19 +2890,22 @@ fn test_codegen_rejects_stored_closure_with_local_mutation() {
                                     span: Span::new(43, 52),
                                 }),
                                 span: Span::new(34, 52),
-                            }],
+                            })],
                             span: Span::new(33, 53),
                         })),
                         span: Span::new(22, 53),
-                    },
-                    Expression::Identifier(Identifier::new("myBlock", Span::new(55, 62))),
+                    }),
+                    bare(Expression::Identifier(Identifier::new(
+                        "myBlock",
+                        Span::new(55, 62),
+                    ))),
                 ],
                 span: Span::new(8, 64),
             })),
             span: Span::new(0, 64),
-        }],
+        })],
         span: Span::new(0, 65),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
 
     // BT-852: Stored closures with local mutations are now allowed via Tier 2 protocol.
@@ -2900,7 +2946,10 @@ fn test_class_registration_generation() {
             MethodDefinition {
                 selector: MessageSelector::Unary("increment".into()),
                 parameters: vec![],
-                body: vec![Expression::Literal(Literal::Integer(42), Span::new(0, 2))],
+                body: vec![bare(Expression::Literal(
+                    Literal::Integer(42),
+                    Span::new(0, 2),
+                ))],
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
@@ -2911,7 +2960,10 @@ fn test_class_registration_generation() {
             MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
-                body: vec![Expression::Literal(Literal::Integer(42), Span::new(0, 2))],
+                body: vec![bare(Expression::Literal(
+                    Literal::Integer(42),
+                    Span::new(0, 2),
+                ))],
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
@@ -2932,7 +2984,7 @@ fn test_class_registration_generation() {
         classes: vec![class],
         method_definitions: Vec::new(),
         span: Span::new(0, 50),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
 
     let code =
@@ -3098,7 +3150,7 @@ fn test_multiple_classes_registration() {
         ],
         method_definitions: Vec::new(),
         span: Span::new(0, 50),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
 
     let code = generate_module(&module, CodegenOptions::new("multi_actors"))
@@ -3222,7 +3274,7 @@ fn test_multi_class_early_error_short_circuits() {
         classes: vec![make_class("ShadowA", 7, 20), make_class("ValidB", 6, 30)],
         method_definitions: Vec::new(),
         span: Span::new(0, 50),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
 
     let code = generate_module(&module, CodegenOptions::new("multi_shadow"))
@@ -3290,7 +3342,7 @@ fn test_three_class_short_circuit_nesting() {
         classes: vec![make_class("A", 1), make_class("B", 1), make_class("C", 1)],
         method_definitions: Vec::new(),
         span: Span::new(0, 60),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
 
     let code = generate_module(&module, CodegenOptions::new("three_classes"))
@@ -3466,14 +3518,14 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
     };
 
     let module = Module {
-        expressions: vec![expr],
+        expressions: vec![bare(expr)],
         classes: vec![],
         method_definitions: Vec::new(),
         span: Span::new(0, 5),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
 
-    let code = generate_repl_expression(&module.expressions[0], "repl_eval")
+    let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
         .expect("codegen should succeed");
 
     // Should call whereis_class to get the class PID
@@ -3514,14 +3566,14 @@ fn test_standalone_class_reference_validates_undefined_classes() {
     };
 
     let module = Module {
-        expressions: vec![expr],
+        expressions: vec![bare(expr)],
         classes: vec![],
         method_definitions: Vec::new(),
         span: Span::new(0, 16),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
 
-    let code = generate_repl_expression(&module.expressions[0], "repl_eval")
+    let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
         .expect("codegen should succeed");
 
     // Should use a case expression to check for undefined
@@ -3575,7 +3627,7 @@ fn test_is_actor_class_direct_actor_subclass() {
         method_definitions: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3605,7 +3657,7 @@ fn test_is_actor_class_object_subclass_is_value_type() {
         method_definitions: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3653,7 +3705,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         method_definitions: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3665,7 +3717,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         method_definitions: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
     // Build hierarchy from full module so Counter is known
     assert!(CoreErlangGenerator::is_actor_class(&module_lc, &hierarchy));
@@ -3704,7 +3756,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
         method_definitions: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3735,7 +3787,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
         method_definitions: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3770,7 +3822,7 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
         method_definitions: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3804,7 +3856,7 @@ fn test_is_actor_class_root_class_is_value_type() {
         method_definitions: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3880,7 +3932,7 @@ fn test_generate_with_bindings_compiles_value_type() {
         method_definitions: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
 
     let bindings = primitive_bindings::PrimitiveBindingTable::new();
@@ -3901,7 +3953,7 @@ fn test_generate_repl_list_reject() {
     let src = "#(1, 2, 3, 4, 5) reject: [:x | x > 2]";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
-    let expr = &module.expressions[0];
+    let expr = &module.expressions[0].expression;
     let code = generate_repl_expression(expr, "test_reject_repl").expect("codegen should work");
 
     // Wrapper fun must be bound to a variable, not inlined in filter call
@@ -4410,7 +4462,7 @@ fn test_bt855_erlang_interop_wrapper_pure_block_no_warning() {
     // Pure block: [:x | x + 1]
     let pure_block = Expression::Block(Block::new(
         vec![BlockParameter::new("x", Span::new(1, 2))],
-        vec![Expression::MessageSend {
+        vec![bare(Expression::MessageSend {
             receiver: Box::new(Expression::Identifier(Identifier::new(
                 "x",
                 Span::new(5, 6),
@@ -4419,7 +4471,7 @@ fn test_bt855_erlang_interop_wrapper_pure_block_no_warning() {
             arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(9, 10))],
             is_cast: false,
             span: Span::new(5, 10),
-        }],
+        })],
         Span::new(0, 11),
     ));
 
@@ -4482,7 +4534,7 @@ fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
     // 'count' is read (captured from outer scope) and written (local_writes) → Tier 2
     let stateful_block = Expression::Block(Block::new(
         vec![BlockParameter::new("x", Span::new(1, 2))],
-        vec![Expression::Assignment {
+        vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "count",
                 Span::new(5, 10),
@@ -4501,7 +4553,7 @@ fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
                 span: Span::new(14, 23),
             }),
             span: Span::new(5, 23),
-        }],
+        })],
         Span::new(0, 24),
     ));
 
@@ -4595,7 +4647,7 @@ fn test_bt855_generate_erlang_interop_wrapper_pure_returns_tier1() {
 
     let pure_block = Block::new(
         vec![BlockParameter::new("x", Span::new(0, 1))],
-        vec![Expression::MessageSend {
+        vec![bare(Expression::MessageSend {
             receiver: Box::new(Expression::Identifier(Identifier::new(
                 "x",
                 Span::new(3, 4),
@@ -4604,7 +4656,7 @@ fn test_bt855_generate_erlang_interop_wrapper_pure_returns_tier1() {
             arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(7, 8))],
             is_cast: false,
             span: Span::new(3, 8),
-        }],
+        })],
         Span::new(0, 9),
     );
 
@@ -4641,7 +4693,7 @@ fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
     // Stateful block: [:x | count := count + x]
     let stateful_block = Block::new(
         vec![BlockParameter::new("x", Span::new(0, 1))],
-        vec![Expression::Assignment {
+        vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "count",
                 Span::new(3, 8),
@@ -4660,7 +4712,7 @@ fn test_bt855_generate_erlang_interop_wrapper_stateful_returns_wrapper() {
                 span: Span::new(12, 21),
             }),
             span: Span::new(3, 21),
-        }],
+        })],
         Span::new(0, 22),
     );
 
@@ -5149,7 +5201,7 @@ sealed Object subclass: Bar
         "Warning should explain the issue. Got: {msg}"
     );
     // Verify the span points at the @primitive expression, not a dummy zero span.
-    let primitive_span = match &module.classes[0].methods[0].body[0] {
+    let primitive_span = match &module.classes[0].methods[0].body[0].expression {
         Expression::Primitive { span, .. } => *span,
         other => panic!("Expected Primitive expression, got: {other:?}"),
     };
@@ -5238,7 +5290,7 @@ fn make_value_subclass_point() -> Module {
         method_definitions: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     }
 }
 
@@ -5419,7 +5471,7 @@ fn test_object_subclass_no_auto_getters() {
         method_definitions: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
@@ -5442,7 +5494,10 @@ fn test_value_subclass_user_defined_overrides_auto() {
         selector: MessageSelector::Unary("x".into()),
         parameters: vec![],
         return_type: None,
-        body: vec![Expression::Literal(Literal::Integer(99), Span::new(0, 0))],
+        body: vec![bare(Expression::Literal(
+            Literal::Integer(99),
+            Span::new(0, 0),
+        ))],
         kind: MethodKind::Primary,
         is_sealed: false,
         comments: CommentAttachment::default(),
@@ -5476,7 +5531,7 @@ fn test_value_subclass_user_defined_overrides_auto() {
         method_definitions: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
     let result = generate_module(&module, CodegenOptions::new("bt@my_val"));
     let code = result.unwrap();
@@ -5511,7 +5566,7 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
         method_definitions: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
-        leading_comments: vec![],
+        file_leading_comments: vec![],
     };
     let result = generate_module(&module, CodegenOptions::new("bt@empty"));
     let code = result.unwrap();

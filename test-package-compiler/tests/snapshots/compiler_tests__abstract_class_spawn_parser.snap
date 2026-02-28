@@ -34,24 +34,30 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "self",
-                                    span: Span {
-                                        start: 186,
-                                        end: 190,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 186,
+                                            end: 190,
+                                        },
                                     },
+                                ),
+                                selector: Unary(
+                                    "subclassResponsibility",
+                                ),
+                                arguments: [],
+                                is_cast: false,
+                                span: Span {
+                                    start: 186,
+                                    end: 213,
                                 },
-                            ),
-                            selector: Unary(
-                                "subclassResponsibility",
-                            ),
-                            arguments: [],
-                            is_cast: false,
-                            span: Span {
-                                start: 186,
-                                end: 213,
                             },
                         },
                     ],
@@ -84,28 +90,34 @@ Module {
     ],
     method_definitions: [],
     expressions: [
-        MessageSend {
-            receiver: ClassReference {
-                name: Identifier {
-                    name: "Shape",
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: ClassReference {
+                    name: Identifier {
+                        name: "Shape",
+                        span: Span {
+                            start: 215,
+                            end: 220,
+                        },
+                    },
                     span: Span {
                         start: 215,
                         end: 220,
                     },
                 },
+                selector: Unary(
+                    "spawn",
+                ),
+                arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 215,
-                    end: 220,
+                    end: 226,
                 },
-            },
-            selector: Unary(
-                "spawn",
-            ),
-            arguments: [],
-            is_cast: false,
-            span: Span {
-                start: 215,
-                end: 226,
             },
         },
     ],
@@ -113,7 +125,7 @@ Module {
         start: 145,
         end: 226,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

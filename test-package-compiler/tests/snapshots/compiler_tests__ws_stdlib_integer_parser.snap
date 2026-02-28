@@ -7,1033 +7,1177 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "sum",
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "sum",
+                        span: Span {
+                            start: 133,
+                            end: 136,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            5,
+                        ),
+                        Span {
+                            start: 140,
+                            end: 141,
+                        },
+                    ),
+                    selector: Binary(
+                        "+",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                3,
+                            ),
+                            Span {
+                                start: 144,
+                                end: 145,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
                     span: Span {
-                        start: 133,
-                        end: 136,
+                        start: 140,
+                        end: 145,
                     },
                 },
-            ),
-            value: MessageSend {
+                span: Span {
+                    start: 133,
+                    end: 145,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "difference",
+                        span: Span {
+                            start: 146,
+                            end: 156,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            10,
+                        ),
+                        Span {
+                            start: 160,
+                            end: 162,
+                        },
+                    ),
+                    selector: Binary(
+                        "-",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                4,
+                            ),
+                            Span {
+                                start: 165,
+                                end: 166,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 160,
+                        end: 166,
+                    },
+                },
+                span: Span {
+                    start: 146,
+                    end: 166,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "product",
+                        span: Span {
+                            start: 167,
+                            end: 174,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            6,
+                        ),
+                        Span {
+                            start: 178,
+                            end: 179,
+                        },
+                    ),
+                    selector: Binary(
+                        "*",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                7,
+                            ),
+                            Span {
+                                start: 182,
+                                end: 183,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 178,
+                        end: 183,
+                    },
+                },
+                span: Span {
+                    start: 167,
+                    end: 183,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "quotient",
+                        span: Span {
+                            start: 184,
+                            end: 192,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            20,
+                        ),
+                        Span {
+                            start: 196,
+                            end: 198,
+                        },
+                    ),
+                    selector: Binary(
+                        "/",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                4,
+                            ),
+                            Span {
+                                start: 201,
+                                end: 202,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 196,
+                        end: 202,
+                    },
+                },
+                span: Span {
+                    start: 184,
+                    end: 202,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "intDiv",
+                        span: Span {
+                            start: 235,
+                            end: 241,
+                        },
+                    },
+                ),
+                value: Literal(
+                    Integer(
+                        17,
+                    ),
+                    Span {
+                        start: 245,
+                        end: 247,
+                    },
+                ),
+                span: Span {
+                    start: 235,
+                    end: 247,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "remainder",
+                        span: Span {
+                            start: 253,
+                            end: 262,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            17,
+                        ),
+                        Span {
+                            start: 266,
+                            end: 268,
+                        },
+                    ),
+                    selector: Binary(
+                        "%",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                5,
+                            ),
+                            Span {
+                                start: 271,
+                                end: 272,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 266,
+                        end: 272,
+                    },
+                },
+                span: Span {
+                    start: 253,
+                    end: 272,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isLess",
+                        span: Span {
+                            start: 288,
+                            end: 294,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            3,
+                        ),
+                        Span {
+                            start: 298,
+                            end: 299,
+                        },
+                    ),
+                    selector: Binary(
+                        "<",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                5,
+                            ),
+                            Span {
+                                start: 302,
+                                end: 303,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 298,
+                        end: 303,
+                    },
+                },
+                span: Span {
+                    start: 288,
+                    end: 303,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isGreater",
+                        span: Span {
+                            start: 304,
+                            end: 313,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            10,
+                        ),
+                        Span {
+                            start: 317,
+                            end: 319,
+                        },
+                    ),
+                    selector: Binary(
+                        ">",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                5,
+                            ),
+                            Span {
+                                start: 322,
+                                end: 323,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 317,
+                        end: 323,
+                    },
+                },
+                span: Span {
+                    start: 304,
+                    end: 323,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isEqual",
+                        span: Span {
+                            start: 324,
+                            end: 331,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            7,
+                        ),
+                        Span {
+                            start: 335,
+                            end: 336,
+                        },
+                    ),
+                    selector: Binary(
+                        "=",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                7,
+                            ),
+                            Span {
+                                start: 339,
+                                end: 340,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 335,
+                        end: 340,
+                    },
+                },
+                span: Span {
+                    start: 324,
+                    end: 340,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "counter",
+                        span: Span {
+                            start: 370,
+                            end: 377,
+                        },
+                    },
+                ),
+                value: Literal(
+                    Integer(
+                        0,
+                    ),
+                    Span {
+                        start: 381,
+                        end: 382,
+                    },
+                ),
+                span: Span {
+                    start: 370,
+                    end: 382,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
                 receiver: Literal(
                     Integer(
                         5,
                     ),
                     Span {
-                        start: 140,
-                        end: 141,
+                        start: 383,
+                        end: 384,
                     },
                 ),
-                selector: Binary(
-                    "+",
-                ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            3,
-                        ),
-                        Span {
-                            start: 144,
-                            end: 145,
-                        },
-                    ),
-                ],
-                is_cast: false,
-                span: Span {
-                    start: 140,
-                    end: 145,
-                },
-            },
-            span: Span {
-                start: 133,
-                end: 145,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "difference",
-                    span: Span {
-                        start: 146,
-                        end: 156,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        10,
-                    ),
-                    Span {
-                        start: 160,
-                        end: 162,
-                    },
-                ),
-                selector: Binary(
-                    "-",
-                ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            4,
-                        ),
-                        Span {
-                            start: 165,
-                            end: 166,
-                        },
-                    ),
-                ],
-                is_cast: false,
-                span: Span {
-                    start: 160,
-                    end: 166,
-                },
-            },
-            span: Span {
-                start: 146,
-                end: 166,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "product",
-                    span: Span {
-                        start: 167,
-                        end: 174,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        6,
-                    ),
-                    Span {
-                        start: 178,
-                        end: 179,
-                    },
-                ),
-                selector: Binary(
-                    "*",
-                ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            7,
-                        ),
-                        Span {
-                            start: 182,
-                            end: 183,
-                        },
-                    ),
-                ],
-                is_cast: false,
-                span: Span {
-                    start: 178,
-                    end: 183,
-                },
-            },
-            span: Span {
-                start: 167,
-                end: 183,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "quotient",
-                    span: Span {
-                        start: 184,
-                        end: 192,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        20,
-                    ),
-                    Span {
-                        start: 196,
-                        end: 198,
-                    },
-                ),
-                selector: Binary(
-                    "/",
-                ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            4,
-                        ),
-                        Span {
-                            start: 201,
-                            end: 202,
-                        },
-                    ),
-                ],
-                is_cast: false,
-                span: Span {
-                    start: 196,
-                    end: 202,
-                },
-            },
-            span: Span {
-                start: 184,
-                end: 202,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "intDiv",
-                    span: Span {
-                        start: 235,
-                        end: 241,
-                    },
-                },
-            ),
-            value: Literal(
-                Integer(
-                    17,
-                ),
-                Span {
-                    start: 245,
-                    end: 247,
-                },
-            ),
-            span: Span {
-                start: 235,
-                end: 247,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "remainder",
-                    span: Span {
-                        start: 253,
-                        end: 262,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        17,
-                    ),
-                    Span {
-                        start: 266,
-                        end: 268,
-                    },
-                ),
-                selector: Binary(
-                    "%",
-                ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            5,
-                        ),
-                        Span {
-                            start: 271,
-                            end: 272,
-                        },
-                    ),
-                ],
-                is_cast: false,
-                span: Span {
-                    start: 266,
-                    end: 272,
-                },
-            },
-            span: Span {
-                start: 253,
-                end: 272,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isLess",
-                    span: Span {
-                        start: 288,
-                        end: 294,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        3,
-                    ),
-                    Span {
-                        start: 298,
-                        end: 299,
-                    },
-                ),
-                selector: Binary(
-                    "<",
-                ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            5,
-                        ),
-                        Span {
-                            start: 302,
-                            end: 303,
-                        },
-                    ),
-                ],
-                is_cast: false,
-                span: Span {
-                    start: 298,
-                    end: 303,
-                },
-            },
-            span: Span {
-                start: 288,
-                end: 303,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isGreater",
-                    span: Span {
-                        start: 304,
-                        end: 313,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        10,
-                    ),
-                    Span {
-                        start: 317,
-                        end: 319,
-                    },
-                ),
-                selector: Binary(
-                    ">",
-                ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            5,
-                        ),
-                        Span {
-                            start: 322,
-                            end: 323,
-                        },
-                    ),
-                ],
-                is_cast: false,
-                span: Span {
-                    start: 317,
-                    end: 323,
-                },
-            },
-            span: Span {
-                start: 304,
-                end: 323,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isEqual",
-                    span: Span {
-                        start: 324,
-                        end: 331,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        7,
-                    ),
-                    Span {
-                        start: 335,
-                        end: 336,
-                    },
-                ),
-                selector: Binary(
-                    "=",
-                ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            7,
-                        ),
-                        Span {
-                            start: 339,
-                            end: 340,
-                        },
-                    ),
-                ],
-                is_cast: false,
-                span: Span {
-                    start: 335,
-                    end: 340,
-                },
-            },
-            span: Span {
-                start: 324,
-                end: 340,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "counter",
-                    span: Span {
-                        start: 370,
-                        end: 377,
-                    },
-                },
-            ),
-            value: Literal(
-                Integer(
-                    0,
-                ),
-                Span {
-                    start: 381,
-                    end: 382,
-                },
-            ),
-            span: Span {
-                start: 370,
-                end: 382,
-            },
-        },
-        MessageSend {
-            receiver: Literal(
-                Integer(
-                    5,
-                ),
-                Span {
-                    start: 383,
-                    end: 384,
-                },
-            ),
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "timesRepeat:",
-                        span: Span {
-                            start: 385,
-                            end: 397,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Block(
-                    Block {
-                        parameters: [],
-                        body: [
-                            Assignment {
-                                target: Identifier(
-                                    Identifier {
-                                        name: "counter",
-                                        span: Span {
-                                            start: 399,
-                                            end: 406,
-                                        },
-                                    },
-                                ),
-                                value: MessageSend {
-                                    receiver: Identifier(
-                                        Identifier {
-                                            name: "counter",
-                                            span: Span {
-                                                start: 410,
-                                                end: 417,
-                                            },
-                                        },
-                                    ),
-                                    selector: Binary(
-                                        "+",
-                                    ),
-                                    arguments: [
-                                        Literal(
-                                            Integer(
-                                                1,
-                                            ),
-                                            Span {
-                                                start: 420,
-                                                end: 421,
-                                            },
-                                        ),
-                                    ],
-                                    is_cast: false,
-                                    span: Span {
-                                        start: 410,
-                                        end: 421,
-                                    },
-                                },
-                                span: Span {
-                                    start: 399,
-                                    end: 421,
-                                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "timesRepeat:",
+                            span: Span {
+                                start: 385,
+                                end: 397,
                             },
-                        ],
-                        span: Span {
-                            start: 398,
-                            end: 422,
                         },
-                    },
+                    ],
                 ),
-            ],
-            is_cast: false,
-            span: Span {
-                start: 383,
-                end: 422,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "sum",
-                    span: Span {
-                        start: 443,
-                        end: 446,
-                    },
-                },
-            ),
-            value: Literal(
-                Integer(
-                    0,
-                ),
-                Span {
-                    start: 450,
-                    end: 451,
-                },
-            ),
-            span: Span {
-                start: 443,
-                end: 451,
-            },
-        },
-        MessageSend {
-            receiver: Literal(
-                Integer(
-                    1,
-                ),
-                Span {
-                    start: 452,
-                    end: 453,
-                },
-            ),
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "to:",
-                        span: Span {
-                            start: 454,
-                            end: 457,
-                        },
-                    },
-                    KeywordPart {
-                        keyword: "do:",
-                        span: Span {
-                            start: 461,
-                            end: 464,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Literal(
-                    Integer(
-                        10,
-                    ),
-                    Span {
-                        start: 458,
-                        end: 460,
-                    },
-                ),
-                Block(
-                    Block {
-                        parameters: [
-                            BlockParameter {
-                                name: "n",
-                                span: Span {
-                                    start: 467,
-                                    end: 468,
-                                },
-                            },
-                        ],
-                        body: [
-                            Assignment {
-                                target: Identifier(
-                                    Identifier {
-                                        name: "sum",
-                                        span: Span {
-                                            start: 471,
-                                            end: 474,
-                                        },
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                ExpressionStatement {
+                                    comments: CommentAttachment {
+                                        leading: [],
+                                        trailing: None,
                                     },
-                                ),
-                                value: MessageSend {
-                                    receiver: Identifier(
-                                        Identifier {
-                                            name: "sum",
-                                            span: Span {
-                                                start: 478,
-                                                end: 481,
-                                            },
-                                        },
-                                    ),
-                                    selector: Binary(
-                                        "+",
-                                    ),
-                                    arguments: [
-                                        Identifier(
+                                    expression: Assignment {
+                                        target: Identifier(
                                             Identifier {
-                                                name: "n",
+                                                name: "counter",
                                                 span: Span {
-                                                    start: 484,
-                                                    end: 485,
+                                                    start: 399,
+                                                    end: 406,
                                                 },
                                             },
                                         ),
-                                    ],
-                                    is_cast: false,
-                                    span: Span {
-                                        start: 478,
-                                        end: 485,
+                                        value: MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "counter",
+                                                    span: Span {
+                                                        start: 410,
+                                                        end: 417,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "+",
+                                            ),
+                                            arguments: [
+                                                Literal(
+                                                    Integer(
+                                                        1,
+                                                    ),
+                                                    Span {
+                                                        start: 420,
+                                                        end: 421,
+                                                    },
+                                                ),
+                                            ],
+                                            is_cast: false,
+                                            span: Span {
+                                                start: 410,
+                                                end: 421,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 399,
+                                            end: 421,
+                                        },
                                     },
                                 },
-                                span: Span {
-                                    start: 471,
-                                    end: 485,
-                                },
+                            ],
+                            span: Span {
+                                start: 398,
+                                end: 422,
                             },
-                        ],
+                        },
+                    ),
+                ],
+                is_cast: false,
+                span: Span {
+                    start: 383,
+                    end: 422,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "sum",
                         span: Span {
-                            start: 465,
-                            end: 486,
+                            start: 443,
+                            end: 446,
                         },
                     },
                 ),
-            ],
-            is_cast: false,
-            span: Span {
-                start: 452,
-                end: 486,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isEven",
-                    span: Span {
-                        start: 504,
-                        end: 510,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        4,
-                    ),
-                    Span {
-                        start: 514,
-                        end: 515,
-                    },
-                ),
-                selector: Unary(
-                    "isEven",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 514,
-                    end: 522,
-                },
-            },
-            span: Span {
-                start: 504,
-                end: 522,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isOdd",
-                    span: Span {
-                        start: 523,
-                        end: 528,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        7,
-                    ),
-                    Span {
-                        start: 532,
-                        end: 533,
-                    },
-                ),
-                selector: Unary(
-                    "isOdd",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 532,
-                    end: 539,
-                },
-            },
-            span: Span {
-                start: 523,
-                end: 539,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isZero",
-                    span: Span {
-                        start: 540,
-                        end: 546,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
+                value: Literal(
                     Integer(
                         0,
                     ),
                     Span {
-                        start: 550,
-                        end: 551,
+                        start: 450,
+                        end: 451,
                     },
                 ),
-                selector: Unary(
-                    "isZero",
-                ),
-                arguments: [],
-                is_cast: false,
                 span: Span {
-                    start: 550,
-                    end: 558,
+                    start: 443,
+                    end: 451,
                 },
-            },
-            span: Span {
-                start: 540,
-                end: 558,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "oddSum",
-                    span: Span {
-                        start: 615,
-                        end: 621,
-                    },
-                },
-            ),
-            value: Literal(
-                Integer(
-                    0,
-                ),
-                Span {
-                    start: 625,
-                    end: 626,
-                },
-            ),
-            span: Span {
-                start: 615,
-                end: 626,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        },
-        MessageSend {
-            receiver: Literal(
-                Integer(
-                    1,
-                ),
-                Span {
-                    start: 627,
-                    end: 628,
-                },
-            ),
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "to:",
-                        span: Span {
-                            start: 629,
-                            end: 632,
-                        },
-                    },
-                    KeywordPart {
-                        keyword: "by:",
-                        span: Span {
-                            start: 636,
-                            end: 639,
-                        },
-                    },
-                    KeywordPart {
-                        keyword: "do:",
-                        span: Span {
-                            start: 642,
-                            end: 645,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Literal(
-                    Integer(
-                        10,
-                    ),
-                    Span {
-                        start: 633,
-                        end: 635,
-                    },
-                ),
-                Literal(
-                    Integer(
-                        2,
-                    ),
-                    Span {
-                        start: 640,
-                        end: 641,
-                    },
-                ),
-                Block(
-                    Block {
-                        parameters: [
-                            BlockParameter {
-                                name: "n",
-                                span: Span {
-                                    start: 648,
-                                    end: 649,
-                                },
-                            },
-                        ],
-                        body: [
-                            Assignment {
-                                target: Identifier(
-                                    Identifier {
-                                        name: "oddSum",
-                                        span: Span {
-                                            start: 652,
-                                            end: 658,
-                                        },
-                                    },
-                                ),
-                                value: MessageSend {
-                                    receiver: Identifier(
-                                        Identifier {
-                                            name: "oddSum",
-                                            span: Span {
-                                                start: 662,
-                                                end: 668,
-                                            },
-                                        },
-                                    ),
-                                    selector: Binary(
-                                        "+",
-                                    ),
-                                    arguments: [
-                                        Identifier(
-                                            Identifier {
-                                                name: "n",
-                                                span: Span {
-                                                    start: 671,
-                                                    end: 672,
-                                                },
-                                            },
-                                        ),
-                                    ],
-                                    is_cast: false,
-                                    span: Span {
-                                        start: 662,
-                                        end: 672,
-                                    },
-                                },
-                                span: Span {
-                                    start: 652,
-                                    end: 672,
-                                },
-                            },
-                        ],
-                        span: Span {
-                            start: 646,
-                            end: 673,
-                        },
-                    },
-                ),
-            ],
-            is_cast: false,
-            span: Span {
-                start: 627,
-                end: 673,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "countdown",
-                    span: Span {
-                        start: 728,
-                        end: 737,
-                    },
-                },
-            ),
-            value: Literal(
-                Integer(
-                    0,
-                ),
-                Span {
-                    start: 741,
-                    end: 742,
-                },
-            ),
-            span: Span {
-                start: 728,
-                end: 742,
-            },
-        },
-        MessageSend {
-            receiver: Literal(
-                Integer(
-                    10,
-                ),
-                Span {
-                    start: 743,
-                    end: 745,
-                },
-            ),
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "to:",
-                        span: Span {
-                            start: 746,
-                            end: 749,
-                        },
-                    },
-                    KeywordPart {
-                        keyword: "by:",
-                        span: Span {
-                            start: 752,
-                            end: 755,
-                        },
-                    },
-                    KeywordPart {
-                        keyword: "do:",
-                        span: Span {
-                            start: 759,
-                            end: 762,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Literal(
+            expression: MessageSend {
+                receiver: Literal(
                     Integer(
                         1,
                     ),
                     Span {
-                        start: 750,
-                        end: 751,
+                        start: 452,
+                        end: 453,
                     },
                 ),
-                Literal(
-                    Integer(
-                        -1,
-                    ),
-                    Span {
-                        start: 756,
-                        end: 758,
-                    },
-                ),
-                Block(
-                    Block {
-                        parameters: [
-                            BlockParameter {
-                                name: "n",
-                                span: Span {
-                                    start: 765,
-                                    end: 766,
-                                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "to:",
+                            span: Span {
+                                start: 454,
+                                end: 457,
                             },
-                        ],
-                        body: [
-                            Assignment {
-                                target: Identifier(
-                                    Identifier {
-                                        name: "countdown",
-                                        span: Span {
-                                            start: 769,
-                                            end: 778,
-                                        },
+                        },
+                        KeywordPart {
+                            keyword: "do:",
+                            span: Span {
+                                start: 461,
+                                end: 464,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            10,
+                        ),
+                        Span {
+                            start: 458,
+                            end: 460,
+                        },
+                    ),
+                    Block(
+                        Block {
+                            parameters: [
+                                BlockParameter {
+                                    name: "n",
+                                    span: Span {
+                                        start: 467,
+                                        end: 468,
                                     },
-                                ),
-                                value: MessageSend {
-                                    receiver: Identifier(
-                                        Identifier {
-                                            name: "countdown",
-                                            span: Span {
-                                                start: 782,
-                                                end: 791,
-                                            },
-                                        },
-                                    ),
-                                    selector: Binary(
-                                        "+",
-                                    ),
-                                    arguments: [
-                                        Literal(
-                                            Integer(
-                                                1,
-                                            ),
-                                            Span {
-                                                start: 794,
-                                                end: 795,
+                                },
+                            ],
+                            body: [
+                                ExpressionStatement {
+                                    comments: CommentAttachment {
+                                        leading: [],
+                                        trailing: None,
+                                    },
+                                    expression: Assignment {
+                                        target: Identifier(
+                                            Identifier {
+                                                name: "sum",
+                                                span: Span {
+                                                    start: 471,
+                                                    end: 474,
+                                                },
                                             },
                                         ),
-                                    ],
-                                    is_cast: false,
-                                    span: Span {
-                                        start: 782,
-                                        end: 795,
+                                        value: MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "sum",
+                                                    span: Span {
+                                                        start: 478,
+                                                        end: 481,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "+",
+                                            ),
+                                            arguments: [
+                                                Identifier(
+                                                    Identifier {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 484,
+                                                            end: 485,
+                                                        },
+                                                    },
+                                                ),
+                                            ],
+                                            is_cast: false,
+                                            span: Span {
+                                                start: 478,
+                                                end: 485,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 471,
+                                            end: 485,
+                                        },
                                     },
                                 },
-                                span: Span {
-                                    start: 769,
-                                    end: 795,
-                                },
+                            ],
+                            span: Span {
+                                start: 465,
+                                end: 486,
                             },
-                        ],
+                        },
+                    ),
+                ],
+                is_cast: false,
+                span: Span {
+                    start: 452,
+                    end: 486,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isEven",
                         span: Span {
-                            start: 763,
-                            end: 796,
+                            start: 504,
+                            end: 510,
                         },
                     },
                 ),
-            ],
-            is_cast: false,
-            span: Span {
-                start: 743,
-                end: 796,
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            4,
+                        ),
+                        Span {
+                            start: 514,
+                            end: 515,
+                        },
+                    ),
+                    selector: Unary(
+                        "isEven",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 514,
+                        end: 522,
+                    },
+                },
+                span: Span {
+                    start: 504,
+                    end: 522,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isOdd",
+                        span: Span {
+                            start: 523,
+                            end: 528,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            7,
+                        ),
+                        Span {
+                            start: 532,
+                            end: 533,
+                        },
+                    ),
+                    selector: Unary(
+                        "isOdd",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 532,
+                        end: 539,
+                    },
+                },
+                span: Span {
+                    start: 523,
+                    end: 539,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isZero",
+                        span: Span {
+                            start: 540,
+                            end: 546,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            0,
+                        ),
+                        Span {
+                            start: 550,
+                            end: 551,
+                        },
+                    ),
+                    selector: Unary(
+                        "isZero",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 550,
+                        end: 558,
+                    },
+                },
+                span: Span {
+                    start: 540,
+                    end: 558,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "oddSum",
+                        span: Span {
+                            start: 615,
+                            end: 621,
+                        },
+                    },
+                ),
+                value: Literal(
+                    Integer(
+                        0,
+                    ),
+                    Span {
+                        start: 625,
+                        end: 626,
+                    },
+                ),
+                span: Span {
+                    start: 615,
+                    end: 626,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        1,
+                    ),
+                    Span {
+                        start: 627,
+                        end: 628,
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "to:",
+                            span: Span {
+                                start: 629,
+                                end: 632,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "by:",
+                            span: Span {
+                                start: 636,
+                                end: 639,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "do:",
+                            span: Span {
+                                start: 642,
+                                end: 645,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            10,
+                        ),
+                        Span {
+                            start: 633,
+                            end: 635,
+                        },
+                    ),
+                    Literal(
+                        Integer(
+                            2,
+                        ),
+                        Span {
+                            start: 640,
+                            end: 641,
+                        },
+                    ),
+                    Block(
+                        Block {
+                            parameters: [
+                                BlockParameter {
+                                    name: "n",
+                                    span: Span {
+                                        start: 648,
+                                        end: 649,
+                                    },
+                                },
+                            ],
+                            body: [
+                                ExpressionStatement {
+                                    comments: CommentAttachment {
+                                        leading: [],
+                                        trailing: None,
+                                    },
+                                    expression: Assignment {
+                                        target: Identifier(
+                                            Identifier {
+                                                name: "oddSum",
+                                                span: Span {
+                                                    start: 652,
+                                                    end: 658,
+                                                },
+                                            },
+                                        ),
+                                        value: MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "oddSum",
+                                                    span: Span {
+                                                        start: 662,
+                                                        end: 668,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "+",
+                                            ),
+                                            arguments: [
+                                                Identifier(
+                                                    Identifier {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 671,
+                                                            end: 672,
+                                                        },
+                                                    },
+                                                ),
+                                            ],
+                                            is_cast: false,
+                                            span: Span {
+                                                start: 662,
+                                                end: 672,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 652,
+                                            end: 672,
+                                        },
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 646,
+                                end: 673,
+                            },
+                        },
+                    ),
+                ],
+                is_cast: false,
+                span: Span {
+                    start: 627,
+                    end: 673,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "countdown",
+                        span: Span {
+                            start: 728,
+                            end: 737,
+                        },
+                    },
+                ),
+                value: Literal(
+                    Integer(
+                        0,
+                    ),
+                    Span {
+                        start: 741,
+                        end: 742,
+                    },
+                ),
+                span: Span {
+                    start: 728,
+                    end: 742,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Literal(
+                    Integer(
+                        10,
+                    ),
+                    Span {
+                        start: 743,
+                        end: 745,
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "to:",
+                            span: Span {
+                                start: 746,
+                                end: 749,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "by:",
+                            span: Span {
+                                start: 752,
+                                end: 755,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "do:",
+                            span: Span {
+                                start: 759,
+                                end: 762,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        Integer(
+                            1,
+                        ),
+                        Span {
+                            start: 750,
+                            end: 751,
+                        },
+                    ),
+                    Literal(
+                        Integer(
+                            -1,
+                        ),
+                        Span {
+                            start: 756,
+                            end: 758,
+                        },
+                    ),
+                    Block(
+                        Block {
+                            parameters: [
+                                BlockParameter {
+                                    name: "n",
+                                    span: Span {
+                                        start: 765,
+                                        end: 766,
+                                    },
+                                },
+                            ],
+                            body: [
+                                ExpressionStatement {
+                                    comments: CommentAttachment {
+                                        leading: [],
+                                        trailing: None,
+                                    },
+                                    expression: Assignment {
+                                        target: Identifier(
+                                            Identifier {
+                                                name: "countdown",
+                                                span: Span {
+                                                    start: 769,
+                                                    end: 778,
+                                                },
+                                            },
+                                        ),
+                                        value: MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "countdown",
+                                                    span: Span {
+                                                        start: 782,
+                                                        end: 791,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "+",
+                                            ),
+                                            arguments: [
+                                                Literal(
+                                                    Integer(
+                                                        1,
+                                                    ),
+                                                    Span {
+                                                        start: 794,
+                                                        end: 795,
+                                                    },
+                                                ),
+                                            ],
+                                            is_cast: false,
+                                            span: Span {
+                                                start: 782,
+                                                end: 795,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 769,
+                                            end: 795,
+                                        },
+                                    },
+                                },
+                            ],
+                            span: Span {
+                                start: 763,
+                                end: 796,
+                            },
+                        },
+                    ),
+                ],
+                is_cast: false,
+                span: Span {
+                    start: 743,
+                    end: 796,
+                },
             },
         },
     ],
@@ -1041,7 +1185,7 @@ Module {
         start: 133,
         end: 796,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

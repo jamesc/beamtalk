@@ -65,75 +65,81 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Assignment {
-                            target: FieldAccess {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "self",
-                                        span: Span {
-                                            start: 368,
-                                            end: 372,
-                                        },
-                                    },
-                                ),
-                                field: Identifier {
-                                    name: "count",
-                                    span: Span {
-                                        start: 373,
-                                        end: 378,
-                                    },
-                                },
-                                span: Span {
-                                    start: 368,
-                                    end: 378,
-                                },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
                             },
-                            value: MessageSend {
-                                receiver: FieldAccess {
+                            expression: Assignment {
+                                target: FieldAccess {
                                     receiver: Identifier(
                                         Identifier {
                                             name: "self",
                                             span: Span {
-                                                start: 382,
-                                                end: 386,
+                                                start: 368,
+                                                end: 372,
                                             },
                                         },
                                     ),
                                     field: Identifier {
                                         name: "count",
                                         span: Span {
-                                            start: 387,
-                                            end: 392,
+                                            start: 373,
+                                            end: 378,
                                         },
                                     },
                                     span: Span {
-                                        start: 382,
-                                        end: 392,
+                                        start: 368,
+                                        end: 378,
                                     },
                                 },
-                                selector: Binary(
-                                    "+",
-                                ),
-                                arguments: [
-                                    Literal(
-                                        Integer(
-                                            1,
+                                value: MessageSend {
+                                    receiver: FieldAccess {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "self",
+                                                span: Span {
+                                                    start: 382,
+                                                    end: 386,
+                                                },
+                                            },
                                         ),
-                                        Span {
-                                            start: 395,
-                                            end: 396,
+                                        field: Identifier {
+                                            name: "count",
+                                            span: Span {
+                                                start: 387,
+                                                end: 392,
+                                            },
                                         },
+                                        span: Span {
+                                            start: 382,
+                                            end: 392,
+                                        },
+                                    },
+                                    selector: Binary(
+                                        "+",
                                     ),
-                                ],
-                                is_cast: false,
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 395,
+                                                end: 396,
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 382,
+                                        end: 396,
+                                    },
+                                },
                                 span: Span {
-                                    start: 382,
+                                    start: 368,
                                     end: 396,
                                 },
-                            },
-                            span: Span {
-                                start: 368,
-                                end: 396,
                             },
                         },
                     ],
@@ -156,26 +162,32 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        FieldAccess {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "self",
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 412,
+                                            end: 416,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "count",
                                     span: Span {
-                                        start: 412,
-                                        end: 416,
+                                        start: 417,
+                                        end: 422,
                                     },
                                 },
-                            ),
-                            field: Identifier {
-                                name: "count",
                                 span: Span {
-                                    start: 417,
+                                    start: 412,
                                     end: 422,
                                 },
-                            },
-                            span: Span {
-                                start: 412,
-                                end: 422,
                             },
                         },
                     ],
@@ -200,95 +212,107 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Assignment {
-                            target: FieldAccess {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "self",
-                                        span: Span {
-                                            start: 244,
-                                            end: 248,
-                                        },
-                                    },
-                                ),
-                                field: Identifier {
-                                    name: "instanceCount",
-                                    span: Span {
-                                        start: 249,
-                                        end: 262,
-                                    },
-                                },
-                                span: Span {
-                                    start: 244,
-                                    end: 262,
-                                },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
                             },
-                            value: MessageSend {
-                                receiver: FieldAccess {
+                            expression: Assignment {
+                                target: FieldAccess {
                                     receiver: Identifier(
                                         Identifier {
                                             name: "self",
                                             span: Span {
-                                                start: 266,
-                                                end: 270,
+                                                start: 244,
+                                                end: 248,
                                             },
                                         },
                                     ),
                                     field: Identifier {
                                         name: "instanceCount",
                                         span: Span {
-                                            start: 271,
+                                            start: 249,
+                                            end: 262,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 244,
+                                        end: 262,
+                                    },
+                                },
+                                value: MessageSend {
+                                    receiver: FieldAccess {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "self",
+                                                span: Span {
+                                                    start: 266,
+                                                    end: 270,
+                                                },
+                                            },
+                                        ),
+                                        field: Identifier {
+                                            name: "instanceCount",
+                                            span: Span {
+                                                start: 271,
+                                                end: 284,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 266,
                                             end: 284,
                                         },
                                     },
+                                    selector: Binary(
+                                        "+",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 287,
+                                                end: 288,
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
                                     span: Span {
                                         start: 266,
-                                        end: 284,
+                                        end: 288,
                                     },
                                 },
-                                selector: Binary(
-                                    "+",
-                                ),
-                                arguments: [
-                                    Literal(
-                                        Integer(
-                                            1,
-                                        ),
-                                        Span {
-                                            start: 287,
-                                            end: 288,
-                                        },
-                                    ),
-                                ],
-                                is_cast: false,
                                 span: Span {
-                                    start: 266,
+                                    start: 244,
                                     end: 288,
                                 },
                             },
-                            span: Span {
-                                start: 244,
-                                end: 288,
-                            },
                         },
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "self",
-                                    span: Span {
-                                        start: 293,
-                                        end: 297,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 293,
+                                            end: 297,
+                                        },
                                     },
+                                ),
+                                selector: Unary(
+                                    "spawn",
+                                ),
+                                arguments: [],
+                                is_cast: false,
+                                span: Span {
+                                    start: 293,
+                                    end: 303,
                                 },
-                            ),
-                            selector: Unary(
-                                "spawn",
-                            ),
-                            arguments: [],
-                            is_cast: false,
-                            span: Span {
-                                start: 293,
-                                end: 303,
                             },
                         },
                     ],
@@ -311,26 +335,32 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        FieldAccess {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "self",
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 329,
+                                            end: 333,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "instanceCount",
                                     span: Span {
-                                        start: 329,
-                                        end: 333,
+                                        start: 334,
+                                        end: 347,
                                     },
                                 },
-                            ),
-                            field: Identifier {
-                                name: "instanceCount",
                                 span: Span {
-                                    start: 334,
+                                    start: 329,
                                     end: 347,
                                 },
-                            },
-                            span: Span {
-                                start: 329,
-                                end: 347,
                             },
                         },
                     ],
@@ -397,7 +427,7 @@ Module {
         start: 138,
         end: 422,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

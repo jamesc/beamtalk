@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,95 +7,107 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "str1",
-                    span: Span {
-                        start: 188,
-                        end: 192,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: MessageSend {
-                    receiver: Literal(
-                        String(
-                            "unterminated string\n\n// Code after error should still parse\nx := 42\n\n// Another unterminated string\nstr2 := ",
-                        ),
-                        Span {
-                            start: 196,
-                            end: 306,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "str1",
+                        span: Span {
+                            start: 188,
+                            end: 192,
                         },
-                    ),
+                    },
+                ),
+                value: MessageSend {
+                    receiver: MessageSend {
+                        receiver: Literal(
+                            String(
+                                "unterminated string\n\n// Code after error should still parse\nx := 42\n\n// Another unterminated string\nstr2 := ",
+                            ),
+                            Span {
+                                start: 196,
+                                end: 306,
+                            },
+                        ),
+                        selector: Unary(
+                            "another",
+                        ),
+                        arguments: [],
+                        is_cast: false,
+                        span: Span {
+                            start: 196,
+                            end: 313,
+                        },
+                    },
                     selector: Unary(
-                        "another",
+                        "unclosed",
                     ),
                     arguments: [],
                     is_cast: false,
                     span: Span {
                         start: 196,
-                        end: 313,
+                        end: 322,
                     },
                 },
-                selector: Unary(
-                    "unclosed",
-                ),
-                arguments: [],
-                is_cast: false,
                 span: Span {
-                    start: 196,
+                    start: 188,
                     end: 322,
                 },
             },
-            span: Span {
-                start: 188,
-                end: 322,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "y",
-                    span: Span {
-                        start: 337,
-                        end: 338,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
-                        name: "x",
+                        name: "y",
                         span: Span {
-                            start: 342,
-                            end: 343,
+                            start: 337,
+                            end: 338,
                         },
                     },
                 ),
-                selector: Binary(
-                    "+",
-                ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            1,
-                        ),
-                        Span {
-                            start: 346,
-                            end: 347,
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "x",
+                            span: Span {
+                                start: 342,
+                                end: 343,
+                            },
                         },
                     ),
-                ],
-                is_cast: false,
+                    selector: Binary(
+                        "+",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                1,
+                            ),
+                            Span {
+                                start: 346,
+                                end: 347,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 342,
+                        end: 347,
+                    },
+                },
                 span: Span {
-                    start: 342,
+                    start: 337,
                     end: 347,
                 },
-            },
-            span: Span {
-                start: 337,
-                end: 347,
             },
         },
     ],
@@ -104,7 +115,7 @@ Module {
         start: 188,
         end: 347,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

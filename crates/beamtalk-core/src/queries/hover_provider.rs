@@ -85,10 +85,14 @@ pub fn compute_hover(
     }
 
     // Find the expression at this position
-    for expr in &module.expressions {
-        if let Some(hover) =
-            find_hover_in_expr(expr, offset_val, &class_context, hierarchy, &type_map)
-        {
+    for stmt in &module.expressions {
+        if let Some(hover) = find_hover_in_expr(
+            &stmt.expression,
+            offset_val,
+            &class_context,
+            hierarchy,
+            &type_map,
+        ) {
             return Some(hover);
         }
     }
@@ -99,10 +103,14 @@ pub fn compute_hover(
             if let Some(hover) = find_hover_on_method_signature(method, source, offset_val) {
                 return Some(hover);
             }
-            for body_expr in &method.body {
-                if let Some(hover) =
-                    find_hover_in_expr(body_expr, offset_val, &class_context, hierarchy, &type_map)
-                {
+            for body_stmt in &method.body {
+                if let Some(hover) = find_hover_in_expr(
+                    &body_stmt.expression,
+                    offset_val,
+                    &class_context,
+                    hierarchy,
+                    &type_map,
+                ) {
                     return Some(hover);
                 }
             }
@@ -111,10 +119,14 @@ pub fn compute_hover(
             if let Some(hover) = find_hover_on_method_signature(method, source, offset_val) {
                 return Some(hover);
             }
-            for body_expr in &method.body {
-                if let Some(hover) =
-                    find_hover_in_expr(body_expr, offset_val, &class_context, hierarchy, &type_map)
-                {
+            for body_stmt in &method.body {
+                if let Some(hover) = find_hover_in_expr(
+                    &body_stmt.expression,
+                    offset_val,
+                    &class_context,
+                    hierarchy,
+                    &type_map,
+                ) {
                     return Some(hover);
                 }
             }
@@ -126,10 +138,14 @@ pub fn compute_hover(
         if let Some(hover) = find_hover_on_method_signature(&smd.method, source, offset_val) {
             return Some(hover);
         }
-        for body_expr in &smd.method.body {
-            if let Some(hover) =
-                find_hover_in_expr(body_expr, offset_val, &class_context, hierarchy, &type_map)
-            {
+        for body_stmt in &smd.method.body {
+            if let Some(hover) = find_hover_in_expr(
+                &body_stmt.expression,
+                offset_val,
+                &class_context,
+                hierarchy,
+                &type_map,
+            ) {
                 return Some(hover);
             }
         }
@@ -365,7 +381,7 @@ fn selector_span_in_method_signature(method: &MethodDefinition, source: &str) ->
             let header_end_u32 = method
                 .body
                 .first()
-                .map_or(method.span.end(), |expr| expr.span().start());
+                .map_or(method.span.end(), |stmt| stmt.expression.span().start());
             let header_end = usize::try_from(header_end_u32).ok()?.min(source.len());
             if method_start >= header_end {
                 return None;
@@ -576,7 +592,7 @@ fn find_hover_in_expr(
         Expression::Block(block) => block
             .body
             .iter()
-            .find_map(|expr| find_hover_in_expr(expr, offset, context, hierarchy, type_map)),
+            .find_map(|s| find_hover_in_expr(&s.expression, offset, context, hierarchy, type_map)),
         Expression::Return { value, .. } => {
             find_hover_in_expr(value, offset, context, hierarchy, type_map)
         }
