@@ -239,16 +239,9 @@ impl ProtocolClient {
         if parsed.get("push").and_then(|v| v.as_str()) == Some("transcript") {
             if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
                 use std::io::Write;
-                let stdout = std::io::stdout();
-                let mut out = stdout.lock();
-                for ch in text.chars() {
-                    if self.transcript_bol && ch != '\n' {
-                        let _ = write!(out, "│ ");
-                    }
-                    let _ = write!(out, "{ch}");
-                    self.transcript_bol = ch == '\n';
-                }
-                let _ = out.flush();
+                let formatted = format_transcript_chunk(text, &mut self.transcript_bol);
+                let _ = std::io::stdout().lock().write_all(formatted.as_bytes());
+                let _ = std::io::stdout().flush();
             }
         }
         true
@@ -378,5 +371,95 @@ impl ProtocolClient {
             }
         }
         unreachable!("send_request loop always returns")
+    }
+}
+
+/// Apply `│ ` gutter prefix to transcript text at each line start.
+///
+/// `bol` tracks whether the cursor is at the beginning of a line across
+/// successive calls (since `show:` and `cr` arrive as separate push chunks).
+/// Returns the formatted string ready to write to stdout.
+pub fn format_transcript_chunk(text: &str, bol: &mut bool) -> String {
+    let mut out = String::with_capacity(text.len() + 3);
+    for ch in text.chars() {
+        if *bol && ch != '\n' {
+            out.push_str("│ ");
+        }
+        out.push(ch);
+        *bol = ch == '\n';
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_transcript_chunk;
+
+    #[test]
+    fn prefix_at_start_of_line() {
+        let mut bol = true;
+        assert_eq!(format_transcript_chunk("hello", &mut bol), "│ hello");
+        assert!(!bol);
+    }
+
+    #[test]
+    fn no_prefix_mid_line() {
+        let mut bol = false;
+        assert_eq!(format_transcript_chunk(" world", &mut bol), " world");
+        assert!(!bol);
+    }
+
+    #[test]
+    fn newline_resets_bol() {
+        let mut bol = false;
+        assert_eq!(format_transcript_chunk("\n", &mut bol), "\n");
+        assert!(bol);
+    }
+
+    #[test]
+    fn show_then_cr_as_separate_chunks() {
+        // Simulates `Transcript show: "hello"` followed by `Transcript cr`
+        let mut bol = true;
+        let s1 = format_transcript_chunk("hello", &mut bol);
+        assert_eq!(s1, "│ hello");
+        assert!(!bol);
+        let s2 = format_transcript_chunk("\n", &mut bol);
+        assert_eq!(s2, "\n");
+        assert!(bol);
+    }
+
+    #[test]
+    fn multiline_in_single_chunk() {
+        let mut bol = true;
+        assert_eq!(
+            format_transcript_chunk("hello\nworld", &mut bol),
+            "│ hello\n│ world"
+        );
+        assert!(!bol);
+    }
+
+    #[test]
+    fn trailing_newline_leaves_bol_true() {
+        let mut bol = true;
+        assert_eq!(
+            format_transcript_chunk("hello\n", &mut bol),
+            "│ hello\n"
+        );
+        assert!(bol);
+    }
+
+    #[test]
+    fn empty_chunk_is_noop() {
+        let mut bol = true;
+        assert_eq!(format_transcript_chunk("", &mut bol), "");
+        assert!(bol); // unchanged
+    }
+
+    #[test]
+    fn newline_only_chunk_does_not_prefix() {
+        // A bare `cr` push: starts mid-line, just a newline — no prefix
+        let mut bol = false;
+        assert_eq!(format_transcript_chunk("\n", &mut bol), "\n");
+        assert!(bol);
     }
 }
