@@ -7,20 +7,32 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Identifier(
-            Identifier {
-                name: "caf",
-                span: Span {
-                    start: 323,
-                    end: 326,
-                },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        ),
-        Error {
-            message: "Invalid assignment target",
-            span: Span {
-                start: 326,
-                end: 328,
+            expression: Identifier(
+                Identifier {
+                    name: "caf",
+                    span: Span {
+                        start: 323,
+                        end: 326,
+                    },
+                },
+            ),
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Invalid assignment target",
+                span: Span {
+                    start: 326,
+                    end: 328,
+                },
             },
         },
     ],
@@ -28,7 +40,7 @@ Module {
         start: 323,
         end: 800,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

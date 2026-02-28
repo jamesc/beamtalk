@@ -50,7 +50,7 @@
 //! assert_eq!(module.expressions.len(), 1);
 //! ```
 
-use crate::ast::{Comment, CommentKind, Expression, Module};
+use crate::ast::{Comment, CommentKind, Expression, ExpressionStatement, Module};
 #[cfg(test)]
 use crate::ast::{Literal, MessageSelector};
 use crate::source_analysis::{Span, Token, TokenKind, Trivia, lex_with_eof};
@@ -713,7 +713,7 @@ impl Parser {
             } else {
                 let expr = self.parse_expression();
                 let is_error = expr.is_error();
-                expressions.push(expr);
+                expressions.push(ExpressionStatement::bare(expr));
 
                 // If we got an error, try to recover
                 if is_error {
@@ -724,7 +724,7 @@ impl Parser {
                         // period consumed — nothing else to do
                     } else if self.match_token(&TokenKind::Bang) {
                         // Cast terminator — annotate the last expression as a cast
-                        match expressions.last_mut() {
+                        match expressions.last_mut().map(|s| &mut s.expression) {
                             Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
                             Some(last) => {
                                 let span = last.span();
@@ -753,7 +753,7 @@ impl Parser {
             method_definitions,
             expressions,
             span,
-            leading_comments: comments,
+            file_leading_comments: comments,
         }
     }
 
@@ -911,7 +911,7 @@ mod tests {
     fn parse_integer_literal() {
         let module = parse_ok("42");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Literal(Literal::Integer(42), _) => {}
             _ => panic!("Expected integer literal"),
         }
@@ -921,7 +921,7 @@ mod tests {
     fn parse_float_literal() {
         let module = parse_ok("2.5");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Literal(Literal::Float(f), _) if (*f - 2.5_f64).abs() < 0.001 => {}
             _ => panic!("Expected float literal"),
         }
@@ -931,7 +931,7 @@ mod tests {
     fn parse_string_literal() {
         let module = parse_ok("\"hello\"");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Literal(Literal::String(s), _) if s == "hello" => {}
             _ => panic!("Expected string literal"),
         }
@@ -941,7 +941,7 @@ mod tests {
     fn parse_symbol_literal() {
         let module = parse_ok("#symbol");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Literal(Literal::Symbol(s), _) if s == "symbol" => {}
             _ => panic!("Expected symbol literal"),
         }
@@ -951,7 +951,7 @@ mod tests {
     fn parse_identifier() {
         let module = parse_ok("myVar");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Identifier(id) if id.name == "myVar" => {}
             _ => panic!("Expected identifier"),
         }
@@ -961,7 +961,7 @@ mod tests {
     fn parse_assignment() {
         let module = parse_ok("x := 42");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Assignment { target, value, .. } => {
                 assert!(matches!(**target, Expression::Identifier(_)));
                 assert!(matches!(
@@ -977,7 +977,7 @@ mod tests {
     fn parse_unary_message() {
         let module = parse_ok("3 factorial");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 receiver,
                 selector: MessageSelector::Unary(name),
@@ -999,7 +999,7 @@ mod tests {
     fn parse_binary_message() {
         let module = parse_ok("3 + 4");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 receiver,
                 selector: MessageSelector::Binary(op),
@@ -1028,7 +1028,7 @@ mod tests {
         assert_eq!(module.expressions.len(), 1);
 
         // The AST should be: (2 + (3 * 4))
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 receiver,
                 selector: MessageSelector::Binary(op),
@@ -1069,7 +1069,7 @@ mod tests {
     fn parse_keyword_message() {
         let module = parse_ok("array at: 1 put: \"x\"");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 receiver,
                 selector: MessageSelector::Keyword(parts),
@@ -1091,7 +1091,7 @@ mod tests {
         let module =
             parse_ok("acc isEmpty ifTrue: [cell]\n            ifFalse: [\"{acc},{cell}\"]");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 selector: MessageSelector::Keyword(parts),
                 arguments,
@@ -1110,7 +1110,7 @@ mod tests {
     fn parse_keyword_message_multiline_inject_into() {
         let module = parse_ok("collection inject: 0\n             into: [:acc :each | acc + each]");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 selector: MessageSelector::Keyword(parts),
                 arguments,
@@ -1129,7 +1129,7 @@ mod tests {
     fn parse_keyword_message_multiline_to_do() {
         let module = parse_ok("1 to: 10\n  do: [:i | i]");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 selector: MessageSelector::Keyword(parts),
                 arguments,
@@ -1171,7 +1171,7 @@ mod tests {
     fn parse_block_no_params() {
         let module = parse_ok("[42]");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Block(block) => {
                 assert!(block.parameters.is_empty());
                 assert_eq!(block.body.len(), 1);
@@ -1184,7 +1184,7 @@ mod tests {
     fn parse_block_with_params() {
         let module = parse_ok("[:x :y | x + y]");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Block(block) => {
                 assert_eq!(block.parameters.len(), 2);
                 assert_eq!(block.parameters[0].name.as_str(), "x");
@@ -1199,7 +1199,7 @@ mod tests {
     fn parse_return_statement() {
         let module = parse_ok("^42");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Return { value, .. } => {
                 assert!(matches!(
                     **value,
@@ -1214,7 +1214,7 @@ mod tests {
     fn parse_parenthesized() {
         let module = parse_ok("(3 + 4) * 2");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 receiver,
                 selector: MessageSelector::Binary(op),
@@ -1233,7 +1233,7 @@ mod tests {
     fn parse_field_access() {
         let module = parse_ok("self.value");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::FieldAccess {
                 receiver, field, ..
             } => {
@@ -1294,7 +1294,7 @@ mod tests {
     fn parse_cascade() {
         let module = parse_ok("Transcript show: \"Hello\"; cr; show: \"World\"");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Cascade {
                 receiver, messages, ..
             } => {
@@ -1319,7 +1319,7 @@ mod tests {
     fn parse_cascade_simple() {
         let module = parse_ok("x foo; bar; baz");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Cascade {
                 receiver, messages, ..
             } => {
@@ -1344,7 +1344,7 @@ mod tests {
         // Test that unary messages followed by period work correctly
         let module = parse_ok("obj foo.");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 receiver,
                 selector: MessageSelector::Unary(name),
@@ -1373,7 +1373,7 @@ mod tests {
         // Plain strings without interpolation still parse as Literal::String
         let module = parse_ok("\"Hello, world!\"");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Literal(Literal::String(s), _) if s == "Hello, world!" => {}
             _ => panic!("Expected plain string literal"),
         }
@@ -1386,7 +1386,7 @@ mod tests {
             "Expected no diagnostics, got: {diagnostics:?}"
         );
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::StringInterpolation { segments, .. } => {
                 assert_eq!(segments.len(), 3);
                 match &segments[0] {
@@ -1422,7 +1422,7 @@ mod tests {
         let (module, diagnostics) = parse(tokens);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::StringInterpolation { segments, .. } => {
                 assert_eq!(segments.len(), 4); // "Name: ", firstName, " ", lastName
             }
@@ -1437,7 +1437,7 @@ mod tests {
         let (module, diagnostics) = parse(tokens);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::StringInterpolation { segments, .. } => {
                 assert_eq!(segments.len(), 2); // "Result: ", (x + 1)
                 assert!(matches!(
@@ -1456,7 +1456,7 @@ mod tests {
         let (module, diagnostics) = parse(tokens);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::StringInterpolation { segments, .. } => {
                 assert_eq!(segments.len(), 2); // "Value: ", (dict at: key)
                 assert!(matches!(
@@ -1475,7 +1475,7 @@ mod tests {
         let (module, diagnostics) = parse(tokens);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::StringInterpolation { segments, .. } => {
                 // Only the interpolation expression, empty start/end omitted
                 assert_eq!(segments.len(), 1);
@@ -1507,7 +1507,7 @@ mod tests {
         // (not the error discarded as before)
         assert_eq!(module.expressions.len(), 1);
         // The assignment should contain the error as its value
-        if let Expression::Assignment { value, .. } = &module.expressions[0] {
+        if let Expression::Assignment { value, .. } = &module.expressions[0].expression {
             assert!(value.is_error());
         }
     }
@@ -1517,7 +1517,7 @@ mod tests {
         // Test that field access doesn't consume statement terminator
         let module = parse_ok("self.value.");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::FieldAccess { .. } => {}
             _ => panic!("Expected field access"),
         }
@@ -1528,7 +1528,7 @@ mod tests {
         // Regression test: ensure `. ` (period + space) is parsed as statement
         // separator, not field access
         let module = parse_ok("[ 1 + m. y := 1]");
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Block(block) => {
                 assert_eq!(block.body.len(), 2, "Block should have 2 statements");
             }
@@ -1540,7 +1540,7 @@ mod tests {
     fn parse_block_newline_separated_statements() {
         // BT-360: newlines act as implicit statement separators
         let module = parse_ok("[\n  Transcript show: \"a\"\n  Transcript show: \"b\"\n  42\n]");
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Block(block) => {
                 assert_eq!(
                     block.body.len(),
@@ -1556,7 +1556,7 @@ mod tests {
     fn parse_block_mixed_period_and_newline_separators() {
         // BT-360: periods and newlines can be mixed
         let module = parse_ok("[\n  1 + 2.\n  3 + 4\n  5\n]");
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Block(block) => {
                 assert_eq!(
                     block.body.len(),
@@ -1580,7 +1580,7 @@ mod tests {
 
         // Should still parse the block with all three statements
         assert_eq!(module.expressions.len(), 1, "Should parse the block");
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Block(block) => {
                 assert_eq!(
                     block.body.len(),
@@ -1589,17 +1589,20 @@ mod tests {
                 );
 
                 // First statement should be valid
-                assert!(!block.body[0].is_error(), "First statement should be valid");
+                assert!(
+                    !block.body[0].expression.is_error(),
+                    "First statement should be valid"
+                );
 
                 // Second statement is assignment with error value
                 assert!(
-                    matches!(&block.body[1], Expression::Assignment { value, .. } if value.is_error()),
+                    matches!(&block.body[1].expression, Expression::Assignment { value, .. } if value.is_error()),
                     "Second statement should be assignment with error value"
                 );
 
                 // Third statement should be parsed after error
                 assert!(
-                    !block.body[2].is_error(),
+                    !block.body[2].expression.is_error(),
                     "Third statement should be valid (blocks don't break on errors)"
                 );
             }
@@ -1664,19 +1667,19 @@ mod tests {
 
         // First statement should be valid
         assert!(
-            !method.body[0].is_error(),
+            !method.body[0].expression.is_error(),
             "First statement should be valid"
         );
 
         // Second statement should be an error assignment
         assert!(
-            matches!(&method.body[1], Expression::Assignment { value, .. } if value.is_error()),
+            matches!(&method.body[1].expression, Expression::Assignment { value, .. } if value.is_error()),
             "Second statement should be assignment with error value"
         );
 
         // Third statement should be parsed after recovery
         assert!(
-            !method.body[2].is_error(),
+            !method.body[2].expression.is_error(),
             "Third statement should be valid after recovery"
         );
     }
@@ -1715,7 +1718,7 @@ mod tests {
             "Second method should have 1 statement"
         );
         assert!(
-            !class.methods[1].body[0].is_error(),
+            !class.methods[1].body[0].expression.is_error(),
             "Second method statement should be valid"
         );
     }
@@ -1748,13 +1751,13 @@ mod tests {
 
         // First statement should be valid (x := 1)
         assert!(
-            !method.body[0].is_error(),
+            !method.body[0].expression.is_error(),
             "First statement should be valid"
         );
 
         // Last statement should be valid (z := 3) — recovered after error
         assert!(
-            !method.body[method.body.len() - 1].is_error(),
+            !method.body[method.body.len() - 1].expression.is_error(),
             "Last statement should be valid after recovery"
         );
     }
@@ -1825,7 +1828,7 @@ mod tests {
         let module = parse_ok("#{}");
         assert_eq!(module.expressions.len(), 1);
         assert!(matches!(
-            &module.expressions[0],
+            &module.expressions[0].expression,
             Expression::MapLiteral { pairs, .. } if pairs.is_empty()
         ));
     }
@@ -1834,7 +1837,7 @@ mod tests {
     fn parse_map_with_atom_keys() {
         let module = parse_ok("#{#name => \"Alice\", #age => 30}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
                 // First pair: #name => "Alice"
@@ -1861,12 +1864,21 @@ mod tests {
     fn parse_block_with_field_assignments() {
         // Regression test: multiple field assignments should parse correctly
         let module = parse_ok("[:n | self.x := self.x + n. self.x := self.x + n. ^self.x]");
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Block(block) => {
                 assert_eq!(block.body.len(), 3, "Block should have 3 statements");
-                assert!(matches!(block.body[0], Expression::Assignment { .. }));
-                assert!(matches!(block.body[1], Expression::Assignment { .. }));
-                assert!(matches!(block.body[2], Expression::Return { .. }));
+                assert!(matches!(
+                    block.body[0].expression,
+                    Expression::Assignment { .. }
+                ));
+                assert!(matches!(
+                    block.body[1].expression,
+                    Expression::Assignment { .. }
+                ));
+                assert!(matches!(
+                    block.body[2].expression,
+                    Expression::Return { .. }
+                ));
             }
             _ => panic!("Expected block"),
         }
@@ -1876,7 +1888,7 @@ mod tests {
     fn parse_map_with_string_keys() {
         let module = parse_ok("#{\"host\" => \"localhost\", \"port\" => 8080}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
                 assert!(
@@ -1900,7 +1912,7 @@ mod tests {
     ^self.value
 ]",
         );
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Block(block) => {
                 assert_eq!(block.body.len(), 3, "Block should have 3 statements");
             }
@@ -1912,7 +1924,7 @@ mod tests {
     fn parse_map_with_integer_keys() {
         let module = parse_ok("#{1 => \"first\", 2 => \"second\"}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
                 assert!(matches!(
@@ -1931,7 +1943,7 @@ mod tests {
     fn parse_map_with_trailing_comma() {
         let module = parse_ok("#{#a => 1, #b => 2,}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
             }
@@ -1943,7 +1955,7 @@ mod tests {
     fn parse_nested_maps() {
         let module = parse_ok("#{#outer => #{#inner => \"value\"}}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 1);
                 // Outer key is #outer
@@ -1975,7 +1987,7 @@ mod tests {
         // BT-664: Map values should support binary expressions
         let module = parse_ok("#{#x => 1 + 2}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 1);
                 assert!(
@@ -2011,7 +2023,7 @@ mod tests {
         // BT-664: Multiple map values with binary expressions
         let module = parse_ok("#{#x => 1 + 2, #y => 3 * 4}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
                 assert!(matches!(
@@ -2038,7 +2050,7 @@ mod tests {
         // BT-664: Map values with unary messages on binary results
         let module = parse_ok("#{#x => self x + other x}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 1);
                 // Value should be a binary message send (+)
@@ -2058,7 +2070,7 @@ mod tests {
     fn parse_map_assignment() {
         let module = parse_ok("person := #{#name => \"Alice\"}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Assignment { target, value, .. } => {
                 assert!(
                     matches!(target.as_ref(), Expression::Identifier(id) if id.name == "person")
@@ -2079,7 +2091,7 @@ mod tests {
         assert_eq!(module.expressions.len(), 2, "Expected 2 expressions");
 
         // First: empty := #{}
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::Assignment { target, value, .. } => {
                 assert!(
                     matches!(target.as_ref(), Expression::Identifier(id) if id.name == "empty")
@@ -2092,7 +2104,7 @@ mod tests {
         }
 
         // Second: person := #{#name => "Alice", #age => 30}
-        match &module.expressions[1] {
+        match &module.expressions[1].expression {
             Expression::Assignment { target, value, .. } => {
                 assert!(
                     matches!(target.as_ref(), Expression::Identifier(id) if id.name == "person")
@@ -2110,7 +2122,7 @@ mod tests {
         // BT-591: Bare identifiers before `=>` in map literals become implicit symbols
         let module = parse_ok("#{name => \"Alice\", age => 30}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
                 // Bare `name` becomes Symbol("name")
@@ -2138,7 +2150,7 @@ mod tests {
         // BT-591: Mixed bare identifier and explicit symbol keys
         let module = parse_ok("#{x => 1, #y => 2}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 2);
                 // Bare `x` becomes Symbol("x")
@@ -2159,7 +2171,7 @@ mod tests {
         // BT-591: Uppercase identifiers (class references) used as map keys are NOT converted to symbols
         let module = parse_ok("#{Counter => 1}");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MapLiteral { pairs, .. } => {
                 assert_eq!(pairs.len(), 1);
                 // Uppercase bare identifier `Counter` remains a ClassReference, not an implicit symbol
@@ -2604,7 +2616,7 @@ Actor subclass: Rectangle
         let module = parse_ok("42");
         assert_eq!(module.expressions.len(), 1);
         assert!(matches!(
-            &module.expressions[0],
+            &module.expressions[0].expression,
             Expression::Literal(Literal::Integer(42), _)
         ));
     }
@@ -2641,7 +2653,7 @@ Actor subclass: Rectangle
             selector: MessageSelector::Binary(op),
             arguments,
             ..
-        } = &module.expressions[0]
+        } = &module.expressions[0].expression
         {
             // Top level should be `+`
             assert_eq!(op.as_str(), "+");
@@ -2686,7 +2698,7 @@ Actor subclass: Rectangle
             selector: MessageSelector::Binary(op),
             arguments,
             ..
-        } = &module.expressions[0]
+        } = &module.expressions[0].expression
         {
             // Top level should be `-` with `3` on right
             assert_eq!(op.as_str(), "-");
@@ -2731,7 +2743,7 @@ Actor subclass: Rectangle
             selector: MessageSelector::Binary(op),
             arguments,
             ..
-        } = &module.expressions[0]
+        } = &module.expressions[0].expression
         {
             assert_eq!(op.as_str(), "<");
 
@@ -2774,7 +2786,10 @@ Actor subclass: Rectangle
             let module = parse_ok(expr);
             assert_eq!(module.expressions.len(), 1, "Failed for: {expr}");
             assert!(
-                matches!(&module.expressions[0], Expression::MessageSend { .. }),
+                matches!(
+                    &module.expressions[0].expression,
+                    Expression::MessageSend { .. }
+                ),
                 "Expected MessageSend for: {expr}"
             );
         }
@@ -2790,7 +2805,7 @@ Actor subclass: Rectangle
             selector: MessageSelector::Unary(name),
             arguments,
             ..
-        } = &module.expressions[0]
+        } = &module.expressions[0].expression
         {
             assert!(matches!(&**receiver, Expression::Super(_)));
             assert_eq!(name.as_str(), "increment");
@@ -2810,7 +2825,7 @@ Actor subclass: Rectangle
             selector: MessageSelector::Keyword(parts),
             arguments,
             ..
-        } = &module.expressions[0]
+        } = &module.expressions[0].expression
         {
             assert!(matches!(&**receiver, Expression::Super(_)));
             assert_eq!(parts.len(), 2);
@@ -2842,7 +2857,7 @@ Actor subclass: Rectangle
             receiver,
             selector: MessageSelector::Unary(name),
             ..
-        } = &method.body[0]
+        } = &method.body[0].expression
         {
             assert!(matches!(&**receiver, Expression::Super(_)));
             assert_eq!(name.as_str(), "increment");
@@ -2860,7 +2875,7 @@ Actor subclass: Rectangle
 
         // Currently parses as FieldAccess with Super receiver
         // This is technically invalid semantically but parser allows it
-        if let Expression::FieldAccess { receiver, .. } = &module.expressions[0] {
+        if let Expression::FieldAccess { receiver, .. } = &module.expressions[0].expression {
             assert!(
                 matches!(&**receiver, Expression::Super(_)),
                 "Parser allows super.field (codegen will reject it)"
@@ -2879,7 +2894,7 @@ Actor subclass: Rectangle
 
         if let Expression::Cascade {
             receiver, messages, ..
-        } = &module.expressions[0]
+        } = &module.expressions[0].expression
         {
             // The receiver should be a MessageSend with Super
             if let Expression::MessageSend {
@@ -2915,7 +2930,7 @@ Actor subclass: Rectangle
             selector: MessageSelector::Unary(name),
             arguments,
             ..
-        } = &module.expressions[0]
+        } = &module.expressions[0].expression
         {
             // Receiver should be ClassReference, not Identifier
             if let Expression::ClassReference {
@@ -2937,7 +2952,7 @@ Actor subclass: Rectangle
     fn parse_class_reference_vs_variable() {
         // Uppercase should parse as ClassReference
         let module1 = parse_ok("Counter");
-        if let Expression::ClassReference { name, .. } = &module1.expressions[0] {
+        if let Expression::ClassReference { name, .. } = &module1.expressions[0].expression {
             assert_eq!(name.name.as_str(), "Counter");
         } else {
             panic!("Expected ClassReference for 'Counter'");
@@ -2945,7 +2960,7 @@ Actor subclass: Rectangle
 
         // Lowercase should parse as Identifier
         let module2 = parse_ok("counter");
-        if let Expression::Identifier(id) = &module2.expressions[0] {
+        if let Expression::Identifier(id) = &module2.expressions[0].expression {
             assert_eq!(id.name.as_str(), "counter");
         } else {
             panic!("Expected Identifier for 'counter'");
@@ -2962,7 +2977,7 @@ Actor subclass: Rectangle
             selector: MessageSelector::Keyword(parts),
             arguments,
             ..
-        } = &module.expressions[0]
+        } = &module.expressions[0].expression
         {
             // Receiver should be ClassReference
             if let Expression::ClassReference {
@@ -2985,7 +3000,7 @@ Actor subclass: Rectangle
     fn parse_mixed_case_identifier() {
         // camelCase should parse as Identifier (starts with lowercase)
         let module = parse_ok("myVariable");
-        if let Expression::Identifier(id) = &module.expressions[0] {
+        if let Expression::Identifier(id) = &module.expressions[0].expression {
             assert_eq!(id.name.as_str(), "myVariable");
         } else {
             panic!("Expected Identifier for 'myVariable'");
@@ -2993,7 +3008,7 @@ Actor subclass: Rectangle
 
         // PascalCase should parse as ClassReference (starts with uppercase)
         let module = parse_ok("MyClass");
-        if let Expression::ClassReference { name, .. } = &module.expressions[0] {
+        if let Expression::ClassReference { name, .. } = &module.expressions[0].expression {
             assert_eq!(name.name.as_str(), "MyClass");
         } else {
             panic!("Expected ClassReference for 'MyClass'");
@@ -3013,7 +3028,7 @@ Actor subclass: Rectangle
         assert_eq!(method.body.len(), 1);
         if let Expression::Primitive {
             name, is_quoted, ..
-        } = &method.body[0]
+        } = &method.body[0].expression
         {
             assert_eq!(name.as_str(), "+");
             assert!(is_quoted);
@@ -3031,7 +3046,7 @@ Actor subclass: Rectangle
         assert_eq!(method.body.len(), 1);
         if let Expression::Primitive {
             name, is_quoted, ..
-        } = &method.body[0]
+        } = &method.body[0].expression
         {
             assert_eq!(name.as_str(), "basicNew");
             assert!(!is_quoted);
@@ -3049,7 +3064,7 @@ Actor subclass: Rectangle
         let method = &module.classes[0].methods[0];
         assert_eq!(method.body.len(), 1);
         assert!(matches!(
-            &method.body[0],
+            &method.body[0].expression,
             Expression::Primitive {
                 is_quoted: true,
                 ..
@@ -3064,7 +3079,10 @@ Actor subclass: Rectangle
         let module = parse_ok(source);
         let method = &module.classes[0].methods[0];
         assert_eq!(method.body.len(), 2);
-        assert!(matches!(&method.body[0], Expression::Primitive { .. }));
+        assert!(matches!(
+            &method.body[0].expression,
+            Expression::Primitive { .. }
+        ));
     }
 
     #[test]
@@ -3075,7 +3093,7 @@ Actor subclass: Rectangle
         assert_eq!(method.body.len(), 1);
         if let Expression::Primitive {
             name, is_quoted, ..
-        } = &method.body[0]
+        } = &method.body[0].expression
         {
             assert_eq!(name.as_str(), "basicNew");
             assert!(!is_quoted);
@@ -3125,10 +3143,10 @@ Actor subclass: Rectangle
         let method = &module.classes[0].methods[0];
         assert_eq!(method.body.len(), 1);
         // The body is a block containing the primitive
-        if let Expression::Block(block) = &method.body[0] {
+        if let Expression::Block(block) = &method.body[0].expression {
             assert_eq!(block.body.len(), 1);
             assert!(
-                matches!(&block.body[0], Expression::Primitive { .. }),
+                matches!(&block.body[0].expression, Expression::Primitive { .. }),
                 "Expected Primitive inside block, got: {:?}",
                 block.body[0]
             );
@@ -3147,7 +3165,7 @@ Actor subclass: Rectangle
         let module = parse_ok(source);
         let method = &module.classes[0].methods[0];
         assert_eq!(method.body.len(), 1);
-        match &method.body[0] {
+        match &method.body[0].expression {
             Expression::Primitive {
                 name, is_quoted, ..
             } => {
@@ -3165,7 +3183,7 @@ Actor subclass: Rectangle
         let module = parse_ok(source);
         let method = &module.classes[0].methods[0];
         assert_eq!(method.body.len(), 1);
-        match &method.body[0] {
+        match &method.body[0].expression {
             Expression::Primitive {
                 name, is_quoted, ..
             } => {
@@ -3241,7 +3259,7 @@ Actor subclass: Rectangle
     fn parse_empty_list() {
         let module = parse_ok("#()");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::ListLiteral { elements, tail, .. } => {
                 assert!(elements.is_empty());
                 assert!(tail.is_none());
@@ -3254,7 +3272,7 @@ Actor subclass: Rectangle
     fn parse_single_element_list() {
         let module = parse_ok("#(42)");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 1);
                 assert!(tail.is_none());
@@ -3267,7 +3285,7 @@ Actor subclass: Rectangle
     fn parse_multi_element_list() {
         let module = parse_ok("#(1, 2, 3)");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 3);
                 assert!(tail.is_none());
@@ -3280,7 +3298,7 @@ Actor subclass: Rectangle
     fn parse_list_trailing_comma() {
         let module = parse_ok("#(1, 2, 3,)");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 3);
                 assert!(tail.is_none());
@@ -3293,7 +3311,7 @@ Actor subclass: Rectangle
     fn parse_list_cons_syntax() {
         let module = parse_ok("#(0 | rest)");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 1);
                 assert!(tail.is_some());
@@ -3306,7 +3324,7 @@ Actor subclass: Rectangle
     fn parse_nested_list() {
         let module = parse_ok("#(#(1, 2), #(3, 4))");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 2);
                 assert!(tail.is_none());
@@ -3322,7 +3340,7 @@ Actor subclass: Rectangle
     fn parse_list_with_mixed_types() {
         let module = parse_ok("#(1, \"hello\", #ok)");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 3);
                 assert!(tail.is_none());
@@ -3336,7 +3354,7 @@ Actor subclass: Rectangle
         // List literal as receiver of a message
         let module = parse_ok("#(1, 2, 3) size");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 receiver, selector, ..
             } => {
@@ -3352,7 +3370,7 @@ Actor subclass: Rectangle
         // Multiple elements before cons: #(1, 2 | rest) → [1, 2 | rest]
         let module = parse_ok("#(1, 2 | rest)");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::ListLiteral { elements, tail, .. } => {
                 assert_eq!(elements.len(), 2);
                 assert!(tail.is_some());
@@ -3875,7 +3893,7 @@ Actor subclass: Counter
         let module = parse_ok("42 match: [_ -> 99]");
         assert_eq!(module.expressions.len(), 1);
         assert!(
-            matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 1)
+            matches!(&module.expressions[0].expression, Expression::Match { arms, .. } if arms.len() == 1)
         );
     }
 
@@ -3884,7 +3902,7 @@ Actor subclass: Counter
         let module = parse_ok("x match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]");
         assert_eq!(module.expressions.len(), 1);
         assert!(
-            matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 3)
+            matches!(&module.expressions[0].expression, Expression::Match { arms, .. } if arms.len() == 3)
         );
     }
 
@@ -3893,7 +3911,7 @@ Actor subclass: Counter
         let module = parse_ok("r match: [{#ok, v} -> v; {#error, _} -> nil]");
         assert_eq!(module.expressions.len(), 1);
         assert!(
-            matches!(&module.expressions[0], Expression::Match { arms, .. } if arms.len() == 2)
+            matches!(&module.expressions[0].expression, Expression::Match { arms, .. } if arms.len() == 2)
         );
     }
 
@@ -3901,7 +3919,7 @@ Actor subclass: Counter
     fn parse_match_with_guard() {
         let module = parse_ok("n match: [x when: [x > 0] -> x; _ -> 0]");
         assert_eq!(module.expressions.len(), 1);
-        if let Expression::Match { arms, .. } = &module.expressions[0] {
+        if let Expression::Match { arms, .. } = &module.expressions[0].expression {
             assert_eq!(arms.len(), 2);
             assert!(arms[0].guard.is_some());
             assert!(arms[1].guard.is_none());
@@ -3913,7 +3931,7 @@ Actor subclass: Counter
     #[test]
     fn codegen_simple_match() {
         let module = parse_ok("42 match: [_ -> 99]");
-        let expr = &module.expressions[0];
+        let expr = &module.expressions[0].expression;
         let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
         assert!(result.is_ok(), "Codegen failed: {:?}", result.err());
         let code = result.unwrap();
@@ -3924,7 +3942,7 @@ Actor subclass: Counter
     #[test]
     fn codegen_match_with_arms() {
         let module = parse_ok("1 match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]");
-        let expr = &module.expressions[0];
+        let expr = &module.expressions[0].expression;
         let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
         assert!(result.is_ok(), "Codegen failed: {:?}", result.err());
         let code = result.unwrap();
@@ -3935,7 +3953,7 @@ Actor subclass: Counter
     #[test]
     fn codegen_empty_match_errors() {
         let module = parse_ok("42 match: []");
-        let expr = &module.expressions[0];
+        let expr = &module.expressions[0].expression;
         let result = crate::codegen::core_erlang::generate_test_expression(expr, "test_match");
         assert!(result.is_err(), "Empty match should fail codegen");
     }
@@ -3963,7 +3981,7 @@ Actor subclass: Counter
         // BT-414: `**` is a binary operator
         let module = parse_ok("2 ** 10");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 receiver,
                 selector: MessageSelector::Binary(op),
@@ -3990,7 +4008,7 @@ Actor subclass: Counter
         // BT-414: `3 * 2 ** 4` should be `3 * (2 ** 4)`
         let module = parse_ok("3 * 2 ** 4");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 receiver,
                 selector: MessageSelector::Binary(op),
@@ -4029,7 +4047,7 @@ Actor subclass: Counter
         // BT-414: `2 ** 3 ** 2` should be `2 ** (3 ** 2)` (right-associative)
         let module = parse_ok("2 ** 3 ** 2");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 receiver,
                 selector: MessageSelector::Binary(op),
@@ -4316,7 +4334,7 @@ Actor subclass: Counter
         // `foo bar!` should parse as a MessageSend with is_cast = true
         let module = parse_ok("foo bar!");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 is_cast,
                 selector: MessageSelector::Unary(name),
@@ -4337,7 +4355,7 @@ Actor subclass: Counter
         // `foo bar.` should parse as a MessageSend with is_cast = false
         let module = parse_ok("foo bar.");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend { is_cast, .. } => {
                 assert!(
                     !is_cast,
@@ -4353,7 +4371,7 @@ Actor subclass: Counter
         // `obj doSomething: 42!` should mark the keyword send as cast
         let module = parse_ok("obj doSomething: 42!");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 is_cast,
                 selector: MessageSelector::Keyword(_),
@@ -4387,11 +4405,11 @@ Actor subclass: Counter
         // `foo bar! baz qux.` — two statements: first cast, second call
         let module = parse_ok("foo bar!\nbaz qux.");
         assert_eq!(module.expressions.len(), 2);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend { is_cast, .. } => assert!(is_cast),
             other => panic!("Expected cast MessageSend, got: {other:?}"),
         }
-        match &module.expressions[1] {
+        match &module.expressions[1].expression {
             Expression::MessageSend { is_cast, .. } => assert!(!is_cast),
             other => panic!("Expected call MessageSend, got: {other:?}"),
         }
@@ -4402,7 +4420,7 @@ Actor subclass: Counter
         // `3 + 4!` — binary message send with cast
         let module = parse_ok("3 + 4!");
         assert_eq!(module.expressions.len(), 1);
-        match &module.expressions[0] {
+        match &module.expressions[0].expression {
             Expression::MessageSend {
                 is_cast,
                 selector: MessageSelector::Binary(op),
@@ -4420,9 +4438,9 @@ Actor subclass: Counter
         // `[foo bar!]` — cast inside a block body
         let module = parse_ok("[foo bar!]");
         assert_eq!(module.expressions.len(), 1);
-        if let Expression::Block(block) = &module.expressions[0] {
+        if let Expression::Block(block) = &module.expressions[0].expression {
             assert_eq!(block.body.len(), 1);
-            match &block.body[0] {
+            match &block.body[0].expression {
                 Expression::MessageSend { is_cast, .. } => {
                     assert!(is_cast, "Expected cast inside block body");
                 }

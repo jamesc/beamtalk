@@ -34,12 +34,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "size",
-                            is_quoted: true,
-                            span: Span {
-                                start: 302,
-                                end: 319,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "size",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 302,
+                                    end: 319,
+                                },
                             },
                         },
                     ],
@@ -81,12 +87,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "at:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 335,
-                                end: 351,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "at:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 335,
+                                    end: 351,
+                                },
                             },
                         },
                     ],
@@ -109,12 +121,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "isOk",
-                            is_quoted: true,
-                            span: Span {
-                                start: 409,
-                                end: 426,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "isOk",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 409,
+                                    end: 426,
+                                },
                             },
                         },
                     ],
@@ -137,12 +155,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "isError",
-                            is_quoted: true,
-                            span: Span {
-                                start: 440,
-                                end: 460,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "isError",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 440,
+                                    end: 460,
+                                },
                             },
                         },
                     ],
@@ -165,12 +189,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "unwrap",
-                            is_quoted: true,
-                            span: Span {
-                                start: 490,
-                                end: 509,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "unwrap",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 490,
+                                    end: 509,
+                                },
                             },
                         },
                     ],
@@ -212,12 +242,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "unwrapOr:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 533,
-                                end: 555,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "unwrapOr:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 533,
+                                    end: 555,
+                                },
                             },
                         },
                     ],
@@ -259,12 +295,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "unwrapOrElse:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 581,
-                                end: 607,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "unwrapOrElse:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 581,
+                                    end: 607,
+                                },
                             },
                         },
                     ],
@@ -287,12 +329,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "asString",
-                            is_quoted: true,
-                            span: Span {
-                                start: 639,
-                                end: 660,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "asString",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 639,
+                                    end: 660,
+                                },
                             },
                         },
                     ],
@@ -329,7 +377,7 @@ Module {
         start: 240,
         end: 660,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

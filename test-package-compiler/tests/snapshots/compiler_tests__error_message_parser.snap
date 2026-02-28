@@ -34,42 +34,48 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "self",
-                                    span: Span {
-                                        start: 225,
-                                        end: 229,
-                                    },
-                                },
-                            ),
-                            selector: Keyword(
-                                [
-                                    KeywordPart {
-                                        keyword: "error:",
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
                                         span: Span {
-                                            start: 230,
-                                            end: 236,
+                                            start: 225,
+                                            end: 229,
                                         },
                                     },
-                                ],
-                            ),
-                            arguments: [
-                                Literal(
-                                    String(
-                                        "This is a test error",
-                                    ),
-                                    Span {
-                                        start: 237,
-                                        end: 259,
-                                    },
                                 ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 225,
-                                end: 259,
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "error:",
+                                            span: Span {
+                                                start: 230,
+                                                end: 236,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Literal(
+                                        String(
+                                            "This is a test error",
+                                        ),
+                                        Span {
+                                            start: 237,
+                                            end: 259,
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 225,
+                                    end: 259,
+                                },
                             },
                         },
                     ],
@@ -92,66 +98,78 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Assignment {
-                            target: Identifier(
-                                Identifier {
-                                    name: "msg",
-                                    span: Span {
-                                        start: 291,
-                                        end: 294,
-                                    },
-                                },
-                            ),
-                            value: Literal(
-                                String(
-                                    "Dynamic error message",
-                                ),
-                                Span {
-                                    start: 298,
-                                    end: 321,
-                                },
-                            ),
-                            span: Span {
-                                start: 291,
-                                end: 321,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
                             },
-                        },
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "self",
-                                    span: Span {
-                                        start: 327,
-                                        end: 331,
-                                    },
-                                },
-                            ),
-                            selector: Keyword(
-                                [
-                                    KeywordPart {
-                                        keyword: "error:",
-                                        span: Span {
-                                            start: 332,
-                                            end: 338,
-                                        },
-                                    },
-                                ],
-                            ),
-                            arguments: [
-                                Identifier(
+                            expression: Assignment {
+                                target: Identifier(
                                     Identifier {
                                         name: "msg",
                                         span: Span {
-                                            start: 339,
-                                            end: 342,
+                                            start: 291,
+                                            end: 294,
                                         },
                                     },
                                 ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 327,
-                                end: 342,
+                                value: Literal(
+                                    String(
+                                        "Dynamic error message",
+                                    ),
+                                    Span {
+                                        start: 298,
+                                        end: 321,
+                                    },
+                                ),
+                                span: Span {
+                                    start: 291,
+                                    end: 321,
+                                },
+                            },
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 327,
+                                            end: 331,
+                                        },
+                                    },
+                                ),
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "error:",
+                                            span: Span {
+                                                start: 332,
+                                                end: 338,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "msg",
+                                            span: Span {
+                                                start: 339,
+                                                end: 342,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 327,
+                                    end: 342,
+                                },
                             },
                         },
                     ],
@@ -188,7 +206,7 @@ Module {
         start: 186,
         end: 342,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

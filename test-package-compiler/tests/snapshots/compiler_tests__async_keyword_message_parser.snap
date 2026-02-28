@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,90 +7,102 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "update",
-                    span: Span {
-                        start: 186,
-                        end: 192,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "update",
+                        span: Span {
+                            start: 186,
+                            end: 192,
+                        },
                     },
-                },
-            ),
-            value: Block(
-                Block {
-                    parameters: [],
-                    body: [
-                        Return {
-                            value: MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "object",
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: Return {
+                                    value: MessageSend {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "object",
+                                                span: Span {
+                                                    start: 199,
+                                                    end: 205,
+                                                },
+                                            },
+                                        ),
+                                        selector: Keyword(
+                                            [
+                                                KeywordPart {
+                                                    keyword: "foo:",
+                                                    span: Span {
+                                                        start: 206,
+                                                        end: 210,
+                                                    },
+                                                },
+                                                KeywordPart {
+                                                    keyword: "bar:",
+                                                    span: Span {
+                                                        start: 213,
+                                                        end: 217,
+                                                    },
+                                                },
+                                            ],
+                                        ),
+                                        arguments: [
+                                            Literal(
+                                                Integer(
+                                                    1,
+                                                ),
+                                                Span {
+                                                    start: 211,
+                                                    end: 212,
+                                                },
+                                            ),
+                                            Literal(
+                                                String(
+                                                    "hello",
+                                                ),
+                                                Span {
+                                                    start: 218,
+                                                    end: 225,
+                                                },
+                                            ),
+                                        ],
+                                        is_cast: false,
                                         span: Span {
                                             start: 199,
-                                            end: 205,
-                                        },
-                                    },
-                                ),
-                                selector: Keyword(
-                                    [
-                                        KeywordPart {
-                                            keyword: "foo:",
-                                            span: Span {
-                                                start: 206,
-                                                end: 210,
-                                            },
-                                        },
-                                        KeywordPart {
-                                            keyword: "bar:",
-                                            span: Span {
-                                                start: 213,
-                                                end: 217,
-                                            },
-                                        },
-                                    ],
-                                ),
-                                arguments: [
-                                    Literal(
-                                        Integer(
-                                            1,
-                                        ),
-                                        Span {
-                                            start: 211,
-                                            end: 212,
-                                        },
-                                    ),
-                                    Literal(
-                                        String(
-                                            "hello",
-                                        ),
-                                        Span {
-                                            start: 218,
                                             end: 225,
                                         },
-                                    ),
-                                ],
-                                is_cast: false,
-                                span: Span {
-                                    start: 199,
-                                    end: 225,
+                                    },
+                                    span: Span {
+                                        start: 198,
+                                        end: 225,
+                                    },
                                 },
                             },
-                            span: Span {
-                                start: 198,
-                                end: 225,
-                            },
+                        ],
+                        span: Span {
+                            start: 196,
+                            end: 227,
                         },
-                    ],
-                    span: Span {
-                        start: 196,
-                        end: 227,
                     },
+                ),
+                span: Span {
+                    start: 186,
+                    end: 227,
                 },
-            ),
-            span: Span {
-                start: 186,
-                end: 227,
             },
         },
     ],
@@ -99,7 +110,7 @@ Module {
         start: 186,
         end: 227,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

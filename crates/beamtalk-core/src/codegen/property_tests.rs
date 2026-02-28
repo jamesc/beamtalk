@@ -122,7 +122,7 @@ proptest! {
     fn generate_repl_expression_never_panics(input in "\\PC{0,300}") {
         let module = parse_source(&input);
         for expr in &module.expressions {
-            let _result = generate_repl_expression(expr, "prop_test_repl");
+            let _result = generate_repl_expression(&expr.expression, "prop_test_repl");
         }
     }
 
@@ -131,7 +131,7 @@ proptest! {
     fn generate_repl_expression_never_panics_near_valid(input in near_valid_beamtalk()) {
         let module = parse_source(&input);
         for expr in &module.expressions {
-            let _result = generate_repl_expression(expr, "prop_test_repl");
+            let _result = generate_repl_expression(&expr.expression, "prop_test_repl");
         }
     }
 
@@ -163,7 +163,7 @@ proptest! {
     fn repl_codegen_output_structure(input in near_valid_beamtalk()) {
         let module = parse_source(&input);
         for expr in &module.expressions {
-            if let Ok(output) = generate_repl_expression(expr, "prop_test_repl") {
+            if let Ok(output) = generate_repl_expression(&expr.expression, "prop_test_repl") {
                 prop_assert!(
                     !output.is_empty(),
                     "generate_repl_expression returned Ok with empty output for input {:?}",

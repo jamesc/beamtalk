@@ -158,7 +158,7 @@ fn has_error_node(expr: &Expression) -> bool {
         }
         Expression::Return { value, .. } => has_error_node(value),
         Expression::Parenthesized { expression, .. } => has_error_node(expression),
-        Expression::Block(block) => block.body.iter().any(has_error_node),
+        Expression::Block(block) => block.body.iter().any(|s| has_error_node(&s.expression)),
         Expression::Cascade {
             receiver, messages, ..
         } => {
@@ -199,15 +199,18 @@ fn has_error_node(expr: &Expression) -> bool {
 
 /// Checks if a module's AST contains any `Expression::Error` nodes.
 fn module_has_error_nodes(module: &Module) -> bool {
-    module.expressions.iter().any(has_error_node)
+    module
+        .expressions
+        .iter()
+        .any(|s| has_error_node(&s.expression))
         || module.classes.iter().any(|cls| {
             cls.methods
                 .iter()
-                .any(|m| m.body.iter().any(has_error_node))
+                .any(|m| m.body.iter().any(|s| has_error_node(&s.expression)))
                 || cls
                     .class_methods
                     .iter()
-                    .any(|m| m.body.iter().any(has_error_node))
+                    .any(|m| m.body.iter().any(|s| has_error_node(&s.expression)))
                 || cls
                     .state
                     .iter()
@@ -220,7 +223,7 @@ fn module_has_error_nodes(module: &Module) -> bool {
         || module
             .method_definitions
             .iter()
-            .any(|m| m.method.body.iter().any(has_error_node))
+            .any(|m| m.method.body.iter().any(|s| has_error_node(&s.expression)))
 }
 
 /// Internal type names that should never appear in user-facing diagnostics.

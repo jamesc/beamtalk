@@ -53,76 +53,88 @@ Module {
                         },
                     ],
                     body: [
-                        MessageSend {
-                            receiver: ClassReference {
-                                name: Identifier {
-                                    name: "Transcript",
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: ClassReference {
+                                    name: Identifier {
+                                        name: "Transcript",
+                                        span: Span {
+                                            start: 558,
+                                            end: 568,
+                                        },
+                                    },
                                     span: Span {
                                         start: 558,
                                         end: 568,
                                     },
                                 },
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "show:",
+                                            span: Span {
+                                                start: 569,
+                                                end: 574,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "x",
+                                            span: Span {
+                                                start: 575,
+                                                end: 576,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
                                 span: Span {
                                     start: 558,
-                                    end: 568,
+                                    end: 576,
                                 },
                             },
-                            selector: Keyword(
-                                [
-                                    KeywordPart {
-                                        keyword: "show:",
-                                        span: Span {
-                                            start: 569,
-                                            end: 574,
-                                        },
-                                    },
-                                ],
-                            ),
-                            arguments: [
-                                Identifier(
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
                                     Identifier {
                                         name: "x",
                                         span: Span {
-                                            start: 575,
-                                            end: 576,
+                                            start: 581,
+                                            end: 582,
                                         },
                                     },
                                 ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 558,
-                                end: 576,
-                            },
-                        },
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "x",
-                                    span: Span {
-                                        start: 581,
-                                        end: 582,
-                                    },
-                                },
-                            ),
-                            selector: Binary(
-                                "*",
-                            ),
-                            arguments: [
-                                Literal(
-                                    Integer(
-                                        2,
-                                    ),
-                                    Span {
-                                        start: 585,
-                                        end: 586,
-                                    },
+                                selector: Binary(
+                                    "*",
                                 ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 581,
-                                end: 586,
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            2,
+                                        ),
+                                        Span {
+                                            start: 585,
+                                            end: 586,
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 581,
+                                    end: 586,
+                                },
                             },
                         },
                     ],
@@ -181,94 +193,112 @@ Module {
                         },
                     ],
                     body: [
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "a",
-                                    span: Span {
-                                        start: 683,
-                                        end: 684,
-                                    },
-                                },
-                            ),
-                            selector: Binary(
-                                "+",
-                            ),
-                            arguments: [
-                                Identifier(
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
                                     Identifier {
-                                        name: "b",
+                                        name: "a",
                                         span: Span {
-                                            start: 687,
-                                            end: 688,
+                                            start: 683,
+                                            end: 684,
                                         },
                                     },
                                 ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 683,
-                                end: 688,
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "b",
+                                            span: Span {
+                                                start: 687,
+                                                end: 688,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 683,
+                                    end: 688,
+                                },
                             },
                         },
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "a",
-                                    span: Span {
-                                        start: 693,
-                                        end: 694,
-                                    },
-                                },
-                            ),
-                            selector: Binary(
-                                "-",
-                            ),
-                            arguments: [
-                                Identifier(
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
                                     Identifier {
-                                        name: "b",
+                                        name: "a",
                                         span: Span {
-                                            start: 697,
-                                            end: 698,
+                                            start: 693,
+                                            end: 694,
                                         },
                                     },
                                 ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 693,
-                                end: 698,
+                                selector: Binary(
+                                    "-",
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "b",
+                                            span: Span {
+                                                start: 697,
+                                                end: 698,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 693,
+                                    end: 698,
+                                },
                             },
                         },
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "a",
-                                    span: Span {
-                                        start: 703,
-                                        end: 704,
-                                    },
-                                },
-                            ),
-                            selector: Binary(
-                                "*",
-                            ),
-                            arguments: [
-                                Identifier(
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
                                     Identifier {
-                                        name: "b",
+                                        name: "a",
                                         span: Span {
-                                            start: 707,
-                                            end: 708,
+                                            start: 703,
+                                            end: 704,
                                         },
                                     },
                                 ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 703,
-                                end: 708,
+                                selector: Binary(
+                                    "*",
+                                ),
+                                arguments: [
+                                    Identifier(
+                                        Identifier {
+                                            name: "b",
+                                            span: Span {
+                                                start: 707,
+                                                end: 708,
+                                            },
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 703,
+                                    end: 708,
+                                },
                             },
                         },
                     ],
@@ -305,7 +335,7 @@ Module {
         start: 443,
         end: 708,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

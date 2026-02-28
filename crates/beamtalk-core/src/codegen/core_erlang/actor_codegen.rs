@@ -212,7 +212,7 @@ impl CoreErlangGenerator {
             c.methods.iter().any(|m| {
                 m.body.len() == 1
                     && matches!(
-                        &m.body[0],
+                        &m.body[0].expression,
                         Expression::Primitive {
                             is_quoted: true,
                             ..
@@ -382,7 +382,7 @@ impl CoreErlangGenerator {
             let needs_nlr = method
                 .body
                 .iter()
-                .any(|expr| Self::expr_has_block_nlr(expr, false));
+                .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
 
             let nlr_token_var = if needs_nlr {
                 let token_var = self.fresh_temp_var("NlrToken");

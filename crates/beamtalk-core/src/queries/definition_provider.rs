@@ -38,8 +38,8 @@ use ecow::EcoString;
 /// matches `name`. Returns the span of the target identifier if found.
 #[must_use]
 pub fn find_definition_in_module(module: &Module, name: &str) -> Option<Span> {
-    for expr in &module.expressions {
-        if let Some(span) = find_definition_in_expr(expr, name) {
+    for stmt in &module.expressions {
+        if let Some(span) = find_definition_in_expr(&stmt.expression, name) {
             return Some(span);
         }
     }
@@ -372,7 +372,7 @@ pub fn find_selector_lookup_in_expr(expr: &Expression, offset: u32) -> Option<Se
         Expression::Block(block) => block
             .body
             .iter()
-            .find_map(|e| find_selector_lookup_in_expr(e, offset)),
+            .find_map(|s| find_selector_lookup_in_expr(&s.expression, offset)),
         Expression::Return { value, .. } => find_selector_lookup_in_expr(value, offset),
         Expression::Parenthesized { expression, .. } => {
             find_selector_lookup_in_expr(expression, offset)
@@ -544,7 +544,7 @@ fn find_definition_in_expr(expr: &Expression, name: &str) -> Option<Span> {
         Expression::Block(block) => block
             .body
             .iter()
-            .find_map(|e| find_definition_in_expr(e, name)),
+            .find_map(|s| find_definition_in_expr(&s.expression, name)),
         _ => None,
     }
 }
@@ -723,7 +723,7 @@ mod tests {
         let source = "obj at: 1 put: 2";
         let module = parse_source(source);
         // The keyword "at:" starts at position 4
-        let result = find_selector_in_expr(&module.expressions[0], 4);
+        let result = find_selector_in_expr(&module.expressions[0].expression, 4);
         assert!(result.is_some());
         let (name, _span) = result.unwrap();
         assert_eq!(name, "at:put:");
@@ -734,7 +734,7 @@ mod tests {
         let source = "obj at: 1 put: 2";
         let module = parse_source(source);
         // Position 0 is on "obj" (receiver), not a selector
-        let result = find_selector_in_expr(&module.expressions[0], 0);
+        let result = find_selector_in_expr(&module.expressions[0].expression, 0);
         assert!(result.is_none());
     }
 
@@ -743,7 +743,7 @@ mod tests {
         let source = "obj size";
         let module = parse_source(source);
         // Position 4 is on/near "size"
-        let result = find_selector_in_expr(&module.expressions[0], 4);
+        let result = find_selector_in_expr(&module.expressions[0].expression, 4);
         assert!(result.is_some());
         let (name, _span) = result.unwrap();
         assert_eq!(name, "size");
@@ -754,7 +754,7 @@ mod tests {
         let source = "3 + 4";
         let module = parse_source(source);
         // Position 2 is on/near "+"
-        let result = find_selector_in_expr(&module.expressions[0], 2);
+        let result = find_selector_in_expr(&module.expressions[0].expression, 2);
         assert!(result.is_some());
         let (name, _span) = result.unwrap();
         assert_eq!(name, "+");

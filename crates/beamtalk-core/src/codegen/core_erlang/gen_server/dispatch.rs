@@ -35,8 +35,8 @@ impl CoreErlangGenerator {
         let mut methods: Vec<(String, usize)> = module
             .expressions
             .iter()
-            .filter_map(|expr| {
-                if let Expression::Assignment { target, value, .. } = expr {
+            .filter_map(|stmt| {
+                if let Expression::Assignment { target, value, .. } = &stmt.expression {
                     if let (Expression::Identifier(id), Expression::Block(block)) =
                         (target.as_ref(), value.as_ref())
                     {
@@ -106,8 +106,8 @@ impl CoreErlangGenerator {
         let mut methods: Vec<String> = module
             .expressions
             .iter()
-            .filter_map(|expr| {
-                if let Expression::Assignment { target, value, .. } = expr {
+            .filter_map(|stmt| {
+                if let Expression::Assignment { target, value, .. } = &stmt.expression {
                     if let (Expression::Identifier(id), Expression::Block(_)) =
                         (target.as_ref(), value.as_ref())
                     {
@@ -233,8 +233,8 @@ impl CoreErlangGenerator {
         let case_clause_indent: isize = 2;
 
         // Generate case clause for each method in the module (legacy expression-based)
-        for expr in &module.expressions {
-            if let Expression::Assignment { target, value, .. } = expr {
+        for stmt in &module.expressions {
+            if let Expression::Assignment { target, value, .. } = &stmt.expression {
                 if let (Expression::Identifier(id), Expression::Block(block)) =
                     (target.as_ref(), value.as_ref())
                 {
@@ -256,7 +256,7 @@ impl CoreErlangGenerator {
                     let needs_nlr = block
                         .body
                         .iter()
-                        .any(|expr| Self::expr_has_block_nlr(expr, false));
+                        .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
 
                     let nlr_token_var = if needs_nlr {
                         let token_var = self.fresh_temp_var("NlrToken");

@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,86 +7,27 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "x",
-                    span: Span {
-                        start: 224,
-                        end: 225,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found :=",
-                    span: Span {
-                        start: 229,
-                        end: 231,
-                    },
-                },
-                selector: Binary(
-                    "+",
-                ),
-                arguments: [
-                    Error {
-                        message: "Unexpected token: expected expression, found :=",
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "x",
                         span: Span {
-                            start: 234,
-                            end: 236,
+                            start: 224,
+                            end: 225,
                         },
                     },
-                ],
-                is_cast: false,
-                span: Span {
-                    start: 229,
-                    end: 236,
-                },
-            },
-            span: Span {
-                start: 224,
-                end: 236,
-            },
-        },
-        Literal(
-            Integer(
-                42,
-            ),
-            Span {
-                start: 237,
-                end: 239,
-            },
-        ),
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "str",
-                    span: Span {
-                        start: 287,
-                        end: 290,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: MessageSend {
-                    receiver: MessageSend {
-                        receiver: Literal(
-                            String(
-                                "unterminated\ny := 10\n\n// Invalid assignment with missing operand\nresult := x + + y\n\n// Multiple malformed messages in sequence\nobject at: put: get:\narray add: remove:\n\n// Nested error (malformed message inside valid structure)\nouter := (inner at: missing: broken)\n\n// Mixed errors: unterminated string + invalid syntax + malformed message\nbroken := ",
-                            ),
-                            Span {
-                                start: 294,
-                                end: 645,
-                            },
-                        ),
-                        selector: Unary(
-                            "unclosed",
-                        ),
-                        arguments: [],
-                        is_cast: false,
+                ),
+                value: MessageSend {
+                    receiver: Error {
+                        message: "Unexpected token: expected expression, found :=",
                         span: Span {
-                            start: 294,
-                            end: 653,
+                            start: 229,
+                            end: 231,
                         },
                     },
                     selector: Binary(
@@ -97,93 +37,176 @@ Module {
                         Error {
                             message: "Unexpected token: expected expression, found :=",
                             span: Span {
-                                start: 656,
-                                end: 658,
+                                start: 234,
+                                end: 236,
                             },
                         },
                     ],
                     is_cast: false,
                     span: Span {
-                        start: 294,
-                        end: 658,
+                        start: 229,
+                        end: 236,
                     },
                 },
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "at:",
+                span: Span {
+                    start: 224,
+                    end: 236,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Literal(
+                Integer(
+                    42,
+                ),
+                Span {
+                    start: 237,
+                    end: 239,
+                },
+            ),
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "str",
+                        span: Span {
+                            start: 287,
+                            end: 290,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: MessageSend {
+                        receiver: MessageSend {
+                            receiver: Literal(
+                                String(
+                                    "unterminated\ny := 10\n\n// Invalid assignment with missing operand\nresult := x + + y\n\n// Multiple malformed messages in sequence\nobject at: put: get:\narray add: remove:\n\n// Nested error (malformed message inside valid structure)\nouter := (inner at: missing: broken)\n\n// Mixed errors: unterminated string + invalid syntax + malformed message\nbroken := ",
+                                ),
+                                Span {
+                                    start: 294,
+                                    end: 645,
+                                },
+                            ),
+                            selector: Unary(
+                                "unclosed",
+                            ),
+                            arguments: [],
+                            is_cast: false,
                             span: Span {
-                                start: 659,
-                                end: 662,
+                                start: 294,
+                                end: 653,
                             },
                         },
-                    ],
-                ),
-                arguments: [
-                    Literal(
-                        Integer(
-                            42,
+                        selector: Binary(
+                            "+",
                         ),
-                        Span {
-                            start: 663,
-                            end: 665,
+                        arguments: [
+                            Error {
+                                message: "Unexpected token: expected expression, found :=",
+                                span: Span {
+                                    start: 656,
+                                    end: 658,
+                                },
+                            },
+                        ],
+                        is_cast: false,
+                        span: Span {
+                            start: 294,
+                            end: 658,
                         },
+                    },
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "at:",
+                                span: Span {
+                                    start: 659,
+                                    end: 662,
+                                },
+                            },
+                        ],
                     ),
-                ],
-                is_cast: false,
+                    arguments: [
+                        Literal(
+                            Integer(
+                                42,
+                            ),
+                            Span {
+                                start: 663,
+                                end: 665,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 294,
+                        end: 665,
+                    },
+                },
                 span: Span {
-                    start: 294,
+                    start: 287,
                     end: 665,
                 },
             },
-            span: Span {
-                start: 287,
-                end: 665,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "validAfterErrors",
-                    span: Span {
-                        start: 722,
-                        end: 738,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        100,
-                    ),
-                    Span {
-                        start: 742,
-                        end: 745,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "validAfterErrors",
+                        span: Span {
+                            start: 722,
+                            end: 738,
+                        },
                     },
                 ),
-                selector: Binary(
-                    "+",
-                ),
-                arguments: [
-                    Literal(
+                value: MessageSend {
+                    receiver: Literal(
                         Integer(
-                            200,
+                            100,
                         ),
                         Span {
-                            start: 748,
-                            end: 751,
+                            start: 742,
+                            end: 745,
                         },
                     ),
-                ],
-                is_cast: false,
+                    selector: Binary(
+                        "+",
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                200,
+                            ),
+                            Span {
+                                start: 748,
+                                end: 751,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 742,
+                        end: 751,
+                    },
+                },
                 span: Span {
-                    start: 742,
+                    start: 722,
                     end: 751,
                 },
-            },
-            span: Span {
-                start: 722,
-                end: 751,
             },
         },
     ],
@@ -191,7 +214,7 @@ Module {
         start: 224,
         end: 751,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

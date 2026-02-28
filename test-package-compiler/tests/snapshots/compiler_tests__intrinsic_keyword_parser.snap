@@ -34,12 +34,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "blockValue",
-                            is_quoted: false,
-                            span: Span {
-                                start: 241,
-                                end: 262,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "blockValue",
+                                is_quoted: false,
+                                span: Span {
+                                    start: 241,
+                                    end: 262,
+                                },
                             },
                         },
                     ],
@@ -62,12 +68,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "size",
-                            is_quoted: true,
-                            span: Span {
-                                start: 273,
-                                end: 290,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "size",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 273,
+                                    end: 290,
+                                },
                             },
                         },
                     ],
@@ -104,7 +116,7 @@ Module {
         start: 204,
         end: 290,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

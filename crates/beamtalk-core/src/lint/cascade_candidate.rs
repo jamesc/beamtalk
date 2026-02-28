@@ -21,7 +21,7 @@
 //! because they may have side effects and are not straightforward to extract
 //! into a single cascade receiver.
 
-use crate::ast::{Block, Expression, Identifier, Module};
+use crate::ast::{Block, Expression, ExpressionStatement, Identifier, Module};
 use crate::lint::LintPass;
 use crate::source_analysis::Diagnostic;
 
@@ -72,12 +72,12 @@ fn simple_receiver_name(expr: &Expression) -> Option<&str> {
 
 /// Check a flat sequence of statements for runs of 3+ consecutive sends to
 /// the same simple receiver, then recurse into nested expressions.
-fn check_sequence(exprs: &[Expression], diagnostics: &mut Vec<Diagnostic>) {
+fn check_sequence(exprs: &[ExpressionStatement], diagnostics: &mut Vec<Diagnostic>) {
     let mut i = 0;
     while i < exprs.len() {
-        if let Some(recv) = simple_receiver_name(&exprs[i]) {
+        if let Some(recv) = simple_receiver_name(&exprs[i].expression) {
             let run_start = i;
-            while i < exprs.len() && simple_receiver_name(&exprs[i]) == Some(recv) {
+            while i < exprs.len() && simple_receiver_name(&exprs[i].expression) == Some(recv) {
                 i += 1;
             }
             let run_len = i - run_start;
@@ -88,8 +88,8 @@ fn check_sequence(exprs: &[Expression], diagnostics: &mut Vec<Diagnostic>) {
             // logically-distinct operations and make test failures harder to
             // isolate.
             if run_len >= 3 && recv != "self" {
-                let first_span = exprs[run_start].span();
-                let last_span = exprs[i - 1].span();
+                let first_span = exprs[run_start].expression.span();
+                let last_span = exprs[i - 1].expression.span();
                 let span = first_span.merge(last_span);
                 let mut diag = Diagnostic::lint(
                     format!(
@@ -107,11 +107,11 @@ fn check_sequence(exprs: &[Expression], diagnostics: &mut Vec<Diagnostic>) {
                 diagnostics.push(diag);
             }
             // Recurse into each expression in the run
-            for expr in &exprs[run_start..i] {
-                recurse(expr, diagnostics);
+            for stmt in &exprs[run_start..i] {
+                recurse(&stmt.expression, diagnostics);
             }
         } else {
-            recurse(&exprs[i], diagnostics);
+            recurse(&exprs[i].expression, diagnostics);
             i += 1;
         }
     }

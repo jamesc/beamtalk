@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,56 +7,68 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "run",
-                    span: Span {
-                        start: 160,
-                        end: 163,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "run",
+                        span: Span {
+                            start: 160,
+                            end: 163,
+                        },
                     },
-                },
-            ),
-            value: Block(
-                Block {
-                    parameters: [],
-                    body: [
-                        Return {
-                            value: MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "counter",
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: Return {
+                                    value: MessageSend {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "counter",
+                                                span: Span {
+                                                    start: 170,
+                                                    end: 177,
+                                                },
+                                            },
+                                        ),
+                                        selector: Unary(
+                                            "increment",
+                                        ),
+                                        arguments: [],
+                                        is_cast: false,
                                         span: Span {
                                             start: 170,
-                                            end: 177,
+                                            end: 187,
                                         },
                                     },
-                                ),
-                                selector: Unary(
-                                    "increment",
-                                ),
-                                arguments: [],
-                                is_cast: false,
-                                span: Span {
-                                    start: 170,
-                                    end: 187,
+                                    span: Span {
+                                        start: 169,
+                                        end: 187,
+                                    },
                                 },
                             },
-                            span: Span {
-                                start: 169,
-                                end: 187,
-                            },
+                        ],
+                        span: Span {
+                            start: 167,
+                            end: 189,
                         },
-                    ],
-                    span: Span {
-                        start: 167,
-                        end: 189,
                     },
+                ),
+                span: Span {
+                    start: 160,
+                    end: 189,
                 },
-            ),
-            span: Span {
-                start: 160,
-                end: 189,
             },
         },
     ],
@@ -65,7 +76,7 @@ Module {
         start: 160,
         end: 189,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

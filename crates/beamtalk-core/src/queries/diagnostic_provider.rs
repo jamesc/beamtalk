@@ -27,7 +27,7 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol publishDiagnostics notification
 
-use crate::ast::{ExpectCategory, Expression, Module};
+use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
 use crate::semantic_analysis;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -160,13 +160,13 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
 /// For each `ExpectDirective` at index `i`, the target span is the span of
 /// the expression at index `i + 1` (if present).
 fn collect_directives_from_exprs(
-    exprs: &[Expression],
+    exprs: &[ExpressionStatement],
     directives: &mut Vec<(ExpectCategory, Span, Span)>,
 ) {
-    for (i, expr) in exprs.iter().enumerate() {
-        if let Expression::ExpectDirective { category, span } = expr {
+    for (i, stmt) in exprs.iter().enumerate() {
+        if let Expression::ExpectDirective { category, span } = &stmt.expression {
             if let Some(next) = exprs.get(i + 1) {
-                directives.push((*category, *span, next.span()));
+                directives.push((*category, *span, next.expression.span()));
             } else {
                 // Trailing @expect with no following expression — treat as stale.
                 // Use the directive's own span as the target span so it will

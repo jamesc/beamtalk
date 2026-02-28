@@ -66,23 +66,23 @@ pub fn find_class_references<'a>(
         }
 
         // Expressions: identifiers and class references
-        for expr in &module.expressions {
-            collect_class_refs(expr, class_name, file_path, &mut results);
+        for stmt in &module.expressions {
+            collect_class_refs(&stmt.expression, class_name, file_path, &mut results);
         }
 
         // Class method bodies
         for class in &module.classes {
             for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for expr in &method.body {
-                    collect_class_refs(expr, class_name, file_path, &mut results);
+                for stmt in &method.body {
+                    collect_class_refs(&stmt.expression, class_name, file_path, &mut results);
                 }
             }
         }
 
         // Standalone method bodies
         for smd in &module.method_definitions {
-            for expr in &smd.method.body {
-                collect_class_refs(expr, class_name, file_path, &mut results);
+            for stmt in &smd.method.body {
+                collect_class_refs(&stmt.expression, class_name, file_path, &mut results);
             }
         }
     }
@@ -119,8 +119,8 @@ fn collect_class_refs(
             }
         }
         Expression::Block(block) => {
-            for expr in &block.body {
-                collect_class_refs(expr, class_name, file_path, results);
+            for stmt in &block.body {
+                collect_class_refs(&stmt.expression, class_name, file_path, results);
             }
         }
         Expression::Return { value, .. } => {
@@ -203,23 +203,23 @@ pub fn find_selector_references<'a>(
         }
 
         // Message sends and cascades in expressions
-        for expr in &module.expressions {
-            collect_selector_refs(expr, selector_name, file_path, &mut results);
+        for stmt in &module.expressions {
+            collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
         }
 
         // Message sends and cascades in class method bodies
         for class in &module.classes {
             for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for expr in &method.body {
-                    collect_selector_refs(expr, selector_name, file_path, &mut results);
+                for stmt in &method.body {
+                    collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
                 }
             }
         }
 
         // Message sends and cascades in standalone method bodies
         for smd in &module.method_definitions {
-            for expr in &smd.method.body {
-                collect_selector_refs(expr, selector_name, file_path, &mut results);
+            for stmt in &smd.method.body {
+                collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
             }
         }
     }
@@ -285,8 +285,8 @@ fn collect_selector_refs(
             collect_selector_refs(value, selector_name, file_path, results);
         }
         Expression::Block(block) => {
-            for expr in &block.body {
-                collect_selector_refs(expr, selector_name, file_path, results);
+            for stmt in &block.body {
+                collect_selector_refs(&stmt.expression, selector_name, file_path, results);
             }
         }
         Expression::Return { value, .. } => {

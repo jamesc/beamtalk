@@ -86,7 +86,7 @@ impl PrimitiveBindingTable {
                 if method.body.len() == 1 {
                     if let Expression::Primitive {
                         name, is_quoted, ..
-                    } = &method.body[0]
+                    } = &method.body[0].expression
                     {
                         let selector = method.selector.to_erlang_atom();
                         let binding = if *is_quoted {
@@ -233,8 +233,8 @@ pub fn load_from_directory(lib_dir: &std::path::Path) -> PrimitiveBindingTable {
 mod tests {
     use super::*;
     use crate::ast::{
-        ClassDefinition, Expression, Identifier, KeywordPart, MessageSelector, MethodDefinition,
-        Module, ParameterDefinition,
+        ClassDefinition, Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector,
+        MethodDefinition, Module, ParameterDefinition,
     };
     use crate::source_analysis::Span;
 
@@ -251,11 +251,11 @@ mod tests {
         MethodDefinition::new(
             selector,
             params,
-            vec![Expression::Primitive {
+            vec![ExpressionStatement::bare(Expression::Primitive {
                 name: prim_name.into(),
                 is_quoted,
                 span: span(),
-            }],
+            })],
             span(),
         )
     }
@@ -264,10 +264,10 @@ mod tests {
         MethodDefinition::new(
             selector,
             vec![],
-            vec![Expression::Literal(
+            vec![ExpressionStatement::bare(Expression::Literal(
                 crate::ast::Literal::Integer(42),
                 span(),
-            )],
+            ))],
             span(),
         )
     }

@@ -34,34 +34,40 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "self",
-                                    span: Span {
-                                        start: 216,
-                                        end: 220,
-                                    },
-                                },
-                            ),
-                            selector: Binary(
-                                "*",
-                            ),
-                            arguments: [
-                                Literal(
-                                    Integer(
-                                        2,
-                                    ),
-                                    Span {
-                                        start: 223,
-                                        end: 224,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 216,
+                                            end: 220,
+                                        },
                                     },
                                 ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 216,
-                                end: 224,
+                                selector: Binary(
+                                    "*",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            2,
+                                        ),
+                                        Span {
+                                            start: 223,
+                                            end: 224,
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 216,
+                                    end: 224,
+                                },
                             },
                         },
                     ],
@@ -98,7 +104,7 @@ Module {
         start: 179,
         end: 224,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

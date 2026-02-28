@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,189 +7,231 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "thisIsAVeryLongIdentifierNameThatTestsTheParserAbilityToHandleExtremelyLongVariableNamesWithoutIssues",
-                    span: Span {
-                        start: 218,
-                        end: 319,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "thisIsAVeryLongIdentifierNameThatTestsTheParserAbilityToHandleExtremelyLongVariableNamesWithoutIssues",
+                        span: Span {
+                            start: 218,
+                            end: 319,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                Integer(
-                    42,
                 ),
-                Span {
-                    start: 323,
+                value: Literal(
+                    Integer(
+                        42,
+                    ),
+                    Span {
+                        start: 323,
+                        end: 325,
+                    },
+                ),
+                span: Span {
+                    start: 218,
                     end: 325,
                 },
-            ),
-            span: Span {
-                start: 218,
-                end: 325,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "longString",
-                    span: Span {
-                        start: 373,
-                        end: 383,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "longString",
+                        span: Span {
+                            start: 373,
+                            end: 383,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                String(
-                    "This is an extremely long string literal that contains a lot of text to test the lexer and parser ability to handle very long string tokens without issues or buffer overflows and to ensure proper memory allocation",
                 ),
-                Span {
-                    start: 387,
+                value: Literal(
+                    String(
+                        "This is an extremely long string literal that contains a lot of text to test the lexer and parser ability to handle very long string tokens without issues or buffer overflows and to ensure proper memory allocation",
+                    ),
+                    Span {
+                        start: 387,
+                        end: 602,
+                    },
+                ),
+                span: Span {
+                    start: 373,
                     end: 602,
                 },
-            ),
-            span: Span {
-                start: 373,
-                end: 602,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result",
-                    span: Span {
-                        start: 662,
-                        end: 668,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "result",
+                        span: Span {
+                            start: 662,
+                            end: 668,
+                        },
                     },
-                },
-            ),
-            value: Identifier(
-                Identifier {
-                    name: "veryLongObjectWithManyMethods",
-                    span: Span {
-                        start: 672,
-                        end: 701,
+                ),
+                value: Identifier(
+                    Identifier {
+                        name: "veryLongObjectWithManyMethods",
+                        span: Span {
+                            start: 672,
+                            end: 701,
+                        },
                     },
+                ),
+                span: Span {
+                    start: 662,
+                    end: 701,
                 },
-            ),
-            span: Span {
-                start: 662,
-                end: 701,
             },
         },
-        MessageSend {
-            receiver: Error {
-                message: "Unexpected token: expected expression, found thisIsAVeryLongKeywordPart:",
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Error {
+                    message: "Unexpected token: expected expression, found thisIsAVeryLongKeywordPart:",
+                    span: Span {
+                        start: 707,
+                        end: 734,
+                    },
+                },
+                selector: Unary(
+                    "value1",
+                ),
+                arguments: [],
+                is_cast: false,
                 span: Span {
                     start: 707,
-                    end: 734,
+                    end: 741,
                 },
             },
-            selector: Unary(
-                "value1",
-            ),
-            arguments: [],
-            is_cast: false,
-            span: Span {
-                start: 707,
-                end: 741,
-            },
         },
-        MessageSend {
-            receiver: Error {
-                message: "Unexpected token: expected expression, found andAnotherVeryLongKeywordPart:",
-                span: Span {
-                    start: 747,
-                    end: 777,
-                },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-            selector: Unary(
-                "value2",
-            ),
-            arguments: [],
-            is_cast: false,
-            span: Span {
-                start: 747,
-                end: 784,
-            },
-        },
-        MessageSend {
-            receiver: Error {
-                message: "Unexpected token: expected expression, found andYetAnotherExtremelyLongKeywordPart:",
-                span: Span {
-                    start: 789,
-                    end: 827,
-                },
-            },
-            selector: Unary(
-                "value3",
-            ),
-            arguments: [],
-            is_cast: false,
-            span: Span {
-                start: 789,
-                end: 834,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "anotherVeryLongIdentifierForTestingPurposes",
+            expression: MessageSend {
+                receiver: Error {
+                    message: "Unexpected token: expected expression, found andAnotherVeryLongKeywordPart:",
                     span: Span {
-                        start: 873,
-                        end: 916,
+                        start: 747,
+                        end: 777,
                     },
                 },
-            ),
-            value: Parenthesized {
-                expression: MessageSend {
-                    receiver: Identifier(
-                        Identifier {
-                            name: "yetAnotherLongIdentifierName",
-                            span: Span {
-                                start: 926,
-                                end: 954,
-                            },
+                selector: Unary(
+                    "value2",
+                ),
+                arguments: [],
+                is_cast: false,
+                span: Span {
+                    start: 747,
+                    end: 784,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Error {
+                    message: "Unexpected token: expected expression, found andYetAnotherExtremelyLongKeywordPart:",
+                    span: Span {
+                        start: 789,
+                        end: 827,
+                    },
+                },
+                selector: Unary(
+                    "value3",
+                ),
+                arguments: [],
+                is_cast: false,
+                span: Span {
+                    start: 789,
+                    end: 834,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "anotherVeryLongIdentifierForTestingPurposes",
+                        span: Span {
+                            start: 873,
+                            end: 916,
                         },
-                    ),
-                    selector: Keyword(
-                        [
-                            KeywordPart {
-                                keyword: "at:",
-                                span: Span {
-                                    start: 955,
-                                    end: 958,
-                                },
-                            },
-                        ],
-                    ),
-                    arguments: [
-                        Identifier(
+                    },
+                ),
+                value: Parenthesized {
+                    expression: MessageSend {
+                        receiver: Identifier(
                             Identifier {
-                                name: "evenMoreLongIdentifierNames",
+                                name: "yetAnotherLongIdentifierName",
                                 span: Span {
-                                    start: 968,
-                                    end: 995,
+                                    start: 926,
+                                    end: 954,
                                 },
                             },
                         ),
-                    ],
-                    is_cast: false,
+                        selector: Keyword(
+                            [
+                                KeywordPart {
+                                    keyword: "at:",
+                                    span: Span {
+                                        start: 955,
+                                        end: 958,
+                                    },
+                                },
+                            ],
+                        ),
+                        arguments: [
+                            Identifier(
+                                Identifier {
+                                    name: "evenMoreLongIdentifierNames",
+                                    span: Span {
+                                        start: 968,
+                                        end: 995,
+                                    },
+                                },
+                            ),
+                        ],
+                        is_cast: false,
+                        span: Span {
+                            start: 926,
+                            end: 995,
+                        },
+                    },
                     span: Span {
-                        start: 926,
-                        end: 995,
+                        start: 920,
+                        end: 997,
                     },
                 },
                 span: Span {
-                    start: 920,
+                    start: 873,
                     end: 997,
                 },
-            },
-            span: Span {
-                start: 873,
-                end: 997,
             },
         },
     ],
@@ -198,7 +239,7 @@ Module {
         start: 218,
         end: 997,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

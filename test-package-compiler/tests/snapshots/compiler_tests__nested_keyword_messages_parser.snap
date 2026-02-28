@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,43 +7,280 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        MessageSend {
-            receiver: Identifier(
-                Identifier {
-                    name: "dict",
-                    span: Span {
-                        start: 196,
-                        end: 200,
-                    },
-                },
-            ),
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "at:",
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "dict",
                         span: Span {
-                            start: 201,
-                            end: 204,
+                            start: 196,
+                            end: 200,
                         },
                     },
-                    KeywordPart {
-                        keyword: "put:",
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "at:",
+                            span: Span {
+                                start: 201,
+                                end: 204,
+                            },
+                        },
+                        KeywordPart {
+                            keyword: "put:",
+                            span: Span {
+                                start: 218,
+                                end: 222,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Parenthesized {
+                        expression: MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "list",
+                                    span: Span {
+                                        start: 206,
+                                        end: 210,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "at:",
+                                        span: Span {
+                                            start: 211,
+                                            end: 214,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        0,
+                                    ),
+                                    Span {
+                                        start: 215,
+                                        end: 216,
+                                    },
+                                ),
+                            ],
+                            is_cast: false,
+                            span: Span {
+                                start: 206,
+                                end: 216,
+                            },
+                        },
                         span: Span {
-                            start: 218,
-                            end: 222,
+                            start: 205,
+                            end: 217,
+                        },
+                    },
+                    Parenthesized {
+                        expression: MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "string",
+                                    span: Span {
+                                        start: 224,
+                                        end: 230,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "concat:",
+                                        span: Span {
+                                            start: 231,
+                                            end: 238,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Literal(
+                                    String(
+                                        "value",
+                                    ),
+                                    Span {
+                                        start: 239,
+                                        end: 246,
+                                    },
+                                ),
+                            ],
+                            is_cast: false,
+                            span: Span {
+                                start: 224,
+                                end: 246,
+                            },
+                        },
+                        span: Span {
+                            start: 223,
+                            end: 247,
                         },
                     },
                 ],
-            ),
-            arguments: [
-                Parenthesized {
+                is_cast: false,
+                span: Span {
+                    start: 196,
+                    end: 247,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Identifier(
+                    Identifier {
+                        name: "object",
+                        span: Span {
+                            start: 279,
+                            end: 285,
+                        },
+                    },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "process:",
+                            span: Span {
+                                start: 286,
+                                end: 294,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Parenthesized {
+                        expression: MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "transformer",
+                                    span: Span {
+                                        start: 296,
+                                        end: 307,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "apply:",
+                                        span: Span {
+                                            start: 308,
+                                            end: 314,
+                                        },
+                                    },
+                                    KeywordPart {
+                                        keyword: "with:",
+                                        span: Span {
+                                            start: 337,
+                                            end: 342,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Parenthesized {
+                                    expression: MessageSend {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "filter",
+                                                span: Span {
+                                                    start: 316,
+                                                    end: 322,
+                                                },
+                                            },
+                                        ),
+                                        selector: Keyword(
+                                            [
+                                                KeywordPart {
+                                                    keyword: "check:",
+                                                    span: Span {
+                                                        start: 323,
+                                                        end: 329,
+                                                    },
+                                                },
+                                            ],
+                                        ),
+                                        arguments: [
+                                            Identifier(
+                                                Identifier {
+                                                    name: "value",
+                                                    span: Span {
+                                                        start: 330,
+                                                        end: 335,
+                                                    },
+                                                },
+                                            ),
+                                        ],
+                                        is_cast: false,
+                                        span: Span {
+                                            start: 316,
+                                            end: 335,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 315,
+                                        end: 336,
+                                    },
+                                },
+                                Identifier(
+                                    Identifier {
+                                        name: "options",
+                                        span: Span {
+                                            start: 343,
+                                            end: 350,
+                                        },
+                                    },
+                                ),
+                            ],
+                            is_cast: false,
+                            span: Span {
+                                start: 296,
+                                end: 350,
+                            },
+                        },
+                        span: Span {
+                            start: 295,
+                            end: 351,
+                        },
+                    },
+                ],
+                is_cast: false,
+                span: Span {
+                    start: 279,
+                    end: 351,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Parenthesized {
                     expression: MessageSend {
                         receiver: Identifier(
                             Identifier {
-                                name: "list",
+                                name: "object",
                                 span: Span {
-                                    start: 206,
-                                    end: 210,
+                                    start: 385,
+                                    end: 391,
                                 },
                             },
                         ),
@@ -53,52 +289,8 @@ Module {
                                 KeywordPart {
                                     keyword: "at:",
                                     span: Span {
-                                        start: 211,
-                                        end: 214,
-                                    },
-                                },
-                            ],
-                        ),
-                        arguments: [
-                            Literal(
-                                Integer(
-                                    0,
-                                ),
-                                Span {
-                                    start: 215,
-                                    end: 216,
-                                },
-                            ),
-                        ],
-                        is_cast: false,
-                        span: Span {
-                            start: 206,
-                            end: 216,
-                        },
-                    },
-                    span: Span {
-                        start: 205,
-                        end: 217,
-                    },
-                },
-                Parenthesized {
-                    expression: MessageSend {
-                        receiver: Identifier(
-                            Identifier {
-                                name: "string",
-                                span: Span {
-                                    start: 224,
-                                    end: 230,
-                                },
-                            },
-                        ),
-                        selector: Keyword(
-                            [
-                                KeywordPart {
-                                    keyword: "concat:",
-                                    span: Span {
-                                        start: 231,
-                                        end: 238,
+                                        start: 392,
+                                        end: 395,
                                     },
                                 },
                             ],
@@ -106,333 +298,164 @@ Module {
                         arguments: [
                             Literal(
                                 String(
-                                    "value",
+                                    "key",
                                 ),
                                 Span {
-                                    start: 239,
-                                    end: 246,
+                                    start: 396,
+                                    end: 401,
                                 },
                             ),
                         ],
                         is_cast: false,
                         span: Span {
-                            start: 224,
-                            end: 246,
+                            start: 385,
+                            end: 401,
                         },
                     },
                     span: Span {
-                        start: 223,
-                        end: 247,
+                        start: 384,
+                        end: 402,
                     },
                 },
-            ],
-            is_cast: false,
-            span: Span {
-                start: 196,
-                end: 247,
-            },
-        },
-        MessageSend {
-            receiver: Identifier(
-                Identifier {
-                    name: "object",
-                    span: Span {
-                        start: 279,
-                        end: 285,
-                    },
-                },
-            ),
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "process:",
-                        span: Span {
-                            start: 286,
-                            end: 294,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Parenthesized {
-                    expression: MessageSend {
-                        receiver: Identifier(
-                            Identifier {
-                                name: "transformer",
-                                span: Span {
-                                    start: 296,
-                                    end: 307,
-                                },
-                            },
-                        ),
-                        selector: Keyword(
-                            [
-                                KeywordPart {
-                                    keyword: "apply:",
-                                    span: Span {
-                                        start: 308,
-                                        end: 314,
-                                    },
-                                },
-                                KeywordPart {
-                                    keyword: "with:",
-                                    span: Span {
-                                        start: 337,
-                                        end: 342,
-                                    },
-                                },
-                            ],
-                        ),
-                        arguments: [
-                            Parenthesized {
-                                expression: MessageSend {
-                                    receiver: Identifier(
-                                        Identifier {
-                                            name: "filter",
-                                            span: Span {
-                                                start: 316,
-                                                end: 322,
-                                            },
-                                        },
-                                    ),
-                                    selector: Keyword(
-                                        [
-                                            KeywordPart {
-                                                keyword: "check:",
-                                                span: Span {
-                                                    start: 323,
-                                                    end: 329,
-                                                },
-                                            },
-                                        ],
-                                    ),
-                                    arguments: [
-                                        Identifier(
-                                            Identifier {
-                                                name: "value",
-                                                span: Span {
-                                                    start: 330,
-                                                    end: 335,
-                                                },
-                                            },
-                                        ),
-                                    ],
-                                    is_cast: false,
-                                    span: Span {
-                                        start: 316,
-                                        end: 335,
-                                    },
-                                },
-                                span: Span {
-                                    start: 315,
-                                    end: 336,
-                                },
-                            },
-                            Identifier(
-                                Identifier {
-                                    name: "options",
-                                    span: Span {
-                                        start: 343,
-                                        end: 350,
-                                    },
-                                },
-                            ),
-                        ],
-                        is_cast: false,
-                        span: Span {
-                            start: 296,
-                            end: 350,
-                        },
-                    },
-                    span: Span {
-                        start: 295,
-                        end: 351,
-                    },
-                },
-            ],
-            is_cast: false,
-            span: Span {
-                start: 279,
-                end: 351,
-            },
-        },
-        MessageSend {
-            receiver: Parenthesized {
-                expression: MessageSend {
-                    receiver: Identifier(
-                        Identifier {
-                            name: "object",
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "update:",
                             span: Span {
-                                start: 385,
-                                end: 391,
+                                start: 403,
+                                end: 410,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Identifier(
+                        Identifier {
+                            name: "newValue",
+                            span: Span {
+                                start: 411,
+                                end: 419,
                             },
                         },
                     ),
-                    selector: Keyword(
-                        [
-                            KeywordPart {
-                                keyword: "at:",
-                                span: Span {
-                                    start: 392,
-                                    end: 395,
-                                },
-                            },
-                        ],
-                    ),
-                    arguments: [
-                        Literal(
-                            String(
-                                "key",
-                            ),
-                            Span {
-                                start: 396,
-                                end: 401,
-                            },
-                        ),
-                    ],
-                    is_cast: false,
-                    span: Span {
-                        start: 385,
-                        end: 401,
-                    },
-                },
+                ],
+                is_cast: false,
                 span: Span {
                     start: 384,
-                    end: 402,
+                    end: 419,
                 },
             },
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "update:",
-                        span: Span {
-                            start: 403,
-                            end: 410,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Identifier(
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Identifier(
                     Identifier {
-                        name: "newValue",
+                        name: "logger",
                         span: Span {
-                            start: 411,
-                            end: 419,
+                            start: 463,
+                            end: 469,
                         },
                     },
                 ),
-            ],
-            is_cast: false,
-            span: Span {
-                start: 384,
-                end: 419,
-            },
-        },
-        MessageSend {
-            receiver: Identifier(
-                Identifier {
-                    name: "logger",
-                    span: Span {
-                        start: 463,
-                        end: 469,
-                    },
-                },
-            ),
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "log:",
-                        span: Span {
-                            start: 470,
-                            end: 474,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Parenthesized {
-                    expression: MessageSend {
-                        receiver: Identifier(
-                            Identifier {
-                                name: "formatter",
-                                span: Span {
-                                    start: 476,
-                                    end: 485,
-                                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "log:",
+                            span: Span {
+                                start: 470,
+                                end: 474,
                             },
-                        ),
-                        selector: Keyword(
-                            [
-                                KeywordPart {
-                                    keyword: "format:",
-                                    span: Span {
-                                        start: 486,
-                                        end: 493,
-                                    },
-                                },
-                                KeywordPart {
-                                    keyword: "with:",
-                                    span: Span {
-                                        start: 502,
-                                        end: 507,
-                                    },
-                                },
-                            ],
-                        ),
-                        arguments: [
-                            Identifier(
+                        },
+                    ],
+                ),
+                arguments: [
+                    Parenthesized {
+                        expression: MessageSend {
+                            receiver: Identifier(
                                 Identifier {
-                                    name: "message",
+                                    name: "formatter",
                                     span: Span {
-                                        start: 494,
-                                        end: 501,
+                                        start: 476,
+                                        end: 485,
                                     },
                                 },
                             ),
-                            Parenthesized {
-                                expression: MessageSend {
-                                    receiver: Identifier(
-                                        Identifier {
-                                            name: "timestamp",
-                                            span: Span {
-                                                start: 509,
-                                                end: 518,
-                                            },
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "format:",
+                                        span: Span {
+                                            start: 486,
+                                            end: 493,
                                         },
-                                    ),
-                                    selector: Unary(
-                                        "now",
-                                    ),
-                                    arguments: [],
-                                    is_cast: false,
+                                    },
+                                    KeywordPart {
+                                        keyword: "with:",
+                                        span: Span {
+                                            start: 502,
+                                            end: 507,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Identifier(
+                                    Identifier {
+                                        name: "message",
+                                        span: Span {
+                                            start: 494,
+                                            end: 501,
+                                        },
+                                    },
+                                ),
+                                Parenthesized {
+                                    expression: MessageSend {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "timestamp",
+                                                span: Span {
+                                                    start: 509,
+                                                    end: 518,
+                                                },
+                                            },
+                                        ),
+                                        selector: Unary(
+                                            "now",
+                                        ),
+                                        arguments: [],
+                                        is_cast: false,
+                                        span: Span {
+                                            start: 509,
+                                            end: 522,
+                                        },
+                                    },
                                     span: Span {
-                                        start: 509,
-                                        end: 522,
+                                        start: 508,
+                                        end: 523,
                                     },
                                 },
-                                span: Span {
-                                    start: 508,
-                                    end: 523,
-                                },
+                            ],
+                            is_cast: false,
+                            span: Span {
+                                start: 476,
+                                end: 523,
                             },
-                        ],
-                        is_cast: false,
+                        },
                         span: Span {
-                            start: 476,
-                            end: 523,
+                            start: 475,
+                            end: 524,
                         },
                     },
-                    span: Span {
-                        start: 475,
-                        end: 524,
-                    },
+                ],
+                is_cast: false,
+                span: Span {
+                    start: 463,
+                    end: 524,
                 },
-            ],
-            is_cast: false,
-            span: Span {
-                start: 463,
-                end: 524,
             },
         },
     ],
@@ -440,7 +463,7 @@ Module {
         start: 196,
         end: 524,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

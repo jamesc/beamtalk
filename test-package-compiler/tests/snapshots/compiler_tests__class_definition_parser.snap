@@ -65,75 +65,81 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Assignment {
-                            target: FieldAccess {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "self",
-                                        span: Span {
-                                            start: 163,
-                                            end: 167,
-                                        },
-                                    },
-                                ),
-                                field: Identifier {
-                                    name: "value",
-                                    span: Span {
-                                        start: 168,
-                                        end: 173,
-                                    },
-                                },
-                                span: Span {
-                                    start: 163,
-                                    end: 173,
-                                },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
                             },
-                            value: MessageSend {
-                                receiver: FieldAccess {
+                            expression: Assignment {
+                                target: FieldAccess {
                                     receiver: Identifier(
                                         Identifier {
                                             name: "self",
                                             span: Span {
-                                                start: 177,
-                                                end: 181,
+                                                start: 163,
+                                                end: 167,
                                             },
                                         },
                                     ),
                                     field: Identifier {
                                         name: "value",
                                         span: Span {
-                                            start: 182,
-                                            end: 187,
+                                            start: 168,
+                                            end: 173,
                                         },
                                     },
                                     span: Span {
-                                        start: 177,
-                                        end: 187,
+                                        start: 163,
+                                        end: 173,
                                     },
                                 },
-                                selector: Binary(
-                                    "+",
-                                ),
-                                arguments: [
-                                    Literal(
-                                        Integer(
-                                            1,
+                                value: MessageSend {
+                                    receiver: FieldAccess {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "self",
+                                                span: Span {
+                                                    start: 177,
+                                                    end: 181,
+                                                },
+                                            },
                                         ),
-                                        Span {
-                                            start: 190,
-                                            end: 191,
+                                        field: Identifier {
+                                            name: "value",
+                                            span: Span {
+                                                start: 182,
+                                                end: 187,
+                                            },
                                         },
+                                        span: Span {
+                                            start: 177,
+                                            end: 187,
+                                        },
+                                    },
+                                    selector: Binary(
+                                        "+",
                                     ),
-                                ],
-                                is_cast: false,
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 190,
+                                                end: 191,
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 177,
+                                        end: 191,
+                                    },
+                                },
                                 span: Span {
-                                    start: 177,
+                                    start: 163,
                                     end: 191,
                                 },
-                            },
-                            span: Span {
-                                start: 163,
-                                end: 191,
                             },
                         },
                     ],
@@ -156,32 +162,38 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Return {
-                            value: FieldAccess {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "self",
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Return {
+                                value: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 207,
+                                                end: 211,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "value",
                                         span: Span {
-                                            start: 207,
-                                            end: 211,
+                                            start: 212,
+                                            end: 217,
                                         },
                                     },
-                                ),
-                                field: Identifier {
-                                    name: "value",
                                     span: Span {
-                                        start: 212,
+                                        start: 207,
                                         end: 217,
                                     },
                                 },
                                 span: Span {
-                                    start: 207,
+                                    start: 206,
                                     end: 217,
                                 },
-                            },
-                            span: Span {
-                                start: 206,
-                                end: 217,
                             },
                         },
                     ],
@@ -218,7 +230,7 @@ Module {
         start: 104,
         end: 217,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

@@ -9,8 +9,8 @@
 //! - Method definitions with optional `sealed` modifier
 
 use crate::ast::{
-    ClassDefinition, CommentAttachment, Expression, Identifier, KeywordPart, MessageSelector,
-    MethodDefinition, MethodKind, ParameterDefinition, StandaloneMethodDefinition,
+    ClassDefinition, CommentAttachment, Expression, ExpressionStatement, Identifier, KeywordPart,
+    MessageSelector, MethodDefinition, MethodKind, ParameterDefinition, StandaloneMethodDefinition,
     StateDeclaration, TypeAnnotation,
 };
 use crate::source_analysis::{Span, TokenKind};
@@ -634,7 +634,7 @@ impl Parser {
         let body = self.parse_method_body();
         self.in_method_body = false;
 
-        let end = body.last().map_or(start, Expression::span);
+        let end = body.last().map_or(start, |s| s.expression.span());
         let span = start.merge(end);
 
         let mut method = MethodDefinition::with_options(
@@ -772,7 +772,7 @@ impl Parser {
     /// Parses a method body (expressions until the next method or end of class).
     ///
     /// Statements are separated by periods or newlines (BT-360).
-    pub(super) fn parse_method_body(&mut self) -> Vec<Expression> {
+    pub(super) fn parse_method_body(&mut self) -> Vec<ExpressionStatement> {
         let mut body = Vec::new();
 
         // Parse expressions until we hit something that looks like a new method,
@@ -790,7 +790,7 @@ impl Parser {
             let pos_before = self.current;
             let expr = self.parse_expression();
             let is_error = expr.is_error();
-            body.push(expr);
+            body.push(ExpressionStatement::bare(expr));
 
             // If parse_expression didn't consume any tokens (e.g. nesting
             // depth exceeded), break to avoid an infinite loop.
@@ -844,7 +844,7 @@ impl Parser {
             } else if self.match_token(&TokenKind::Bang) {
                 // Cast terminator — mark the last expression as a cast if it's a MessageSend.
                 // If the expression is not a MessageSend (e.g. `x := foo bar!`), emit an error.
-                match body.last_mut() {
+                match body.last_mut().map(|s| &mut s.expression) {
                     Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
                     Some(last) => {
                         let span = last.span();

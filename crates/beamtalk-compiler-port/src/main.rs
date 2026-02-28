@@ -428,7 +428,12 @@ fn handle_compile_expression(request: &Map) -> Term {
     }
 
     // BT-780: Generate Core Erlang for all expressions (multi-statement support)
-    match beamtalk_core::erlang::generate_repl_expressions(&module.expressions, &module_name) {
+    let expressions: Vec<_> = module
+        .expressions
+        .iter()
+        .map(|s| s.expression.clone())
+        .collect();
+    match beamtalk_core::erlang::generate_repl_expressions(&expressions, &module_name) {
         Ok(code) => ok_response(&code, &warnings),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),
     }
@@ -485,10 +490,12 @@ fn handle_inline_class_definition(
     let trailing_core_erlang = if module.expressions.is_empty() {
         None
     } else {
-        match beamtalk_core::erlang::generate_repl_expressions(
-            &module.expressions,
-            expr_module_name,
-        ) {
+        let trailing_exprs: Vec<_> = module
+            .expressions
+            .iter()
+            .map(|s| s.expression.clone())
+            .collect();
+        match beamtalk_core::erlang::generate_repl_expressions(&trailing_exprs, expr_module_name) {
             Ok(code) => Some(code),
             Err(e) => {
                 return error_response(&[format!(

@@ -53,64 +53,76 @@ Module {
                         },
                     ],
                     body: [
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "_seq0",
-                                    span: Span {
-                                        start: 780,
-                                        end: 785,
-                                    },
-                                },
-                            ),
-                            selector: Binary(
-                                "+",
-                            ),
-                            arguments: [
-                                Literal(
-                                    Integer(
-                                        1,
-                                    ),
-                                    Span {
-                                        start: 788,
-                                        end: 789,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "_seq0",
+                                        span: Span {
+                                            start: 780,
+                                            end: 785,
+                                        },
                                     },
                                 ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 780,
-                                end: 789,
+                                selector: Binary(
+                                    "+",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            1,
+                                        ),
+                                        Span {
+                                            start: 788,
+                                            end: 789,
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 780,
+                                    end: 789,
+                                },
                             },
                         },
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "_seq0",
-                                    span: Span {
-                                        start: 794,
-                                        end: 799,
-                                    },
-                                },
-                            ),
-                            selector: Binary(
-                                "*",
-                            ),
-                            arguments: [
-                                Literal(
-                                    Integer(
-                                        2,
-                                    ),
-                                    Span {
-                                        start: 802,
-                                        end: 803,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "_seq0",
+                                        span: Span {
+                                            start: 794,
+                                            end: 799,
+                                        },
                                     },
                                 ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 794,
-                                end: 803,
+                                selector: Binary(
+                                    "*",
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            2,
+                                        ),
+                                        Span {
+                                            start: 802,
+                                            end: 803,
+                                        },
+                                    ),
+                                ],
+                                is_cast: false,
+                                span: Span {
+                                    start: 794,
+                                    end: 803,
+                                },
                             },
                         },
                     ],
@@ -147,7 +159,7 @@ Module {
         start: 445,
         end: 803,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

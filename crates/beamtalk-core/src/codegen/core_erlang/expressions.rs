@@ -849,6 +849,7 @@ impl CoreErlangGenerator {
         let filtered_body: Vec<&Expression> = block
             .body
             .iter()
+            .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
 
@@ -1204,6 +1205,7 @@ impl CoreErlangGenerator {
         let body: Vec<&Expression> = block
             .body
             .iter()
+            .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
 

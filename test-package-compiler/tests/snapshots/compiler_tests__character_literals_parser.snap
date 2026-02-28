@@ -7,284 +7,338 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "letterA",
-                    span: Span {
-                        start: 180,
-                        end: 187,
-                    },
-                },
-            ),
-            value: Literal(
-                Character(
-                    'A',
-                ),
-                Span {
-                    start: 191,
-                    end: 193,
-                },
-            ),
-            span: Span {
-                start: 180,
-                end: 193,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "letterZ",
-                    span: Span {
-                        start: 194,
-                        end: 201,
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "letterA",
+                        span: Span {
+                            start: 180,
+                            end: 187,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                Character(
-                    'z',
                 ),
-                Span {
-                    start: 205,
-                    end: 207,
-                },
-            ),
-            span: Span {
-                start: 194,
-                end: 207,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "digit",
-                    span: Span {
-                        start: 208,
-                        end: 213,
-                    },
-                },
-            ),
-            value: Literal(
-                Character(
-                    '0',
-                ),
-                Span {
-                    start: 217,
-                    end: 219,
-                },
-            ),
-            span: Span {
-                start: 208,
-                end: 219,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isEqual",
-                    span: Span {
-                        start: 257,
-                        end: 264,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
+                value: Literal(
                     Character(
                         'A',
                     ),
                     Span {
-                        start: 268,
-                        end: 270,
+                        start: 191,
+                        end: 193,
                     },
                 ),
-                selector: Binary(
-                    "=",
+                span: Span {
+                    start: 180,
+                    end: 193,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "letterZ",
+                        span: Span {
+                            start: 194,
+                            end: 201,
+                        },
+                    },
                 ),
-                arguments: [
-                    Literal(
+                value: Literal(
+                    Character(
+                        'z',
+                    ),
+                    Span {
+                        start: 205,
+                        end: 207,
+                    },
+                ),
+                span: Span {
+                    start: 194,
+                    end: 207,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "digit",
+                        span: Span {
+                            start: 208,
+                            end: 213,
+                        },
+                    },
+                ),
+                value: Literal(
+                    Character(
+                        '0',
+                    ),
+                    Span {
+                        start: 217,
+                        end: 219,
+                    },
+                ),
+                span: Span {
+                    start: 208,
+                    end: 219,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isEqual",
+                        span: Span {
+                            start: 257,
+                            end: 264,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
                         Character(
                             'A',
                         ),
                         Span {
-                            start: 273,
-                            end: 275,
+                            start: 268,
+                            end: 270,
                         },
                     ),
-                ],
-                is_cast: false,
+                    selector: Binary(
+                        "=",
+                    ),
+                    arguments: [
+                        Literal(
+                            Character(
+                                'A',
+                            ),
+                            Span {
+                                start: 273,
+                                end: 275,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 268,
+                        end: 275,
+                    },
+                },
                 span: Span {
-                    start: 268,
+                    start: 257,
                     end: 275,
                 },
             },
-            span: Span {
-                start: 257,
-                end: 275,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isLess",
-                    span: Span {
-                        start: 276,
-                        end: 282,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Character(
-                        'A',
-                    ),
-                    Span {
-                        start: 286,
-                        end: 288,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isLess",
+                        span: Span {
+                            start: 276,
+                            end: 282,
+                        },
                     },
                 ),
-                selector: Binary(
-                    "<",
-                ),
-                arguments: [
-                    Literal(
+                value: MessageSend {
+                    receiver: Literal(
                         Character(
-                            'Z',
+                            'A',
                         ),
                         Span {
-                            start: 291,
-                            end: 293,
+                            start: 286,
+                            end: 288,
                         },
                     ),
-                ],
-                is_cast: false,
+                    selector: Binary(
+                        "<",
+                    ),
+                    arguments: [
+                        Literal(
+                            Character(
+                                'Z',
+                            ),
+                            Span {
+                                start: 291,
+                                end: 293,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 286,
+                        end: 293,
+                    },
+                },
                 span: Span {
-                    start: 286,
+                    start: 276,
                     end: 293,
                 },
             },
-            span: Span {
-                start: 276,
-                end: 293,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "asInt",
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "asInt",
+                        span: Span {
+                            start: 331,
+                            end: 336,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Character(
+                            'A',
+                        ),
+                        Span {
+                            start: 340,
+                            end: 342,
+                        },
+                    ),
+                    selector: Unary(
+                        "asInteger",
+                    ),
+                    arguments: [],
+                    is_cast: false,
                     span: Span {
-                        start: 331,
-                        end: 336,
+                        start: 340,
+                        end: 352,
                     },
                 },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Character(
-                        'A',
-                    ),
-                    Span {
-                        start: 340,
-                        end: 342,
-                    },
-                ),
-                selector: Unary(
-                    "asInteger",
-                ),
-                arguments: [],
-                is_cast: false,
                 span: Span {
-                    start: 340,
+                    start: 331,
                     end: 352,
                 },
             },
-            span: Span {
-                start: 331,
-                end: 352,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "asStr",
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "asStr",
+                        span: Span {
+                            start: 353,
+                            end: 358,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Character(
+                            'A',
+                        ),
+                        Span {
+                            start: 362,
+                            end: 364,
+                        },
+                    ),
+                    selector: Unary(
+                        "asString",
+                    ),
+                    arguments: [],
+                    is_cast: false,
                     span: Span {
-                        start: 353,
-                        end: 358,
+                        start: 362,
+                        end: 373,
                     },
                 },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Character(
-                        'A',
-                    ),
-                    Span {
-                        start: 362,
-                        end: 364,
-                    },
-                ),
-                selector: Unary(
-                    "asString",
-                ),
-                arguments: [],
-                is_cast: false,
                 span: Span {
-                    start: 362,
+                    start: 353,
                     end: 373,
                 },
             },
-            span: Span {
-                start: 353,
-                end: 373,
-            },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "newline",
-                    span: Span {
-                        start: 407,
-                        end: 414,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "newline",
+                        span: Span {
+                            start: 407,
+                            end: 414,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                Character(
-                    '\n',
                 ),
-                Span {
-                    start: 418,
+                value: Literal(
+                    Character(
+                        '\n',
+                    ),
+                    Span {
+                        start: 418,
+                        end: 421,
+                    },
+                ),
+                span: Span {
+                    start: 407,
                     end: 421,
                 },
-            ),
-            span: Span {
-                start: 407,
-                end: 421,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "tab",
-                    span: Span {
-                        start: 422,
-                        end: 425,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "tab",
+                        span: Span {
+                            start: 422,
+                            end: 425,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                Character(
-                    '\t',
                 ),
-                Span {
-                    start: 429,
+                value: Literal(
+                    Character(
+                        '\t',
+                    ),
+                    Span {
+                        start: 429,
+                        end: 432,
+                    },
+                ),
+                span: Span {
+                    start: 422,
                     end: 432,
                 },
-            ),
-            span: Span {
-                start: 422,
-                end: 432,
             },
         },
     ],
@@ -292,7 +346,7 @@ Module {
         start: 180,
         end: 432,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

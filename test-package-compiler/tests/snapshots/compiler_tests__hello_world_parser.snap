@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,46 +7,52 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        MessageSend {
-            receiver: ClassReference {
-                name: Identifier {
-                    name: "Transcript",
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: ClassReference {
+                    name: Identifier {
+                        name: "Transcript",
+                        span: Span {
+                            start: 133,
+                            end: 143,
+                        },
+                    },
                     span: Span {
                         start: 133,
                         end: 143,
                     },
                 },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "show:",
+                            span: Span {
+                                start: 144,
+                                end: 149,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Literal(
+                        String(
+                            "Hello, World!",
+                        ),
+                        Span {
+                            start: 150,
+                            end: 165,
+                        },
+                    ),
+                ],
+                is_cast: false,
                 span: Span {
                     start: 133,
-                    end: 143,
+                    end: 165,
                 },
-            },
-            selector: Keyword(
-                [
-                    KeywordPart {
-                        keyword: "show:",
-                        span: Span {
-                            start: 144,
-                            end: 149,
-                        },
-                    },
-                ],
-            ),
-            arguments: [
-                Literal(
-                    String(
-                        "Hello, World!",
-                    ),
-                    Span {
-                        start: 150,
-                        end: 165,
-                    },
-                ),
-            ],
-            is_cast: false,
-            span: Span {
-                start: 133,
-                end: 165,
             },
         },
     ],
@@ -55,7 +60,7 @@ Module {
         start: 133,
         end: 165,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

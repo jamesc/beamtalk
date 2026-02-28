@@ -119,8 +119,8 @@ impl TypeChecker {
         let mut env = TypeEnv::new();
 
         // Check top-level expressions
-        for expr in &module.expressions {
-            self.infer_expr(expr, hierarchy, &mut env, false);
+        for stmt in &module.expressions {
+            self.infer_expr(&stmt.expression, hierarchy, &mut env, false);
         }
 
         // Check method bodies inside class definitions
@@ -135,7 +135,8 @@ impl TypeChecker {
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
                 let mut body_type = InferredType::Dynamic;
-                for expr in &method.body {
+                for stmt in &method.body {
+                    let expr = &stmt.expression;
                     body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
                     if matches!(expr, Expression::Return { .. }) {
                         break; // Explicit return ends the body; later expressions are unreachable
@@ -153,7 +154,8 @@ impl TypeChecker {
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
                 let mut body_type = InferredType::Dynamic;
-                for expr in &method.body {
+                for stmt in &method.body {
+                    let expr = &stmt.expression;
                     body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
                     if matches!(expr, Expression::Return { .. }) {
                         break;
@@ -178,7 +180,8 @@ impl TypeChecker {
             method_env.set("self", InferredType::Known(class_name.clone()));
             Self::set_param_types(&mut method_env, &standalone.method.parameters);
             let mut body_type = InferredType::Dynamic;
-            for expr in &standalone.method.body {
+            for stmt in &standalone.method.body {
+                let expr = &stmt.expression;
                 body_type = self.infer_expr(expr, hierarchy, &mut method_env, is_abstract);
                 if matches!(expr, Expression::Return { .. }) {
                     break;
@@ -358,8 +361,13 @@ impl TypeChecker {
                 for param in &block.parameters {
                     block_env.set(param.name.as_str(), InferredType::Dynamic);
                 }
-                for body_expr in &block.body {
-                    self.infer_expr(body_expr, hierarchy, &mut block_env, in_abstract_method);
+                for body_stmt in &block.body {
+                    self.infer_expr(
+                        &body_stmt.expression,
+                        hierarchy,
+                        &mut block_env,
+                        in_abstract_method,
+                    );
                 }
                 InferredType::Known("Block".into())
             }
@@ -621,7 +629,7 @@ impl TypeChecker {
         if method
             .body
             .iter()
-            .any(|e| matches!(e, Expression::Primitive { .. }))
+            .any(|s| matches!(s.expression, Expression::Primitive { .. }))
         {
             return;
         }
@@ -730,7 +738,7 @@ impl TypeChecker {
         if method
             .body
             .iter()
-            .any(|e| matches!(e, Expression::Primitive { .. }))
+            .any(|s| matches!(s.expression, Expression::Primitive { .. }))
         {
             return;
         }
@@ -1106,9 +1114,9 @@ mod tests {
     //! Tests for zero-syntax type inference across all expression forms.
     use super::*;
     use crate::ast::{
-        Block, CascadeMessage, ClassDefinition, ClassKind, CommentAttachment, Identifier,
-        KeywordPart, MethodDefinition, MethodKind, Module, ParameterDefinition, StateDeclaration,
-        TypeAnnotation,
+        Block, CascadeMessage, ClassDefinition, ClassKind, CommentAttachment, ExpressionStatement,
+        Identifier, KeywordPart, MethodDefinition, MethodKind, Module, ParameterDefinition,
+        StateDeclaration, TypeAnnotation,
     };
     use crate::source_analysis::Span;
 
@@ -1123,15 +1131,31 @@ mod tests {
         }
     }
 
+    fn bare(expr: Expression) -> ExpressionStatement {
+        ExpressionStatement::bare(expr)
+    }
+
     fn make_module(expressions: Vec<Expression>) -> Module {
-        Module::new(expressions, span())
+        Module::new(
+            expressions
+                .into_iter()
+                .map(ExpressionStatement::bare)
+                .collect(),
+            span(),
+        )
     }
 
     fn make_module_with_classes(
         expressions: Vec<Expression>,
         classes: Vec<ClassDefinition>,
     ) -> Module {
-        let mut module = Module::new(expressions, span());
+        let mut module = Module::new(
+            expressions
+                .into_iter()
+                .map(ExpressionStatement::bare)
+                .collect(),
+            span(),
+        );
         module.classes = classes;
         module
     }
@@ -1506,7 +1530,7 @@ mod tests {
 
         let block_expr = Expression::Block(Block {
             parameters: vec![],
-            body: vec![int_lit(42)],
+            body: vec![bare(int_lit(42))],
             span: span(),
         });
 
@@ -1640,11 +1664,11 @@ mod tests {
                 methods: vec![MethodDefinition {
                     selector: MessageSelector::Unary("greet".into()),
                     parameters: vec![],
-                    body: vec![msg_send(
+                    body: vec![bare(msg_send(
                         var("self"),
                         MessageSelector::Unary("nonExistent".into()),
                         vec![],
-                    )],
+                    ))],
                     return_type: None,
                     is_sealed: false,
                     kind: MethodKind::Primary,
@@ -1735,7 +1759,7 @@ mod tests {
         let type_map = infer_types(&module, &hierarchy);
 
         // The integer literal should be recorded as Integer
-        let ty = type_map.get(module.expressions[0].span());
+        let ty = type_map.get(module.expressions[0].expression.span());
         assert!(ty.is_some(), "TypeMap should record literal type");
         assert_eq!(
             ty.unwrap(),
@@ -1753,7 +1777,7 @@ mod tests {
 
         // The second expression (var "x") should be recorded as Integer
         let x_expr = &module.expressions[1];
-        let ty = type_map.get(x_expr.span());
+        let ty = type_map.get(x_expr.expression.span());
         assert!(
             ty.is_some(),
             "TypeMap should record variable type after assignment"
@@ -1770,7 +1794,7 @@ mod tests {
         let module = make_module(vec![str_lit("hello")]);
         let hierarchy = ClassHierarchy::with_builtins();
         let type_map = infer_types(&module, &hierarchy);
-        let ty = type_map.get(module.expressions[0].span());
+        let ty = type_map.get(module.expressions[0].expression.span());
         assert_eq!(
             ty,
             Some(&InferredType::Known("String".into())),
@@ -1806,7 +1830,7 @@ mod tests {
         MethodDefinition {
             selector: MessageSelector::Unary(selector.into()),
             parameters: vec![],
-            body,
+            body: body.into_iter().map(ExpressionStatement::bare).collect(),
             return_type: None,
             is_sealed: false,
             kind: MethodKind::Primary,
@@ -1964,7 +1988,7 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
                 parameters: vec![],
-                body: vec![int_lit(0)],
+                body: vec![bare(int_lit(0))],
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
@@ -1992,13 +2016,13 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
                 parameters: vec![],
-                body: vec![Expression::MessageSend {
+                body: vec![bare(Expression::MessageSend {
                     receiver: Box::new(Expression::Super(super_span)),
                     selector: MessageSelector::Unary("reset".into()),
                     arguments: vec![],
                     is_cast: false,
                     span: msg_span,
-                }],
+                })],
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
@@ -2041,7 +2065,7 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
                 parameters: vec![],
-                body: vec![int_lit(0)],
+                body: vec![bare(int_lit(0))],
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
@@ -2067,11 +2091,11 @@ mod tests {
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
                 parameters: vec![],
-                body: vec![msg_send(
+                body: vec![bare(msg_send(
                     Expression::Super(span()),
                     MessageSelector::Unary("nonExistent".into()),
                     vec![],
-                )],
+                ))],
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
@@ -2290,7 +2314,7 @@ mod tests {
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
                 vec![ParameterDefinition::new(ident("amount"))], // no type annotation
-                vec![int_lit(0)],
+                vec![bare(int_lit(0))],
                 span(),
             )],
             span(),
@@ -2325,7 +2349,7 @@ mod tests {
             vec![MethodDefinition::new(
                 MessageSelector::Unary("increment".into()),
                 vec![],
-                vec![int_lit(1)],
+                vec![bare(int_lit(1))],
                 span(),
             )],
             span(),
@@ -2358,7 +2382,7 @@ mod tests {
                     ident("amount"),
                     TypeAnnotation::Simple(ident("Integer")),
                 )],
-                vec![int_lit(0)],
+                vec![bare(int_lit(0))],
                 TypeAnnotation::Simple(ident("Integer")),
                 span(),
             )],
@@ -2392,7 +2416,7 @@ mod tests {
             vec![MethodDefinition::new(
                 MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
                 vec![ParameterDefinition::new(ident("amount"))],
-                vec![int_lit(0)],
+                vec![bare(int_lit(0))],
                 span(),
             )],
             span(),
@@ -2424,11 +2448,11 @@ mod tests {
             vec![MethodDefinition::new(
                 MessageSelector::Binary("+".into()),
                 vec![ParameterDefinition::new(ident("other"))],
-                vec![Expression::Primitive {
+                vec![bare(Expression::Primitive {
                     name: "+".into(),
                     is_quoted: true,
                     span: span(),
-                }],
+                })],
                 span(),
             )],
             span(),
@@ -2552,7 +2576,7 @@ mod tests {
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("getBalance".into()),
                 vec![],
-                vec![str_lit("oops")], // Returns String, declared Integer
+                vec![bare(str_lit("oops"))], // Returns String, declared Integer
                 TypeAnnotation::Simple(ident("Integer")),
                 span(),
             )],
@@ -2588,7 +2612,7 @@ mod tests {
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("getBalance".into()),
                 vec![],
-                vec![int_lit(42)],
+                vec![bare(int_lit(42))],
                 TypeAnnotation::Simple(ident("Integer")),
                 span(),
             )],
@@ -2621,11 +2645,11 @@ mod tests {
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("value".into()),
                 vec![],
-                vec![Expression::Primitive {
+                vec![bare(Expression::Primitive {
                     name: "value".into(),
                     is_quoted: true,
                     span: span(),
-                }],
+                })],
                 TypeAnnotation::Simple(ident("Integer")),
                 span(),
             )],
@@ -2658,7 +2682,7 @@ mod tests {
             vec![MethodDefinition::new(
                 MessageSelector::Unary("count".into()),
                 vec![],
-                vec![str_lit("oops")],
+                vec![bare(str_lit("oops"))],
                 span(),
             )],
             span(),
@@ -2716,7 +2740,7 @@ mod tests {
                     ident("amount"),
                     TypeAnnotation::Simple(ident("Integer")),
                 )],
-                vec![int_lit(0)],
+                vec![bare(int_lit(0))],
                 span(),
             )],
             span(),
@@ -2772,7 +2796,7 @@ mod tests {
                     ident("amount"),
                     TypeAnnotation::Simple(ident("Integer")),
                 )],
-                vec![int_lit(0)],
+                vec![bare(int_lit(0))],
                 span(),
             )],
             span(),
@@ -2826,7 +2850,7 @@ mod tests {
                     ident("amount"),
                     TypeAnnotation::Simple(ident("Number")),
                 )],
-                vec![int_lit(0)],
+                vec![bare(int_lit(0))],
                 span(),
             )],
             span(),
@@ -2843,7 +2867,7 @@ mod tests {
                     ident("amount"),
                     TypeAnnotation::Simple(ident("String")),
                 )],
-                vec![str_lit("ok")],
+                vec![bare(str_lit("ok"))],
                 span(),
             )],
             span(),
@@ -2880,7 +2904,7 @@ mod tests {
                     ident("amount"),
                     TypeAnnotation::Simple(ident("Number")),
                 )],
-                vec![int_lit(0)],
+                vec![bare(int_lit(0))],
                 span(),
             )],
             span(),
@@ -2897,7 +2921,7 @@ mod tests {
                     ident("amount"),
                     TypeAnnotation::Simple(ident("Integer")),
                 )],
-                vec![int_lit(0)],
+                vec![bare(int_lit(0))],
                 span(),
             )],
             span(),
@@ -2929,7 +2953,7 @@ mod tests {
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("getBalance".into()),
                 vec![],
-                vec![str_lit("oops")],
+                vec![bare(str_lit("oops"))],
                 TypeAnnotation::Simple(ident("Integer")),
                 span(),
             )],
@@ -3114,7 +3138,7 @@ mod tests {
             vec![MethodDefinition::with_return_type(
                 MessageSelector::Unary("compute".into()),
                 vec![],
-                vec![int_lit(42)], // Integer is subtype of Number
+                vec![bare(int_lit(42))], // Integer is subtype of Number
                 TypeAnnotation::Simple(ident("Number")),
                 span(),
             )],
@@ -3174,11 +3198,11 @@ mod tests {
                 MessageSelector::Unary("compute".into()),
                 vec![],
                 vec![
-                    Expression::Return {
+                    bare(Expression::Return {
                         value: Box::new(int_lit(42)),
                         span: span(),
-                    },
-                    str_lit("unreachable"), // would be String, but never reached
+                    }),
+                    bare(str_lit("unreachable")), // would be String, bare(but never reached)
                 ],
                 TypeAnnotation::Simple(ident("Integer")),
                 span(),

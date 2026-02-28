@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,56 +7,68 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "waitFor",
-                    span: Span {
-                        start: 134,
-                        end: 141,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "waitFor",
+                        span: Span {
+                            start: 134,
+                            end: 141,
+                        },
                     },
-                },
-            ),
-            value: Block(
-                Block {
-                    parameters: [],
-                    body: [
-                        Return {
-                            value: MessageSend {
-                                receiver: Identifier(
-                                    Identifier {
-                                        name: "future",
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: Return {
+                                    value: MessageSend {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "future",
+                                                span: Span {
+                                                    start: 148,
+                                                    end: 154,
+                                                },
+                                            },
+                                        ),
+                                        selector: Unary(
+                                            "await",
+                                        ),
+                                        arguments: [],
+                                        is_cast: false,
                                         span: Span {
                                             start: 148,
-                                            end: 154,
+                                            end: 160,
                                         },
                                     },
-                                ),
-                                selector: Unary(
-                                    "await",
-                                ),
-                                arguments: [],
-                                is_cast: false,
-                                span: Span {
-                                    start: 148,
-                                    end: 160,
+                                    span: Span {
+                                        start: 147,
+                                        end: 160,
+                                    },
                                 },
                             },
-                            span: Span {
-                                start: 147,
-                                end: 160,
-                            },
+                        ],
+                        span: Span {
+                            start: 145,
+                            end: 162,
                         },
-                    ],
-                    span: Span {
-                        start: 145,
-                        end: 162,
                     },
+                ),
+                span: Span {
+                    start: 134,
+                    end: 162,
                 },
-            ),
-            span: Span {
-                start: 134,
-                end: 162,
             },
         },
     ],
@@ -65,7 +76,7 @@ Module {
         start: 134,
         end: 162,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

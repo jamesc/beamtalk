@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -8,311 +7,29 @@ Module {
     classes: [],
     method_definitions: [],
     expressions: [
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "negatedNum",
-                    span: Span {
-                        start: 268,
-                        end: 278,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        5,
-                    ),
-                    Span {
-                        start: 282,
-                        end: 283,
-                    },
-                ),
-                selector: Unary(
-                    "negated",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 282,
-                    end: 291,
-                },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
             },
-            span: Span {
-                start: 268,
-                end: 291,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "absValue",
-                    span: Span {
-                        start: 356,
-                        end: 364,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Parenthesized {
-                    expression: Literal(
-                        Integer(
-                            -10,
-                        ),
-                        Span {
-                            start: 369,
-                            end: 372,
-                        },
-                    ),
-                    span: Span {
-                        start: 368,
-                        end: 373,
-                    },
-                },
-                selector: Unary(
-                    "abs",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 368,
-                    end: 377,
-                },
-            },
-            span: Span {
-                start: 356,
-                end: 377,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isZero1",
-                    span: Span {
-                        start: 436,
-                        end: 443,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        0,
-                    ),
-                    Span {
-                        start: 447,
-                        end: 448,
-                    },
-                ),
-                selector: Unary(
-                    "isZero",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 447,
-                    end: 455,
-                },
-            },
-            span: Span {
-                start: 436,
-                end: 455,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "isZero2",
-                    span: Span {
-                        start: 456,
-                        end: 463,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        42,
-                    ),
-                    Span {
-                        start: 467,
-                        end: 469,
-                    },
-                ),
-                selector: Unary(
-                    "isZero",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 467,
-                    end: 476,
-                },
-            },
-            span: Span {
-                start: 456,
-                end: 476,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "evenCheck",
-                    span: Span {
-                        start: 496,
-                        end: 505,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        4,
-                    ),
-                    Span {
-                        start: 509,
-                        end: 510,
-                    },
-                ),
-                selector: Unary(
-                    "isEven",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 509,
-                    end: 517,
-                },
-            },
-            span: Span {
-                start: 496,
-                end: 517,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "oddCheck",
-                    span: Span {
-                        start: 518,
-                        end: 526,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Literal(
-                    Integer(
-                        7,
-                    ),
-                    Span {
-                        start: 530,
-                        end: 531,
-                    },
-                ),
-                selector: Unary(
-                    "isOdd",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 530,
-                    end: 537,
-                },
-            },
-            span: Span {
-                start: 518,
-                end: 537,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "notTrue",
-                    span: Span {
-                        start: 594,
-                        end: 601,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
+            expression: Assignment {
+                target: Identifier(
                     Identifier {
-                        name: "true",
+                        name: "negatedNum",
                         span: Span {
-                            start: 605,
-                            end: 609,
+                            start: 268,
+                            end: 278,
                         },
                     },
                 ),
-                selector: Unary(
-                    "not",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 605,
-                    end: 613,
-                },
-            },
-            span: Span {
-                start: 594,
-                end: 613,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "notFalse",
-                    span: Span {
-                        start: 614,
-                        end: 622,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: Identifier(
-                    Identifier {
-                        name: "false",
-                        span: Span {
-                            start: 626,
-                            end: 631,
-                        },
-                    },
-                ),
-                selector: Unary(
-                    "not",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 626,
-                    end: 635,
-                },
-            },
-            span: Span {
-                start: 614,
-                end: 635,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "chained",
-                    span: Span {
-                        start: 704,
-                        end: 711,
-                    },
-                },
-            ),
-            value: MessageSend {
-                receiver: MessageSend {
+                value: MessageSend {
                     receiver: Literal(
                         Integer(
                             5,
                         ),
                         Span {
-                            start: 715,
-                            end: 716,
+                            start: 282,
+                            end: 283,
                         },
                     ),
                     selector: Unary(
@@ -321,209 +38,581 @@ Module {
                     arguments: [],
                     is_cast: false,
                     span: Span {
-                        start: 715,
-                        end: 724,
+                        start: 282,
+                        end: 291,
                     },
                 },
-                selector: Unary(
-                    "abs",
-                ),
-                arguments: [],
-                is_cast: false,
                 span: Span {
-                    start: 715,
-                    end: 728,
+                    start: 268,
+                    end: 291,
                 },
-            },
-            span: Span {
-                start: 704,
-                end: 728,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "counter",
-                    span: Span {
-                        start: 776,
-                        end: 783,
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "absValue",
+                        span: Span {
+                            start: 356,
+                            end: 364,
+                        },
                     },
-                },
-            ),
-            value: Literal(
-                Integer(
-                    0,
                 ),
-                Span {
-                    start: 787,
-                    end: 788,
-                },
-            ),
-            span: Span {
-                start: 776,
-                end: 788,
-            },
-        },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "result",
+                value: MessageSend {
+                    receiver: Parenthesized {
+                        expression: Literal(
+                            Integer(
+                                -10,
+                            ),
+                            Span {
+                                start: 369,
+                                end: 372,
+                            },
+                        ),
+                        span: Span {
+                            start: 368,
+                            end: 373,
+                        },
+                    },
+                    selector: Unary(
+                        "abs",
+                    ),
+                    arguments: [],
+                    is_cast: false,
                     span: Span {
-                        start: 789,
-                        end: 795,
+                        start: 368,
+                        end: 377,
                     },
                 },
-            ),
-            value: MessageSend {
-                receiver: Parenthesized {
-                    expression: MessageSend {
-                        receiver: Identifier(
-                            Identifier {
-                                name: "counter",
-                                span: Span {
-                                    start: 800,
-                                    end: 807,
-                                },
+                span: Span {
+                    start: 356,
+                    end: 377,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isZero1",
+                        span: Span {
+                            start: 436,
+                            end: 443,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            0,
+                        ),
+                        Span {
+                            start: 447,
+                            end: 448,
+                        },
+                    ),
+                    selector: Unary(
+                        "isZero",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 447,
+                        end: 455,
+                    },
+                },
+                span: Span {
+                    start: 436,
+                    end: 455,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "isZero2",
+                        span: Span {
+                            start: 456,
+                            end: 463,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            42,
+                        ),
+                        Span {
+                            start: 467,
+                            end: 469,
+                        },
+                    ),
+                    selector: Unary(
+                        "isZero",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 467,
+                        end: 476,
+                    },
+                },
+                span: Span {
+                    start: 456,
+                    end: 476,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "evenCheck",
+                        span: Span {
+                            start: 496,
+                            end: 505,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            4,
+                        ),
+                        Span {
+                            start: 509,
+                            end: 510,
+                        },
+                    ),
+                    selector: Unary(
+                        "isEven",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 509,
+                        end: 517,
+                    },
+                },
+                span: Span {
+                    start: 496,
+                    end: 517,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "oddCheck",
+                        span: Span {
+                            start: 518,
+                            end: 526,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Literal(
+                        Integer(
+                            7,
+                        ),
+                        Span {
+                            start: 530,
+                            end: 531,
+                        },
+                    ),
+                    selector: Unary(
+                        "isOdd",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 530,
+                        end: 537,
+                    },
+                },
+                span: Span {
+                    start: 518,
+                    end: 537,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "notTrue",
+                        span: Span {
+                            start: 594,
+                            end: 601,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "true",
+                            span: Span {
+                                start: 605,
+                                end: 609,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "not",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 605,
+                        end: 613,
+                    },
+                },
+                span: Span {
+                    start: 594,
+                    end: 613,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "notFalse",
+                        span: Span {
+                            start: 614,
+                            end: 622,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "false",
+                            span: Span {
+                                start: 626,
+                                end: 631,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "not",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 626,
+                        end: 635,
+                    },
+                },
+                span: Span {
+                    start: 614,
+                    end: 635,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "chained",
+                        span: Span {
+                            start: 704,
+                            end: 711,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: MessageSend {
+                        receiver: Literal(
+                            Integer(
+                                5,
+                            ),
+                            Span {
+                                start: 715,
+                                end: 716,
                             },
                         ),
                         selector: Unary(
-                            "isZero",
+                            "negated",
                         ),
                         arguments: [],
                         is_cast: false,
                         span: Span {
-                            start: 800,
-                            end: 814,
+                            start: 715,
+                            end: 724,
                         },
                     },
+                    selector: Unary(
+                        "abs",
+                    ),
+                    arguments: [],
+                    is_cast: false,
                     span: Span {
-                        start: 799,
-                        end: 815,
+                        start: 715,
+                        end: 728,
                     },
                 },
-                selector: Keyword(
-                    [
-                        KeywordPart {
-                            keyword: "ifTrue:",
-                            span: Span {
-                                start: 816,
-                                end: 823,
-                            },
-                        },
-                        KeywordPart {
-                            keyword: "ifFalse:",
-                            span: Span {
-                                start: 828,
-                                end: 836,
-                            },
-                        },
-                    ],
-                ),
-                arguments: [
-                    Block(
-                        Block {
-                            parameters: [],
-                            body: [
-                                Literal(
-                                    Integer(
-                                        0,
-                                    ),
-                                    Span {
-                                        start: 825,
-                                        end: 826,
-                                    },
-                                ),
-                            ],
-                            span: Span {
-                                start: 824,
-                                end: 827,
-                            },
-                        },
-                    ),
-                    Block(
-                        Block {
-                            parameters: [],
-                            body: [
-                                Identifier(
-                                    Identifier {
-                                        name: "counter",
-                                        span: Span {
-                                            start: 838,
-                                            end: 845,
-                                        },
-                                    },
-                                ),
-                            ],
-                            span: Span {
-                                start: 837,
-                                end: 846,
-                            },
-                        },
-                    ),
-                ],
-                is_cast: false,
                 span: Span {
-                    start: 799,
-                    end: 846,
+                    start: 704,
+                    end: 728,
                 },
-            },
-            span: Span {
-                start: 789,
-                end: 846,
             },
         },
-        Assignment {
-            target: Identifier(
-                Identifier {
-                    name: "blockUnary",
-                    span: Span {
-                        start: 878,
-                        end: 888,
-                    },
-                },
-            ),
-            value: Block(
-                Block {
-                    parameters: [
-                        BlockParameter {
-                            name: "x",
-                            span: Span {
-                                start: 894,
-                                end: 895,
-                            },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "counter",
+                        span: Span {
+                            start: 776,
+                            end: 783,
                         },
-                    ],
-                    body: [
-                        MessageSend {
+                    },
+                ),
+                value: Literal(
+                    Integer(
+                        0,
+                    ),
+                    Span {
+                        start: 787,
+                        end: 788,
+                    },
+                ),
+                span: Span {
+                    start: 776,
+                    end: 788,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "result",
+                        span: Span {
+                            start: 789,
+                            end: 795,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Parenthesized {
+                        expression: MessageSend {
                             receiver: Identifier(
                                 Identifier {
-                                    name: "x",
+                                    name: "counter",
                                     span: Span {
-                                        start: 898,
-                                        end: 899,
+                                        start: 800,
+                                        end: 807,
                                     },
                                 },
                             ),
                             selector: Unary(
-                                "negated",
+                                "isZero",
                             ),
                             arguments: [],
                             is_cast: false,
                             span: Span {
-                                start: 898,
-                                end: 907,
+                                start: 800,
+                                end: 814,
                             },
                         },
+                        span: Span {
+                            start: 799,
+                            end: 815,
+                        },
+                    },
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "ifTrue:",
+                                span: Span {
+                                    start: 816,
+                                    end: 823,
+                                },
+                            },
+                            KeywordPart {
+                                keyword: "ifFalse:",
+                                span: Span {
+                                    start: 828,
+                                    end: 836,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Block(
+                            Block {
+                                parameters: [],
+                                body: [
+                                    ExpressionStatement {
+                                        comments: CommentAttachment {
+                                            leading: [],
+                                            trailing: None,
+                                        },
+                                        expression: Literal(
+                                            Integer(
+                                                0,
+                                            ),
+                                            Span {
+                                                start: 825,
+                                                end: 826,
+                                            },
+                                        ),
+                                    },
+                                ],
+                                span: Span {
+                                    start: 824,
+                                    end: 827,
+                                },
+                            },
+                        ),
+                        Block(
+                            Block {
+                                parameters: [],
+                                body: [
+                                    ExpressionStatement {
+                                        comments: CommentAttachment {
+                                            leading: [],
+                                            trailing: None,
+                                        },
+                                        expression: Identifier(
+                                            Identifier {
+                                                name: "counter",
+                                                span: Span {
+                                                    start: 838,
+                                                    end: 845,
+                                                },
+                                            },
+                                        ),
+                                    },
+                                ],
+                                span: Span {
+                                    start: 837,
+                                    end: 846,
+                                },
+                            },
+                        ),
                     ],
+                    is_cast: false,
                     span: Span {
-                        start: 892,
-                        end: 908,
+                        start: 799,
+                        end: 846,
                     },
                 },
-            ),
-            span: Span {
-                start: 878,
-                end: 908,
+                span: Span {
+                    start: 789,
+                    end: 846,
+                },
+            },
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "blockUnary",
+                        span: Span {
+                            start: 878,
+                            end: 888,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [
+                            BlockParameter {
+                                name: "x",
+                                span: Span {
+                                    start: 894,
+                                    end: 895,
+                                },
+                            },
+                        ],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "x",
+                                            span: Span {
+                                                start: 898,
+                                                end: 899,
+                                            },
+                                        },
+                                    ),
+                                    selector: Unary(
+                                        "negated",
+                                    ),
+                                    arguments: [],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 898,
+                                        end: 907,
+                                    },
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 892,
+                            end: 908,
+                        },
+                    },
+                ),
+                span: Span {
+                    start: 878,
+                    end: 908,
+                },
             },
         },
     ],
@@ -531,7 +620,7 @@ Module {
         start: 268,
         end: 908,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

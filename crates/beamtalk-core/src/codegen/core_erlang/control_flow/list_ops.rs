@@ -203,6 +203,7 @@ impl CoreErlangGenerator {
         let filtered_body: Vec<&Expression> = body
             .body
             .iter()
+            .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
         for (i, expr) in filtered_body.iter().enumerate() {
@@ -427,6 +428,7 @@ impl CoreErlangGenerator {
         let filtered_body: Vec<&Expression> = body
             .body
             .iter()
+            .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
         let mut has_mutations = false;
@@ -720,6 +722,7 @@ impl CoreErlangGenerator {
         let filtered_body: Vec<&Expression> = body
             .body
             .iter()
+            .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
         let mut has_mutations = false;
@@ -1120,6 +1123,7 @@ impl CoreErlangGenerator {
         let filtered_body: Vec<&Expression> = body
             .body
             .iter()
+            .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
         let mut has_mutations = false;

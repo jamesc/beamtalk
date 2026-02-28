@@ -56,9 +56,11 @@ pub fn compute_signature_help(
     let type_map = infer_types(module, hierarchy);
 
     // Search top-level expressions
-    for expr in &module.expressions {
+    for stmt in &module.expressions {
         let context = SigHelpClassContext::TopLevel;
-        if let Some(help) = find_signature_in_expr(expr, offset, &context, hierarchy, &type_map) {
+        if let Some(help) =
+            find_signature_in_expr(&stmt.expression, offset, &context, hierarchy, &type_map)
+        {
             return Some(help);
         }
     }
@@ -67,9 +69,9 @@ pub fn compute_signature_help(
     for class in &module.classes {
         for method in &class.methods {
             let context = SigHelpClassContext::InstanceMethod(class);
-            for expr in &method.body {
+            for stmt in &method.body {
                 if let Some(help) =
-                    find_signature_in_expr(expr, offset, &context, hierarchy, &type_map)
+                    find_signature_in_expr(&stmt.expression, offset, &context, hierarchy, &type_map)
                 {
                     return Some(help);
                 }
@@ -77,9 +79,9 @@ pub fn compute_signature_help(
         }
         for method in &class.class_methods {
             let context = SigHelpClassContext::ClassMethod(class);
-            for expr in &method.body {
+            for stmt in &method.body {
                 if let Some(help) =
-                    find_signature_in_expr(expr, offset, &context, hierarchy, &type_map)
+                    find_signature_in_expr(&stmt.expression, offset, &context, hierarchy, &type_map)
                 {
                     return Some(help);
                 }
@@ -94,8 +96,9 @@ pub fn compute_signature_help(
         } else {
             SigHelpClassContext::StandaloneInstanceMethod(smd.class_name.name.as_str())
         };
-        for expr in &smd.method.body {
-            if let Some(help) = find_signature_in_expr(expr, offset, &context, hierarchy, &type_map)
+        for stmt in &smd.method.body {
+            if let Some(help) =
+                find_signature_in_expr(&stmt.expression, offset, &context, hierarchy, &type_map)
             {
                 return Some(help);
             }
@@ -158,10 +161,9 @@ fn find_signature_in_expr(
             }
             None
         }
-        Expression::Block(block) => block
-            .body
-            .iter()
-            .find_map(|e| find_signature_in_expr(e, offset, context, hierarchy, type_map)),
+        Expression::Block(block) => block.body.iter().find_map(|s| {
+            find_signature_in_expr(&s.expression, offset, context, hierarchy, type_map)
+        }),
         Expression::Assignment { target, value, .. } => {
             find_signature_in_expr(target, offset, context, hierarchy, type_map)
                 .or_else(|| find_signature_in_expr(value, offset, context, hierarchy, type_map))

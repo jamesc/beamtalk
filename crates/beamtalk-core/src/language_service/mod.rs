@@ -188,20 +188,22 @@ impl SimpleLanguageService {
         offset: u32,
     ) -> Option<crate::queries::definition_provider::SelectorLookup> {
         // Check top-level expressions
-        for expr in &module.expressions {
-            if let Some(result) =
-                crate::queries::definition_provider::find_selector_lookup_in_expr(expr, offset)
-            {
+        for stmt in &module.expressions {
+            if let Some(result) = crate::queries::definition_provider::find_selector_lookup_in_expr(
+                &stmt.expression,
+                offset,
+            ) {
                 return Some(result);
             }
         }
         // Check class method bodies
         for class in &module.classes {
             for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for expr in &method.body {
+                for stmt in &method.body {
                     if let Some(result) =
                         crate::queries::definition_provider::find_selector_lookup_in_expr(
-                            expr, offset,
+                            &stmt.expression,
+                            offset,
                         )
                     {
                         return Some(result);
@@ -211,9 +213,12 @@ impl SimpleLanguageService {
         }
         // Check standalone method bodies
         for smd in &module.method_definitions {
-            for expr in &smd.method.body {
+            for stmt in &smd.method.body {
                 if let Some(result) =
-                    crate::queries::definition_provider::find_selector_lookup_in_expr(expr, offset)
+                    crate::queries::definition_provider::find_selector_lookup_in_expr(
+                        &stmt.expression,
+                        offset,
+                    )
                 {
                     return Some(result);
                 }
@@ -271,8 +276,8 @@ impl SimpleLanguageService {
                         return Some(ident);
                     }
                 }
-                for expr in &method.body {
-                    if let Some(ident) = Self::find_identifier_in_expr(expr, offset) {
+                for stmt in &method.body {
+                    if let Some(ident) = Self::find_identifier_in_expr(&stmt.expression, offset) {
                         return Some(ident);
                     }
                 }
@@ -302,16 +307,16 @@ impl SimpleLanguageService {
                 }
             }
 
-            for expr in &smd.method.body {
-                if let Some(ident) = Self::find_identifier_in_expr(expr, offset) {
+            for stmt in &smd.method.body {
+                if let Some(ident) = Self::find_identifier_in_expr(&stmt.expression, offset) {
                     return Some(ident);
                 }
             }
         }
 
         // Walk the top-level expressions
-        for expr in &file_data.module.expressions {
-            if let Some(ident) = Self::find_identifier_in_expr(expr, offset) {
+        for stmt in &file_data.module.expressions {
+            if let Some(ident) = Self::find_identifier_in_expr(&stmt.expression, offset) {
                 return Some(ident);
             }
         }
@@ -393,7 +398,7 @@ impl SimpleLanguageService {
             Expression::Block(block) => block
                 .body
                 .iter()
-                .find_map(|expr| Self::find_identifier_in_expr(expr, offset)),
+                .find_map(|stmt| Self::find_identifier_in_expr(&stmt.expression, offset)),
             Expression::Return { value, .. } => Self::find_identifier_in_expr(value, offset),
             Expression::Parenthesized { expression, .. } => {
                 Self::find_identifier_in_expr(expression, offset)
@@ -458,8 +463,8 @@ impl SimpleLanguageService {
                 }
             }
             Expression::Block(block) => {
-                for expr in &block.body {
-                    Self::collect_identifiers(expr, name, results);
+                for stmt in &block.body {
+                    Self::collect_identifiers(&stmt.expression, name, results);
                 }
             }
             Expression::Return { value, .. } => {
@@ -671,21 +676,21 @@ impl LanguageService for SimpleLanguageService {
         let mut results = Vec::new();
         for (file_path, fd) in &self.files {
             let mut spans = Vec::new();
-            for expr in &fd.module.expressions {
-                Self::collect_identifiers(expr, &ident.name, &mut spans);
+            for stmt in &fd.module.expressions {
+                Self::collect_identifiers(&stmt.expression, &ident.name, &mut spans);
             }
             // Also search class method bodies
             for class in &fd.module.classes {
                 for method in class.methods.iter().chain(class.class_methods.iter()) {
-                    for expr in &method.body {
-                        Self::collect_identifiers(expr, &ident.name, &mut spans);
+                    for stmt in &method.body {
+                        Self::collect_identifiers(&stmt.expression, &ident.name, &mut spans);
                     }
                 }
             }
             // And standalone method bodies
             for smd in &fd.module.method_definitions {
-                for expr in &smd.method.body {
-                    Self::collect_identifiers(expr, &ident.name, &mut spans);
+                for stmt in &smd.method.body {
+                    Self::collect_identifiers(&stmt.expression, &ident.name, &mut spans);
                 }
             }
             results.extend(

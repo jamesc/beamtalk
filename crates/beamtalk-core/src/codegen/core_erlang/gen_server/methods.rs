@@ -81,7 +81,7 @@ impl CoreErlangGenerator {
         let needs_nlr = method
             .body
             .iter()
-            .any(|expr| Self::expr_has_block_nlr(expr, false));
+            .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
 
         let nlr_token_var = if needs_nlr {
             let token_var = self.fresh_temp_var("NlrToken");
@@ -184,6 +184,7 @@ impl CoreErlangGenerator {
         let body: Vec<&Expression> = method
             .body
             .iter()
+            .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
         for (i, expr) in body.iter().enumerate() {
@@ -549,6 +550,7 @@ impl CoreErlangGenerator {
         let body: Vec<&Expression> = block
             .body
             .iter()
+            .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
         for (i, expr) in body.iter().enumerate() {
@@ -954,12 +956,12 @@ impl CoreErlangGenerator {
     }
 
     /// Check if a method body is a single `self error: <StringLiteral>` expression.
-    fn is_self_error_body(body: &[Expression]) -> bool {
+    fn is_self_error_body(body: &[crate::ast::ExpressionStatement]) -> bool {
         if body.len() != 1 {
             return false;
         }
         matches!(
-            &body[0],
+            &body[0].expression,
             Expression::MessageSend {
                 receiver,
                 selector: MessageSelector::Keyword(parts),
@@ -1516,6 +1518,7 @@ impl CoreErlangGenerator {
         let body: Vec<&Expression> = method
             .body
             .iter()
+            .map(|s| &s.expression)
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
         for (i, expr) in body.iter().enumerate() {

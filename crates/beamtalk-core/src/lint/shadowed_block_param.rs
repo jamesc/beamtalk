@@ -25,7 +25,7 @@
 
 use std::collections::HashSet;
 
-use crate::ast::{Block, Expression, MethodDefinition, Module, StringSegment};
+use crate::ast::{Block, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment};
 use crate::lint::LintPass;
 use crate::source_analysis::Diagnostic;
 
@@ -114,9 +114,13 @@ fn check_method(
 
 /// Walk a sequence of expressions in order, collecting assignment targets into
 /// the current scope as they are encountered (so later blocks can see them).
-fn check_expr_seq(exprs: &[Expression], scope: &mut LintScope, diagnostics: &mut Vec<Diagnostic>) {
-    for expr in exprs {
-        check_expr(expr, scope, diagnostics);
+fn check_expr_seq(
+    exprs: &[ExpressionStatement],
+    scope: &mut LintScope,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for stmt in exprs {
+        check_expr(&stmt.expression, scope, diagnostics);
     }
 }
 

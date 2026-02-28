@@ -34,12 +34,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "size",
-                            is_quoted: true,
-                            span: Span {
-                                start: 259,
-                                end: 276,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "size",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 259,
+                                    end: 276,
+                                },
                             },
                         },
                     ],
@@ -62,12 +68,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "isEmpty",
-                            is_quoted: true,
-                            span: Span {
-                                start: 290,
-                                end: 310,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "isEmpty",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 290,
+                                    end: 310,
+                                },
                             },
                         },
                     ],
@@ -90,12 +102,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "first",
-                            is_quoted: true,
-                            span: Span {
-                                start: 322,
-                                end: 340,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "first",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 322,
+                                    end: 340,
+                                },
                             },
                         },
                     ],
@@ -118,12 +136,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "rest",
-                            is_quoted: true,
-                            span: Span {
-                                start: 351,
-                                end: 368,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "rest",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 351,
+                                    end: 368,
+                                },
                             },
                         },
                     ],
@@ -146,12 +170,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "last",
-                            is_quoted: true,
-                            span: Span {
-                                start: 379,
-                                end: 396,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "last",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 379,
+                                    end: 396,
+                                },
                             },
                         },
                     ],
@@ -193,12 +223,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "at:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 412,
-                                end: 428,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "at:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 412,
+                                    end: 428,
+                                },
                             },
                         },
                     ],
@@ -240,12 +276,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "includes:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 449,
-                                end: 471,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "includes:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 449,
+                                    end: 471,
+                                },
                             },
                         },
                     ],
@@ -268,12 +310,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "sort",
-                            is_quoted: true,
-                            span: Span {
-                                start: 497,
-                                end: 514,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "sort",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 497,
+                                    end: 514,
+                                },
                             },
                         },
                     ],
@@ -315,12 +363,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "sort:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 537,
-                                end: 555,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "sort:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 537,
+                                    end: 555,
+                                },
                             },
                         },
                     ],
@@ -343,12 +397,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "reversed",
-                            is_quoted: true,
-                            span: Span {
-                                start: 570,
-                                end: 591,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "reversed",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 570,
+                                    end: 591,
+                                },
                             },
                         },
                     ],
@@ -371,12 +431,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "unique",
-                            is_quoted: true,
-                            span: Span {
-                                start: 604,
-                                end: 623,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "unique",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 604,
+                                    end: 623,
+                                },
                             },
                         },
                     ],
@@ -418,12 +484,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "detect:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 656,
-                                end: 676,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "detect:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 656,
+                                    end: 676,
+                                },
                             },
                         },
                     ],
@@ -482,12 +554,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "detect:ifNone:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 712,
-                                end: 739,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "detect:ifNone:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 712,
+                                    end: 739,
+                                },
                             },
                         },
                     ],
@@ -529,12 +607,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "do:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 807,
-                                end: 823,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "do:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 807,
+                                    end: 823,
+                                },
                             },
                         },
                     ],
@@ -576,12 +660,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "collect:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 844,
-                                end: 865,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "collect:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 844,
+                                    end: 865,
+                                },
                             },
                         },
                     ],
@@ -623,12 +713,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "select:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 885,
-                                end: 905,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "select:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 885,
+                                    end: 905,
+                                },
                             },
                         },
                     ],
@@ -670,12 +766,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "reject:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 925,
-                                end: 945,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "reject:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 925,
+                                    end: 945,
+                                },
                             },
                         },
                     ],
@@ -734,12 +836,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "inject:into:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 979,
-                                end: 1004,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "inject:into:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 979,
+                                    end: 1004,
+                                },
                             },
                         },
                     ],
@@ -781,12 +889,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "take:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1035,
-                                end: 1053,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "take:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1035,
+                                    end: 1053,
+                                },
                             },
                         },
                     ],
@@ -828,12 +942,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "drop:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1067,
-                                end: 1085,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "drop:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1067,
+                                    end: 1085,
+                                },
                             },
                         },
                     ],
@@ -856,12 +976,18 @@ Module {
                     ),
                     parameters: [],
                     body: [
-                        Primitive {
-                            name: "flatten",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1099,
-                                end: 1119,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "flatten",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1099,
+                                    end: 1119,
+                                },
                             },
                         },
                     ],
@@ -903,12 +1029,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "flatMap:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1140,
-                                end: 1161,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "flatMap:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1140,
+                                    end: 1161,
+                                },
                             },
                         },
                     ],
@@ -950,12 +1082,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "count:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1180,
-                                end: 1199,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "count:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1180,
+                                    end: 1199,
+                                },
                             },
                         },
                     ],
@@ -997,12 +1135,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "anySatisfy:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1223,
-                                end: 1247,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "anySatisfy:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1223,
+                                    end: 1247,
+                                },
                             },
                         },
                     ],
@@ -1044,12 +1188,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "allSatisfy:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1271,
-                                end: 1295,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "allSatisfy:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1271,
+                                    end: 1295,
+                                },
                             },
                         },
                     ],
@@ -1083,12 +1233,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "++",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1330,
-                                end: 1345,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "++",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1330,
+                                    end: 1345,
+                                },
                             },
                         },
                     ],
@@ -1147,12 +1303,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "from:to:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1398,
-                                end: 1419,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "from:to:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1398,
+                                    end: 1419,
+                                },
                             },
                         },
                     ],
@@ -1194,216 +1356,252 @@ Module {
                         },
                     ],
                     body: [
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "self",
-                                    span: Span {
-                                        start: 1443,
-                                        end: 1447,
-                                    },
-                                },
-                            ),
-                            selector: Keyword(
-                                [
-                                    KeywordPart {
-                                        keyword: "inject:",
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
                                         span: Span {
-                                            start: 1448,
-                                            end: 1455,
+                                            start: 1443,
+                                            end: 1447,
                                         },
-                                    },
-                                    KeywordPart {
-                                        keyword: "into:",
-                                        span: Span {
-                                            start: 1458,
-                                            end: 1463,
-                                        },
-                                    },
-                                ],
-                            ),
-                            arguments: [
-                                Literal(
-                                    Integer(
-                                        0,
-                                    ),
-                                    Span {
-                                        start: 1456,
-                                        end: 1457,
                                     },
                                 ),
-                                Block(
-                                    Block {
-                                        parameters: [
-                                            BlockParameter {
-                                                name: "i",
-                                                span: Span {
-                                                    start: 1466,
-                                                    end: 1467,
-                                                },
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "inject:",
+                                            span: Span {
+                                                start: 1448,
+                                                end: 1455,
                                             },
-                                            BlockParameter {
-                                                name: "each",
-                                                span: Span {
-                                                    start: 1469,
-                                                    end: 1473,
-                                                },
+                                        },
+                                        KeywordPart {
+                                            keyword: "into:",
+                                            span: Span {
+                                                start: 1458,
+                                                end: 1463,
                                             },
-                                        ],
-                                        body: [
-                                            Assignment {
-                                                target: Identifier(
-                                                    Identifier {
-                                                        name: "newI",
-                                                        span: Span {
-                                                            start: 1482,
-                                                            end: 1486,
-                                                        },
-                                                    },
-                                                ),
-                                                value: MessageSend {
-                                                    receiver: Identifier(
-                                                        Identifier {
-                                                            name: "i",
-                                                            span: Span {
-                                                                start: 1490,
-                                                                end: 1491,
-                                                            },
-                                                        },
-                                                    ),
-                                                    selector: Binary(
-                                                        "+",
-                                                    ),
-                                                    arguments: [
-                                                        Literal(
-                                                            Integer(
-                                                                1,
-                                                            ),
-                                                            Span {
-                                                                start: 1494,
-                                                                end: 1495,
-                                                            },
-                                                        ),
-                                                    ],
-                                                    is_cast: false,
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            0,
+                                        ),
+                                        Span {
+                                            start: 1456,
+                                            end: 1457,
+                                        },
+                                    ),
+                                    Block(
+                                        Block {
+                                            parameters: [
+                                                BlockParameter {
+                                                    name: "i",
                                                     span: Span {
-                                                        start: 1490,
-                                                        end: 1495,
+                                                        start: 1466,
+                                                        end: 1467,
                                                     },
                                                 },
-                                                span: Span {
-                                                    start: 1482,
-                                                    end: 1495,
+                                                BlockParameter {
+                                                    name: "each",
+                                                    span: Span {
+                                                        start: 1469,
+                                                        end: 1473,
+                                                    },
                                                 },
-                                            },
-                                            MessageSend {
-                                                receiver: MessageSend {
-                                                    receiver: Identifier(
-                                                        Identifier {
-                                                            name: "each",
-                                                            span: Span {
-                                                                start: 1503,
-                                                                end: 1507,
-                                                            },
-                                                        },
-                                                    ),
-                                                    selector: Binary(
-                                                        "=:=",
-                                                    ),
-                                                    arguments: [
-                                                        Identifier(
+                                            ],
+                                            body: [
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                    },
+                                                    expression: Assignment {
+                                                        target: Identifier(
                                                             Identifier {
-                                                                name: "item",
+                                                                name: "newI",
                                                                 span: Span {
-                                                                    start: 1512,
-                                                                    end: 1516,
+                                                                    start: 1482,
+                                                                    end: 1486,
                                                                 },
                                                             },
                                                         ),
-                                                    ],
-                                                    is_cast: false,
-                                                    span: Span {
-                                                        start: 1503,
-                                                        end: 1516,
-                                                    },
-                                                },
-                                                selector: Keyword(
-                                                    [
-                                                        KeywordPart {
-                                                            keyword: "ifTrue:",
+                                                        value: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "i",
+                                                                    span: Span {
+                                                                        start: 1490,
+                                                                        end: 1491,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                "+",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        1,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 1494,
+                                                                        end: 1495,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
                                                             span: Span {
-                                                                start: 1517,
-                                                                end: 1524,
+                                                                start: 1490,
+                                                                end: 1495,
                                                             },
                                                         },
-                                                    ],
-                                                ),
-                                                arguments: [
-                                                    Block(
-                                                        Block {
-                                                            parameters: [],
-                                                            body: [
-                                                                Return {
-                                                                    value: Identifier(
-                                                                        Identifier {
-                                                                            name: "newI",
-                                                                            span: Span {
-                                                                                start: 1527,
-                                                                                end: 1531,
-                                                                            },
-                                                                        },
-                                                                    ),
+                                                        span: Span {
+                                                            start: 1482,
+                                                            end: 1495,
+                                                        },
+                                                    },
+                                                },
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                    },
+                                                    expression: MessageSend {
+                                                        receiver: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "each",
                                                                     span: Span {
-                                                                        start: 1526,
-                                                                        end: 1531,
+                                                                        start: 1503,
+                                                                        end: 1507,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                "=:=",
+                                                            ),
+                                                            arguments: [
+                                                                Identifier(
+                                                                    Identifier {
+                                                                        name: "item",
+                                                                        span: Span {
+                                                                            start: 1512,
+                                                                            end: 1516,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 1503,
+                                                                end: 1516,
+                                                            },
+                                                        },
+                                                        selector: Keyword(
+                                                            [
+                                                                KeywordPart {
+                                                                    keyword: "ifTrue:",
+                                                                    span: Span {
+                                                                        start: 1517,
+                                                                        end: 1524,
                                                                     },
                                                                 },
                                                             ],
+                                                        ),
+                                                        arguments: [
+                                                            Block(
+                                                                Block {
+                                                                    parameters: [],
+                                                                    body: [
+                                                                        ExpressionStatement {
+                                                                            comments: CommentAttachment {
+                                                                                leading: [],
+                                                                                trailing: None,
+                                                                            },
+                                                                            expression: Return {
+                                                                                value: Identifier(
+                                                                                    Identifier {
+                                                                                        name: "newI",
+                                                                                        span: Span {
+                                                                                            start: 1527,
+                                                                                            end: 1531,
+                                                                                        },
+                                                                                    },
+                                                                                ),
+                                                                                span: Span {
+                                                                                    start: 1526,
+                                                                                    end: 1531,
+                                                                                },
+                                                                            },
+                                                                        },
+                                                                    ],
+                                                                    span: Span {
+                                                                        start: 1525,
+                                                                        end: 1532,
+                                                                    },
+                                                                },
+                                                            ),
+                                                        ],
+                                                        is_cast: false,
+                                                        span: Span {
+                                                            start: 1503,
+                                                            end: 1532,
+                                                        },
+                                                    },
+                                                },
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                    },
+                                                    expression: Identifier(
+                                                        Identifier {
+                                                            name: "newI",
                                                             span: Span {
-                                                                start: 1525,
-                                                                end: 1532,
+                                                                start: 1540,
+                                                                end: 1544,
                                                             },
                                                         },
                                                     ),
-                                                ],
-                                                is_cast: false,
-                                                span: Span {
-                                                    start: 1503,
-                                                    end: 1532,
                                                 },
+                                            ],
+                                            span: Span {
+                                                start: 1464,
+                                                end: 1550,
                                             },
-                                            Identifier(
-                                                Identifier {
-                                                    name: "newI",
-                                                    span: Span {
-                                                        start: 1540,
-                                                        end: 1544,
-                                                    },
-                                                },
-                                            ),
-                                        ],
-                                        span: Span {
-                                            start: 1464,
-                                            end: 1550,
                                         },
-                                    },
-                                ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 1443,
-                                end: 1550,
-                            },
-                        },
-                        Identifier(
-                            Identifier {
-                                name: "nil",
+                                    ),
+                                ],
+                                is_cast: false,
                                 span: Span {
-                                    start: 1556,
-                                    end: 1559,
+                                    start: 1443,
+                                    end: 1550,
                                 },
                             },
-                        ),
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Identifier(
+                                Identifier {
+                                    name: "nil",
+                                    span: Span {
+                                        start: 1556,
+                                        end: 1559,
+                                    },
+                                },
+                            ),
+                        },
                     ],
                     return_type: None,
                     is_sealed: false,
@@ -1443,194 +1641,224 @@ Module {
                         },
                     ],
                     body: [
-                        MessageSend {
-                            receiver: Identifier(
-                                Identifier {
-                                    name: "self",
-                                    span: Span {
-                                        start: 1617,
-                                        end: 1621,
-                                    },
-                                },
-                            ),
-                            selector: Keyword(
-                                [
-                                    KeywordPart {
-                                        keyword: "inject:",
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
                                         span: Span {
-                                            start: 1622,
-                                            end: 1629,
+                                            start: 1617,
+                                            end: 1621,
                                         },
-                                    },
-                                    KeywordPart {
-                                        keyword: "into:",
-                                        span: Span {
-                                            start: 1632,
-                                            end: 1637,
-                                        },
-                                    },
-                                ],
-                            ),
-                            arguments: [
-                                Literal(
-                                    Integer(
-                                        0,
-                                    ),
-                                    Span {
-                                        start: 1630,
-                                        end: 1631,
                                     },
                                 ),
-                                Block(
-                                    Block {
-                                        parameters: [
-                                            BlockParameter {
-                                                name: "i",
-                                                span: Span {
-                                                    start: 1640,
-                                                    end: 1641,
-                                                },
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "inject:",
+                                            span: Span {
+                                                start: 1622,
+                                                end: 1629,
                                             },
-                                            BlockParameter {
-                                                name: "each",
-                                                span: Span {
-                                                    start: 1643,
-                                                    end: 1647,
-                                                },
+                                        },
+                                        KeywordPart {
+                                            keyword: "into:",
+                                            span: Span {
+                                                start: 1632,
+                                                end: 1637,
                                             },
-                                        ],
-                                        body: [
-                                            Assignment {
-                                                target: Identifier(
-                                                    Identifier {
-                                                        name: "newI",
-                                                        span: Span {
-                                                            start: 1656,
-                                                            end: 1660,
-                                                        },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            0,
+                                        ),
+                                        Span {
+                                            start: 1630,
+                                            end: 1631,
+                                        },
+                                    ),
+                                    Block(
+                                        Block {
+                                            parameters: [
+                                                BlockParameter {
+                                                    name: "i",
+                                                    span: Span {
+                                                        start: 1640,
+                                                        end: 1641,
                                                     },
-                                                ),
-                                                value: MessageSend {
-                                                    receiver: Identifier(
-                                                        Identifier {
-                                                            name: "i",
-                                                            span: Span {
-                                                                start: 1664,
-                                                                end: 1665,
-                                                            },
-                                                        },
-                                                    ),
-                                                    selector: Binary(
-                                                        "+",
-                                                    ),
-                                                    arguments: [
-                                                        Literal(
-                                                            Integer(
-                                                                1,
-                                                            ),
-                                                            Span {
-                                                                start: 1668,
-                                                                end: 1669,
+                                                },
+                                                BlockParameter {
+                                                    name: "each",
+                                                    span: Span {
+                                                        start: 1643,
+                                                        end: 1647,
+                                                    },
+                                                },
+                                            ],
+                                            body: [
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                    },
+                                                    expression: Assignment {
+                                                        target: Identifier(
+                                                            Identifier {
+                                                                name: "newI",
+                                                                span: Span {
+                                                                    start: 1656,
+                                                                    end: 1660,
+                                                                },
                                                             },
                                                         ),
-                                                    ],
-                                                    is_cast: false,
-                                                    span: Span {
-                                                        start: 1664,
-                                                        end: 1669,
+                                                        value: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "i",
+                                                                    span: Span {
+                                                                        start: 1664,
+                                                                        end: 1665,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                "+",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        1,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 1668,
+                                                                        end: 1669,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 1664,
+                                                                end: 1669,
+                                                            },
+                                                        },
+                                                        span: Span {
+                                                            start: 1656,
+                                                            end: 1669,
+                                                        },
                                                     },
                                                 },
-                                                span: Span {
-                                                    start: 1656,
-                                                    end: 1669,
-                                                },
-                                            },
-                                            MessageSend {
-                                                receiver: Identifier(
-                                                    Identifier {
-                                                        name: "block",
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                    },
+                                                    expression: MessageSend {
+                                                        receiver: Identifier(
+                                                            Identifier {
+                                                                name: "block",
+                                                                span: Span {
+                                                                    start: 1677,
+                                                                    end: 1682,
+                                                                },
+                                                            },
+                                                        ),
+                                                        selector: Keyword(
+                                                            [
+                                                                KeywordPart {
+                                                                    keyword: "value:",
+                                                                    span: Span {
+                                                                        start: 1683,
+                                                                        end: 1689,
+                                                                    },
+                                                                },
+                                                                KeywordPart {
+                                                                    keyword: "value:",
+                                                                    span: Span {
+                                                                        start: 1695,
+                                                                        end: 1701,
+                                                                    },
+                                                                },
+                                                            ],
+                                                        ),
+                                                        arguments: [
+                                                            Identifier(
+                                                                Identifier {
+                                                                    name: "each",
+                                                                    span: Span {
+                                                                        start: 1690,
+                                                                        end: 1694,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            Identifier(
+                                                                Identifier {
+                                                                    name: "newI",
+                                                                    span: Span {
+                                                                        start: 1702,
+                                                                        end: 1706,
+                                                                    },
+                                                                },
+                                                            ),
+                                                        ],
+                                                        is_cast: false,
                                                         span: Span {
                                                             start: 1677,
-                                                            end: 1682,
+                                                            end: 1706,
                                                         },
                                                     },
-                                                ),
-                                                selector: Keyword(
-                                                    [
-                                                        KeywordPart {
-                                                            keyword: "value:",
-                                                            span: Span {
-                                                                start: 1683,
-                                                                end: 1689,
-                                                            },
-                                                        },
-                                                        KeywordPart {
-                                                            keyword: "value:",
-                                                            span: Span {
-                                                                start: 1695,
-                                                                end: 1701,
-                                                            },
-                                                        },
-                                                    ],
-                                                ),
-                                                arguments: [
-                                                    Identifier(
-                                                        Identifier {
-                                                            name: "each",
-                                                            span: Span {
-                                                                start: 1690,
-                                                                end: 1694,
-                                                            },
-                                                        },
-                                                    ),
-                                                    Identifier(
+                                                },
+                                                ExpressionStatement {
+                                                    comments: CommentAttachment {
+                                                        leading: [],
+                                                        trailing: None,
+                                                    },
+                                                    expression: Identifier(
                                                         Identifier {
                                                             name: "newI",
                                                             span: Span {
-                                                                start: 1702,
-                                                                end: 1706,
+                                                                start: 1714,
+                                                                end: 1718,
                                                             },
                                                         },
                                                     ),
-                                                ],
-                                                is_cast: false,
-                                                span: Span {
-                                                    start: 1677,
-                                                    end: 1706,
                                                 },
+                                            ],
+                                            span: Span {
+                                                start: 1638,
+                                                end: 1724,
                                             },
-                                            Identifier(
-                                                Identifier {
-                                                    name: "newI",
-                                                    span: Span {
-                                                        start: 1714,
-                                                        end: 1718,
-                                                    },
-                                                },
-                                            ),
-                                        ],
-                                        span: Span {
-                                            start: 1638,
-                                            end: 1724,
                                         },
-                                    },
-                                ),
-                            ],
-                            is_cast: false,
-                            span: Span {
-                                start: 1617,
-                                end: 1724,
-                            },
-                        },
-                        Identifier(
-                            Identifier {
-                                name: "nil",
+                                    ),
+                                ],
+                                is_cast: false,
                                 span: Span {
-                                    start: 1730,
-                                    end: 1733,
+                                    start: 1617,
+                                    end: 1724,
                                 },
                             },
-                        ),
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Identifier(
+                                Identifier {
+                                    name: "nil",
+                                    span: Span {
+                                        start: 1730,
+                                        end: 1733,
+                                    },
+                                },
+                            ),
+                        },
                     ],
                     return_type: None,
                     is_sealed: false,
@@ -1670,12 +1898,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "zip:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1765,
-                                end: 1782,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "zip:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1765,
+                                    end: 1782,
+                                },
                             },
                         },
                     ],
@@ -1717,12 +1951,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "groupBy:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1803,
-                                end: 1824,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "groupBy:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1803,
+                                    end: 1824,
+                                },
                             },
                         },
                     ],
@@ -1764,12 +2004,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "partition:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1847,
-                                end: 1870,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "partition:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1847,
+                                    end: 1870,
+                                },
                             },
                         },
                     ],
@@ -1811,12 +2057,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "takeWhile:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1893,
-                                end: 1916,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "takeWhile:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1893,
+                                    end: 1916,
+                                },
                             },
                         },
                     ],
@@ -1858,12 +2110,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "dropWhile:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1939,
-                                end: 1962,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "dropWhile:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1939,
+                                    end: 1962,
+                                },
                             },
                         },
                     ],
@@ -1905,12 +2163,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "intersperse:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 1991,
-                                end: 2016,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "intersperse:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 1991,
+                                    end: 2016,
+                                },
                             },
                         },
                     ],
@@ -1952,12 +2216,18 @@ Module {
                         },
                     ],
                     body: [
-                        Primitive {
-                            name: "add:",
-                            is_quoted: true,
-                            span: Span {
-                                start: 2032,
-                                end: 2049,
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Primitive {
+                                name: "add:",
+                                is_quoted: true,
+                                span: Span {
+                                    start: 2032,
+                                    end: 2049,
+                                },
                             },
                         },
                     ],
@@ -1994,7 +2264,7 @@ Module {
         start: 208,
         end: 2049,
     },
-    leading_comments: [
+    file_leading_comments: [
         Comment {
             content: "// Copyright 2026 James Casey",
             span: Span {

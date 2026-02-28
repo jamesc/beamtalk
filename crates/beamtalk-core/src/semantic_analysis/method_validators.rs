@@ -665,7 +665,7 @@ impl MethodValidator for TypeAwareStringArgValidator {
 mod tests {
     //! Tests for method-specific semantic validators (responds-to, inst-var-at, primitives, mutations).
     use super::*;
-    use crate::ast::{Block, BlockParameter, Identifier, KeywordPart};
+    use crate::ast::{Block, BlockParameter, ExpressionStatement, Identifier, KeywordPart};
     use crate::semantic_analysis::test_helpers::test_span;
     use crate::source_analysis::Span;
 
@@ -1083,7 +1083,10 @@ mod tests {
             .collect();
         Expression::Block(Block::new(
             params,
-            vec![Expression::Literal(Literal::Integer(1), test_span())],
+            vec![ExpressionStatement::bare(Expression::Literal(
+                Literal::Integer(1),
+                test_span(),
+            ))],
             test_span(),
         ))
     }
