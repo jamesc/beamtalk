@@ -12,4 +12,4 @@ Object subclass: FsEntry
   /// Return the total byte size of this entry (recursive for directories).
   size            => self subclassResponsibility
   /// Return a human-readable string representation, indented by indent.
-  describe: indent => self subclassResponsibility
+  describe: _indent => self subclassResponsibility

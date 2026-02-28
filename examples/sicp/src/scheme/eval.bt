@@ -156,7 +156,7 @@ Object subclass: SchemeEval
   /// ```beamtalk
   /// ev apply: [:a | (a at: 1) + (a at: 2)] args: #(3 4) in: env   // => 7
   /// ```
-  apply: func args: args in: env =>
+  apply: func args: args in: _env =>
     (func class =:= SchemeLambda) ifTrue: [
       childEnv := func closureEnv extend: func params values: args
       ^self eval: func body in: childEnv]
