@@ -25,6 +25,42 @@ use super::storage::{
     workspace_exists, workspace_id_for, workspaces_base_dir,
 };
 
+/// Inner logic for workspace creation, called under an already-held lock.
+///
+/// Does NOT acquire the lock itself — callers are responsible for holding
+/// `acquire_workspace_lock` before calling this function.
+fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<WorkspaceMetadata> {
+    // Re-check under lock — another process may have created the workspace
+    // while we were waiting for the lock.
+    if workspace_exists(workspace_id)? {
+        return get_workspace_metadata(workspace_id);
+    }
+
+    // Create workspace directory
+    let dir = workspace_dir(workspace_id)?;
+    fs::create_dir_all(&dir).into_diagnostic()?;
+
+    // Generate and save cookie
+    let cookie = generate_cookie();
+    save_workspace_cookie(workspace_id, &cookie)?;
+
+    // Create metadata
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .into_diagnostic()?
+        .as_secs();
+
+    let metadata = WorkspaceMetadata {
+        workspace_id: workspace_id.to_string(),
+        project_path: project_path.to_path_buf(),
+        created_at: now,
+    };
+
+    save_workspace_metadata(&metadata)?;
+
+    Ok(metadata)
+}
+
 /// Create a new workspace.
 pub fn create_workspace(
     project_path: &Path,
@@ -36,35 +72,7 @@ pub fn create_workspace(
     // The lock is released when `_lock` is dropped at end of scope.
     let _lock = acquire_workspace_lock(&workspace_id)?;
 
-    // Re-check under lock — another process may have created the workspace
-    // while we were waiting for the lock.
-    if workspace_exists(&workspace_id)? {
-        return get_workspace_metadata(&workspace_id);
-    }
-
-    // Create workspace directory
-    let dir = workspace_dir(&workspace_id)?;
-    fs::create_dir_all(&dir).into_diagnostic()?;
-
-    // Generate and save cookie
-    let cookie = generate_cookie();
-    save_workspace_cookie(&workspace_id, &cookie)?;
-
-    // Create metadata
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .into_diagnostic()?
-        .as_secs();
-
-    let metadata = WorkspaceMetadata {
-        workspace_id: workspace_id.clone(),
-        project_path: project_path.to_path_buf(),
-        created_at: now,
-    };
-
-    save_workspace_metadata(&metadata)?;
-
-    Ok(metadata)
+    create_workspace_impl(&workspace_id, project_path)
 }
 
 /// Get or start a workspace node for the current directory.
@@ -86,11 +94,27 @@ pub fn get_or_start_workspace(
     ssl_dist_optfile: Option<&Path>,
     web_port: Option<u16>,
 ) -> Result<(NodeInfo, bool, String)> {
-    // Create workspace if it doesn't exist
-    let metadata = create_workspace(project_path, workspace_name)?;
-    let workspace_id = metadata.workspace_id.clone();
+    let workspace_id = workspace_id_for(project_path, workspace_name)?;
 
-    // Check if node is already running
+    // Acquire exclusive lock covering the full check-is-running + start sequence.
+    //
+    // Without this lock, two concurrent callers (e.g. IDE extension + terminal both
+    // starting `beamtalk repl`) can both observe "not running" and both attempt
+    // `start_detached_node`, causing the second call to fail when EPMD rejects the
+    // duplicate node name.
+    //
+    // With the lock:
+    // - The first caller acquires it, creates the workspace, starts the node, releases the lock.
+    // - The second caller blocks until the lock is released, then acquires it, finds the
+    //   node already running (written by the first caller), and returns it directly.
+    //
+    // The lock is released when `_lock` is dropped at end of scope (including error paths).
+    let _lock = acquire_workspace_lock(&workspace_id)?;
+
+    // Create workspace if it doesn't exist (under lock)
+    create_workspace_impl(&workspace_id, project_path)?;
+
+    // Check if node is already running (under lock)
     if let Some(node_info) = get_node_info(&workspace_id)? {
         if is_node_running(&node_info) {
             return Ok((node_info, false, workspace_id)); // Existing node
@@ -100,7 +124,7 @@ pub fn get_or_start_workspace(
         cleanup_stale_node_info(&workspace_id)?;
     }
 
-    // Start new detached node
+    // Start new detached node (under lock — released after node_info is written)
     let node_info = start_detached_node(
         &workspace_id,
         port,
