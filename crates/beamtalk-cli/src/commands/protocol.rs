@@ -441,10 +441,7 @@ mod tests {
     #[test]
     fn trailing_newline_leaves_bol_true() {
         let mut bol = true;
-        assert_eq!(
-            format_transcript_chunk("hello\n", &mut bol),
-            "│ hello\n"
-        );
+        assert_eq!(format_transcript_chunk("hello\n", &mut bol), "│ hello\n");
         assert!(bol);
     }
 
