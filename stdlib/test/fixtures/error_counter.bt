@@ -1,3 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
 // Actor for testing state mutation threading in exception handling blocks
 // Used by tests/stdlib/exception_mutations.bt (BT-410)
 

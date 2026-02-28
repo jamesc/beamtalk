@@ -1,9 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-754: NlrBaz — top-level ^ regression guard fixture
-// Intentional: ^ on last expression tests that top-level ^ still works
-// after NLR changes. Do not simplify to `x + x`
+// BT-754: NlrBaz — simple value-type fixture used by NLR regression tests
 
 Object subclass: NlrBaz
   double: x => x + x
