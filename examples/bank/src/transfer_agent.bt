@@ -5,11 +5,11 @@
 //
 // A TransferAgent moves money between accounts by sending withdraw and
 // deposit messages synchronously. Each Account handles its own validation
-// (e.g. overdraft protection) independently.
+// (e.g. overdraft protection) independently
 //
 // This demonstrates the actor coordination pattern: the TransferAgent
 // orchestrates two independent actors, and each actor enforces its own
-// invariants.
+// invariants
 //
 // Usage:
 //   agent := TransferAgent spawn
@@ -19,8 +19,8 @@ Actor subclass: TransferAgent
   state: lastAmount = 0
 
   transfer: amount from: source to: destination =>
-    source withdraw: amount.
-    destination deposit: amount.
+    source withdraw: amount
+    destination deposit: amount
     self.lastAmount := amount
 
-  getLastAmount => ^self.lastAmount
+  getLastAmount => self.lastAmount

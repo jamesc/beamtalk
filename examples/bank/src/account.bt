@@ -5,7 +5,7 @@
 //
 // Each Account is a BEAM process. Deposits and withdrawals are message sends,
 // making them inherently serialised per-account. Overdraft protection raises
-// a structured error via `self error:`.
+// a structured error via `self error:`
 //
 // Usage:
 //   acct := Account spawn
@@ -21,23 +21,23 @@ Actor subclass: Account
   deposit: amount =>
     amount < 0 ifTrue: [
       self error: "Amount must be non-negative"
-    ].
-    self.balance := self.balance + amount.
-    ^self.balance
+    ]
+    self.balance := self.balance + amount
+    self.balance
 
   withdraw: amount =>
     amount < 0 ifTrue: [
       self error: "Amount must be non-negative"
-    ].
+    ]
     self.balance < amount ifTrue: [
       self error: "Insufficient funds (balance: " ++ self.balance printString ++ ", requested: " ++ amount printString ++ ")"
-    ].
-    self.balance := self.balance - amount.
-    ^self.balance
+    ]
+    self.balance := self.balance - amount
+    self.balance
 
-  balance => ^self.balance
+  balance => self.balance
 
   setOwner: name =>
     self.owner := name
 
-  getOwner => ^self.owner
+  getOwner => self.owner

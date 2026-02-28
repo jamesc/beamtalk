@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BUnit tests for the ChatRoom and ChatMember actors.
+// BUnit tests for the ChatRoom and ChatMember actors
 //
 // With sync-by-default dispatch, room say:from: calls receiveMessage: on each
 // member synchronously. When say:from: returns, all members have processed
-// the message — no sync barriers are needed.
+// the message — no sync barriers are needed
 //
 // Run in the REPL:
 //   > :load src/message.bt
@@ -18,73 +18,66 @@
 TestCase subclass: ChatRoomTest
 
   testNewRoomHasNoHistory =>
-    room := ChatRoom spawn.
-    self assert: (room getHistory) equals: #()
+    room := ChatRoom spawn
+    self assert: room getHistory equals: #()
 
   testMemberJoinsRoom =>
-    room := ChatRoom spawn.
-    alice := ChatMember spawn.
-    room join: alice.
-    self assert: ((room online) includes: alice)
+    room := ChatRoom spawn
+    alice := ChatMember spawn
+    room join: alice
+    self assert: (room online includes: alice)
 
   testMemberLeavesRoom =>
-    room := ChatRoom spawn.
-    alice := ChatMember spawn.
-    room join: alice.
-    room leave: alice.
-    self deny: ((room online) includes: alice)
+    room := ChatRoom spawn
+    alice := ChatMember spawn
+    room join: alice
+    room leave: alice
+    self deny: (room online includes: alice)
 
   testSayAddsToHistory =>
-    room := ChatRoom spawn.
-    room say: "Hello!" from: "Alice".
-    self assert: (room getHistory) equals: #("Alice: Hello!")
+    room := ChatRoom spawn
+    room say: "Hello!" from: "Alice"
+    self assert: room getHistory equals: #("Alice: Hello!")
 
   testSayMultipleMessages =>
-    room := ChatRoom spawn.
-    room say: "Hello!" from: "Alice".
-    room say: "Hey!" from: "Bob".
-    self assert: (room getHistory) equals: #("Alice: Hello!", "Bob: Hey!")
+    room := ChatRoom spawn
+    room say: "Hello!" from: "Alice"
+    room say: "Hey!" from: "Bob"
+    self assert: room getHistory equals: #("Alice: Hello!", "Bob: Hey!")
 
   testMemberReceivesMessage =>
-    room := ChatRoom spawn.
-    alice := ChatMember spawn.
-    room join: alice.
-    room say: "Hello!" from: "System".
-    self assert: (alice getInbox) equals: #("System: Hello!")
+    room := ChatRoom spawn
+    alice := ChatMember spawn
+    room join: alice
+    room say: "Hello!" from: "System"
+    self assert: alice getInbox equals: #("System: Hello!")
 
   testMemberDoesNotReceiveAfterLeaving =>
-    room := ChatRoom spawn.
-    alice := ChatMember spawn.
-    room join: alice.
-    room leave: alice.
-    room say: "Hello?" from: "System".
-    self assert: (alice getInbox) equals: #()
+    room := ChatRoom spawn
+    alice := ChatMember spawn
+    room join: alice; leave: alice; say: "Hello?" from: "System"
+    self assert: alice getInbox equals: #()
 
   testBroadcastToMultipleMembers =>
-    room := ChatRoom spawn.
-    alice := ChatMember spawn.
-    bob := ChatMember spawn.
-    room join: alice.
-    room join: bob.
-    room say: "Hi all!" from: "System".
-    self assert: (alice getInbox) equals: #("System: Hi all!").
-    self assert: (bob getInbox) equals: #("System: Hi all!")
+    room := ChatRoom spawn
+    alice := ChatMember spawn
+    bob := ChatMember spawn
+    room join: alice; join: bob; say: "Hi all!" from: "System"
+    self assert: alice getInbox equals: #("System: Hi all!")
+    self assert: bob getInbox equals: #("System: Hi all!")
 
   testOnlyRemainingMemberReceives =>
-    room := ChatRoom spawn.
-    alice := ChatMember spawn.
-    bob := ChatMember spawn.
-    room join: alice.
-    room join: bob.
-    room leave: alice.
-    room say: "Anyone there?" from: "System".
-    self assert: (alice getInbox) equals: #().
-    self assert: (bob getInbox) equals: #("System: Anyone there?")
+    room := ChatRoom spawn
+    alice := ChatMember spawn
+    bob := ChatMember spawn
+    room join: alice; join: bob; leave: alice; say: "Anyone there?" from: "System"
+    self assert: alice getInbox equals: #()
+    self assert: bob getInbox equals: #("System: Anyone there?")
 
   testMemberSetsName =>
-    alice := ChatMember spawn.
-    alice setName: "Alice".
-    self assert: (alice getName) equals: "Alice"
+    alice := ChatMember spawn
+    alice setName: "Alice"
+    self assert: alice getName equals: "Alice"
 
   testMemberDefaultName =>
-    self assert: (ChatMember spawn getName) equals: "Guest"
+    self assert: ChatMember spawn getName equals: "Guest"

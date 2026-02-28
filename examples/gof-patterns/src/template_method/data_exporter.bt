@@ -26,5 +26,5 @@ Object subclass: DataExporter
     self subclassResponsibility
 
   /// Hook: format a single row (a List of cell strings). Subclasses must override.
-  formatRow: row =>
+  formatRow: _row =>
     self subclassResponsibility

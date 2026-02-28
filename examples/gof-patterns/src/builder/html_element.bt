@@ -28,6 +28,7 @@ Object subclass: HtmlElement
 
   /// Render to an HTML string.
   render =>
-    attrStr := self.attributes keys inject: "" into: [:acc :k |
-      acc ++ " {k}=\"{self.attributes at: k}\""]
+    attrs   := self.attributes
+    attrStr := attrs keys inject: "" into: [:acc :k |
+      acc ++ " {k}=\"{attrs at: k}\""]
     "<{self.tag}{attrStr}>{self.content}</{self.tag}>"

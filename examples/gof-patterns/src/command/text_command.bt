@@ -8,4 +8,4 @@
 
 Object subclass: TextCommand
   /// Apply this command to buffer and return the resulting buffer.
-  execute: buffer => self subclassResponsibility
+  execute: _buffer => self subclassResponsibility

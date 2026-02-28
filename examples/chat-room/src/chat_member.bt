@@ -3,7 +3,7 @@
 
 // Chat Member Actor — Part of Chat Room Demo (BT-431, BT-568)
 //
-// ChatMember represents a chat participant with a name, inbox, and room ref.
+// ChatMember represents a chat participant with a name, inbox, and room ref
 // It demonstrates:
 // - Actor-to-actor references (room field)
 // - Receiving formatted messages from other actors
@@ -49,8 +49,8 @@ Actor subclass: ChatMember
 
   // Return received messages
   getInbox =>
-    ^self.inbox
-  
+    self.inbox
+
   // Return member's name
   getName =>
-    ^self.name
+    self.name

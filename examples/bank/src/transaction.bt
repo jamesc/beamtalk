@@ -4,7 +4,7 @@
 // Transaction — an immutable value recording a transfer
 //
 // Transactions are value objects (Object subclass), not actors. They capture
-// the details of a transfer as an immutable record.
+// the details of a transfer as an immutable record
 //
 // Usage:
 //   txn := Transaction new: #{#amount => 250, #from => "Alice", #to => "Bob", #status => "completed"}
@@ -18,8 +18,8 @@ Object subclass: Transaction
   state: timestamp = nil
   state: status = "pending"
 
-  getAmount => ^self.amount
-  getFrom => ^self.from
-  getTo => ^self.to
-  getTimestamp => ^self.timestamp
-  getStatus => ^self.status
+  getAmount => self.amount
+  getFrom => self.from
+  getTo => self.to
+  getTimestamp => self.timestamp
+  getStatus => self.status

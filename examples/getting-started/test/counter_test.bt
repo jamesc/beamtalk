@@ -3,37 +3,35 @@
 
 // Example: BUnit test for Counter actor (ADR 0014)
 //
-// Demonstrates TestCase subclass with assertion methods.
+// Demonstrates TestCase subclass with assertion methods
 // Run interactively in the REPL:
 //   > :load examples/counter.bt
 //   > :load examples/counter_test.bt
 //   > ExampleCounterTest runAll
 //
 // Note: Each test runs in a fresh TestCase instance, so there is no shared
-// state between tests; use setUp to initialize per-test instance fields.
+// state between tests; use setUp to initialize per-test instance fields
 
 TestCase subclass: ExampleCounterTest
 
   testInitialValue =>
-    self assert: (Counter spawn getValue) equals: 0
+    self assert: Counter spawn getValue equals: 0
 
   testIncrement =>
-    self assert: (Counter spawn increment) equals: 1
+    self assert: Counter spawn increment equals: 1
 
   testDecrement =>
-    self assert: (Counter spawn decrement) equals: -1
+    self assert: Counter spawn decrement equals: -1
 
   testMultipleIncrements =>
     counter := Counter spawn
     3 timesRepeat: [counter increment]
-    self assert: (counter getValue) equals: 3
+    self assert: counter getValue equals: 3
 
   testIncrementAndDecrement =>
     counter := Counter spawn
-    counter increment
-    counter increment
-    counter decrement
-    self assert: (counter getValue) equals: 1
+    counter increment; increment; decrement
+    self assert: counter getValue equals: 1
 
   testDenyInitialNonPositive =>
-    self deny: (Counter spawn getValue) > 0
+    self deny: Counter spawn getValue > 0

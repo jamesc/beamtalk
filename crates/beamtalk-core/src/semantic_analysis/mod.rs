@@ -272,7 +272,11 @@ fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> Anal
     // BT-950: Warn on redundant assignment (x := x)
     validators::check_redundant_assignment(module, &mut result.diagnostics);
     // BT-953: Hint on self capture in collection HOF blocks (deadlock risk)
-    validators::check_self_capture_in_actor_block(module, &mut result.diagnostics);
+    validators::check_self_capture_in_actor_block(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     // BT-955: Warn on literal boolean conditions (always true / always false)
     validators::check_literal_boolean_condition(module, &mut result.diagnostics);
 
@@ -2496,6 +2500,120 @@ mod tests {
             .filter(|d| d.message.contains("Unused parameter"))
             .collect();
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_unused_parameter_primitive_body_no_warning() {
+        // @primitive body implicitly passes all params to the Erlang primitive —
+        // no unused-parameter warning should fire.
+        // at: index => @primitive "at:"
+        let class = ClassDefinition {
+            name: Identifier::new("Array", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+                    keyword: "at:".into(),
+                    span: test_span(),
+                }]),
+                parameters: vec![crate::ast::ParameterDefinition {
+                    name: Identifier::new("index", test_span()),
+                    type_annotation: None,
+                }],
+                body: vec![Expression::Primitive {
+                    name: "at:".into(),
+                    is_quoted: true,
+                    span: test_span(),
+                }],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused parameter"))
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "@primitive body: all params are passed to the primitive, expected no warning, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_unused_parameter_intrinsic_body_no_warning() {
+        // @intrinsic body (unquoted primitive) also passes all params implicitly —
+        // no unused-parameter warning should fire.
+        // spawnWith: initArgs => @intrinsic actorSpawnWith
+        let class = ClassDefinition {
+            name: Identifier::new("Actor", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
+                    keyword: "spawnWith:".into(),
+                    span: test_span(),
+                }]),
+                parameters: vec![crate::ast::ParameterDefinition {
+                    name: Identifier::new("initArgs", test_span()),
+                    type_annotation: None,
+                }],
+                body: vec![Expression::Primitive {
+                    name: "actorSpawnWith".into(),
+                    is_quoted: false,
+                    span: test_span(),
+                }],
+                return_type: None,
+                is_sealed: false,
+                kind: crate::ast::MethodKind::Primary,
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            doc_comment: None,
+            span: test_span(),
+        };
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: vec![],
+            span: test_span(),
+            leading_comments: vec![],
+        };
+        let result = analyse(&module);
+        let warnings: Vec<_> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("Unused parameter"))
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "@intrinsic body: all params are passed to the primitive, expected no warning, got: {warnings:?}"
+        );
     }
 
     #[test]

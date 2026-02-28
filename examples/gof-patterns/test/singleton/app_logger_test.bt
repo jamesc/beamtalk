@@ -19,9 +19,7 @@ TestCase subclass: AppLoggerTest
 
   testMultipleLogs =>
     logger := AppLogger spawn
-    logger log: "a"
-    logger log: "b"
-    logger log: "c"
+    logger log: "a"; log: "b"; log: "c"
     self assert: logger size equals: 3
     logger stop
 
@@ -41,7 +39,7 @@ TestCase subclass: AppLoggerTest
     logger stop
 
   testSingletonBehavior =>
-    // Two independently spawned loggers must not share state.
+    // Two independently spawned loggers must not share state
     a := AppLogger spawn
     b := AppLogger spawn
     a log: "from a"

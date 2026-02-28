@@ -12,4 +12,4 @@
 
 Object subclass: Hello
 
-  greeting => ^"Hello, World!"
+  greeting => "Hello, World!"
