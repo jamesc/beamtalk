@@ -23,8 +23,8 @@
 //! ```
 
 use crate::ast::{Block, Expression, MessageSelector, Module};
+use crate::ast_walker::for_each_expr_seq;
 use crate::lint::LintPass;
-use crate::lint::walker::for_each_expr_seq;
 use crate::source_analysis::Diagnostic;
 
 /// Lint pass that warns on `Expression::Parenthesized` wrapping expressions

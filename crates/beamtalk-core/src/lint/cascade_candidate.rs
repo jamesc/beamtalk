@@ -22,8 +22,8 @@
 //! into a single cascade receiver.
 
 use crate::ast::{Block, Expression, Identifier, Module};
+use crate::ast_walker::for_each_expr_seq;
 use crate::lint::LintPass;
-use crate::lint::walker::for_each_expr_seq;
 use crate::source_analysis::Diagnostic;
 
 /// Lint pass that warns on 3+ consecutive message sends to the same simple

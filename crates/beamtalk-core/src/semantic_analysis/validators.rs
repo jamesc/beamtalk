@@ -14,7 +14,7 @@
 //! - Empty method bodies (BT-631)
 
 use crate::ast::{Block, Expression, Identifier, Module};
-use crate::lint::walker::{for_each_expr_seq, walk_expression, walk_module};
+use crate::ast_walker::{for_each_expr_seq, walk_expression, walk_module};
 use crate::semantic_analysis::block_context::{classify_block, is_collection_hof_selector};
 use crate::semantic_analysis::{BlockContext, ClassHierarchy};
 #[cfg(test)]

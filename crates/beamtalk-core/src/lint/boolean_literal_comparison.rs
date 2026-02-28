@@ -21,8 +21,8 @@
 //! ```
 
 use crate::ast::{Expression, Identifier, MessageSelector, Module};
+use crate::ast_walker::walk_module;
 use crate::lint::LintPass;
-use crate::lint::walker::walk_module;
 use crate::source_analysis::{Diagnostic, Span};
 
 /// Lint pass that flags `expr = true` and `expr = false` comparisons.
