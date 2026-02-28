@@ -10,7 +10,7 @@ Beamtalk is a Smalltalk/Newspeak-inspired language compiling to BEAM via Rust. T
 - **Structured errors:** Use `#beamtalk_error{}` for all user-facing/public API errors. Internal runtime helpers may use `{ok, Value} | {error, Reason}` if translated at public boundaries.
 - **Codegen:** All Core Erlang codegen MUST use `Document` / `docvec!` API. **NEVER use `format!()` or string concatenation to produce Core Erlang fragments — not even for "simple" atoms, arities, or map keys.** This rule has been violated repeatedly and required a dedicated cleanup effort (BT-875). Do not reintroduce violations.
 - **Erlang logging:** Use OTP logger macros (`?LOG_ERROR`, etc.), never `io:format` or `logger:error()`.
-- **License headers:** All source files need `Copyright 2026 James Casey` / `SPDX-License-Identifier: Apache-2.0`.
+- **License headers:** All source **code** files (`.rs`, `.erl`, `.bt`, `.hrl`) need `Copyright 2026 James Casey` / `SPDX-License-Identifier: Apache-2.0`. Do **not** add license headers to `.md` files.
 - **Implicit returns:** Use `^` ONLY for early returns, never on last expression.
 - **Test assertions:** Every expression in test files MUST have a `// =>` assertion (even `// => _`). No assertion = no execution.
 

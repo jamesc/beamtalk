@@ -83,8 +83,18 @@ pub(super) fn render_doc(doc: &str) -> String {
             code_text.push_str(&text);
             None
         }
-        // Sanitize raw HTML from doc comments to prevent injection
-        Event::Html(raw) | Event::InlineHtml(raw) => Some(Event::Text(raw)),
+        // Drop HTML comments (e.g. license headers); sanitize all other raw HTML.
+        // Only drop events that are purely a comment (starts *and* ends with the
+        // comment delimiters) so mixed chunks like `<!--x--><em>y</em>` are not
+        // silently swallowed.
+        Event::Html(raw) | Event::InlineHtml(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
+                None
+            } else {
+                Some(Event::Text(raw))
+            }
+        }
         _ if in_code_block => None,
         other => Some(other),
     });
@@ -102,10 +112,20 @@ pub(super) fn write_index_page(
     classes: &[ClassInfo],
     readme: Option<&str>,
     sidebar_html: &str,
+    asset_prefix: &str,
 ) -> Result<()> {
     let mut html = String::new();
-    html.push_str(&page_header("Beamtalk API Reference", None));
+    html.push_str(&page_header(
+        "Beamtalk API Reference",
+        "style.css",
+        asset_prefix,
+    ));
     html.push_str("<div class=\"page-wrapper\">\n");
+    html.push_str(
+        "<button class=\"sidebar-toggle\" \
+         onclick=\"document.querySelector('.sidebar').classList.toggle('open')\" \
+         aria-label=\"Toggle navigation\">☰</button>\n",
+    );
     html.push_str(sidebar_html);
     html.push_str("<main class=\"main-content\">\n");
     html.push_str("<div id=\"search-results\" class=\"search-results\"></div>\n");
@@ -161,11 +181,17 @@ pub(super) fn write_class_page(
     inherited: &[(&str, &[MethodInfo])],
     all_classes: &HashMap<String, &ClassInfo>,
     sidebar_html: &str,
+    asset_prefix: &str,
 ) -> Result<()> {
     let title = format!("{} — Beamtalk", class.name);
     let mut html = String::new();
-    html.push_str(&page_header(&title, Some("style.css")));
+    html.push_str(&page_header(&title, "style.css", asset_prefix));
     html.push_str("<div class=\"page-wrapper\">\n");
+    html.push_str(
+        "<button class=\"sidebar-toggle\" \
+         onclick=\"document.querySelector('.sidebar').classList.toggle('open')\" \
+         aria-label=\"Toggle navigation\">☰</button>\n",
+    );
     html.push_str(&sidebar_html.replace(
         &format!("\">{}</a>", html_escape(&class.name)),
         &format!("\" class=\"active\">{}</a>", html_escape(&class.name)),

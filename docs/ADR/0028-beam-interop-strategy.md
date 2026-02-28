@@ -1,5 +1,3 @@
-<!-- Copyright 2026 James Casey SPDX-License-Identifier: Apache-2.0 -->
-
 # ADR 0028: BEAM Interop Strategy
 
 ## Status

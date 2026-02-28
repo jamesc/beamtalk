@@ -176,7 +176,13 @@ fn generate_api_docs(
     // Generate index page (include README.md from source dir if present, per ADR 0008)
     let readme_path = source_path.join("README.md");
     let readme = fs::read_to_string(&readme_path).ok();
-    write_index_page(output_path, &classes, readme.as_deref(), &sidebar_html)?;
+    write_index_page(
+        output_path,
+        &classes,
+        readme.as_deref(),
+        &sidebar_html,
+        asset_prefix,
+    )?;
 
     // Generate per-class pages
     for class in &classes {
@@ -187,6 +193,7 @@ fn generate_api_docs(
             &inherited,
             &methods_by_class,
             &sidebar_html,
+            asset_prefix,
         )?;
     }
 

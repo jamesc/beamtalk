@@ -86,6 +86,9 @@ jobs:
       - name: Copy install script to site root
         run: cp scripts/install.sh _site/install.sh
 
+      - name: Write CNAME for custom domain
+        run: echo "beamtalk.dev" > _site/CNAME
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
 
