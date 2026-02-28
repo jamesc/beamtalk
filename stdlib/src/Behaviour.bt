@@ -138,7 +138,7 @@ abstract Object subclass: Behaviour
   /// Counter whichClassIncludesSelector: #class  // => ProtoObject
   /// ```
   sealed whichClassIncludesSelector: selector =>
-    (self includesSelector: selector) ifTrue: [^self].
+    (self includesSelector: selector) ifTrue: [^self]
     self allSuperclasses detect: [:c | c includesSelector: selector] ifNone: [nil]
 
   // --- Instance variable queries ---

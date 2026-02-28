@@ -118,7 +118,7 @@ sealed Collection subclass: Dictionary
   /// #{#a => 1, #b => 2} collect: [:v | v * 10]  // => #{#a => 10, #b => 20}
   /// ```
   collect: block: Block -> Dictionary =>
-    dict := self.
+    dict := self
     self keys inject: #{} into: [:acc :k |
       acc at: k put: (block value: (dict at: k))
     ]

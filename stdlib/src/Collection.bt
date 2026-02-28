@@ -87,7 +87,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2, 3) includes: 9      // => false
   /// ```
   includes: element: Object -> Boolean =>
-    self do: [:each | each =:= element ifTrue: [^true]].
+    self do: [:each | each =:= element ifTrue: [^true]]
     false
 
   /// Reduce the collection with an accumulator.
@@ -118,7 +118,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
   /// ```
   collect: block: Block -> Collection =>
-    result := (self inject: #() into: [:acc :each | acc addFirst: (block value: each)]) reversed.
+    result := (self inject: #() into: [:acc :each | acc addFirst: (block value: each)]) reversed
     self species withAll: result
 
   /// Select elements for which `block` returns true.
@@ -133,7 +133,7 @@ abstract typed Value subclass: Collection
   select: block: Block -> Collection =>
     result := (self inject: #() into: [:acc :each |
       (block value: each) ifTrue: [acc addFirst: each] ifFalse: [acc]
-    ]) reversed.
+    ]) reversed
     self species withAll: result
 
   /// Reject elements for which `block` returns true.
@@ -155,7 +155,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2, 3) detect: [:x | x > 1]     // => 2
   /// ```
   detect: block: Block -> Object | Nil =>
-    self do: [:each | (block value: each) ifTrue: [^each]].
+    self do: [:each | (block value: each) ifTrue: [^each]]
     nil
 
   /// Find the first element matching `block`, or evaluate `noneBlock` if none.
@@ -167,7 +167,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]  // => 0
   /// ```
   detect: block: Block ifNone: noneBlock: Block -> Object =>
-    self do: [:each | (block value: each) ifTrue: [^each]].
+    self do: [:each | (block value: each) ifTrue: [^each]]
     noneBlock value
 
   /// Test if any element satisfies `block`.
@@ -179,7 +179,7 @@ abstract typed Value subclass: Collection
   /// #(1, 2, 3) anySatisfy: [:x | x > 2]  // => true
   /// ```
   anySatisfy: block: Block -> Boolean =>
-    self do: [:each | (block value: each) ifTrue: [^true]].
+    self do: [:each | (block value: each) ifTrue: [^true]]
     false
 
   /// Test if all elements satisfy `block`.
@@ -191,7 +191,7 @@ abstract typed Value subclass: Collection
   /// #(2, 4, 6) allSatisfy: [:x | x isEven]  // => true
   /// ```
   allSatisfy: block: Block -> Boolean =>
-    self do: [:each | (block value: each) ifFalse: [^false]].
+    self do: [:each | (block value: each) ifFalse: [^false]]
     true
 
   /// Return a string representation.
