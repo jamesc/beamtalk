@@ -5,7 +5,7 @@
 //
 // The Bank maintains a Dictionary mapping account names to Account actor
 // references. Opening an account spawns a new Account process and registers
-// it. Looking up an account returns the live actor reference.
+// it. Looking up an account returns the live actor reference
 //
 // Usage:
 //   bank := Bank spawn
@@ -18,14 +18,14 @@ Actor subclass: Bank
   state: lastCreated = nil
 
   openAccount: name =>
-    self.lastCreated := Account spawn.
-    self.lastCreated setOwner: name.
-    self.accounts := self.accounts at: name put: self.lastCreated.
-    ^self.lastCreated
+    self.lastCreated := Account spawn
+    self.lastCreated setOwner: name
+    self.accounts := self.accounts at: name put: self.lastCreated
+    self.lastCreated
 
   accountFor: name =>
-    ^self.accounts at: name ifAbsent: [
+    self.accounts at: name ifAbsent: [
       self error: "No account found for: " ++ name
     ]
 
-  allAccounts => ^self.accounts
+  allAccounts => self.accounts

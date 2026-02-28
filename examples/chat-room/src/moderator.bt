@@ -43,8 +43,8 @@ ChatMember subclass: Moderator
 
   // Check if a member name is muted
   isMuted: memberName =>
-    ^self.muted includes: memberName
+    self.muted includes: memberName
 
   // Return the set of muted member names
   getMuted =>
-    ^self.muted
+    self.muted

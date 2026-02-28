@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BUnit tests for the Hanoi value type.
+// BUnit tests for the Hanoi value type
 //
-// Note: solve:from:to:via: prints move instructions to Transcript.
-// These tests verify correctness of the algorithm, not Transcript output.
-// The number of moves for n disks is always 2^n - 1.
+// Note: solve:from:to:via: prints move instructions to Transcript
+// These tests verify correctness of the algorithm, not Transcript output
+// The number of moves for n disks is always 2^n - 1
 //
 // Run in the REPL:
 //   > :load src/hanoi.bt
@@ -32,7 +32,7 @@ TestCase subclass: HanoiTest
 
   testTwoSeparateInstances =>
     // Value types — each call is on a fresh instance with no shared state
-    h1 := Hanoi new.
-    h2 := Hanoi new.
-    self assert: (h1 solve: 2 from: "A" to: "C" via: "B") equals: nil.
+    h1 := Hanoi new
+    h2 := Hanoi new
+    self assert: (h1 solve: 2 from: "A" to: "C" via: "B") equals: nil
     self assert: (h2 solve: 2 from: "X" to: "Z" via: "Y") equals: nil
