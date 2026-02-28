@@ -24,7 +24,7 @@ abstract typed Value subclass: Collection
   size -> Integer => self subclassResponsibility
 
   /// Iterate over each element, evaluating `block` with each one.
-  do: block: Block -> Nil => self subclassResponsibility
+  do: _block: Block -> Nil => self subclassResponsibility
 
   /// Return a developer-readable string representation.
   printString -> String => self subclassResponsibility
