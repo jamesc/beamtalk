@@ -18,7 +18,9 @@
 //! **References:**
 //! - `docs/ADR/0025-gradual-typing-and-protocols.md` — Phase 1
 
-use crate::ast::{Expression, ExpressionStatement, Literal, MessageSelector, Module, TypeAnnotation};
+use crate::ast::{
+    Expression, ExpressionStatement, Literal, MessageSelector, Module, TypeAnnotation,
+};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -132,7 +134,8 @@ impl TypeChecker {
                 let mut method_env = TypeEnv::new();
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
-                let body_type = self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
+                let body_type =
+                    self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
                 self.check_override_param_compatibility(method, &class.name.name, hierarchy);
                 if is_typed {
@@ -144,7 +147,8 @@ impl TypeChecker {
                 method_env.in_class_method = true;
                 method_env.set("self", InferredType::Known(class.name.name.clone()));
                 Self::set_param_types(&mut method_env, &method.parameters);
-                let body_type = self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
+                let body_type =
+                    self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
@@ -163,7 +167,12 @@ impl TypeChecker {
             method_env.in_class_method = standalone.is_class_method;
             method_env.set("self", InferredType::Known(class_name.clone()));
             Self::set_param_types(&mut method_env, &standalone.method.parameters);
-            let body_type = self.infer_stmts(&standalone.method.body, hierarchy, &mut method_env, is_abstract);
+            let body_type = self.infer_stmts(
+                &standalone.method.body,
+                hierarchy,
+                &mut method_env,
+                is_abstract,
+            );
             self.check_return_type(&standalone.method, &body_type, class_name, hierarchy);
         }
     }
