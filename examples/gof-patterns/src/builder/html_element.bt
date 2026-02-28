@@ -1,12 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Builder Pattern — HtmlElement (the product)
-// Intent: Separate the construction of a complex object from its representation.
-//
-// HtmlElement is an immutable value object. Its state is assembled step-by-step
-// by HtmlBuilder. Callers never construct HtmlElement directly.
-
+/// Builder Pattern — HtmlElement (the product)
+/// Intent: Separate the construction of a complex object from its representation.
+///
+/// HtmlElement is an immutable value object. Its state is assembled step-by-step
+/// by HtmlBuilder. Callers never construct HtmlElement directly.
 Object subclass: HtmlElement
   state: tag        = "div"
   state: attributes = #{}

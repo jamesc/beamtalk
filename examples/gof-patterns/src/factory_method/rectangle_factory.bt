@@ -1,8 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Factory Method Pattern — RectangleFactory (concrete creator)
-
+/// Factory Method Pattern — RectangleFactory (concrete creator)
 ShapeFactory subclass: RectangleFactory
   state: width  = 1.0
   state: height = 1.0

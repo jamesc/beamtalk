@@ -21,7 +21,6 @@
 /// ## References
 /// * ADR 0038: `docs/ADR/0038-subclass-classbuilder-protocol.md`
 /// * Pattern: `stdlib/src/Actor.bt` (ClassBuilder is Actor subclass)
-
 Actor subclass: ClassBuilder
   state: className     = nil
   state: superclassRef = nil

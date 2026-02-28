@@ -1,8 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Decorator Pattern — Sugar (concrete decorator)
-
+/// Decorator Pattern — Sugar (concrete decorator)
 CondimentDecorator subclass: Sugar
   /// Append ", Sugar" to the wrapped beverage's description.
   description => "{self.beverage description}, Sugar"

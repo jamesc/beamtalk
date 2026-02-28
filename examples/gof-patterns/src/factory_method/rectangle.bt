@@ -1,8 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Factory Method Pattern — Rectangle (concrete product)
-
+/// Factory Method Pattern — Rectangle (concrete product)
 Shape subclass: Rectangle
   state: width  = 1.0
   state: height = 1.0

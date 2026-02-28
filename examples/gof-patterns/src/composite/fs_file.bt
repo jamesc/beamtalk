@@ -1,15 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Composite Pattern — FsFile (leaf)
-// A single file with a fixed name and byte size. Has no children.
-// Implements the same interface as FsDir (name, size, describe:) via duck typing.
-//
-// Usage:
-//   f := FsFile name: "main.bt" size: 120.
-//   f size            // => 120
-//   f describe: ""    // => "main.bt (120 bytes)"
-
+/// Composite Pattern — FsFile (leaf)
+/// A single file with a fixed name and byte size. Has no children.
+/// Implements the same interface as FsDir (name, size, describe:) via duck typing.
+///
+/// Usage:
+///   f := FsFile name: "main.bt" size: 120.
+///   f size            // => 120
+///   f describe: ""    // => "main.bt (120 bytes)"
 FsEntry subclass: FsFile
   state: name = ""
   state: size = 0

@@ -30,14 +30,12 @@
 // ===========================================================================
 // CHATROOM ACTOR
 // ===========================================================================
-//
-// ChatRoom manages a Set of member actors and a List of message strings
-// It demonstrates:
-// - Storing actor references (PIDs) in a Set
-// - String concatenation for formatted messages
-// - Broadcasting via do: iteration over actor Set
-// - List concatenation for message history
-
+/// ChatRoom manages a Set of member actors and a List of message strings
+/// It demonstrates:
+/// - Storing actor references (PIDs) in a Set
+/// - String concatenation for formatted messages
+/// - Broadcasting via do: iteration over actor Set
+/// - List concatenation for message history
 Actor subclass: ChatRoom
   state: members = Set new     // Set of ChatMember actor references
   state: history = #()         // List of formatted message strings

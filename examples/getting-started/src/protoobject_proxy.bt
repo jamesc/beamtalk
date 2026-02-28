@@ -53,10 +53,10 @@
 //
 // =============================================================================
 
-// TransparentProxy - Forwards all unknown messages to a target object
-//
-// This demonstrates ProtoObject's doesNotUnderstand:args: and perform:withArguments:
-// working together to create a proxy that's indistinguishable from the target.
+/// TransparentProxy - Forwards all unknown messages to a target object
+///
+/// This demonstrates ProtoObject's doesNotUnderstand:args: and perform:withArguments:
+/// working together to create a proxy that's indistinguishable from the target.
 Actor subclass: TransparentProxy
   state: target = nil
   

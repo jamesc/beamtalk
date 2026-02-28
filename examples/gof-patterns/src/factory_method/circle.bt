@@ -1,8 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Factory Method Pattern — Circle (concrete product)
-
+/// Factory Method Pattern — Circle (concrete product)
 Shape subclass: Circle
   state: radius = 1.0
 

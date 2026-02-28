@@ -1,18 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Command Pattern — CommandHistory (invoker)
-// Executes commands on a TextBuffer, tracking buffer snapshots for undo support.
-// Each execute: runs the command first, then saves the previous buffer state.
-// undo restores the most recent saved state. No command needs to implement its own undo logic.
-//
-// Usage:
-//   h := CommandHistory on: (TextBuffer withText: "hello").
-//   h := h execute: (InsertCommand at: 6 insert: " world").
-//   h buffer text    // => "hello world"
-//   h := h undo.
-//   h buffer text    // => "hello"
-
+/// Command Pattern — CommandHistory (invoker)
+/// Executes commands on a TextBuffer, tracking buffer snapshots for undo support.
+/// Each execute: runs the command first, then saves the previous buffer state.
+/// undo restores the most recent saved state. No command needs to implement its own undo logic.
+///
+/// Usage:
+///   h := CommandHistory on: (TextBuffer withText: "hello").
+///   h := h execute: (InsertCommand at: 6 insert: " world").
+///   h buffer text    // => "hello world"
+///   h := h undo.
+///   h buffer text    // => "hello"
 Object subclass: CommandHistory
   state: buffer  = nil
   state: history = #()   // stack of prior buffer snapshots

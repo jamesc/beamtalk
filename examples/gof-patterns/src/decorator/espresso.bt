@@ -1,8 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Decorator Pattern — Espresso (concrete component)
-
+/// Decorator Pattern — Espresso (concrete component)
 Beverage subclass: Espresso
   /// Return "Espresso".
   description => "Espresso"

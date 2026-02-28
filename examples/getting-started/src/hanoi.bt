@@ -1,23 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Towers of Hanoi
-// A classic recursive algorithm that moves n disks between three pegs
-//
-// Try it in the REPL:
-//   $ beamtalk repl
-//   > :load examples/hanoi.bt
-//   > h := Hanoi new
-//   > h solve: 3 from: "A" to: "C" via: "B"
-//   Move disk from A to C
-//   Move disk from A to B
-//   Move disk from C to B
-//   Move disk from A to C
-//   Move disk from B to A
-//   Move disk from B to C
-//   Move disk from A to C
-//   nil
-
+/// Towers of Hanoi
+/// A classic recursive algorithm that moves n disks between three pegs
+///
+/// Try it in the REPL:
+///   $ beamtalk repl
+///   > :load examples/hanoi.bt
+///   > h := Hanoi new
+///   > h solve: 3 from: "A" to: "C" via: "B"
+///   Move disk from A to C
+///   Move disk from A to B
+///   Move disk from C to B
+///   Move disk from A to C
+///   Move disk from B to A
+///   Move disk from B to C
+///   Move disk from A to C
+///   nil
 Object subclass: Hanoi
 
   solve: n from: source to: target via: auxiliary =>

@@ -1,14 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Adapter Pattern — CelsiusThermometer (adaptee)
-// Intent: Convert the interface of a class into another interface clients expect.
-// Adapter lets classes work together that couldn't otherwise because of
-// incompatible interfaces.
-//
-// CelsiusThermometer is an existing class whose interface we cannot change.
-// It speaks only Celsius. CelsiusToFahrenheitAdapter wraps it to speak Fahrenheit.
-
+/// Adapter Pattern — CelsiusThermometer (adaptee)
+/// Intent: Convert the interface of a class into another interface clients expect.
+/// Adapter lets classes work together that couldn't otherwise because of
+/// incompatible interfaces.
+///
+/// CelsiusThermometer is an existing class whose interface we cannot change.
+/// It speaks only Celsius. CelsiusToFahrenheitAdapter wraps it to speak Fahrenheit.
 Object subclass: CelsiusThermometer
   state: celsius = 0.0
 
