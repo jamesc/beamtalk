@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-761: ActorNlrLocalVar — NLR with local variable bindings in Actor methods.
+// BT-761: ActorNlrLocalVar — NLR with local variable bindings in Actor methods
 
 Actor subclass: ActorNlrLocalVar
   state: data = #{}

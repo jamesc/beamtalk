@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-754: NlrReturnTest — ifTrue: non-local return fixture.
+// BT-754: NlrReturnTest — ifTrue: non-local return fixture
 
 Object subclass: NlrReturnTest
   test: x =>

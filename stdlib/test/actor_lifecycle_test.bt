@@ -2,44 +2,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-172, BT-397: Tests actor lifecycle — isAlive, stop, idempotent stop,
-// and error behaviour when sending to a stopped actor.
+// and error behaviour when sending to a stopped actor
 
 
 TestCase subclass: ActorLifecycleTest
 
   testIsAliveAndStop =>
-    counter := Counter spawn.
+    counter := Counter spawn
     // isAlive returns true for a running actor
-    self assert: (counter isAlive).
+    self assert: counter isAlive
     // Actor still works after isAlive check
-    self assert: (counter increment) equals: 1.
+    self assert: counter increment equals: 1
     // isAlive still true after message processing
-    self assert: (counter isAlive).
+    self assert: counter isAlive
     // Stop the actor gracefully
-    self assert: (counter stop) equals: #ok.
+    self assert: counter stop equals: #ok
     // Stopping an already-stopped actor is idempotent
-    self assert: (counter stop) equals: #ok.
+    self assert: counter stop equals: #ok
     // isAlive returns false after stop
-    self deny: (counter isAlive).
+    self deny: counter isAlive
     // Sending a message to a stopped actor raises an error
     self should: [counter increment] raise: #actor_dead
 
   testNonMapArgumentToSpawnwith =>
-    // not silently fall back to spawn/0.
-    self should: [Counter spawnWith: 42] raise: #type_error.
+    // not silently fall back to spawn/0
+    self should: [Counter spawnWith: 42] raise: #type_error
     // Passing a non-Dictionary argument to spawnWith: should raise type_error,
-    self should: [Counter spawnWith: "hello"] raise: #type_error.
+    self should: [Counter spawnWith: "hello"] raise: #type_error
     self should: [Counter spawnWith: true] raise: #type_error
 
   testSpawnwithWithBareIdentifierKeys =>
     // Bare identifier keys in map literals work as implicit symbols
-    c3 := Counter spawnWith: #{value => 10}.
-    self assert: (c3 getValue) equals: 10.
-    self assert: (c3 increment) equals: 11
+    c3 := Counter spawnWith: #{value => 10}
+    self assert: c3 getValue equals: 10
+    self assert: c3 increment equals: 11
 
   testPrintstringActorInstanceAndClassObject =>
     // Actor instance printString returns "a ClassName"
-    c2 := Counter spawn.
-    self assert: (c2 printString) equals: "a Counter".
+    c2 := Counter spawn
+    self assert: c2 printString equals: "a Counter"
     // Class object printString returns class name
-    self assert: (Counter printString) equals: "Counter"
+    self assert: Counter printString equals: "Counter"

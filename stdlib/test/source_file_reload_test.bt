@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests for Behaviour >> sourceFile and Behaviour >> reload (BT-845, ADR 0040 Phase 2).
+// Tests for Behaviour >> sourceFile and Behaviour >> reload (BT-845, ADR 0040 Phase 2)
 //
 // Verifies:
 // - sourceFile returns nil for stdlib classes (never loaded from a user file)
@@ -9,19 +9,19 @@
 // - sourceFile is a sealed method on all classes (isBehaviour check)
 //
 // The positive case (sourceFile returns a path after :load) requires the REPL
-// context and is tested in tests/e2e/cases/source_file_reload.bt.
+// context and is tested in tests/e2e/cases/source_file_reload.bt
 
 TestCase subclass: SourceFileReloadTest
 
   testStdlibClassSourceFileIsNil =>
     // Stdlib classes have no user-supplied source file
-    self assert: Integer sourceFile isNil.
+    self assert: Integer sourceFile isNil
     // => _
-    self assert: String sourceFile isNil.
+    self assert: String sourceFile isNil
     // => _
-    self assert: Object sourceFile isNil.
+    self assert: Object sourceFile isNil
     // => _
-    self assert: Boolean sourceFile isNil.
+    self assert: Boolean sourceFile isNil
     // => _
     self assert: Actor sourceFile isNil
     // => _
@@ -33,16 +33,16 @@ TestCase subclass: SourceFileReloadTest
 
   testStdlibReloadRaisesNoSourceFile =>
     // Reloading a stdlib class raises no_source_file
-    self should: [Integer reload] raise: #no_source_file.
+    self should: [Integer reload] raise: #no_source_file
     // => _
-    self should: [String reload] raise: #no_source_file.
+    self should: [String reload] raise: #no_source_file
     // => _
     self should: [Object reload] raise: #no_source_file
     // => _
 
   testSourceFileMethodExists =>
     // sourceFile is a sealed method defined in Behaviour (class protocol)
-    self assert: (Behaviour includesSelector: #sourceFile).
+    self assert: (Behaviour includesSelector: #sourceFile)
     // => _
     // Sending sourceFile to any class object returns nil or a path (no DNU)
     self assert: Integer sourceFile isNil
@@ -50,7 +50,7 @@ TestCase subclass: SourceFileReloadTest
 
   testReloadMethodExists =>
     // reload is a sealed method defined in Behaviour (class protocol)
-    self assert: (Behaviour includesSelector: #reload).
+    self assert: (Behaviour includesSelector: #reload)
     // => _
     // Reloading a stdlib class (Behaviour itself) raises no_source_file
     self should: [Behaviour reload] raise: #no_source_file

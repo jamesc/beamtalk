@@ -1,10 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests for Behaviour >> removeFromSystem (BT-785).
+// Tests for Behaviour >> removeFromSystem (BT-785)
 //
-// Tests the safety checks: stdlib class rejection and subclass rejection.
-// Full integration tests (actual removal and cleanup) are in the e2e suite.
+// Tests the safety checks: stdlib class rejection and subclass rejection
+// Full integration tests (actual removal and cleanup) are in the e2e suite
 //
 // Fixtures:
 //   stdlib/test/fixtures/removal_test_parent.bt  — RemovalTestParent
@@ -17,21 +17,21 @@ TestCase subclass: RemoveFromSystemTest
 
   testStdlibClassRejected =>
     // Attempting to remove a stdlib class raises a runtime_error
-    self should: [Integer removeFromSystem] raise: #runtime_error.
+    self should: [Integer removeFromSystem] raise: #runtime_error
     // => _
 
   testSubclassRejected =>
-    // A class with subclasses cannot be removed (subclasses must go first).
-    // RemovalTestParent has RemovalTestChild as a subclass (see fixtures).
-    self should: [RemovalTestParent removeFromSystem] raise: #runtime_error.
+    // A class with subclasses cannot be removed (subclasses must go first)
+    // RemovalTestParent has RemovalTestChild as a subclass (see fixtures)
+    self should: [RemovalTestParent removeFromSystem] raise: #runtime_error
     // => _
 
   testStringClassRejected =>
     // String is stdlib — cannot be removed
-    self should: [String removeFromSystem] raise: #runtime_error.
+    self should: [String removeFromSystem] raise: #runtime_error
     // => _
 
   testObjectClassRejected =>
     // Object is stdlib — cannot be removed
-    self should: [Object removeFromSystem] raise: #runtime_error.
+    self should: [Object removeFromSystem] raise: #runtime_error
     // => _

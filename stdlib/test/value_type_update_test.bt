@@ -1,36 +1,36 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-833: Tests for immutable-update semantics on value types.
+// BT-833: Tests for immutable-update semantics on value types
 // Field assignments use Self-threading (Self -> Self1 -> Self{N}) so that
-// `self` in expression position resolves to the latest snapshot.
+// `self` in expression position resolves to the latest snapshot
 
 
 TestCase subclass: ValueTypeUpdateTest
 
   testSingleFieldUpdate =>
-    b := ValueTypeBuilder new.
-    b2 := b withX: 42.
+    b := ValueTypeBuilder new
+    b2 := b withX: 42
     // The returned object has the updated field
-    self assert: (b2 getX) equals: 42.
+    self assert: b2 getX equals: 42
     // The original object is unchanged (immutable semantics)
-    self assert: (b getX) equals: 0
+    self assert: b getX equals: 0
 
   testChainedSetters =>
-    b := ValueTypeBuilder new.
-    b2 := (b withX: 10) withY: 20.
-    self assert: (b2 getX) equals: 10.
-    self assert: (b2 getY) equals: 20
+    b := ValueTypeBuilder new
+    b2 := (b withX: 10) withY: 20
+    self assert: b2 getX equals: 10
+    self assert: b2 getY equals: 20
 
   testMultipleFieldAssignmentsInOneMethod =>
-    b := ValueTypeBuilder new.
-    b2 := b setX: 5 y: 7.
-    self assert: (b2 getX) equals: 5.
-    self assert: (b2 getY) equals: 7
+    b := ValueTypeBuilder new
+    b2 := b setX: 5 y: 7
+    self assert: b2 getX equals: 5
+    self assert: b2 getY equals: 7
 
   testReadThenWrite =>
-    b := ValueTypeBuilder new withX: 10.
-    b2 := b incrementX: 5.
-    self assert: (b2 getX) equals: 15.
+    b := ValueTypeBuilder new withX: 10
+    b2 := b incrementX: 5
+    self assert: b2 getX equals: 15
     // Original unchanged
-    self assert: (b getX) equals: 10
+    self assert: b getX equals: 10

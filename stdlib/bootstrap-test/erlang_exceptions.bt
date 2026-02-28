@@ -3,7 +3,7 @@
 
 // Tests for BEAM interop exception classes (BT-678)
 // Verifies BEAMError, ExitError, ThrowError class hierarchy
-// and exception catching behavior.
+// and exception catching behavior
 
 // ===========================================================================
 // BEAM ERROR HIERARCHY — SIGNAL AND CATCH

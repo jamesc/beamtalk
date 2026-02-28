@@ -3,82 +3,82 @@
 
 // BT-412, BT-803, ADR 0036 Phase 2: Tests the metaclass tower — primitive class
 // identity (42 class == Integer), isMeta/isClass predicates, metaclass name,
-// thisClass, superclass hierarchy, self-grounding fixed point, and sealed Metaclass.
+// thisClass, superclass hierarchy, self-grounding fixed point, and sealed Metaclass
 
 TestCase subclass: MetaclassTest
 
   testPrimitiveClassIdentityAndTower =>
-    self assert: (42 class) equals: Integer.
-    self assert: (3.14 class) equals: Float.
-    self assert: ("hello" class) equals: String.
-    self assert: (true class) equals: True.
-    self assert: (false class) equals: False.
-    self assert: (nil class) equals: UndefinedObject.
-    self assert: (#symbol class) equals: Symbol.
+    self assert: 42 class equals: Integer
+    self assert: 3.14 class equals: Float
+    self assert: "hello" class equals: String
+    self assert: true class equals: True
+    self assert: false class equals: False
+    self assert: nil class equals: UndefinedObject
+    self assert: #symbol class equals: Symbol
     // BT-802 (ADR 0036 Phase 1): Metaclass objects replace the #Metaclass sentinel
-    self assert: (42 class class) isMeta equals: true.
-    self assert: ("hello" class class) isMeta equals: true.
-    self assert: (true class class) isMeta equals: true.
+    self assert: (42 class class) isMeta equals: true
+    self assert: ("hello" class class) isMeta equals: true
+    self assert: (true class class) isMeta equals: true
     // Metaclass objects are not plain classes
-    self assert: (42 class class) isClass equals: false.
+    self assert: (42 class class) isClass equals: false
     // Metaclass tower terminates: self-grounding invariant (class class class == class class)
-    self assert: (42 class class class) equals: (42 class class)
+    self assert: 42 class class class equals: 42 class class
 
   // BT-803: isMetaclass predicate
   testIsMetaclass =>
-    self assert: (42 class class) isMetaclass equals: true.
-    self assert: ("hello" class class) isMetaclass equals: true.
-    self assert: (true class class) isMetaclass equals: true.
-    self assert: (nil class class) isMetaclass equals: true.
+    self assert: (42 class class) isMetaclass equals: true
+    self assert: ("hello" class class) isMetaclass equals: true
+    self assert: (true class class) isMetaclass equals: true
+    self assert: (nil class class) isMetaclass equals: true
     // isBehaviour is inherited from Behaviour
-    self assert: (42 class class) isBehaviour equals: true.
+    self assert: (42 class class) isBehaviour equals: true
     // Regular class objects are not metaclasses
-    self assert: (42 class) isMetaclass equals: false.
+    self assert: (42 class) isMetaclass equals: false
     self assert: Integer isMetaclass equals: false
 
   // BT-803: name — e.g. 42 class class name == 'Integer class'
   testName =>
-    self assert: (42 class class) name equals: "Integer class".
-    self assert: (3.14 class class) name equals: "Float class".
-    self assert: ("hello" class class) name equals: "String class".
-    self assert: (true class class) name equals: "True class".
-    self assert: (false class class) name equals: "False class".
-    self assert: (nil class class) name equals: "UndefinedObject class".
+    self assert: (42 class class) name equals: "Integer class"
+    self assert: (3.14 class class) name equals: "Float class"
+    self assert: ("hello" class class) name equals: "String class"
+    self assert: (true class class) name equals: "True class"
+    self assert: (false class class) name equals: "False class"
+    self assert: (nil class class) name equals: "UndefinedObject class"
     self assert: (#sym class class) name equals: "Symbol class"
 
   // BT-803: thisClass — e.g. 42 class class thisClass == Integer
   testThisClass =>
-    self assert: (42 class class) thisClass equals: Integer.
-    self assert: (3.14 class class) thisClass equals: Float.
-    self assert: ("hello" class class) thisClass equals: String.
-    self assert: (true class class) thisClass equals: True.
-    self assert: (false class class) thisClass equals: False.
+    self assert: (42 class class) thisClass equals: Integer
+    self assert: (3.14 class class) thisClass equals: Float
+    self assert: ("hello" class class) thisClass equals: String
+    self assert: (true class class) thisClass equals: True
+    self assert: (false class class) thisClass equals: False
     self assert: (nil class class) thisClass equals: UndefinedObject
 
   // BT-803: printString — same as name
   testPrintString =>
-    self assert: (42 class class) printString equals: "Integer class".
-    self assert: (3.14 class class) printString equals: "Float class".
+    self assert: (42 class class) printString equals: "Integer class"
+    self assert: (3.14 class class) printString equals: "Float class"
     self assert: ("hello" class class) printString equals: "String class"
 
   // BT-803: superclass invariant — Counter class superclass == Actor class
   testSuperclassInvariant =>
     // Parallel hierarchy: Counter class class superclass == Actor class class
-    self assert: (Counter class class superclass) equals: (Actor class class).
+    self assert: Counter class class superclass equals: Actor class class
     // Actor's metaclass superclass is Object's metaclass
-    self assert: (Actor class class superclass) equals: (Object class class).
+    self assert: Actor class class superclass equals: Object class class
     // Object's metaclass superclass is ProtoObject's metaclass
-    self assert: (Object class class superclass) equals: (ProtoObject class class)
+    self assert: Object class class superclass equals: ProtoObject class class
 
   // BT-803: self-grounding fixed point — Metaclass class class == Metaclass class
   testSelfGrounding =>
-    self assert: (Metaclass class class) equals: (Metaclass class).
+    self assert: Metaclass class class equals: Metaclass class
     // Three-deep also terminates
-    self assert: (Metaclass class class class) equals: (Metaclass class class)
+    self assert: Metaclass class class class equals: Metaclass class class
 
   // BT-803: Metaclass allSubclasses returns [] (sealed)
   testAllSubclassesSealed =>
-    self assert: (Metaclass allSubclasses isEmpty)
+    self assert: Metaclass allSubclasses isEmpty
 
   // BT-803: Metaclass new raises error
   testNewRaisesError =>
@@ -87,6 +87,6 @@ TestCase subclass: MetaclassTest
   // Class identity tests for domain classes
   testClassIdentityForDomainClasses =>
     // Random class isMeta returns true (BT-802 / ADR 0036)
-    self assert: (Random class) isMeta equals: true.
+    self assert: (Random class) isMeta equals: true
     // Regex class isMeta returns true (BT-802 / ADR 0036)
     self assert: (Regex class) isMeta equals: true

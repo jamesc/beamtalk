@@ -8,15 +8,15 @@
 Actor subclass: FieldMutationCounter
   state: value = 0
 
-  getValue => ^self.value
+  getValue => self.value
 
   setValue: v => self.value := v
 
   // do: with field mutation (accumulate sum)
   sumArray: items =>
-    items do: [:item | self.value := self.value + item].
-    ^self.value
+    items do: [:item | self.value := self.value + item]
+    self.value
 
   // inject:into: without field mutation (pure functional)
   sumWithInject: items =>
-    ^items inject: 0 into: [:sum :item | sum + item]
+    items inject: 0 into: [:sum :item | sum + item]

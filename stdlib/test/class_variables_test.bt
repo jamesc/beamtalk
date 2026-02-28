@@ -2,20 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-412: Tests that class variables persist across instance creation and are
-// shared by all instances, including when accessed via class-side self-sends.
+// shared by all instances, including when accessed via class-side self-sends
 
 
 TestCase subclass: ClassVariablesTest
 
   testClassVariablePersistence =>
-    self assert: (ClassVarCounter getCount) equals: 0.
+    self assert: ClassVarCounter getCount equals: 0
     // Create an instance via class method that increments counter
-    ClassVarCounter create.
+    ClassVarCounter create
     // Class variable was incremented
-    self assert: (ClassVarCounter getCount) equals: 1.
+    self assert: ClassVarCounter getCount equals: 1
     // Create another instance
-    ClassVarCounter create.
+    ClassVarCounter create
     // Class variable persists across calls
-    self assert: (ClassVarCounter getCount) equals: 2.
+    self assert: ClassVarCounter getCount equals: 2
     // Class method calling another class method (self-send routing)
-    self assert: (ClassVarCounter createAndReport) equals: 3
+    self assert: ClassVarCounter createAndReport equals: 3

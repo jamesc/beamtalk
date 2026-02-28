@@ -6,6 +6,6 @@
 Actor subclass: Circle
   state: radius = 0
 
-  area => ^self.radius * self.radius
+  area => self.radius * self.radius
 
   setRadius: r => self.radius := r

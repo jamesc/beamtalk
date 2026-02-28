@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-916: Actor fixture for testing self.slot := assignment patterns.
-// Covers: multiple slots, do: blocks, collect: blocks, and early return (^).
+// BT-916: Actor fixture for testing self.slot := assignment patterns
+// Covers: multiple slots, do: blocks, collect: blocks, and early return (^)
 
 Actor subclass: ActorSlotCounter
   state: count = 0
@@ -14,51 +14,51 @@ Actor subclass: ActorSlotCounter
 
   // Multiple slot assignments in one method
   incrementBoth: n =>
-    self.count := self.count + 1.
-    self.total := self.total + n.
+    self.count := self.count + 1
+    self.total := self.total + n
     #{#count => self.count, #total => self.total}
 
   // Multiple sequential assignments to same slot
   addThrice: n =>
-    self.count := self.count + n.
-    self.count := self.count + n.
-    self.count := self.count + n.
+    self.count := self.count + n
+    self.count := self.count + n
+    self.count := self.count + n
     self.count
 
   // Slot assignment inside do: block
   sumItems: items =>
-    items do: [:item | self.total := self.total + item].
+    items do: [:item | self.total := self.total + item]
     self.total
 
   // Slot assignment inside do: block with two slot mutations per iteration
   countAndSum: items =>
     items do: [:item |
-      self.count := self.count + 1.
+      self.count := self.count + 1
       self.total := self.total + item
-    ].
+    ]
     #{#count => self.count, #total => self.total}
 
   // Slot assignment inside collect: block (count tracks each element processed)
   collectDoubled: items =>
     result := items collect: [:item |
-      self.count := self.count + 1.
+      self.count := self.count + 1
       item * 2
-    ].
+    ]
     result
 
   // Slot assignment then early return (^) from method body via ifTrue:
   // Pattern: mutate slot, check condition, return early if met
   addAndCheckLimit: limit =>
-    self.count := self.count + 1.
-    self.count >= limit ifTrue: [^#reached].
+    self.count := self.count + 1
+    self.count >= limit ifTrue: [^#reached]
     #not_yet
 
   // Slot assignment before an early return with a computed value
   addAndReturnIfAbove: threshold =>
-    self.total := self.total + 1.
-    self.total > threshold ifTrue: [^self.total].
+    self.total := self.total + 1
+    self.total > threshold ifTrue: [^self.total]
     -1
 
   reset =>
-    self.count := 0.
+    self.count := 0
     self.total := 0

@@ -1,27 +1,27 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-870: Mixed Tier 1/Tier 2 call site fixture.
+// BT-870: Mixed Tier 1/Tier 2 call site fixture
 // Tests that a HOM called from two different methods — one with a plain Tier 1
 // block and one with a Tier 2 (captured-mutation) block — compiles and runs
-// correctly for both call sites.
+// correctly for both call sites
 
 Actor subclass: MixedCallSiteActor
 
-  // HOM called with both Tier 1 and Tier 2 blocks depending on the caller.
+  // HOM called with both Tier 1 and Tier 2 blocks depending on the caller
   // BT-870: The method body is compiled as Tier 2. Tier 1 call sites must
-  // promote their blocks to the Tier 2 calling convention (StateAcc passthrough).
+  // promote their blocks to the Tier 2 calling convention (StateAcc passthrough)
   applyBlock: aBlock to: anItem =>
     aBlock value: anItem
 
-  // Tier 1 call site: block has no captured mutations.
+  // Tier 1 call site: block has no captured mutations
   // BT-870: Prior to the fix this caused a wrong-arity crash because the block
-  // was compiled as arity 1 but the Tier 2 method body calls it with arity 2.
+  // was compiled as arity 1 but the Tier 2 method body calls it with arity 2
   testTier1CallSite =>
     self applyBlock: [:x | x + 1] to: 10
 
-  // Tier 2 call site: block captures and mutates `total`.
+  // Tier 2 call site: block captures and mutates `total`
   testTier2CallSite =>
-    total := 0.
-    self applyBlock: [:x | total := total + x] to: 7.
+    total := 0
+    self applyBlock: [:x | total := total + x] to: 7
     total

@@ -1,4 +1,4 @@
-// Actor for testing state mutation threading in exception handling blocks.
+// Actor for testing state mutation threading in exception handling blocks
 // Used by tests/stdlib/exception_mutations.bt (BT-410)
 
 Actor subclass: ErrorCounter
@@ -13,5 +13,5 @@ Actor subclass: ErrorCounter
   safeIncrementWithCleanup =>
     [self.value := self.value + 1] ensure: [self.errorCount := self.errorCount + 1]
 
-  getValue => ^self.value
-  getErrorCount => ^self.errorCount
+  getValue => self.value
+  getErrorCount => self.errorCount

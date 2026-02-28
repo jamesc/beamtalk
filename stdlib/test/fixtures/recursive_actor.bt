@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // RecursiveActor - Actor with recursive methods for testing BT-330
-// Actor self-sends use synchronous direct dispatch (BT-330 fix).
+// Actor self-sends use synchronous direct dispatch (BT-330 fix)
 
 Actor subclass: RecursiveActor
   state: result = 0

@@ -2,70 +2,70 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Tests for block (closure) evaluation — argument passing, arity, whileTrue/False,
-// valueWithArguments:, closure variable capture, and early return with ^.
+// valueWithArguments:, closure variable capture, and early return with ^
 
 TestCase subclass: BlocksTest
 
   testBlockEvaluation =>
-    self assert: ([:x | x + 1] value: 5) equals: 6.
+    self assert: ([:x | x + 1] value: 5) equals: 6
     // Block with two arguments
-    self assert: ([:x :y | x + y] value: 3 value: 4) equals: 7.
+    self assert: ([:x :y | x + y] value: 3 value: 4) equals: 7
     // Block with no arguments (value message)
-    self assert: ([42] value) equals: 42.
+    self assert: [42] value equals: 42
     // Block with expression body
-    self assert: ([:n | n * n] value: 5) equals: 25.
+    self assert: ([:n | n * n] value: 5) equals: 25
     // Nested arithmetic in block
-    self assert: ([:a | a + a * 2] value: 3) equals: 9.
+    self assert: ([:a | a + a * 2] value: 3) equals: 9
     // Block returning constant
-    self assert: ([:x | 100] value: 999) equals: 100.
+    self assert: ([:x | 100] value: 999) equals: 100
     // Block with subtraction
-    self assert: ([:a :b | a - b] value: 10 value: 3) equals: 7.
+    self assert: ([:a :b | a - b] value: 10 value: 3) equals: 7
     // Block with three arguments
-    self assert: ([:x :y :z | x + y + z] value: 1 value: 2 value: 3) equals: 6.
+    self assert: ([:x :y :z | x + y + z] value: 1 value: 2 value: 3) equals: 6
     // Nested blocks - outer returns inner block that captures x
-    self assert: ([[:x | [:y | x + y]] value: 10] value value: 5) equals: 15.
+    self assert: ([[:x | [:y | x + y]] value: 10] value value: 5) equals: 15
     // Higher-order block (makeAdder pattern)
-    self assert: ([[:n | [:x | x + n]] value: 5] value value: 10) equals: 15.
+    self assert: ([[:n | [:x | x + n]] value: 5] value value: 10) equals: 15
     // Complex expression in block body
     self assert: ([:x | x * 2 + 1] value: 5) equals: 11
 
   testReturnStatements =>
     // Explicit return with ^ (returns from block)
-    self assert: ([:x | ^x + 10] value: 5) equals: 15.
+    self assert: ([:x | ^x + 10] value: 5) equals: 15
     // Explicit return of literal
-    self assert: ([^42] value) equals: 42.
+    self assert: [^42] value equals: 42
     // Implicit return (last expression) - same behavior
-    self assert: ([:x | x + 10] value: 5) equals: 15.
+    self assert: ([:x | x + 10] value: 5) equals: 15
     // whileTrue: with false condition (returns immediately)
     self assert: ([false] whileTrue: [42]) equals: nil
 
   testBasicClosureCapture =>
     // Simple closure capturing outer variable
-    outerVar := 10.
-    self assert: outerVar equals: 10.
-    self assert: ([:x | x + outerVar] value: 5) equals: 15.
+    outerVar := 10
+    self assert: outerVar equals: 10
+    self assert: ([:x | x + outerVar] value: 5) equals: 15
     // Nested closure with capture
-    makeAdder := [:n | [:x | x + n]].
-    addFive := makeAdder value: 5.
+    makeAdder := [:n | [:x | x + n]]
+    addFive := makeAdder value: 5
     self assert: (addFive value: 10) equals: 15
 
   testBlockValuewitharguments =>
     // Block with array of arguments
-    self assert: ([:x :y | x + y] valueWithArguments: #(3, 4)) equals: 7.
+    self assert: ([:x :y | x + y] valueWithArguments: #(3, 4)) equals: 7
     // Zero-arg block
-    self assert: ([42] valueWithArguments: #()) equals: 42.
+    self assert: ([42] valueWithArguments: #()) equals: 42
     // Single-arg block
     self assert: ([:x | x * 2] valueWithArguments: #(5)) equals: 10
 
   testBlockArity =>
     // Zero-argument block arity
-    self assert: ([42] arity) equals: 0.
+    self assert: [42] arity equals: 0
     // One-argument block arity
-    self assert: ([:x | x + 1] arity) equals: 1.
+    self assert: [:x | x + 1] arity equals: 1
     // Two-argument block arity
-    self assert: ([:x :y | x + y] arity) equals: 2.
+    self assert: [:x :y | x + y] arity equals: 2
     // Three-argument block arity
-    self assert: ([:x :y :z | x + y + z] arity) equals: 3
+    self assert: [:x :y :z | x + y + z] arity equals: 3
 
   testWhilefalse =>
     // whileFalse: with true condition (returns immediately)

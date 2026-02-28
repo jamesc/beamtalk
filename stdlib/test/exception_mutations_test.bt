@@ -3,30 +3,30 @@
 
 // BT-410: Tests that actor state mutations inside on:do: error handlers and
 // ensure: cleanup blocks are correctly threaded — mutations accumulate across
-// multiple calls and both try-body and cleanup mutations are preserved.
+// multiple calls and both try-body and cleanup mutations are preserved
 
 
 TestCase subclass: ExceptionMutationsTest
 
   testMutationsInOnDoAndEnsure =>
-    c := ErrorCounter spawn.
-    c riskyIncrement.
+    c := ErrorCounter spawn
+    c riskyIncrement
     // Verify errorCount was mutated by the handler
-    self assert: (c getErrorCount) equals: 1.
+    self assert: c getErrorCount equals: 1
     // Value should be unchanged (try body failed before mutation completed)
-    self assert: (c getValue) equals: 0.
-    c riskyIncrement.
+    self assert: c getValue equals: 0
+    c riskyIncrement
     // Call again to verify mutation accumulates
-    self assert: (c getErrorCount) equals: 2.
+    self assert: c getErrorCount equals: 2
     // Spawn a fresh actor
-    d := ErrorCounter spawn.
-    d safeIncrementWithCleanup.
+    d := ErrorCounter spawn
+    d safeIncrementWithCleanup
     // Value should be incremented by the try body
-    self assert: (d getValue) equals: 1.
+    self assert: d getValue equals: 1
     // errorCount should be incremented by the cleanup block
-    self assert: (d getErrorCount) equals: 1.
-    d safeIncrementWithCleanup.
+    self assert: d getErrorCount equals: 1
+    d safeIncrementWithCleanup
     // Call again to verify both accumulate
-    self assert: (d getValue) equals: 2.
+    self assert: d getValue equals: 2
     // safeIncrementWithCleanup: body increments value, cleanup increments errorCount
-    self assert: (d getErrorCount) equals: 2
+    self assert: d getErrorCount equals: 2

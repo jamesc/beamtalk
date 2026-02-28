@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6).
+// BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6)
 //
 // Tests use class-level introspection (includesSelector:, inheritsFrom:) since
 // the Workspace singleton is not available in the BUnit test context

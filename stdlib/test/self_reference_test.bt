@@ -7,30 +7,30 @@
 TestCase subclass: SelfReferenceTest
 
   testMethodReturningSelf =>
-    a := SelfRefActor spawn.
+    a := SelfRefActor spawn
     // returnSelf returns the actor's self reference
-    ref := a returnSelf.
+    ref := a returnSelf
     // The returned reference responds to class
-    self assert: (ref class) equals: SelfRefActor.
+    self assert: ref class equals: SelfRefActor
     // The returned reference is the same actor (can send messages through it)
-    self assert: (ref setValue: 99) equals: 99.
+    self assert: (ref setValue: 99) equals: 99
     // Verify the state changed on the original actor (same process)
-    self assert: (a getValue) equals: 99
+    self assert: a getValue equals: 99
 
   testSelfInBlock =>
-    a := SelfRefActor spawn.
+    a := SelfRefActor spawn
     // self in block refers to enclosing actor, not the block itself
-    self assert: (a classInBlock) equals: SelfRefActor
+    self assert: a classInBlock equals: SelfRefActor
 
   testDynamicDispatchViaPerform =>
-    a := SelfRefActor spawn.
-    a setValue: 99.
+    a := SelfRefActor spawn
+    a setValue: 99
     // perform: dispatches zero-arg methods dynamically on actors
-    self assert: (a perform: #getValue) equals: 99.
+    self assert: (a perform: #getValue) equals: 99
     // perform:withArguments: dispatches methods with arguments on actors
-    self assert: (a perform: #setValue: withArguments: #(42)) equals: 42.
-    self assert: (a getValue) equals: 42.
+    self assert: (a perform: #setValue: withArguments: #(42)) equals: 42
+    self assert: a getValue equals: 42
     // perform: also works on primitives (synchronous dispatch)
-    self assert: (42 perform: #asString) equals: "42".
+    self assert: (42 perform: #asString) equals: "42"
     // perform:withArguments: works on primitives
     self assert: (10 perform: #+ withArguments: #(32)) equals: 42

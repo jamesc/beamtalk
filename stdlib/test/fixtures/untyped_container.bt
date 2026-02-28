@@ -5,5 +5,5 @@ Actor subclass: UntypedContainer
   state: item = nil
 
   setItem: value =>
-    self.item := value.
-    ^self.item
+    self.item := value
+    self.item

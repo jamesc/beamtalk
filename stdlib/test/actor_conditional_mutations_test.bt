@@ -2,100 +2,98 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-915: Tests that self.slot := inside ifTrue:, ifFalse:, and
-// ifTrue:ifFalse: correctly mutates actor state.
+// ifTrue:ifFalse: correctly mutates actor state
 //
 // Without the fix, mutations inside conditional blocks are lost because
 // the block executes as a pure closure and the mutated state is local
-// to the closure and never returned to handle_call.
+// to the closure and never returned to handle_call
 
 
 TestCase subclass: ActorConditionalMutationsTest
 
   testIfTrueWithTrueFlag =>
     // Verify flag=true causes the increment to be applied
-    c := ConditionalMutationCounter spawn.
-    self assert: (c conditionalIncrement: true) equals: 1.
+    c := ConditionalMutationCounter spawn
+    self assert: (c conditionalIncrement: true) equals: 1
     self assert: (c conditionalIncrement: true) equals: 2
 
   testIfTrueWithFalseFlag =>
     // Verify flag=false leaves state unchanged
-    c := ConditionalMutationCounter spawn.
-    result := c conditionalIncrement: false.
-    self assert: result equals: 0.
-    self assert: (c getCount) equals: 0
+    c := ConditionalMutationCounter spawn
+    result := c conditionalIncrement: false
+    self assert: result equals: 0
+    self assert: c getCount equals: 0
 
   testIfFalseWithFalseFlag =>
     // Verify flag=false causes the decrement to be applied
-    c := ConditionalMutationCounter spawn.
-    self assert: (c conditionalDecrement: false) equals: -1.
-    self assert: (c getCount) equals: -1
+    c := ConditionalMutationCounter spawn
+    self assert: (c conditionalDecrement: false) equals: -1
+    self assert: c getCount equals: -1
 
   testIfFalseWithTrueFlag =>
     // Verify flag=true leaves state unchanged
-    c := ConditionalMutationCounter spawn.
-    result := c conditionalDecrement: true.
-    self assert: result equals: 0.
-    self assert: (c getCount) equals: 0
+    c := ConditionalMutationCounter spawn
+    result := c conditionalDecrement: true
+    self assert: result equals: 0
+    self assert: c getCount equals: 0
 
   testIfTrueIfFalseWithTrueFlag =>
     // Verify true branch of ifTrue:ifFalse: is taken
-    c := ConditionalMutationCounter spawn.
-    result := c conditionalToggle: true.
-    self assert: result equals: 10.
-    self assert: (c getCount) equals: 10
+    c := ConditionalMutationCounter spawn
+    result := c conditionalToggle: true
+    self assert: result equals: 10
+    self assert: c getCount equals: 10
 
   testIfTrueIfFalseWithFalseFlag =>
     // Verify false branch of ifTrue:ifFalse: is taken
-    c := ConditionalMutationCounter spawn.
-    result := c conditionalToggle: false.
-    self assert: result equals: -1.
-    self assert: (c getCount) equals: -1
+    c := ConditionalMutationCounter spawn
+    result := c conditionalToggle: false
+    self assert: result equals: -1
+    self assert: c getCount equals: -1
 
   testStatePersistedAcrossCalls =>
     // Verify state accumulates across multiple conditional calls
-    c := ConditionalMutationCounter spawn.
-    c conditionalIncrement: true.
-    c conditionalIncrement: true.
-    c conditionalIncrement: false.
-    self assert: (c getCount) equals: 2
+    c := ConditionalMutationCounter spawn
+    c conditionalIncrement: true; conditionalIncrement: true; conditionalIncrement: false
+    self assert: c getCount equals: 2
 
   testSequentialConditionals =>
     // Verify two sequential conditionals in one method both thread state
-    c := ConditionalMutationCounter spawn.
+    c := ConditionalMutationCounter spawn
     // a=true, b=true => count = 0 + 1 + 10 = 11
-    self assert: (c doubleConditional: true and: true) equals: 11.
-    c reset.
+    self assert: (c doubleConditional: true and: true) equals: 11
+    c reset
     // a=true, b=false => count = 0 + 1 = 1
-    self assert: (c doubleConditional: true and: false) equals: 1.
-    c reset.
+    self assert: (c doubleConditional: true and: false) equals: 1
+    c reset
     // a=false, b=true => count = 0 + 10 = 10
-    self assert: (c doubleConditional: false and: true) equals: 10.
-    c reset.
+    self assert: (c doubleConditional: false and: true) equals: 10
+    c reset
     // a=false, b=false => count = 0
     self assert: (c doubleConditional: false and: false) equals: 0
 
   testNestedConditionals =>
     // Verify nested ifTrue: with mutations threads state correctly
-    c := ConditionalMutationCounter spawn.
+    c := ConditionalMutationCounter spawn
     // outer=true, inner=true => count = 0 + 100 = 100
-    self assert: (c nestedConditional: true and: true) equals: 100.
-    c reset.
+    self assert: (c nestedConditional: true and: true) equals: 100
+    c reset
     // outer=true, inner=false => count = 0 (inner not taken)
-    self assert: (c nestedConditional: true and: false) equals: 0.
-    c reset.
+    self assert: (c nestedConditional: true and: false) equals: 0
+    c reset
     // outer=false => count = 0 (outer not taken)
     self assert: (c nestedConditional: false and: true) equals: 0
 
   testConditionalAsLastExpression =>
     // Verify conditional as the last expression in a method
-    c := ConditionalMutationCounter spawn.
+    c := ConditionalMutationCounter spawn
     // flag=true returns the assigned value (5) and mutates state
-    result := c conditionalLast: true.
-    self assert: result equals: 5.
-    self assert: (c getCount) equals: 5.
-    c reset.
+    result := c conditionalLast: true
+    self assert: result equals: 5
+    self assert: c getCount equals: 5
+    c reset
     // flag=false returns nil and leaves state unchanged
-    result2 := c conditionalLast: false.
-    self assert: result2 equals: nil.
-    self assert: (c getCount) equals: 0
+    result2 := c conditionalLast: false
+    self assert: result2 equals: nil
+    self assert: c getCount equals: 0
 

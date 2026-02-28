@@ -3,59 +3,59 @@
 
 // ADR 0014 Phase 2: Tests the TestCase framework itself — setUp/tearDown
 // lifecycle, assert:/deny:/assert:equals: pass cases, and that multiple
-// instances can be independently created and used.
+// instances can be independently created and used
 
 TestCase subclass: TestCaseAssertionTest
 
   testLifecycleAndBasicAssertions =>
-    testCase := TestCase new.
-    self assert: (testCase setUp) equals: nil.
-    self assert: (testCase tearDown) equals: nil.
+    testCase := TestCase new
+    self assert: testCase setUp equals: nil
+    self assert: testCase tearDown equals: nil
     // Test assert: with true condition
-    self assert: (TestCase new assert: true) equals: nil.
+    self assert: (TestCase new assert: true) equals: nil
     // Test assert:equals: with matching values
-    self assert: (TestCase new assert: 3 equals: 3) equals: nil.
-    self assert: (TestCase new assert: "hello" equals: "hello") equals: nil.
-    self assert: (TestCase new assert: true equals: true) equals: nil.
-    self assert: (TestCase new assert: false equals: false) equals: nil.
+    self assert: (TestCase new assert: 3 equals: 3) equals: nil
+    self assert: (TestCase new assert: "hello" equals: "hello") equals: nil
+    self assert: (TestCase new assert: true equals: true) equals: nil
+    self assert: (TestCase new assert: false equals: false) equals: nil
     // Test assert:equals: with integers
-    self assert: (TestCase new assert: 42 equals: 42) equals: nil.
-    self assert: (TestCase new assert: 0 equals: 0) equals: nil.
+    self assert: (TestCase new assert: 42 equals: 42) equals: nil
+    self assert: (TestCase new assert: 0 equals: 0) equals: nil
     // Test assert:equals: with negative numbers
-    self assert: (TestCase new assert: -5 equals: -5) equals: nil.
+    self assert: (TestCase new assert: -5 equals: -5) equals: nil
     // Test deny: with false condition
-    self assert: (TestCase new deny: false) equals: nil.
+    self assert: (TestCase new deny: false) equals: nil
     // Test that TestCase is a proper Object subclass
-    self assert: (TestCase superclass) equals: Object.
-    testInstance := TestCase new.
-    self assert: (testInstance class) equals: TestCase.
+    self assert: TestCase superclass equals: Object
+    testInstance := TestCase new
+    self assert: testInstance class equals: TestCase
     // Test that multiple instances can be created
-    tc2 := TestCase new.
-    self assert: (tc2 class) equals: TestCase.
+    tc2 := TestCase new
+    self assert: tc2 class equals: TestCase
     // Test lifecycle methods can be called on different instances
-    tc3 := TestCase new.
-    self assert: (tc3 setUp) equals: nil.
-    self assert: (tc3 tearDown) equals: nil
+    tc3 := TestCase new
+    self assert: tc3 setUp equals: nil
+    self assert: tc3 tearDown equals: nil
 
   testAssertionFailureTests =>
     // Test assert: with false condition — should raise assertion_failed
-    self should: [TestCase new assert: false] raise: #assertion_failed.
+    self should: [TestCase new assert: false] raise: #assertion_failed
     // Test assert:equals: with unequal values
-    self should: [TestCase new assert: 3 equals: 4] raise: #assertion_failed.
+    self should: [TestCase new assert: 3 equals: 4] raise: #assertion_failed
     // Test assert:equals: with different types
-    self should: [TestCase new assert: "hello" equals: 42] raise: #assertion_failed.
+    self should: [TestCase new assert: "hello" equals: 42] raise: #assertion_failed
     // Test deny: with true condition — should raise assertion_failed
-    self should: [TestCase new deny: true] raise: #assertion_failed.
+    self should: [TestCase new deny: true] raise: #assertion_failed
     // Test fail: unconditional failure
     self should: [TestCase new fail: "this test should fail"] raise: #assertion_failed
 
   testShouldRaiseTests =>
     // Test should:raise: with matching error kind
-    self assert: (TestCase new should: [1 / 0] raise: #badarith) equals: nil.
+    self assert: (TestCase new should: [1 / 0] raise: #badarith) equals: nil
     // Test should:raise: with does_not_understand error
     @expect dnu
-    self assert: (TestCase new should: [42 nonExistentMethod] raise: #does_not_understand) equals: nil.
+    self assert: (TestCase new should: [42 nonExistentMethod] raise: #does_not_understand) equals: nil
     // Test should:raise: block completes normally (no error raised)
-    self should: [TestCase new should: [42] raise: #does_not_understand] raise: #assertion_failed.
+    self should: [TestCase new should: [42] raise: #does_not_understand] raise: #assertion_failed
     // Test should:raise: with wrong error kind (mismatch)
     self should: [TestCase new should: [1 / 0] raise: #does_not_understand] raise: #assertion_failed

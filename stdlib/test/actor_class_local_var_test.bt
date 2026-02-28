@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-741: Tests that Actor class methods can use local variables (arithmetic,
-// block literals, dictionaries) without referencing actor State fields.
+// block literals, dictionaries) without referencing actor State fields
 
 
 TestCase subclass: ActorClassLocalVarTest
 
   testClassMethodsWithLocalVariables =>
-    self assert: (ActorClassLocalVar buildDict) equals: #{#key => 42}.
+    self assert: ActorClassLocalVar buildDict equals: #{#key => 42}
     // BT-741: Class method with arithmetic on local variables
-    self assert: (ActorClassLocalVar computeSum) equals: 30.
+    self assert: ActorClassLocalVar computeSum equals: 30
     // BT-741: Class method with block literal as local variable
-    self assert: (ActorClassLocalVar applyBlock) equals: 42
+    self assert: ActorClassLocalVar applyBlock equals: 42

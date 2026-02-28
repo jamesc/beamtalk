@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // E2E tests for exception handling (BT-338)
-// Tests Block on:do:, ensure:, and Exception object inspection.
+// Tests Block on:do:, ensure:, and Exception object inspection
 
 // ===========================================================================
 // BLOCK on:do: — BASIC EXCEPTION CATCHING

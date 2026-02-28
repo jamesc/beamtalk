@@ -5,42 +5,42 @@
 // with sync-by-default dispatch. Actor method calls return values directly
 // (via gen_server:call), so binary ops (+, ==, <, >, etc.) receive the
 // resolved value, not a Future. The codegen wraps operands with
-// beamtalk_future:maybe_await/1 for backward compatibility during migration.
+// beamtalk_future:maybe_await/1 for backward compatibility during migration
 
 
 TestCase subclass: FutureAutoAwaitTest
 
   // Equality: actor method result used in == comparison
   testEqualityWithActorMethod =>
-    a := ActorChainingFixture spawn.
+    a := ActorChainingFixture spawn
     self assert: (a getValue == 0) equals: true
 
   // Arithmetic: actor method result used in + operation
   testArithmeticAddWithActorMethod =>
-    a := ActorChainingFixture spawn.
+    a := ActorChainingFixture spawn
     self assert: (a getValue + 1) equals: 1
 
   // Comparison: actor method result used in > comparison
   testGreaterThanWithActorMethod =>
-    a := ActorChainingFixture spawn.
-    a increment.
+    a := ActorChainingFixture spawn
+    a increment
     self assert: (a getValue > 0) equals: true
 
   // Comparison: actor method result used in < comparison
   testLessThanWithActorMethod =>
-    a := ActorChainingFixture spawn.
+    a := ActorChainingFixture spawn
     self assert: (a getValue < 10) equals: true
 
   // Arithmetic: actor method result used in * operation
   testArithmeticAfterIncrement =>
-    a := ActorChainingFixture spawn.
-    a increment.
-    a increment.
+    a := ActorChainingFixture spawn
+    a increment
+    a increment
     self assert: (a getValue * 3) equals: 6
 
   // Both operands are actor method results
   testBothOperandsAreActorResults =>
-    a := ActorChainingFixture spawn.
-    b := ActorChainingFixture spawn.
-    a increment.
+    a := ActorChainingFixture spawn
+    b := ActorChainingFixture spawn
+    a increment
     self assert: (a getValue + b getValue) equals: 1

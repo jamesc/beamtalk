@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // ADR 0014 Phase 2: Tests basic arithmetic operations — addition, subtraction,
-// negation, equality, and denial — as a canonical BUnit TestCase example.
+// negation, equality, and denial — as a canonical BUnit TestCase example
 
 TestCase subclass: ArithmeticTest
 

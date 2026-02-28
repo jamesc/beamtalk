@@ -3,17 +3,17 @@
 
 // BT-743: Tests that string literals correctly parse doubled double-quote
 // characters as a single embedded quote — single, middle, multiple, and
-// adjacent embedded quotes.
+// adjacent embedded quotes
 
 TestCase subclass: StringQuoteEscapeTest
 
   testDoubleQuoteEscaping =>
-    self assert: """" equals: """".
+    self assert: """" equals: """"
     // Size of a 1-char string containing `"`
-    self assert: ("""" size) equals: 1.
+    self assert: """" size equals: 1
     // Embedded quotes in the middle of a string
-    self assert: "say ""hello"" please" equals: "say ""hello"" please".
+    self assert: "say ""hello"" please" equals: "say ""hello"" please"
     // Multiple embedded quotes
-    self assert: "one "" two "" three" equals: "one "" two "" three".
+    self assert: "one "" two "" three" equals: "one "" two "" three"
     // String containing two double-quotes
     self assert: """""" equals: """"""

@@ -2,20 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-524: Tests that the is_list guard in mutation-threading codegen works
-// correctly when actor methods iterate over List, Set, and Dictionary arguments.
+// correctly when actor methods iterate over List, Set, and Dictionary arguments
 
 
 TestCase subclass: CollectionMutationsTest
 
   testActorMutatingCollections =>
-    counter := CollectionMutationCounter spawn.
-    self assert: (counter getTotal) equals: 0.
-    self assert: (counter sumSet: #(1, 2, 3)) equals: 6.
-    self assert: (counter getTotal) equals: 6.
-    counter2 := CollectionMutationCounter spawn.
-    s := (Set new) fromList: #(1, 2, 3).
-    self assert: (counter2 sumSet: s) equals: 6.
-    self assert: (counter2 getTotal) equals: 6.
-    counter3 := CollectionMutationCounter spawn.
-    self assert: (counter3 sumDictValues: (Dictionary new: #{#a => 10, #b => 20, #c => 30})) equals: 60.
-    self assert: (counter3 getTotal) equals: 60
+    counter := CollectionMutationCounter spawn
+    self assert: counter getTotal equals: 0
+    self assert: (counter sumSet: #(1, 2, 3)) equals: 6
+    self assert: counter getTotal equals: 6
+    counter2 := CollectionMutationCounter spawn
+    s := (Set new) fromList: #(1, 2, 3)
+    self assert: (counter2 sumSet: s) equals: 6
+    self assert: counter2 getTotal equals: 6
+    counter3 := CollectionMutationCounter spawn
+    self assert: (counter3 sumDictValues: (Dictionary new: #{#a => 10, #b => 20, #c => 30})) equals: 60
+    self assert: counter3 getTotal equals: 60

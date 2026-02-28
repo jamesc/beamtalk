@@ -6,62 +6,62 @@
 TestCase subclass: CustomExceptionsTest
 
   testSignalFromCustomErrorRaisesWithCorrectClass =>
-    result := [MyCustomError new signal: "oops"] on: Exception do: [:e | e class].
+    result := [MyCustomError new signal: "oops"] on: Exception do: [:e | e class]
     self assert: result equals: MyCustomError
 
   testSignalNoArgsOnCustomErrorRaisesWithClassName =>
-    result := [MyCustomError new signal] on: Exception do: [:e | e class].
+    result := [MyCustomError new signal] on: Exception do: [:e | e class]
     self assert: result equals: MyCustomError
 
   testSignalNoArgsMessageIsClassName =>
-    result := [MyCustomError new signal] on: Exception do: [:e | e message].
+    result := [MyCustomError new signal] on: Exception do: [:e | e message]
     self assert: result equals: "MyCustomError"
 
   testSignalPreservesMessage =>
-    result := [MyCustomError new signal: "custom message"] on: Exception do: [:e | e message].
+    result := [MyCustomError new signal: "custom message"] on: Exception do: [:e | e message]
     self assert: result equals: "custom message"
 
   testSignalPreservesKind =>
-    result := [MyCustomError new signal: "test"] on: Exception do: [:e | e kind].
+    result := [MyCustomError new signal: "test"] on: Exception do: [:e | e kind]
     self assert: result equals: #signal
 
   testCatchByExactClass =>
     // on: MyCustomError do: catches MyCustomError
-    result := [MyCustomError new signal: "caught"] on: MyCustomError do: [:e | e message].
+    result := [MyCustomError new signal: "caught"] on: MyCustomError do: [:e | e message]
     self assert: result equals: "caught"
 
   testCatchByParentClass =>
     // on: Error do: catches MyCustomError (Error is superclass)
-    result := [MyCustomError new signal: "err"] on: Error do: [:e | "caught by Error"].
+    result := [MyCustomError new signal: "err"] on: Error do: [:e | "caught by Error"]
     self assert: result equals: "caught by Error"
 
   testCatchByRootException =>
     // on: Exception do: catches MyCustomError (Exception is root)
-    result := [MyCustomError new signal: "exc"] on: Exception do: [:e | "caught by Exception"].
+    result := [MyCustomError new signal: "exc"] on: Exception do: [:e | "caught by Exception"]
     self assert: result equals: "caught by Exception"
 
   testNonMatchingClassTypeError =>
     // on: TypeError do: does NOT catch MyCustomError
-    result := [[MyCustomError new signal: "no"] on: TypeError do: [:e | "wrong"]] on: Exception do: [:e | "correct"].
+    result := [[MyCustomError new signal: "no"] on: TypeError do: [:e | "wrong"]] on: Exception do: [:e | "correct"]
     self assert: result equals: "correct"
 
   testNonMatchingClassRuntimeError =>
     // on: RuntimeError do: does NOT catch MyCustomError
-    result := [[MyCustomError new signal: "no"] on: RuntimeError do: [:e | "wrong"]] on: Exception do: [:e | "correct"].
+    result := [[MyCustomError new signal: "no"] on: RuntimeError do: [:e | "wrong"]] on: Exception do: [:e | "correct"]
     self assert: result equals: "correct"
 
   testBuiltInDoesNotUnderstandStillWorks =>
     // Built-in does_not_understand still maps to RuntimeError
     @expect dnu
-    result := [42 noSuchMethod] on: RuntimeError do: [:e | e class].
+    result := [42 noSuchMethod] on: RuntimeError do: [:e | e class]
     self assert: result equals: RuntimeError
 
   testBuiltInDivisionByZero =>
     // Built-in division by zero raises an exception
-    result := [1 / 0] on: Exception do: [:e | "caught"].
+    result := [1 / 0] on: Exception do: [:e | "caught"]
     self assert: result equals: "caught"
 
   testReSignalingCaughtCustomException =>
     // Re-signaling a caught custom exception preserves its class
-    result := [[MyCustomError new signal: "re-test"] on: MyCustomError do: [:e | e signal: "forwarded"]] on: MyCustomError do: [:e | e message].
+    result := [[MyCustomError new signal: "re-test"] on: MyCustomError do: [:e | e signal: "forwarded"]] on: MyCustomError do: [:e | e message]
     self assert: result equals: "forwarded"

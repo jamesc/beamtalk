@@ -2,67 +2,67 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-815: Tests that a user-defined Collection subclass (implementing only
-// do: and size) correctly inherits the abstract Collection protocol.
+// do: and size) correctly inherits the abstract Collection protocol
 
 TestCase subclass: CustomCollectionTest
 
   testInheritedInjectInto =>
-    col := NumberList new: #{#items => #(1, 2, 3)}.
-    self assert: (col inject: 0 into: [:sum :x | sum + x]) equals: 6.
-    // Non-commutative: verifies block arg order is (accumulator, element).
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    self assert: (col inject: 0 into: [:sum :x | sum + x]) equals: 6
+    // Non-commutative: verifies block arg order is (accumulator, element)
     self assert: (col inject: #() into: [:acc :x | acc addFirst: x]) equals: #(3, 2, 1)
 
   testInheritedCollect =>
-    col := NumberList new: #{#items => #(1, 2, 3)}.
+    col := NumberList new: #{#items => #(1, 2, 3)}
     self assert: (col collect: [:x | x * 2]) equals: #(2, 4, 6)
 
   testInheritedSelect =>
-    col := NumberList new: #{#items => #(1, 2, 3, 4)}.
+    col := NumberList new: #{#items => #(1, 2, 3, 4)}
     self assert: (col select: [:x | x > 2]) equals: #(3, 4)
 
   testInheritedReject =>
-    col := NumberList new: #{#items => #(1, 2, 3, 4)}.
+    col := NumberList new: #{#items => #(1, 2, 3, 4)}
     self assert: (col reject: [:x | x > 2]) equals: #(1, 2)
 
   testInheritedIncludes =>
-    col := NumberList new: #{#items => #(1, 2, 3)}.
-    self assert: (col includes: 2).
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    self assert: (col includes: 2)
     self deny: (col includes: 9)
 
   testInheritedIsEmpty =>
-    empty := NumberList new: #{#items => #()}.
-    self assert: empty isEmpty.
-    self deny: empty isNotEmpty.
-    col := NumberList new: #{#items => #(1)}.
-    self deny: col isEmpty.
+    empty := NumberList new: #{#items => #()}
+    self assert: empty isEmpty
+    self deny: empty isNotEmpty
+    col := NumberList new: #{#items => #(1)}
+    self deny: col isEmpty
     self assert: col isNotEmpty
 
   testInheritedDetect =>
-    col := NumberList new: #{#items => #(1, 2, 3)}.
+    col := NumberList new: #{#items => #(1, 2, 3)}
     self assert: (col detect: [:x | x > 1]) equals: 2
 
   testInheritedDetectIfNone =>
-    col := NumberList new: #{#items => #(1, 2, 3)}.
+    col := NumberList new: #{#items => #(1, 2, 3)}
     self assert: (col detect: [:x | x > 10] ifNone: [0]) equals: 0
 
   testInheritedAnySatisfy =>
-    col := NumberList new: #{#items => #(1, 2, 3)}.
-    self assert: (col anySatisfy: [:x | x > 2]).
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    self assert: (col anySatisfy: [:x | x > 2])
     self deny: (col anySatisfy: [:x | x > 5])
 
   testInheritedAllSatisfy =>
-    col := NumberList new: #{#items => #(1, 2, 3)}.
-    self assert: (col allSatisfy: [:x | x > 0]).
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    self assert: (col allSatisfy: [:x | x > 0])
     self deny: (col allSatisfy: [:x | x > 1])
 
   testEmptyCollectionEdgeCases =>
-    empty := NumberList new: #{#items => #()}.
-    self assert: (empty inject: 0 into: [:acc :x | acc + x]) equals: 0.
-    self assert: (empty collect: [:x | x * 2]) equals: #().
-    self assert: (empty select: [:x | x > 0]) equals: #().
-    self assert: (empty reject: [:x | x > 0]) equals: #().
-    self deny: (empty includes: 1).
-    self assert: (empty detect: [:x | x > 0]) equals: nil.
-    self assert: (empty detect: [:x | x > 0] ifNone: [42]) equals: 42.
-    self deny: (empty anySatisfy: [:x | x > 0]).
+    empty := NumberList new: #{#items => #()}
+    self assert: (empty inject: 0 into: [:acc :x | acc + x]) equals: 0
+    self assert: (empty collect: [:x | x * 2]) equals: #()
+    self assert: (empty select: [:x | x > 0]) equals: #()
+    self assert: (empty reject: [:x | x > 0]) equals: #()
+    self deny: (empty includes: 1)
+    self assert: (empty detect: [:x | x > 0]) equals: nil
+    self assert: (empty detect: [:x | x > 0] ifNone: [42]) equals: 42
+    self deny: (empty anySatisfy: [:x | x > 0])
     self assert: (empty allSatisfy: [:x | x > 0])

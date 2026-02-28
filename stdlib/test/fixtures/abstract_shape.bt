@@ -10,4 +10,4 @@ abstract Actor subclass: Shape
   // Abstract method — subclasses must override
   area => self subclassResponsibility
 
-  getName => ^self.name
+  getName => self.name

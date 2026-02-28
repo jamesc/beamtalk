@@ -3,7 +3,7 @@
 
 // BT-926: Comprehensive BUnit tests for Value subclass: construction forms,
 // with*: functional setters, immutability enforcement, value equality,
-// and value objects in collections.
+// and value objects in collections
 //
 // Fixture: stdlib/test/fixtures/value_point.bt (ValuePoint — x, y slots)
 //
@@ -20,31 +20,31 @@ TestCase subclass: ValueObjectTest
 
   // new — default-initialises all slots to their declared defaults
   testNewDefaultValues =>
-    p := ValuePoint new.
-    self assert: p x equals: 0.
+    p := ValuePoint new
+    self assert: p x equals: 0
     self assert: p y equals: 0
 
   // new: — initialises from a map; missing keys keep defaults
   testNewWithMap =>
-    p := ValuePoint new: #{#x => 5, #y => 10}.
-    self assert: p x equals: 5.
+    p := ValuePoint new: #{#x => 5, #y => 10}
+    self assert: p x equals: 5
     self assert: p y equals: 10
 
   testNewWithPartialMap =>
-    p := ValuePoint new: #{#x => 7}.
-    self assert: p x equals: 7.
+    p := ValuePoint new: #{#x => 7}
+    self assert: p x equals: 7
     // y keeps its declared default
     self assert: p y equals: 0
 
   // Keyword constructor — auto-generated from slot names
   testKeywordConstructor =>
-    p := ValuePoint x: 3 y: 4.
-    self assert: p x equals: 3.
+    p := ValuePoint x: 3 y: 4
+    self assert: p x equals: 3
     self assert: p y equals: 4
 
   testKeywordConstructorZeroValues =>
-    p := ValuePoint x: 0 y: 0.
-    self assert: p x equals: 0.
+    p := ValuePoint x: 0 y: 0
+    self assert: p x equals: 0
     self assert: p y equals: 0
 
   // =========================================================================
@@ -53,42 +53,42 @@ TestCase subclass: ValueObjectTest
 
   // with*: returns a new instance with one field changed
   testWithXReturnsNewInstance =>
-    p := ValuePoint x: 1 y: 2.
-    p2 := p withX: 99.
-    self assert: p2 x equals: 99.
+    p := ValuePoint x: 1 y: 2
+    p2 := p withX: 99
+    self assert: p2 x equals: 99
     // y is preserved from the original
     self assert: p2 y equals: 2
 
   testWithYReturnsNewInstance =>
-    p := ValuePoint x: 1 y: 2.
-    p2 := p withY: 99.
+    p := ValuePoint x: 1 y: 2
+    p2 := p withY: 99
     // x is preserved from the original
-    self assert: p2 x equals: 1.
+    self assert: p2 x equals: 1
     self assert: p2 y equals: 99
 
   // Original object is unchanged after with*:
   testWithSetterDoesNotMutateOriginal =>
-    p := ValuePoint x: 10 y: 20.
-    p withX: 999.
-    self assert: p x equals: 10.
+    p := ValuePoint x: 10 y: 20
+    p withX: 999
+    self assert: p x equals: 10
     self assert: p y equals: 20
 
   // Chaining with*: calls produces cumulative result
   testChainedWithSetters =>
-    p := ValuePoint new.
-    p2 := (p withX: 5) withY: 7.
-    self assert: p2 x equals: 5.
+    p := ValuePoint new
+    p2 := (p withX: 5) withY: 7
+    self assert: p2 x equals: 5
     self assert: p2 y equals: 7
 
   // with*: preserves class identity
   testWithSetterPreservesClass =>
-    p := ValuePoint x: 1 y: 2.
-    p2 := p withX: 99.
+    p := ValuePoint x: 1 y: 2
+    p2 := p withX: 99
     self assert: p2 class equals: ValuePoint
 
   // User-defined methods coexist with auto-generated ones
   testUserDefinedMethodWithAutoGetters =>
-    p := ValuePoint x: 3 y: 4.
+    p := ValuePoint x: 3 y: 4
     self assert: p distanceSquared equals: 25
 
   // =========================================================================
@@ -97,11 +97,11 @@ TestCase subclass: ValueObjectTest
 
   // fieldAt:put: raises immutable_value — direct slot mutation is rejected
   testFieldAtPutRaisesImmutableValue =>
-    p := ValuePoint x: 1 y: 2.
+    p := ValuePoint x: 1 y: 2
     self should: [p fieldAt: #x put: 99] raise: #immutable_value
 
   testFieldAtPutRaisesForAnySlot =>
-    p := ValuePoint x: 0 y: 0.
+    p := ValuePoint x: 0 y: 0
     self should: [p fieldAt: #y put: 42] raise: #immutable_value
 
   // self.slot := is rejected at compile time (tested in E2E via @load-error)
@@ -112,35 +112,35 @@ TestCase subclass: ValueObjectTest
 
   // Two value objects with identical field values are equal (structural equality)
   testTwoPointsWithSameFieldsAreEqual =>
-    p1 := ValuePoint x: 3 y: 4.
-    p2 := ValuePoint x: 3 y: 4.
+    p1 := ValuePoint x: 3 y: 4
+    p2 := ValuePoint x: 3 y: 4
     self assert: (p1 == p2)
 
   // Two value objects with different field values are not equal
   testTwoPointsWithDifferentFieldsAreNotEqual =>
-    p1 := ValuePoint x: 1 y: 2.
-    p2 := ValuePoint x: 9 y: 9.
+    p1 := ValuePoint x: 1 y: 2
+    p2 := ValuePoint x: 9 y: 9
     self deny: (p1 == p2)
 
   // Inequality operator agrees with equality
   testInequalityOperator =>
-    p1 := ValuePoint x: 1 y: 2.
-    p2 := ValuePoint x: 1 y: 2.
-    p3 := ValuePoint x: 5 y: 6.
-    self deny: (p1 /= p2).
+    p1 := ValuePoint x: 1 y: 2
+    p2 := ValuePoint x: 1 y: 2
+    p3 := ValuePoint x: 5 y: 6
+    self deny: (p1 /= p2)
     self assert: (p1 /= p3)
 
   // with*: result equals a fresh object with the same values
   testWithSetterResultEqualsManualConstruct =>
-    p := ValuePoint x: 1 y: 2.
-    p2 := p withX: 10.
-    p3 := ValuePoint x: 10 y: 2.
+    p := ValuePoint x: 1 y: 2
+    p2 := p withX: 10
+    p3 := ValuePoint x: 10 y: 2
     self assert: (p2 == p3)
 
   // Default (new) equals keyword constructor with zeros
   testNewEqualsKeywordConstructorWithDefaults =>
-    p1 := ValuePoint new.
-    p2 := ValuePoint x: 0 y: 0.
+    p1 := ValuePoint new
+    p2 := ValuePoint x: 0 y: 0
     self assert: (p1 == p2)
 
   // =========================================================================
@@ -149,38 +149,38 @@ TestCase subclass: ValueObjectTest
 
   // collect: transforms a collection of value objects
   testCollectOnValueObjects =>
-    points := #((ValuePoint x: 1 y: 1), (ValuePoint x: 2 y: 2), (ValuePoint x: 3 y: 3)).
-    xs := points collect: [:p | p x].
+    points := #((ValuePoint x: 1 y: 1), (ValuePoint x: 2 y: 2), (ValuePoint x: 3 y: 3))
+    xs := points collect: [:p | p x]
     self assert: xs equals: #(1, 2, 3)
 
   // collect: can produce new value objects from old ones
   testCollectProducesNewValueObjects =>
-    points := #((ValuePoint x: 1 y: 10), (ValuePoint x: 2 y: 20)).
-    doubled := points collect: [:p | p withX: p x * 2].
-    self assert: (doubled at: 1) x equals: 2.
+    points := #((ValuePoint x: 1 y: 10), (ValuePoint x: 2 y: 20))
+    doubled := points collect: [:p | p withX: p x * 2]
+    self assert: (doubled at: 1) x equals: 2
     self assert: (doubled at: 2) x equals: 4
 
   // select: filters a collection of value objects by a predicate
   testSelectOnValueObjects =>
-    points := #((ValuePoint x: 1 y: 1), (ValuePoint x: 5 y: 5), (ValuePoint x: 2 y: 2)).
-    big := points select: [:p | p x > 2].
-    self assert: big size equals: 1.
+    points := #((ValuePoint x: 1 y: 1), (ValuePoint x: 5 y: 5), (ValuePoint x: 2 y: 2))
+    big := points select: [:p | p x > 2]
+    self assert: big size equals: 1
     self assert: (big at: 1) x equals: 5
 
   // inject:into: folds over a collection of value objects
   testInjectIntoOnValueObjects =>
-    points := #((ValuePoint x: 1 y: 0), (ValuePoint x: 2 y: 0), (ValuePoint x: 3 y: 0)).
-    total := points inject: 0 into: [:sum :p | sum + p x].
+    points := #((ValuePoint x: 1 y: 0), (ValuePoint x: 2 y: 0), (ValuePoint x: 3 y: 0))
+    total := points inject: 0 into: [:sum :p | sum + p x]
     self assert: total equals: 6
 
   // Size of a collection of value objects
   testCollectionSizeWithValueObjects =>
-    points := #((ValuePoint x: 0 y: 0), (ValuePoint x: 1 y: 1)).
+    points := #((ValuePoint x: 0 y: 0), (ValuePoint x: 1 y: 1))
     self assert: points size equals: 2
 
   // Value objects can be used as elements in detect:
   testDetectOnValueObjects =>
-    points := #((ValuePoint x: 1 y: 1), (ValuePoint x: 7 y: 3), (ValuePoint x: 2 y: 2)).
-    found := points detect: [:p | p x == 7].
-    self assert: found x equals: 7.
+    points := #((ValuePoint x: 1 y: 1), (ValuePoint x: 7 y: 3), (ValuePoint x: 2 y: 2))
+    found := points detect: [:p | p x == 7]
+    self assert: found x equals: 7
     self assert: found y equals: 3

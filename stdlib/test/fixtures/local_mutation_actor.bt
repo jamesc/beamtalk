@@ -7,72 +7,72 @@
 Actor subclass: LocalMutationActor
   state: log = 0
 
-  getLog => ^self.log
+  getLog => self.log
 
   // Local mutation in do: (lists:foldl path)
   sumWithDo: items =>
-    total := 0.
+    total := 0
     items do: [:item |
       total := total + item
-    ].
-    ^total
+    ]
+    total
 
   // Local mutation in inject:into:
   sumWithInject: items =>
-    count := 0.
+    count := 0
     result := items inject: 0 into: [:acc :item |
-      count := count + 1.
+      count := count + 1
       acc + item
-    ].
-    ^#{#result => result, #count => count}
+    ]
+    #{#result => result, #count => count}
 
   // Local mutation in timesRepeat:
   countToN: n =>
-    counter := 0.
+    counter := 0
     n timesRepeat: [
       counter := counter + 1
-    ].
-    ^counter
+    ]
+    counter
 
   // Local mutation in to:do:
   sumRange: n =>
-    total := 0.
+    total := 0
     1 to: n do: [:i |
       total := total + i
-    ].
-    ^total
+    ]
+    total
 
   // Local mutation in whileTrue:
   countDownFrom: n =>
-    counter := n.
-    steps := 0.
+    counter := n
+    steps := 0
     [counter > 0] whileTrue: [
-      counter := counter - 1.
+      counter := counter - 1
       steps := steps + 1
-    ].
-    ^steps
+    ]
+    steps
 
   // Local mutation in whileFalse:
   countUpWithWhileFalseFrom: n =>
-    counter := 0.
+    counter := 0
     [counter >= n] whileFalse: [
       counter := counter + 1
-    ].
-    ^counter
+    ]
+    counter
 
   // Local mutation in to:by:do:
   sumEvens: n =>
-    total := 0.
+    total := 0
     2 to: n by: 2 do: [:i |
       total := total + i
-    ].
-    ^total
+    ]
+    total
 
   // Mixed local + field mutation
   processWithTracking: items =>
-    localCount := 0.
+    localCount := 0
     items do: [:item |
-      localCount := localCount + 1.
+      localCount := localCount + 1
       self.log := self.log + item
-    ].
-    ^#{#localCount => localCount, #log => self.log}
+    ]
+    #{#localCount => localCount, #log => self.log}

@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Bootstrap-level smoke tests for the Array type (BT-822).
-// Tests literal syntax, basic access, and core operations.
+// Bootstrap-level smoke tests for the Array type (BT-822)
+// Tests literal syntax, basic access, and core operations
 
 // ===========================================================================
 // ARRAY LITERALS

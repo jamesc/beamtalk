@@ -7,32 +7,32 @@
 TestCase subclass: CompiledMethodTest
 
   testMethodLookup =>
-    self assert: (Counter >> #getValue) notNil.
+    self assert: (Counter >> #getValue) notNil
     self assert: (Counter >> #nonExistent) equals: nil
 
   testMethodLookupOnVariableReceivers =>
-    cls := Counter.
-    self assert: cls equals: Counter.
-    self assert: (cls >> #getValue) notNil.
-    self assert: ((cls >> #getValue) selector) equals: #getValue.
+    cls := Counter
+    self assert: cls equals: Counter
+    self assert: (cls >> #getValue) notNil
+    self assert: (cls >> #getValue) selector equals: #getValue
     self assert: (cls >> #nonExistent) equals: nil
 
   testClass =>
-    self assert: ((Counter >> #getValue) class) equals: CompiledMethod
+    self assert: (Counter >> #getValue) class equals: CompiledMethod
 
   testSelector =>
-    self assert: ((Counter >> #getValue) selector) equals: #getValue.
-    self assert: ((Counter >> #increment) selector) equals: #increment
+    self assert: (Counter >> #getValue) selector equals: #getValue
+    self assert: (Counter >> #increment) selector equals: #increment
 
   testArgumentCount =>
-    self assert: ((Counter >> #getValue) argumentCount) equals: 0.
-    self assert: ((Counter >> #increment) argumentCount) equals: 0
+    self assert: (Counter >> #getValue) argumentCount equals: 0
+    self assert: (Counter >> #increment) argumentCount equals: 0
 
   testSource =>
-    self assert: ((Counter >> #getValue) source) equals: "getValue => ^self.value"
+    self assert: (Counter >> #getValue) source equals: "getValue => self.value"
 
   testPrintString =>
-    self assert: ((Counter >> #getValue) printString) equals: "a CompiledMethod(getValue)"
+    self assert: (Counter >> #getValue) printString equals: "a CompiledMethod(getValue)"
 
   testLookupOnNonClass =>
     // >> on non-class value produces type_error
@@ -40,4 +40,4 @@ TestCase subclass: CompiledMethodTest
     self should: [42 >> #foo] raise: #type_error
 
   testAsString =>
-    self assert: ((Counter >> #getValue) asString) equals: "a CompiledMethod(getValue)"
+    self assert: (Counter >> #getValue) asString equals: "a CompiledMethod(getValue)"

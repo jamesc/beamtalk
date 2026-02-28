@@ -8,12 +8,12 @@ Actor subclass: SelfRefActor
   state: value = 0
 
   // Returns self (the actor's object reference)
-  returnSelf => ^self
+  returnSelf => self
 
   // Returns self's class from inside a block
-  classInBlock => ^[self class] value
+  classInBlock => [self class] value
 
   // Keyword message setter
   setValue: v => self.value := v
 
-  getValue => ^self.value
+  getValue => self.value

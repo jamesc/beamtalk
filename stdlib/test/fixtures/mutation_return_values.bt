@@ -3,19 +3,19 @@
 
 // BT-483: Tests that mutation-threaded control flow returns {Result, State}
 // When control flow is the last expression in a method, the method should
-// return the Result part of the tuple, not nil.
+// return the Result part of the tuple, not nil
 
 Actor subclass: MutationReturnValues
   state: value = 0
 
-  getValue => ^self.value
+  getValue => self.value
   setValue: v => self.value := v
 
   // inject:into: should return the accumulator result
   // Block receives (accumulator, element) matching Beamtalk convention (BT-820)
   sumViaInject: items =>
     items inject: 0 into: [:acc :elem |
-      self.value := self.value + elem.
+      self.value := self.value + elem
       acc + elem
     ]
 
@@ -26,7 +26,7 @@ Actor subclass: MutationReturnValues
   // on:do: should return the handler result on exception
   failingAdd =>
     [self.value := self.value + (1 / 0). self.value] on: Exception do: [:e |
-      self.value := self.value + 100.
+      self.value := self.value + 100
       -999
     ]
 

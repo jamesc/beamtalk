@@ -1,9 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// DeadlockA fixture for actor_deadlock_test.bt.
+// DeadlockA fixture for actor_deadlock_test.bt
 // When callPeer is called, it synchronously calls respondToA: on DeadlockB,
-// which calls back callPeer on this actor — creating a circular deadlock.
+// which calls back callPeer on this actor — creating a circular deadlock
 
 Actor subclass: DeadlockA
   state: peer = nil

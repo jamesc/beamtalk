@@ -8,57 +8,57 @@ TestCase subclass: ClassHierarchyQueryTest
 
   testNumberSubclasses =>
     // Number has Integer and Float as direct subclasses
-    numSubs := Number subclasses.
-    self assert: (numSubs includes: Integer).
+    numSubs := Number subclasses
+    self assert: (numSubs includes: Integer)
     self assert: (numSubs includes: Float)
 
   testBooleanSubclasses =>
     // Boolean has True and False as direct subclasses
-    boolSubs := Boolean subclasses.
-    self assert: (boolSubs includes: True).
+    boolSubs := Boolean subclasses
+    self assert: (boolSubs includes: True)
     self assert: (boolSubs includes: False)
 
   testFloatIsSealed =>
     // Float is sealed — always a leaf
-    self assert: (Float subclasses isEmpty).
-    self assert: (True subclasses isEmpty)
+    self assert: Float subclasses isEmpty
+    self assert: True subclasses isEmpty
 
   testActorSubclassesNotEmpty =>
     // Actor should have some subclasses
-    actorSubs := Actor subclasses.
-    self deny: (actorSubs isEmpty)
+    actorSubs := Actor subclasses
+    self deny: actorSubs isEmpty
 
   testNumberAllSubclasses =>
     // Number allSubclasses includes Integer and Float
-    numAllSubs := Number allSubclasses.
-    self assert: (numAllSubs includes: Integer).
+    numAllSubs := Number allSubclasses
+    self assert: (numAllSubs includes: Integer)
     self assert: (numAllSubs includes: Float)
 
   testBooleanAllSubclasses =>
     // Boolean allSubclasses includes True and False
-    boolAllSubs := Boolean allSubclasses.
-    self assert: (boolAllSubs includes: True).
+    boolAllSubs := Boolean allSubclasses
+    self assert: (boolAllSubs includes: True)
     self assert: (boolAllSubs includes: False)
 
   testCollectionAllSubclasses =>
     // Collection allSubclasses includes List and Dictionary
-    collSubs := Collection allSubclasses.
-    self assert: (collSubs includes: List).
+    collSubs := Collection allSubclasses
+    self assert: (collSubs includes: List)
     self assert: (collSubs includes: Dictionary)
 
   testFloatAllSubclassesEmpty =>
     // Float is sealed — always a leaf, allSubclasses returns empty
-    self assert: (Float allSubclasses isEmpty)
+    self assert: Float allSubclasses isEmpty
 
   testClassOnPrimitives =>
     // class returns the class name for primitives
-    self assert: (42 class) equals: Integer.
-    self assert: ("hello" class) equals: String.
-    self assert: (true class) equals: True.
-    self assert: (nil class) equals: UndefinedObject.
-    self assert: (3.14 class) equals: Float
+    self assert: 42 class equals: Integer
+    self assert: "hello" class equals: String
+    self assert: true class equals: True
+    self assert: nil class equals: UndefinedObject
+    self assert: 3.14 class equals: Float
 
   testClassOnClassObject =>
     // class on a class object returns something
-    classObj := Integer class.
-    self assert: (classObj isNil) equals: false
+    classObj := Integer class
+    self assert: classObj isNil equals: false

@@ -6,80 +6,80 @@
 TestCase subclass: RegexTest
 
   testRegexConstruction =>
-    self assert: ((Regex from: "[0-9]+") class) equals: Regex.
+    self assert: (Regex from: "[0-9]+") class equals: Regex
     // Source returns the original pattern
-    self assert: ((Regex from: "[0-9]+") source) equals: "[0-9]+".
+    self assert: (Regex from: "[0-9]+") source equals: "[0-9]+"
     // Compile with options
-    self assert: ((Regex from: "[a-z]+" options: #(#caseless)) class) equals: Regex
+    self assert: (Regex from: "[a-z]+" options: #(#caseless)) class equals: Regex
 
   testStringMatchesregexWithStringPatterns =>
     // Simple digit match
-    self assert: ("hello123" matchesRegex: "[0-9]+").
+    self assert: ("hello123" matchesRegex: "[0-9]+")
     // Full string match fails
-    self deny: ("hello123" matchesRegex: "^[0-9]+$").
+    self deny: ("hello123" matchesRegex: "^[0-9]+$")
     // Full string match succeeds
-    self assert: ("12345" matchesRegex: "^[0-9]+$").
+    self assert: ("12345" matchesRegex: "^[0-9]+$")
     // Letters only
-    self assert: ("hello" matchesRegex: "^[a-z]+$").
+    self assert: ("hello" matchesRegex: "^[a-z]+$")
     // No match
     self deny: ("hello" matchesRegex: "[0-9]+")
 
   testStringMatchesregexWithCompiledRegexObjects =>
     // Match with compiled regex
-    self assert: ("hello123" matchesRegex: (Regex from: "[0-9]+")).
+    self assert: ("hello123" matchesRegex: (Regex from: "[0-9]+"))
     // No match with compiled regex
     self deny: ("hello" matchesRegex: (Regex from: "[0-9]+"))
 
   testStringMatchesregexOptions =>
     // Case-insensitive matching
-    self assert: ("Hello" matchesRegex: "^[a-z]+$" options: #(#caseless)).
+    self assert: ("Hello" matchesRegex: "^[a-z]+$" options: #(#caseless))
     // Without caseless, fails
     self deny: ("Hello" matchesRegex: "^[a-z]+$")
 
   testStringFirstmatch =>
     // First match returns the matched string
-    self assert: ("hello123world456" firstMatch: "[0-9]+") equals: "123".
+    self assert: ("hello123world456" firstMatch: "[0-9]+") equals: "123"
     // No match returns nil
-    self assert: ("hello" firstMatch: "[0-9]+") equals: nil.
+    self assert: ("hello" firstMatch: "[0-9]+") equals: nil
     // First match with compiled regex
     self assert: ("abc42def" firstMatch: (Regex from: "[0-9]+")) equals: "42"
 
   testStringAllmatches =>
     // All matches returns list of matched strings
-    self assert: ("a1b2c3" allMatches: "[0-9]+") equals: #("1", "2", "3").
+    self assert: ("a1b2c3" allMatches: "[0-9]+") equals: #("1", "2", "3")
     // No matches returns empty list
-    self assert: ("hello" allMatches: "[0-9]+") equals: #().
+    self assert: ("hello" allMatches: "[0-9]+") equals: #()
     // All matches with compiled regex
-    self assert: ("x10y20z30" allMatches: (Regex from: "[0-9]+")) equals: #("10", "20", "30").
+    self assert: ("x10y20z30" allMatches: (Regex from: "[0-9]+")) equals: #("10", "20", "30")
     // Single match returns single-element list
     self assert: ("abc123def" allMatches: "[0-9]+") equals: #("123")
 
   testStringReplaceregexWith =>
     // Replace first match
-    self assert: ("hello world" replaceRegex: "[aeiou]" with: "*") equals: "h*llo world".
+    self assert: ("hello world" replaceRegex: "[aeiou]" with: "*") equals: "h*llo world"
     // No match leaves string unchanged
-    self assert: ("hello" replaceRegex: "[0-9]+" with: "X") equals: "hello".
+    self assert: ("hello" replaceRegex: "[0-9]+" with: "X") equals: "hello"
     // Replace first match with compiled regex
     self assert: ("abc123def456" replaceRegex: (Regex from: "[0-9]+") with: "NUM") equals: "abcNUMdef456"
 
   testStringReplaceallregexWith =>
     // Replace all matches
-    self assert: ("hello world" replaceAllRegex: "[aeiou]" with: "*") equals: "h*ll* w*rld".
+    self assert: ("hello world" replaceAllRegex: "[aeiou]" with: "*") equals: "h*ll* w*rld"
     // No match leaves string unchanged
-    self assert: ("hello" replaceAllRegex: "[0-9]+" with: "X") equals: "hello".
+    self assert: ("hello" replaceAllRegex: "[0-9]+" with: "X") equals: "hello"
     // Replace all with compiled regex
     self assert: ("a1b2c3" replaceAllRegex: (Regex from: "[0-9]+") with: "N") equals: "aNbNcN"
 
   testStringSplitregex =>
     // Split on one or more commas
-    self assert: ("a,,b,,,c" splitRegex: ",+") equals: #("a", "b", "c").
+    self assert: ("a,,b,,,c" splitRegex: ",+") equals: #("a", "b", "c")
     // Split on whitespace
-    self assert: ("hello   world   test" splitRegex: " +") equals: #("hello", "world", "test").
+    self assert: ("hello   world   test" splitRegex: " +") equals: #("hello", "world", "test")
     // Split with compiled regex
     self assert: ("a1b2c3" splitRegex: (Regex from: "[0-9]+")) equals: #("a", "b", "c")
 
   testErrorHandling =>
     // Invalid regex pattern produces regex_error
-    self should: [Regex from: "[invalid"] raise: #regex_error.
+    self should: [Regex from: "[invalid"] raise: #regex_error
     // Invalid pattern in String method also produces regex_error
     self should: ["hello" matchesRegex: "[invalid"] raise: #regex_error

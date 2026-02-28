@@ -6,36 +6,36 @@
 TestCase subclass: AssociationTest
 
   testCreationBinaryMessage =>
-    a := #name -> "James".
-    self assert: (a class) equals: Association.
+    a := #name -> "James"
+    self assert: a class equals: Association
     // Integer key with Integer value
-    self assert: ((42 -> "answer") class) equals: Association.
+    self assert: (42 -> "answer") class equals: Association
     // String key
-    self assert: (("city" -> "London") class) equals: Association
+    self assert: ("city" -> "London") class equals: Association
 
   testAccessorsKeyAndValue =>
-    a := #name -> "James".
-    self assert: (a key) equals: #name.
-    self assert: (a value) equals: "James".
-    b := 1 -> 2.
-    self assert: (b key) equals: 1.
-    self assert: (b value) equals: 2
+    a := #name -> "James"
+    self assert: a key equals: #name
+    self assert: a value equals: "James"
+    b := 1 -> 2
+    self assert: b key equals: 1
+    self assert: b value equals: 2
 
   testDisplayAsstringPrintstring =>
     // asString uses displayString (user-facing: no # prefix, no string quotes)
-    self assert: ((#name -> "James") asString) equals: "name -> James".
-    self assert: ((42 -> "answer") asString) equals: "42 -> answer".
-    self assert: (("count" -> 5) asString) equals: "count -> 5".
+    self assert: (#name -> "James") asString equals: "name -> James"
+    self assert: (42 -> "answer") asString equals: "42 -> answer"
+    self assert: ("count" -> 5) asString equals: "count -> 5"
     // printString uses printString for each part (developer: # prefix, string quoted)
-    self assert: ((#name -> "James") printString) equals: "#name -> ""James"""
+    self assert: (#name -> "James") printString equals: "#name -> ""James"""
 
   testReflection =>
-    self assert: ((#name -> "James") class) equals: Association.
-    self assert: ((#name -> "James") respondsTo: #key).
+    self assert: (#name -> "James") class equals: Association
+    self assert: ((#name -> "James") respondsTo: #key)
     self assert: ((#name -> "James") respondsTo: #value)
 
   testUsageInCollections =>
-    assocs := #(#a -> 1, #b -> 2, #c -> 3).
-    self assert: (assocs size) equals: 3.
-    self assert: (assocs collect: [:assoc | assoc key]) equals: #(#a, #b, #c).
+    assocs := #(#a -> 1, #b -> 2, #c -> 3)
+    self assert: assocs size equals: 3
+    self assert: (assocs collect: [:assoc | assoc key]) equals: #(#a, #b, #c)
     self assert: (assocs collect: [:assoc | assoc value]) equals: #(1, 2, 3)

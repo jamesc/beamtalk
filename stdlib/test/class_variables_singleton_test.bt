@@ -3,22 +3,22 @@
 
 // BT-488, ADR 0019 Phase 1: Tests that singleton classes (BeamtalkInterface,
 // TranscriptStream, WorkspaceInterface) expose a current accessor that
-// returns nil before initialization.
+// returns nil before initialization
 
 TestCase subclass: ClassVariablesSingletonTest
 
   testSingletonCurrentAccessors =>
-    self assert: (BeamtalkInterface current) equals: nil.
+    self assert: BeamtalkInterface current equals: nil
     // TranscriptStream has current accessor
-    self assert: (TranscriptStream current) equals: nil.
+    self assert: TranscriptStream current equals: nil
     // WorkspaceInterface has current accessor
-    self assert: (WorkspaceInterface current) equals: nil
+    self assert: WorkspaceInterface current equals: nil
 
   testSetAndGetCurrent =>
     // Set a BeamtalkInterface instance as current and verify retrieval
-    prev := BeamtalkInterface current.
-    sd := BeamtalkInterface spawn.
-    BeamtalkInterface current: sd.
-    self assert: (BeamtalkInterface current) equals: sd.
+    prev := BeamtalkInterface current
+    sd := BeamtalkInterface spawn
+    BeamtalkInterface current: sd
+    self assert: BeamtalkInterface current equals: sd
     // Restore previous value to avoid affecting other tests
     BeamtalkInterface current: prev

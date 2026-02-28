@@ -3,19 +3,19 @@
 
 // BT-744: Tests that Object subclass (non-actor) method bodies can use local
 // variables — single local, multiple locals in sequence, local as message
-// receiver, and local from a conditional branch.
+// receiver, and local from a conditional branch
 
 
 TestCase subclass: ValueTypeLocalVarsTest
 
   testLocalVariablesInValueTypeMethods =>
-    c := Calculator new.
+    c := Calculator new
     // Single local variable: assign and read back
-    self assert: (c double: 7) equals: 14.
+    self assert: (c double: 7) equals: 14
     // Multiple locals in sequence: each must be visible to subsequent expressions
-    self assert: (c compute: 3) equals: 16.
+    self assert: (c compute: 3) equals: 16
     // Local variable used as receiver of a message send
-    self assert: (c addAndNegate: 4 to: 6) equals: -10.
+    self assert: (c addAndNegate: 4 to: 6) equals: -10
     // Local variable from a conditional
-    self assert: (c absVal: -5) equals: 5.
+    self assert: (c absVal: -5) equals: 5
     self assert: (c absVal: 3) equals: 3

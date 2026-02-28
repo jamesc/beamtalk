@@ -5,9 +5,9 @@
 // Tests that runtime errors produce correct error kinds
 // Validates BT-458: ERROR: assertion support in stdlib test framework
 //
-// These tests were migrated from E2E where they don't need REPL features.
+// These tests were migrated from E2E where they don't need REPL features
 // Stdlib tests match #beamtalk_error{kind} structurally (more precise than
-// E2E substring matching).
+// E2E substring matching)
 
 // ===========================================================================
 // ARITHMETIC ERRORS
@@ -65,8 +65,8 @@ nil nonExistentMethod
 // ===========================================================================
 // PRIMITIVE TYPE INSTANTIATION ERRORS (BT-422)
 // ===========================================================================
-// Primitive types are backed by native BEAM values, not maps.
-// Calling `new` on them should raise an instantiation_error.
+// Primitive types are backed by native BEAM values, not maps
+// Calling `new` on them should raise an instantiation_error
 
 Integer new
 // => ERROR: instantiation_error
@@ -96,8 +96,8 @@ Block new
 // => ERROR: instantiation_error
 
 // new: on non-instantiable primitives still raises instantiation_error
-// because the class can't be constructed at all (BT-473: checked first).
-// BT-422: gen_server crash fix ensures class process survives the error.
+// because the class can't be constructed at all (BT-473: checked first)
+// BT-422: gen_server crash fix ensures class process survives the error
 
 Integer new: 42
 // => ERROR: instantiation_error
@@ -109,7 +109,7 @@ String new: "hello"
 // NON-MAP ARGUMENT TO new: (BT-473)
 // ===========================================================================
 // Passing a non-Dictionary argument to new: should raise type_error,
-// not silently fall back to new/0.
+// not silently fall back to new/0
 
 Dictionary new: 42
 // => ERROR: type_error
@@ -124,9 +124,9 @@ Dictionary new: true
 // FILE I/O ERRORS
 // ===========================================================================
 // NOTE: File I/O error tests temporarily removed — the underlying File
-// operations raise function_clause instead of structured beamtalk_errors.
-// See pre-existing failures in file_io.bt E2E tests.
-// TODO: Re-add when beamtalk_file.erl properly handles these error paths.
+// operations raise function_clause instead of structured beamtalk_errors
+// See pre-existing failures in file_io.bt E2E tests
+// TODO: Re-add when beamtalk_file.erl properly handles these error paths
 
 // ===========================================================================
 // ACTOR INSTANTIATION ERRORS (BT-623)

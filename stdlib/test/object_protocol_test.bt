@@ -6,73 +6,73 @@
 TestCase subclass: ObjectProtocolTest
 
   testPrintstringStringRepresentationOfAnyObject =>
-    self assert: (42 printString) equals: "42".
-    self assert: (0 printString) equals: "0".
-    self assert: (-7 printString) equals: "-7".
+    self assert: 42 printString equals: "42"
+    self assert: 0 printString equals: "0"
+    self assert: -7 printString equals: "-7"
     // --- Strings (printString adds surrounding quotes) ---
-    self assert: ("hello" printString) equals: """hello""".
-    self assert: ("" printString) equals: """""".
+    self assert: "hello" printString equals: """hello"""
+    self assert: "" printString equals: """"""
     // --- Booleans ---
-    self assert: (true printString) equals: "true".
-    self assert: (false printString) equals: "false".
+    self assert: true printString equals: "true"
+    self assert: false printString equals: "false"
     // --- Nil ---
-    self assert: (nil printString) equals: "nil".
+    self assert: nil printString equals: "nil"
     // --- Floats ---
-    self assert: (3.14 printString) equals: "3.14".
-    self assert: (-2.5 printString) equals: "-2.5".
+    self assert: 3.14 printString equals: "3.14"
+    self assert: -2.5 printString equals: "-2.5"
     // --- Lists ---
-    self assert: (#(1, 2, 3) printString) equals: "#(1, 2, 3)".
-    self assert: (#() printString) equals: "#()".
+    self assert: #(1, 2, 3) printString equals: "#(1, 2, 3)"
+    self assert: #() printString equals: "#()"
     // --- Blocks ---
-    self assert: ([42] printString) notNil.
+    self assert: ([42] printString) notNil
     // --- Dictionaries ---
-    self assert: (#{} printString size) equals: 3.
+    self assert: #{} printString size equals: 3
     // --- Class objects (BT-477: class_send printString) ---
-    self assert: (42 class printString) equals: "Integer".
-    self assert: ("hello" class printString) equals: "String".
-    self assert: (true class printString) equals: "True".
-    self assert: (nil class printString) equals: "UndefinedObject"
+    self assert: 42 class printString equals: "Integer"
+    self assert: "hello" class printString equals: "String"
+    self assert: true class printString equals: "True"
+    self assert: nil class printString equals: "UndefinedObject"
 
   testYourselfIdentityMethodReturnsReceiver =>
-    self assert: (42 yourself) equals: 42.
-    self assert: ("hello" yourself) equals: "hello".
-    self assert: (true yourself).
-    self assert: (nil yourself) equals: nil.
+    self assert: 42 yourself equals: 42
+    self assert: "hello" yourself equals: "hello"
+    self assert: true yourself
+    self assert: nil yourself equals: nil
     // yourself should return the same object
-    self assert: (42 yourself =:= 42).
+    self assert: (42 yourself =:= 42)
     self assert: "test" yourself =:= "test"
 
   testHashHashValueInteger =>
     // hash returns an integer (non-deterministic, keep wildcard)
-    self assert: ((42 hash) class) equals: Integer.
+    self assert: (42 hash) class equals: Integer
     // Same value should produce same hash
-    self assert: (42 hash =:= 42 hash).
-    self assert: ("hello" hash =:= "hello" hash).
+    self assert: (42 hash =:= 42 hash)
+    self assert: ("hello" hash =:= "hello" hash)
     // Hash values are non-deterministic, keep wildcard
-    self assert: (("hello" hash) class) equals: Integer
+    self assert: ("hello" hash) class equals: Integer
 
   testRespondstoMethodExistenceCheck =>
     // Integers respond to +
-    self assert: (42 respondsTo: #+).
+    self assert: (42 respondsTo: #+)
     // Integers respond to class (inherited from Object)
-    self assert: (42 respondsTo: #class).
+    self assert: (42 respondsTo: #class)
     // Integers do not respond to nonsense
-    self deny: (42 respondsTo: #totallyFakeMethod).
+    self deny: (42 respondsTo: #totallyFakeMethod)
     // Strings respond to size
-    self assert: ("hello" respondsTo: #size).
+    self assert: ("hello" respondsTo: #size)
     // Strings do not respond to nonsense
-    self deny: ("hello" respondsTo: #totallyFakeMethod).
+    self deny: ("hello" respondsTo: #totallyFakeMethod)
     // nil responds to isNil
-    self assert: (nil respondsTo: #isNil).
+    self assert: (nil respondsTo: #isNil)
     // Booleans respond to ifTrue:ifFalse:
-    self assert: (true respondsTo: #'ifTrue:ifFalse:').
+    self assert: (true respondsTo: #'ifTrue:ifFalse:')
     // Blocks respond to value
-    self assert: ([1] respondsTo: #value).
-    self deny: ([1] respondsTo: #invalidMethod).
+    self assert: ([1] respondsTo: #value)
+    self deny: ([1] respondsTo: #invalidMethod)
     // Float responds to arithmetic operations
-    self assert: (3.14 respondsTo: #+).
-    self assert: (3.14 respondsTo: #'-').
-    self assert: (3.14 respondsTo: #class).
-    self assert: (3.14 respondsTo: #asString).
-    self assert: (3.14 respondsTo: #abs).
+    self assert: (3.14 respondsTo: #+)
+    self assert: (3.14 respondsTo: #'-')
+    self assert: (3.14 respondsTo: #class)
+    self assert: (3.14 respondsTo: #asString)
+    self assert: (3.14 respondsTo: #abs)
     self deny: (3.14 respondsTo: #nonExistent)
