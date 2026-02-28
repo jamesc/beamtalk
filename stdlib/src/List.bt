@@ -254,10 +254,10 @@ sealed typed Collection subclass: List
   /// ```
   indexOf: item: Object -> Integer | Nil =>
     self inject: 0 into: [:i :each |
-      newI := i + 1.
-      each =:= item ifTrue: [^newI].
+      newI := i + 1
+      each =:= item ifTrue: [^newI]
       newI
-    ].
+    ]
     nil
 
   /// Iterate with both element and 1-based index.
@@ -268,10 +268,10 @@ sealed typed Collection subclass: List
   /// ```
   eachWithIndex: block: Block -> Nil =>
     self inject: 0 into: [:i :each |
-      newI := i + 1.
-      block value: each value: newI.
+      newI := i + 1
+      block value: each value: newI
       newI
-    ].
+    ]
     nil
 
   /// Combine two lists element-wise into a list of pairs.

@@ -64,7 +64,7 @@ ProtoObject subclass: Object
   /// 42 ifNil: [0]         // => 42
   /// nil ifNil: [0]        // => 0
   /// ```
-  ifNil: nilBlock: Block => self
+  ifNil: _nilBlock: Block => self
 
   /// If the receiver is not nil, evaluate `notNilBlock` with self.
   ///
@@ -82,7 +82,7 @@ ProtoObject subclass: Object
   /// 42 ifNil: [0] ifNotNil: [:v | v + 1]    // => 43
   /// nil ifNil: [0] ifNotNil: [:v | v + 1]   // => 0
   /// ```
-  ifNil: nilBlock: Block ifNotNil: notNilBlock: Block => notNilBlock value: self
+  ifNil: _nilBlock: Block ifNotNil: notNilBlock: Block => notNilBlock value: self
 
   /// If not nil, evaluate `notNilBlock` with self; otherwise evaluate `nilBlock`.
   ///
@@ -91,7 +91,7 @@ ProtoObject subclass: Object
   /// 42 ifNotNil: [:v | v + 1] ifNil: [0]    // => 43
   /// nil ifNotNil: [:v | v + 1] ifNil: [0]   // => 0
   /// ```
-  ifNotNil: notNilBlock: Block ifNil: nilBlock: Block => notNilBlock value: self
+  ifNotNil: notNilBlock: Block ifNil: _nilBlock: Block => notNilBlock value: self
 
   /// Return a developer-readable string representation.
   ///

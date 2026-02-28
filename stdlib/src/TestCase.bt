@@ -34,7 +34,7 @@ Object subclass: TestCase
   /// self assert: false              // fails
   /// ```
   assert: condition: Boolean -> Nil =>
-    condition ifFalse: [self fail: "Assertion failed: expected true, got {condition}"].
+    condition ifFalse: [self fail: "Assertion failed: expected true, got {condition}"]
     nil
 
   /// Assert that `condition` is false, failing the test if it is true.
@@ -45,7 +45,7 @@ Object subclass: TestCase
   /// self deny: true                 // fails
   /// ```
   deny: condition: Boolean -> Nil =>
-    condition ifTrue: [self fail: "Denial failed: expected false, got {condition}"].
+    condition ifTrue: [self fail: "Denial failed: expected false, got {condition}"]
     nil
 
   /// Assert that `actual` equals `expected`, failing the test if they differ.
@@ -56,7 +56,7 @@ Object subclass: TestCase
   /// self assert: (1 + 1) equals: 3   // fails
   /// ```
   assert: actual equals: expected -> Nil =>
-    (actual =:= expected) ifFalse: [self fail: "Expected {expected}, got {actual}"].
+    (actual =:= expected) ifFalse: [self fail: "Expected {expected}, got {actual}"]
     nil
 
   /// Assert that evaluating `block` raises an error of kind `errorKind`.

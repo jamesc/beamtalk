@@ -19,13 +19,13 @@ abstract Value subclass: Boolean
   // === Abstract protocol (subclasses must implement) ===
 
   /// Conditional evaluation: evaluate `trueBlock` if true, `falseBlock` if false.
-  ifTrue: trueBlock: Block ifFalse: falseBlock: Block => self subclassResponsibility
+  ifTrue: _trueBlock: Block ifFalse: _falseBlock: Block => self subclassResponsibility
 
   /// If true, evaluate `trueBlock`.
-  ifTrue: trueBlock: Block => self subclassResponsibility
+  ifTrue: _trueBlock: Block => self subclassResponsibility
 
   /// If false, evaluate `falseBlock`.
-  ifFalse: falseBlock: Block => self subclassResponsibility
+  ifFalse: _falseBlock: Block => self subclassResponsibility
 
   /// Logical negation.
   not -> Boolean => self subclassResponsibility
