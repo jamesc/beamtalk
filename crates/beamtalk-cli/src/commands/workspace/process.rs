@@ -330,14 +330,24 @@ pub fn start_detached_node(
 
     // Override the default /dev/null stderr with a workspace log file.
     // Errors opening the log file are non-fatal — we fall back to /dev/null.
-    if let Ok(log_file) = std::fs::OpenOptions::new()
+    let startup_log_enabled = match std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(&startup_log_path)
     {
-        cmd.stderr(Stdio::from(log_file));
-    }
+        Ok(log_file) => {
+            cmd.stderr(Stdio::from(log_file));
+            true
+        }
+        Err(e) => {
+            eprintln!(
+                "Warning: could not open startup log {}: {e}",
+                startup_log_path.display()
+            );
+            false
+        }
+    };
 
     let child = cmd.spawn().map_err(|e| {
         miette!("Failed to start detached BEAM node: {e}\nIs Erlang/OTP installed?")
@@ -433,7 +443,7 @@ pub fn start_detached_node(
         actual_port,
         pid,
         &cookie,
-        &startup_log_path,
+        startup_log_enabled.then_some(startup_log_path.as_path()),
     )?;
 
     // Save node info
@@ -466,13 +476,14 @@ fn path_to_erlang_arg(path: &Path) -> String {
 /// Poll until the WebSocket health endpoint responds on the given port.
 ///
 /// Uses short per-attempt timeouts to keep the worst-case total bounded.
-/// `log_path` is included in timeout errors to help diagnose failures.
+/// `log_path` is `Some(path)` only when the startup log file was successfully
+/// opened; it is included in timeout error messages to guide diagnosis.
 fn wait_for_tcp_ready(
     host: &str,
     port: u16,
     pid: u32,
     cookie: &str,
-    log_path: &std::path::Path,
+    log_path: Option<&std::path::Path>,
 ) -> Result<()> {
     for _ in 0..READINESS_PROBE_MAX_RETRIES {
         if let Ok(mut client) = ProtocolClient::connect(
@@ -503,18 +514,21 @@ fn wait_for_tcp_ready(
         system.process(Pid::from_u32(pid)).is_some()
     };
 
-    let log_hint = log_path.display();
+    // Only mention the log file if we actually opened it (log_path is Some).
+    let log_suffix = log_path
+        .map(|p| format!(" Check {} for startup logs.", p.display()))
+        .unwrap_or_default();
+
     if node_alive {
         Err(miette!(
             "BEAM node started (PID {pid}) but WebSocket health endpoint on port {port} \
              did not become ready within the timeout. The workspace may be initializing \
-             slowly — try again, or check {log_hint} for startup logs."
+             slowly — try again.{log_suffix}"
         ))
     } else {
         Err(miette!(
             "BEAM node (PID {pid}) crashed during startup before WebSocket endpoint \
-             on port {port} became ready. Check {log_hint} for crash details and ensure \
-             Erlang/OTP is installed correctly."
+             on port {port} became ready. Ensure Erlang/OTP is installed correctly.{log_suffix}"
         ))
     }
 }
