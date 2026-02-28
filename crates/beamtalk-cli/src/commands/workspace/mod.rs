@@ -1244,6 +1244,11 @@ mod tests {
 
         let infos: Vec<_> = results.into_iter().map(|r| r.unwrap()).collect();
 
+        // Safety net: ensure the node is killed even if an assertion below panics.
+        let _guard = NodeGuard {
+            pid: infos[0].0.pid,
+        };
+
         // Exactly one caller must have started a new node; the other must have joined it
         let started_count = infos.iter().filter(|(_, started, _)| *started).count();
         assert_eq!(
@@ -1267,9 +1272,6 @@ mod tests {
             is_node_running(info0),
             "node should be running after concurrent start"
         );
-
-        // Clean up
-        let _guard = NodeGuard { pid: info0.pid };
     }
 
     /// Regression test for BT-967: stale port file from a previous aborted startup
