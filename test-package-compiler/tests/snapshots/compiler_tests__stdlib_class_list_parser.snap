@@ -46,6 +46,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 251,
@@ -70,6 +74,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 279,
@@ -94,6 +102,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 313,
@@ -118,6 +130,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 343,
@@ -142,6 +158,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 371,
@@ -185,6 +205,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 399,
@@ -228,6 +252,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 431,
@@ -252,6 +280,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 489,
@@ -295,6 +327,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 517,
@@ -319,6 +355,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 558,
@@ -343,6 +383,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 594,
@@ -386,6 +430,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 639,
@@ -446,6 +494,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 679,
@@ -489,6 +541,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 794,
@@ -532,6 +588,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 826,
@@ -575,6 +635,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 868,
@@ -618,6 +682,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 908,
@@ -678,6 +746,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 948,
@@ -721,6 +793,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1024,
@@ -764,6 +840,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1056,
@@ -788,6 +868,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1088,
@@ -831,6 +915,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1122,
@@ -874,6 +962,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1164,
@@ -917,6 +1009,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1202,
@@ -960,6 +1056,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1250,
@@ -995,6 +1095,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1318,
@@ -1055,6 +1159,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1375,
@@ -1300,6 +1408,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1422,
@@ -1523,6 +1635,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1589,
@@ -1566,6 +1682,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1751,
@@ -1609,6 +1729,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1785,
@@ -1652,6 +1776,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1827,
@@ -1695,6 +1823,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1873,
@@ -1738,6 +1870,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1919,
@@ -1781,6 +1917,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 1965,
@@ -1824,6 +1964,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 2019,
@@ -1833,6 +1977,10 @@ Module {
             ],
             class_methods: [],
             class_variables: [],
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
             doc_comment: None,
             span: Span {
                 start: 208,

@@ -158,6 +158,28 @@ pub struct Comment {
     pub kind: CommentKind,
 }
 
+impl Comment {
+    /// Creates a line comment (`// text`).
+    #[must_use]
+    pub fn line(content: impl Into<EcoString>, span: Span) -> Self {
+        Self {
+            content: content.into(),
+            span,
+            kind: CommentKind::Line,
+        }
+    }
+
+    /// Creates a block comment (`/* text */`).
+    #[must_use]
+    pub fn block(content: impl Into<EcoString>, span: Span) -> Self {
+        Self {
+            content: content.into(),
+            span,
+            kind: CommentKind::Block,
+        }
+    }
+}
+
 /// The kind of comment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommentKind {
@@ -165,6 +187,53 @@ pub enum CommentKind {
     Line,
     /// A block comment (`/* text */`).
     Block,
+}
+
+/// Comments attached to an AST node (ADR 0044).
+///
+/// Every comment belongs to exactly one AST node, either as a leading comment
+/// (appears before the node in source) or a trailing comment (appears at the
+/// end of the same line as the node).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CommentAttachment {
+    /// Comments appearing on lines immediately before this node.
+    /// Ordered top-to-bottom as they appear in source.
+    pub leading: Vec<Comment>,
+    /// A single end-of-line comment on the same line as this node.
+    pub trailing: Option<Comment>,
+}
+
+impl CommentAttachment {
+    /// Returns true if no comments are attached.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.leading.is_empty() && self.trailing.is_none()
+    }
+}
+
+/// An expression in a statement position, with optional surrounding comments (ADR 0044).
+///
+/// Wraps an [`Expression`] with a [`CommentAttachment`] for preserving comments
+/// between statements. Statement-position fields (method bodies, block bodies,
+/// module expressions) will migrate from `Vec<Expression>` to
+/// `Vec<ExpressionStatement>` in BT-974.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExpressionStatement {
+    /// Comments attached to this statement.
+    pub comments: CommentAttachment,
+    /// The expression.
+    pub expression: Expression,
+}
+
+impl ExpressionStatement {
+    /// Creates an expression statement with no attached comments.
+    #[must_use]
+    pub fn bare(expression: Expression) -> Self {
+        Self {
+            comments: CommentAttachment::default(),
+            expression,
+        }
+    }
 }
 
 /// The kind of class based on its declaration form (ADR 0042).
@@ -247,6 +316,8 @@ pub struct ClassDefinition {
     pub class_methods: Vec<MethodDefinition>,
     /// Class variable declarations (defined with `classState:`).
     pub class_variables: Vec<StateDeclaration>,
+    /// Non-doc comments (`//` and `/* */`) appearing before this class.
+    pub comments: CommentAttachment,
     /// Doc comment attached to this class (`///` lines).
     pub doc_comment: Option<String>,
     /// Source location of the entire class definition.
@@ -275,6 +346,7 @@ impl ClassDefinition {
             methods,
             class_methods: Vec::new(),
             class_variables: Vec::new(),
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span,
         }
@@ -305,6 +377,7 @@ impl ClassDefinition {
             methods,
             class_methods: Vec::new(),
             class_variables: Vec::new(),
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span,
         }
@@ -347,6 +420,12 @@ pub struct StateDeclaration {
     pub type_annotation: Option<TypeAnnotation>,
     /// Optional default value.
     pub default_value: Option<Expression>,
+    /// Non-doc comments (`//` and `/* */`) appearing before this field.
+    pub comments: CommentAttachment,
+    /// Doc comment attached to this field (`///` lines).
+    ///
+    /// **Note:** Always `None` until parser support lands in BT-975.
+    pub doc_comment: Option<String>,
     /// Source location.
     pub span: Span,
 }
@@ -359,6 +438,8 @@ impl StateDeclaration {
             name,
             type_annotation: None,
             default_value: None,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
             span,
         }
     }
@@ -370,6 +451,8 @@ impl StateDeclaration {
             name,
             type_annotation: Some(type_annotation),
             default_value: None,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
             span,
         }
     }
@@ -381,6 +464,8 @@ impl StateDeclaration {
             name,
             type_annotation: None,
             default_value: Some(default_value),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
             span,
         }
     }
@@ -397,6 +482,8 @@ impl StateDeclaration {
             name,
             type_annotation: Some(type_annotation),
             default_value: Some(default_value),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
             span,
         }
     }
@@ -467,6 +554,8 @@ pub struct MethodDefinition {
     pub is_sealed: bool,
     /// The kind of method.
     pub kind: MethodKind,
+    /// Non-doc comments (`//` and `/* */`) appearing before this method.
+    pub comments: CommentAttachment,
     /// Doc comment attached to this method (`///` lines).
     pub doc_comment: Option<String>,
     /// Source location.
@@ -489,6 +578,7 @@ impl MethodDefinition {
             return_type: None,
             is_sealed: false,
             kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span,
         }
@@ -510,6 +600,7 @@ impl MethodDefinition {
             return_type: Some(return_type),
             is_sealed: false,
             kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span,
         }
@@ -533,6 +624,7 @@ impl MethodDefinition {
             return_type,
             is_sealed,
             kind,
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span,
         }
@@ -1951,6 +2043,90 @@ mod tests {
         let module = Module::new(Vec::new(), span);
         assert!(module.classes.is_empty());
         assert!(module.expressions.is_empty());
+    }
+
+    // --- CommentAttachment tests (BT-973) ---
+
+    #[test]
+    fn comment_attachment_default_is_empty() {
+        let ca = CommentAttachment::default();
+        assert!(ca.is_empty());
+        assert!(ca.leading.is_empty());
+        assert!(ca.trailing.is_none());
+    }
+
+    #[test]
+    fn comment_attachment_with_leading_not_empty() {
+        let ca = CommentAttachment {
+            leading: vec![Comment {
+                content: "a comment".into(),
+                span: Span::new(0, 11),
+                kind: CommentKind::Line,
+            }],
+            trailing: None,
+        };
+        assert!(!ca.is_empty());
+    }
+
+    #[test]
+    fn comment_attachment_with_trailing_not_empty() {
+        let ca = CommentAttachment {
+            leading: Vec::new(),
+            trailing: Some(Comment {
+                content: "trailing".into(),
+                span: Span::new(10, 20),
+                kind: CommentKind::Line,
+            }),
+        };
+        assert!(!ca.is_empty());
+    }
+
+    #[test]
+    fn comment_attachment_with_both_leading_and_trailing() {
+        let ca = CommentAttachment {
+            leading: vec![Comment::line("leading", Span::new(0, 9))],
+            trailing: Some(Comment::line("trailing", Span::new(20, 30))),
+        };
+        assert!(!ca.is_empty());
+        assert_eq!(ca.leading.len(), 1);
+        assert!(ca.trailing.is_some());
+    }
+
+    #[test]
+    fn comment_constructors() {
+        let line = Comment::line("hello", Span::new(0, 7));
+        assert_eq!(line.kind, CommentKind::Line);
+        assert_eq!(line.content, "hello");
+
+        let block = Comment::block("world", Span::new(0, 9));
+        assert_eq!(block.kind, CommentKind::Block);
+        assert_eq!(block.content, "world");
+    }
+
+    #[test]
+    fn expression_statement_bare() {
+        let expr = Expression::Literal(Literal::Integer(42), Span::new(0, 2));
+        let stmt = ExpressionStatement::bare(expr.clone());
+        assert!(stmt.comments.is_empty());
+        assert_eq!(stmt.expression, expr);
+    }
+
+    #[test]
+    fn expression_statement_with_comments() {
+        let expr = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
+        let stmt = ExpressionStatement {
+            comments: CommentAttachment {
+                leading: vec![Comment {
+                    content: "before".into(),
+                    span: Span::new(0, 8),
+                    kind: CommentKind::Line,
+                }],
+                trailing: None,
+            },
+            expression: expr,
+        };
+        assert!(!stmt.comments.is_empty());
+        assert_eq!(stmt.comments.leading.len(), 1);
     }
 
     // --- ClassKind tests (BT-922) ---

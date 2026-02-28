@@ -618,8 +618,9 @@ mod tests {
     use super::test_helpers::test_span;
     use super::*;
     use crate::ast::{
-        Block, BlockParameter, ClassDefinition, ClassKind, Expression, Identifier, Literal,
-        MatchArm, MessageSelector, MethodDefinition, Pattern, StateDeclaration, StringSegment,
+        Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, Expression,
+        Identifier, Literal, MatchArm, MessageSelector, MethodDefinition, Pattern,
+        StateDeclaration, StringSegment,
     };
     use crate::source_analysis::{Severity, Span};
 
@@ -1308,8 +1309,8 @@ mod tests {
         //   getValue => self.value
 
         use crate::ast::{
-            ClassDefinition, ClassKind, MessageSelector, MethodDefinition, MethodKind,
-            StateDeclaration,
+            ClassDefinition, ClassKind, CommentAttachment, MessageSelector, MethodDefinition,
+            MethodKind, StateDeclaration,
         };
 
         let get_value_method = MethodDefinition {
@@ -1323,6 +1324,7 @@ mod tests {
             return_type: None,
             is_sealed: false,
             kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -1331,6 +1333,8 @@ mod tests {
             name: Identifier::new("value", test_span()),
             type_annotation: None,
             default_value: Some(Expression::Literal(Literal::Integer(0), test_span())),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
             span: test_span(),
         };
 
@@ -1345,6 +1349,7 @@ mod tests {
             methods: vec![get_value_method],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -1697,7 +1702,8 @@ mod tests {
     #[test]
     fn test_analyse_hierarchy_includes_user_classes() {
         use crate::ast::{
-            ClassDefinition, ClassKind, MethodDefinition, MethodKind, StateDeclaration,
+            ClassDefinition, ClassKind, CommentAttachment, MethodDefinition, MethodKind,
+            StateDeclaration,
         };
 
         let class = ClassDefinition {
@@ -1711,6 +1717,8 @@ mod tests {
                 name: Identifier::new("count", test_span()),
                 type_annotation: None,
                 default_value: None,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
                 span: test_span(),
             }],
             methods: vec![MethodDefinition {
@@ -1720,11 +1728,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -1763,6 +1773,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2032,7 +2043,9 @@ mod tests {
 
     #[test]
     fn test_abstract_class_instantiation_error() {
-        use crate::ast::{ClassDefinition, ClassKind, MethodDefinition, MethodKind};
+        use crate::ast::{
+            ClassDefinition, ClassKind, CommentAttachment, MethodDefinition, MethodKind,
+        };
 
         // BT-105: abstract class cannot be instantiated
         let class = ClassDefinition {
@@ -2050,11 +2063,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2134,6 +2149,8 @@ mod tests {
                 name: Identifier::new("value", test_span()),
                 type_annotation: None,
                 default_value: None,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
                 span: test_span(),
             }],
             methods: vec![MethodDefinition {
@@ -2150,11 +2167,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2192,6 +2211,8 @@ mod tests {
                 name: Identifier::new("value", test_span()),
                 type_annotation: None,
                 default_value: None,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
                 span: test_span(),
             }],
             methods: vec![MethodDefinition {
@@ -2218,11 +2239,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2273,11 +2296,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2321,11 +2346,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2372,11 +2399,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2425,11 +2454,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2476,11 +2507,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2532,11 +2565,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2589,11 +2624,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2645,10 +2682,12 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2693,11 +2732,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2746,11 +2787,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2802,11 +2845,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2863,11 +2908,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2925,11 +2972,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -2974,11 +3023,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -3031,11 +3082,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -3078,11 +3131,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -3151,11 +3206,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -3241,11 +3298,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -3308,11 +3367,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -3373,11 +3434,13 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: crate::ast::MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             }],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -3513,6 +3576,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         }
@@ -3545,6 +3609,7 @@ mod tests {
             return_type: None,
             is_sealed: false,
             kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         });
@@ -3627,6 +3692,7 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             },
@@ -3673,6 +3739,7 @@ mod tests {
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
+            comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
         };
@@ -3699,6 +3766,7 @@ mod tests {
                 return_type: None,
                 is_sealed: false,
                 kind: MethodKind::Primary,
+                comments: CommentAttachment::default(),
                 doc_comment: None,
                 span: test_span(),
             },

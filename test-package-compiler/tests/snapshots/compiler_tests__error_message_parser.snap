@@ -76,6 +76,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 214,
@@ -154,6 +158,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 265,
@@ -163,6 +171,10 @@ Module {
             ],
             class_methods: [],
             class_variables: [],
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
             doc_comment: None,
             span: Span {
                 start: 186,

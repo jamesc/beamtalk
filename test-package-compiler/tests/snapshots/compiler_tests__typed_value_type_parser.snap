@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -58,6 +57,11 @@ Module {
                             },
                         ),
                     ),
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
                     span: Span {
                         start: 78,
                         end: 99,
@@ -93,6 +97,11 @@ Module {
                             },
                         ),
                     ),
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
                     span: Span {
                         start: 102,
                         end: 123,
@@ -142,6 +151,10 @@ Module {
                     ),
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 152,
@@ -190,6 +203,10 @@ Module {
                     ),
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 180,
@@ -253,6 +270,10 @@ Module {
                     ),
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 235,
@@ -277,6 +298,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 339,
@@ -286,6 +311,10 @@ Module {
             ],
             class_methods: [],
             class_variables: [],
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
             doc_comment: None,
             span: Span {
                 start: 48,
