@@ -218,7 +218,7 @@ fn discover_adrs(adr_source: &Utf8Path) -> Result<Vec<AdrInfo>> {
             }
             let stem = path.file_stem()?.to_string();
             // Must start with digits (NNNN-)
-            let number: String = stem.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let number: String = stem.chars().take_while(char::is_ascii_digit).collect();
             if number.is_empty() {
                 return None;
             }

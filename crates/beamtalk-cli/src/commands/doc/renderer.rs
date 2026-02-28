@@ -132,15 +132,9 @@ fn strip_html_comments(events: Vec<pulldown_cmark::Event<'_>>) -> Vec<pulldown_c
                     out.push(Event::Text(CowStr::Boxed(content.into_boxed_str())));
                 }
             }
-            Event::InlineHtml(raw) => {
-                let trimmed = raw.trim();
-                if !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
-                    out.push(Event::Text(raw));
-                }
-            }
-            // Bare Event::Html outside an HtmlBlock (should not normally occur,
-            // but handle defensively).
-            Event::Html(raw) => {
+            // Inline or bare Html outside an HtmlBlock — drop if pure comment,
+            // otherwise escape to prevent injection.
+            Event::InlineHtml(raw) | Event::Html(raw) => {
                 let trimmed = raw.trim();
                 if !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
                     out.push(Event::Text(raw));
