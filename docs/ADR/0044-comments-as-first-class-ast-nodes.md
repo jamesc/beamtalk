@@ -56,7 +56,7 @@ formatter would need a separate parse to recover them, breaking the principle.
   be preserved and generalised, not replaced.
 - Comment handling must not complicate the codegen pipeline — the compiler ignores
   comments.
-- Synthesised AST nodes (from live tools or auto-generated code like `with*:` methods)
+- Synthesized AST nodes (from live tools or auto-generated code like `with*:` methods)
   have no source positions. Comment attachment must work without valid spans.
 
 ## Decision
@@ -102,12 +102,12 @@ correct vehicle for carrying this data through compilation. Regular `//` and `/*
 comments have no runtime representation — they exist in the AST solely for the
 formatter/unparser.
 
-### Synthesised AST Nodes
+### Synthesized AST Nodes
 
-Comments on synthesised AST nodes (from live tools, auto-generated `with*:` methods, or
+Comments on synthesized AST nodes (from live tools, auto-generated `with*:` methods, or
 `ClassBuilder` codegen) use `Span::default()` for the span field. Consumers that inspect
 comment spans (LSP, diagnostics) must treat `Span::default()` as "no source location" —
-consistent with how synthesised `Expression` nodes already handle missing spans.
+consistent with how synthesized `Expression` nodes already handle missing spans.
 
 ### Section-Divider Comments
 
@@ -222,7 +222,7 @@ runtime. This follows the Strongtalk model: type annotations are optional, the r
 performs no type checks, but the annotations survive as data so live tools and
 reflection APIs can read them without re-parsing source. The Elixir `@spec` precedent
 on BEAM validates this: typespecs are compiled into module attributes, used by Dialyzer
-and documentation tooling, ignored by the VM. A synthesised class built by a live tool
+and documentation tooling, ignored by the VM. A synthesized class built by a live tool
 with no source file would otherwise have no way to expose type information.
 
 The current `MethodDefinition.return_type` and `ParameterDefinition.type_annotation`
@@ -234,9 +234,13 @@ will be updated in the same pass for consistency.
 
 `Module.leading_comments: Vec<Comment>` (currently the only comment store) is replaced
 by leading comments on the first item in the module. If the module is empty, file-level
-comments become trailing on a synthetic `EmptyFile` node or are preserved in a
-`file_leading_comments` field on `Module` as a narrow exception documented explicitly
-in the invariant.
+comments are preserved in a `file_leading_comments: Vec<Comment>` field on `Module` as
+a narrow, explicitly documented exception to the core invariant. A synthetic `EmptyFile`
+node was considered but rejected — adding a node purely to carry comments misrepresents
+the program structure. The exception field is honest: an empty file is a real edge case,
+not a missing node. The invariant is updated to read: "Every comment belongs to exactly
+one AST node, except file-level comments in an empty module which are held in
+`Module.file_leading_comments`."
 
 ### Parser Changes
 
@@ -316,7 +320,7 @@ No source positions needed. The comment is data, not recovered from text.
 | **Go (gofmt)** | Dual storage: flat `Comments []*CommentGroup` on `File` AND `Doc`/`Comment` fields on individual nodes. | The Go team calls free-floating comments "the single biggest mistake" in the AST design. Dual storage causes constant synchronisation burden. **Avoid.** |
 | **Gleam** | Separate `Vec<Comment>` sorted by position; consumed by position during formatter traversal. | Clean separation but makes programmatic AST construction with comments impossible. Known idempotency bugs. |
 | **Elixir** | `Code.string_to_quoted_with_comments/2` returns AST + separate comment list. Sourceror attaches comments to node metadata. | The separate-list approach is backward-compatible but fragile. Sourceror (node metadata) is closer to Option A and is the preferred third-party approach. |
-| **Rust (rustfmt)** | Comments not in AST; recovered from source text gaps between spans (`missed_spans.rs`). | Acknowledged as rustfmt's primary source of bugs. Completely unsuitable for synthesised ASTs. **Avoid.** |
+| **Rust (rustfmt)** | Comments not in AST; recovered from source text gaps between spans (`missed_spans.rs`). | Acknowledged as rustfmt's primary source of bugs. Completely unsuitable for synthesized ASTs. **Avoid.** |
 | **Tree-sitter** | Comments are full CST nodes (`extras`), siblings of code nodes. | Maximum fidelity. Every tree walk must handle comment siblings. Appropriate for a generic parser framework, overkill for a single language's compiler. |
 
 ## User Impact
@@ -370,7 +374,7 @@ If it's good enough for Gleam it's good enough for Beamtalk."
 to every variant. Easier to reason about the AST in isolation."
 
 **Tension:** The steelman is strongest for static formatting of existing source files.
-It collapses entirely for synthesised ASTs (live tools) — there is no viable way to
+It collapses entirely for synthesized ASTs (live tools) — there is no viable way to
 attach comments to nodes that have no source positions. This is the decisive failure.
 
 ### Option C: Concrete Syntax Tree (Tree-sitter style)
@@ -420,7 +424,7 @@ what it needs, and nobody else pays a tax."
 paths, not compilation."
 
 **Tension:** This is the strongest alternative for pure formatting. But it fails on two
-fronts, not one. First, synthesised ASTs have no token stream — a class built in a live
+fronts, not one. First, synthesized ASTs have no token stream — a class built in a live
 tool cannot emit comments because there are no tokens to walk. Second, and more
 fundamentally, token preservation is a *formatting* concept only: it says nothing about
 where type annotations and doc comments live on `FieldDescriptor` and `CompiledMethod`
@@ -433,13 +437,13 @@ the split we are trying to avoid.
 
 Option B is faster to implement and has no AST churn. Option D (token preservation) is
 the industry standard for formatters. Option A is the only approach that handles both
-synthesised ASTs from live tools *and* runtime metadata storage on `FieldDescriptor`
+synthesized ASTs from live tools *and* runtime metadata storage on `FieldDescriptor`
 and `CompiledMethod`.
 
 Live tool persistence and `FieldDescriptor` are not hypothetical future concerns —
 they are confirmed requirements. `FieldDescriptor` will store `.doc`, `.typeAnnotation`,
 and `.defaultValue` as runtime fields; `CompiledMethod` will gain type annotation
-storage in the same pass. Option B and D have no answer for synthesised objects with no
+storage in the same pass. Option B and D have no answer for synthesized objects with no
 source file origin. Building the formatter on Option B or D and then rebuilding on
 Option A when `FieldDescriptor` lands means paying the AST churn twice. The decision
 is to pay it once, now.
@@ -452,7 +456,7 @@ Recover comments from source text by examining the gap between adjacent node spa
 Requires no AST changes.
 
 **Rejected:** Rustfmt maintainers describe this as the primary source of formatter bugs.
-Completely impossible for synthesised AST nodes (no source text to examine). Violates
+Completely impossible for synthesized AST nodes (no source text to examine). Violates
 the "tooling == compiler" principle by requiring the formatter to re-examine source text
 rather than using the AST.
 
@@ -461,7 +465,7 @@ rather than using the AST.
 Store a `Vec<Comment>` sorted by byte position alongside the `Module`. During formatting,
 consume comments positionally.
 
-**Rejected:** Cannot attach comments to synthesised AST nodes created by live tools
+**Rejected:** Cannot attach comments to synthesized AST nodes created by live tools
 (no source positions). The Go team, who chose this approach (their flat `Comments` list),
 call it "the single biggest mistake" in their AST design. Known idempotency bugs in
 Gleam's formatter stem from this approach.
@@ -483,7 +487,7 @@ to AST node spans.
 This is the approach used by TypeScript, Roslyn (C#), and rust-analyzer. It has zero
 AST churn and zero impact on downstream consumers (codegen, lint, LSP).
 
-**Rejected:** Fails the synthesised-AST use case. A class created in a live tool has
+**Rejected:** Fails the synthesized-AST use case. A class created in a live tool has
 no token stream — the formatter cannot emit comments because there are no tokens to
 walk. For formatting existing source files this approach works well, but Beamtalk's
 persistence model requires unparsing ASTs that may never have been parsed from source.
@@ -532,7 +536,7 @@ The exact failure mode that Go and Elixir are trying to escape from.
   matters; the decision defers optimisation to implementation.
 
 ### Neutral
-- `Module.leading_comments` is replaced by leading comments on the first item in the module — equivalent semantics, different location
+- `Module.leading_comments` is replaced by leading comments on the first item (non-empty modules) or `Module.file_leading_comments` (empty modules) — equivalent semantics, different location
 - `ExpressionStatement` is a new wrapper type; it does not affect language semantics
 - Comments remain invisible to the codegen pipeline
 - **Error recovery:** Near `Expression::Error` nodes (from parse errors), comment
@@ -555,7 +559,8 @@ The exact failure mode that Go and Elixir are trying to escape from.
 - Change `Vec<Expression>` to `Vec<ExpressionStatement>` in statement-position fields
   (~6 fields in `ast.rs`: `Module.expressions`, `ClassDefinition.expressions`,
   `MethodDefinition.body` × 3 variants, `Block.body`)
-- Update `Module` to remove `leading_comments` (moved to first-item leading)
+- Update `Module`: replace `leading_comments` with `file_leading_comments: Vec<Comment>`
+  (used only for empty modules; non-empty modules carry comments on their first item)
 
 **Affected:** `crates/beamtalk-core/src/ast.rs`
 
@@ -597,7 +602,7 @@ must unwrap `ExpressionStatement`. Key subsystems:
 - **Update `extract_method_source` to use the unparser** instead of raw source slicing.
   The current implementation (`source[span.start..span.end]`) misses leading comments
   (they are before `method.span.start()`) and falls back to the selector name for
-  synthesised methods. Once the unparser exists, `CompiledMethod.source` should be
+  synthesized methods. Once the unparser exists, `CompiledMethod.source` should be
   generated by unparsing the `MethodDefinition` node — giving complete, comment-inclusive,
   formatter-normalised source for all methods whether parsed from a `.bt` file or
   constructed programmatically by a live tool.
