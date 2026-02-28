@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -47,6 +46,11 @@ Module {
                             },
                         },
                     ),
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
                     span: Span {
                         start: 251,
                         end: 272,
@@ -72,6 +76,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 286,
@@ -96,6 +104,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 314,
@@ -139,6 +151,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 365,
@@ -182,6 +198,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 448,
@@ -225,6 +245,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 484,
@@ -268,6 +292,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 565,
@@ -311,6 +339,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 603,
@@ -354,6 +386,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 655,
@@ -397,6 +433,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 720,
@@ -421,6 +461,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 785,
@@ -464,6 +508,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 817,
@@ -507,6 +555,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 876,
@@ -516,6 +568,10 @@ Module {
             ],
             class_methods: [],
             class_variables: [],
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
             doc_comment: None,
             span: Span {
                 start: 221,

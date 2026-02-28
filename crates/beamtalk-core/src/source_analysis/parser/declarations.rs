@@ -9,8 +9,9 @@
 //! - Method definitions with optional `sealed` modifier
 
 use crate::ast::{
-    ClassDefinition, Expression, Identifier, KeywordPart, MessageSelector, MethodDefinition,
-    MethodKind, ParameterDefinition, StandaloneMethodDefinition, StateDeclaration, TypeAnnotation,
+    ClassDefinition, CommentAttachment, Expression, Identifier, KeywordPart, MessageSelector,
+    MethodDefinition, MethodKind, ParameterDefinition, StandaloneMethodDefinition,
+    StateDeclaration, TypeAnnotation,
 };
 use crate::source_analysis::{Span, TokenKind};
 
@@ -461,6 +462,8 @@ impl Parser {
             name,
             type_annotation,
             default_value,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
             span,
         })
     }
@@ -526,6 +529,8 @@ impl Parser {
             name,
             type_annotation,
             default_value,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
             span,
         })
     }

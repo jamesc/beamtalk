@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -130,6 +129,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 535,
@@ -272,6 +275,10 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
                     doc_comment: None,
                     span: Span {
                         start: 654,
@@ -281,6 +288,10 @@ Module {
             ],
             class_methods: [],
             class_variables: [],
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
             doc_comment: None,
             span: Span {
                 start: 443,
