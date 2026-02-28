@@ -156,8 +156,15 @@ impl NameResolver {
         // Collect unused variable warnings before exiting scope
         self.collect_unused_warnings();
 
-        // BT-954: Warn on unused method parameters
-        self.collect_unused_param_warnings();
+        // BT-954: Warn on unused method parameters — but suppress for @primitive /
+        // @intrinsic bodies. A sole `Primitive` expression means all declared
+        // parameters are forwarded implicitly to the underlying Erlang function;
+        // none of them appear as identifiers in the AST, so the normal
+        // "never referenced" heuristic produces false positives.
+        let is_primitive_body = matches!(method.body.as_slice(), [Expression::Primitive { .. }]);
+        if !is_primitive_body {
+            self.collect_unused_param_warnings();
+        }
 
         self.scope.pop(); // Exit method scope
     }

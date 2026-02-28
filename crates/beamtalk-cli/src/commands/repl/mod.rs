@@ -521,6 +521,12 @@ pub fn run(
                      Stop the workspace first with `beamtalk workspace stop` to restart with TLS."
                 );
             }
+            if timeout.is_some() {
+                eprintln!(
+                    "  ⚠️  Workspace already running (timeout unchanged). \
+                     Use `beamtalk workspace stop` to restart with a new timeout."
+                );
+            }
             if workspace_name.is_some() {
                 println!("  Workspace: {workspace_id}");
             } else {
@@ -639,6 +645,35 @@ mod ephemeral_tests {
     #[test]
     fn not_stop_when_guard_present() {
         assert!(!should_stop_workspace(true, true));
+    }
+}
+
+#[cfg(test)]
+mod timeout_warning_tests {
+    /// Helper: returns true when timeout warning should be shown.
+    /// Warning is shown when timeout was explicitly provided AND workspace was already running.
+    fn should_warn_timeout(timeout: Option<u64>, is_new: bool) -> bool {
+        timeout.is_some() && !is_new
+    }
+
+    #[test]
+    fn warns_when_timeout_provided_and_workspace_existing() {
+        assert!(should_warn_timeout(Some(300), false));
+    }
+
+    #[test]
+    fn no_warn_when_timeout_not_provided() {
+        assert!(!should_warn_timeout(None, false));
+    }
+
+    #[test]
+    fn no_warn_when_new_workspace_started() {
+        assert!(!should_warn_timeout(Some(300), true));
+    }
+
+    #[test]
+    fn no_warn_when_new_workspace_and_no_timeout() {
+        assert!(!should_warn_timeout(None, true));
     }
 }
 

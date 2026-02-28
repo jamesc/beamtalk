@@ -31,7 +31,7 @@
 // CHATROOM ACTOR
 // ===========================================================================
 //
-// ChatRoom manages a Set of member actors and a List of message strings.
+// ChatRoom manages a Set of member actors and a List of message strings
 // It demonstrates:
 // - Storing actor references (PIDs) in a Set
 // - String concatenation for formatted messages
@@ -58,15 +58,15 @@ Actor subclass: ChatRoom
   // - Set do: iteration with blocks
   // - Calling actor methods inside block (m receiveMessage:)
   say: text from: senderName =>
-    self.history := self.history ++ #(senderName ++ ": " ++ text).
+    self.history := self.history ++ #(senderName ++ ": " ++ text)
     self.members do: [:m | m receiveMessage: senderName ++ ": " ++ text]
   
   // Return current online members
   // Demonstrates: Returning a Set of actor references
   online =>
-    ^self.members
-  
+    self.members
+
   // Return message history
   // Demonstrates: Returning a List of formatted strings
   getHistory =>
-    ^self.history
+    self.history

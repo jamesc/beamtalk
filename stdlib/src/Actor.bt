@@ -46,7 +46,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// Counter new: #{}   // => ERROR: instantiation_error
   /// ```
-  sealed new: initArgs => self error: "Actors must use spawnWith:, not new:"
+  sealed new: _initArgs => self error: "Actors must use spawnWith:, not new:"
 
   /// Gracefully stop this actor (gen_server:stop).
   ///

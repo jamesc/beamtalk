@@ -11,7 +11,7 @@
 /// (#name -> "James") key       // => #name
 /// (#name -> "James") value     // => "James"
 /// ```
-sealed Object subclass: Association
+sealed Value subclass: Association
   /// Return the key of the association.
   ///
   /// ## Examples

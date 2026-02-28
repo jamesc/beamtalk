@@ -28,8 +28,8 @@ use crate::commands::protocol::ProtocolClient;
 #[cfg(target_os = "linux")]
 use super::storage::read_proc_start_time;
 use super::storage::{
-    NodeInfo, get_workspace_metadata, read_port_file, read_workspace_cookie, save_node_info,
-    workspace_dir,
+    NodeInfo, get_workspace_metadata, read_port_file, read_workspace_cookie,
+    remove_stale_runtime_files, save_node_info, workspace_dir,
 };
 
 /// Default idle timeout in seconds (4 hours)
@@ -245,21 +245,15 @@ pub fn start_detached_node(
     #[cfg(windows)]
     let project_path_str = project_path_str.replace('\\', "\\\\");
 
+    // Remove stale runtime files (pid, port, node.info) from any previous run.
+    // Without this, the port/PID discovery loops may read stale values and connect
+    // to the wrong BEAM node, causing auth failures in wait_for_tcp_ready.
+    remove_stale_runtime_files(workspace_id)?;
+
     // Compute the PID file path so the BEAM node can write its own PID for reliable discovery.
     // This avoids flaky process-list scanning via sysinfo (which can miss newly-forked processes
     // on loaded CI runners). The workspace dir is guaranteed to exist before we start the node.
     let pid_file_path = workspace_dir(workspace_id)?.join("pid");
-    // Remove any stale PID file from a previous run.
-    // Ignore NotFound (expected first run); propagate other errors (e.g. permissions)
-    // so we don't proceed and later accept a stale PID as valid.
-    if let Err(err) = std::fs::remove_file(&pid_file_path) {
-        if err.kind() != std::io::ErrorKind::NotFound {
-            return Err(miette!(
-                "Failed to remove stale PID file {}: {err}",
-                pid_file_path.display()
-            ));
-        }
-    }
     let pid_file_path_str = pid_file_path
         .to_str()
         .ok_or_else(|| miette!("PID file path contains invalid UTF-8: {:?}", pid_file_path))?

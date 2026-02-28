@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BUnit tests for the TransferAgent actor.
+// BUnit tests for the TransferAgent actor
 //
 // TransferAgent sends withdraw: and deposit: to accounts synchronously
 // (sync-by-default actor dispatch). When transfer:from:to: returns, both
-// accounts have already processed their messages.
+// accounts have already processed their messages
 //
 // Run in the REPL:
 //   > :load src/account.bt
@@ -16,46 +16,46 @@
 TestCase subclass: TransferTest
 
   testBasicTransfer =>
-    alice := Account spawn.
-    bob := Account spawn.
-    alice deposit: 1000.
-    bob deposit: 500.
-    agent := TransferAgent spawn.
-    agent transfer: 250 from: alice to: bob.
-    self assert: (alice balance) equals: 750.
-    self assert: (bob balance) equals: 750
+    alice := Account spawn
+    bob := Account spawn
+    alice deposit: 1000
+    bob deposit: 500
+    agent := TransferAgent spawn
+    agent transfer: 250 from: alice to: bob
+    self assert: alice balance equals: 750
+    self assert: bob balance equals: 750
 
   testTransferRecordsLastAmount =>
-    alice := Account spawn.
-    bob := Account spawn.
-    alice deposit: 1000.
-    agent := TransferAgent spawn.
-    agent transfer: 300 from: alice to: bob.
-    self assert: (agent getLastAmount) equals: 300
+    alice := Account spawn
+    bob := Account spawn
+    alice deposit: 1000
+    agent := TransferAgent spawn
+    agent transfer: 300 from: alice to: bob
+    self assert: agent getLastAmount equals: 300
 
   testMultipleTransfers =>
-    alice := Account spawn.
-    bob := Account spawn.
-    alice deposit: 1000.
-    agent := TransferAgent spawn.
-    agent transfer: 100 from: alice to: bob.
-    agent transfer: 200 from: alice to: bob.
-    self assert: (alice balance) equals: 700.
-    self assert: (bob balance) equals: 300.
+    alice := Account spawn
+    bob := Account spawn
+    alice deposit: 1000
+    agent := TransferAgent spawn
+    agent transfer: 100 from: alice to: bob
+    agent transfer: 200 from: alice to: bob
     // getLastAmount reflects the most recent transfer
-    self assert: (agent getLastAmount) equals: 200
+    self assert: alice balance equals: 700;
+         assert: bob balance equals: 300;
+         assert: agent getLastAmount equals: 200
 
   testTransferInBothDirections =>
-    alice := Account spawn.
-    bob := Account spawn.
-    alice deposit: 500.
-    bob deposit: 500.
-    agent := TransferAgent spawn.
-    agent transfer: 100 from: alice to: bob.
-    agent transfer: 50 from: bob to: alice.
-    self assert: (alice balance) equals: 450.
-    self assert: (bob balance) equals: 550
+    alice := Account spawn
+    bob := Account spawn
+    alice deposit: 500
+    bob deposit: 500
+    agent := TransferAgent spawn
+    agent transfer: 100 from: alice to: bob
+    agent transfer: 50 from: bob to: alice
+    self assert: alice balance equals: 450
+    self assert: bob balance equals: 550
 
   testDefaultLastAmountIsZero =>
-    agent := TransferAgent spawn.
-    self assert: (agent getLastAmount) equals: 0
+    agent := TransferAgent spawn
+    self assert: agent getLastAmount equals: 0

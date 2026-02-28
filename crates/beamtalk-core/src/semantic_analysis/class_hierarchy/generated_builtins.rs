@@ -72,6 +72,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Tuple"
             | "TypeError"
             | "UndefinedObject"
+            | "Value"
             | "WorkspaceInterface"
     )
 }
@@ -143,11 +144,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Association".into(),
         ClassInfo {
             name: "Association".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Value".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
-            is_value: false,
+            is_value: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -278,11 +279,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Boolean".into(),
         ClassInfo {
             name: "Boolean".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Value".into()),
             is_sealed: false,
             is_abstract: true,
             is_typed: false,
-            is_value: false,
+            is_value: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -389,11 +390,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Collection".into(),
         ClassInfo {
             name: "Collection".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Value".into()),
             is_sealed: false,
             is_abstract: true,
             is_typed: true,
-            is_value: false,
+            is_value: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -425,11 +426,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "CompiledMethod".into(),
         ClassInfo {
             name: "CompiledMethod".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Value".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
-            is_value: false,
+            is_value: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -449,11 +450,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "DateTime".into(),
         ClassInfo {
             name: "DateTime".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Value".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
-            is_value: false,
+            is_value: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -580,11 +581,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Exception".into(),
         ClassInfo {
             name: "Exception".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Value".into()),
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
-            is_value: false,
+            is_value: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -672,11 +673,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "FileHandle".into(),
         ClassInfo {
             name: "FileHandle".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Value".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
-            is_value: false,
+            is_value: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -969,11 +970,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Number".into(),
         ClassInfo {
             name: "Number".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Value".into()),
             is_sealed: false,
             is_abstract: true,
             is_typed: true,
-            is_value: false,
+            is_value: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1109,11 +1110,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Random".into(),
         ClassInfo {
             name: "Random".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Value".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
-            is_value: false,
+            is_value: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1157,11 +1158,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Regex".into(),
         ClassInfo {
             name: "Regex".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Value".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
-            is_value: false,
+            is_value: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1231,11 +1232,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "StackFrame".into(),
         ClassInfo {
             name: "StackFrame".into(),
-            superclass: Some("Object".into()),
+            superclass: Some("Value".into()),
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
-            is_value: false,
+            is_value: true,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1629,6 +1630,23 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "shallowCopy".into(), arity: 0, kind: MethodKind::Primary, defined_in: "UndefinedObject".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![] },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "UndefinedObject".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Value".into(),
+        ClassInfo {
+            name: "Value".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
         },

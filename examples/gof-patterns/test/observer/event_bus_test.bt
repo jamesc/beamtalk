@@ -4,7 +4,7 @@
 // Tests for Observer Pattern — EventBus and EventCollector
 //
 // With sync-by-default dispatch, bus notify: calls receive: on each subscriber
-// synchronously. When notify: returns, all subscribers have processed the event.
+// synchronously. When notify: returns, all subscribers have processed the event
 
 TestCase subclass: EventBusTest
 
@@ -13,31 +13,25 @@ TestCase subclass: EventBusTest
     col := EventCollector spawn
     bus subscribe: col
     bus notify: "hello"
-    self assert: (col eventCount) equals: 1
-    self assert: ((col events) first) equals: "hello"
+    self assert: col eventCount equals: 1
+    self assert: col events first equals: "hello"
     bus stop
     col stop
 
   testMultipleNotifications =>
     bus := EventBus spawn
     col := EventCollector spawn
-    bus subscribe: col
-    bus notify: "a"
-    bus notify: "b"
-    bus notify: "c"
-    self assert: (col eventCount) equals: 3
+    bus subscribe: col; notify: "a"; notify: "b"; notify: "c"
+    self assert: col eventCount equals: 3
     bus stop
     col stop
 
   testUnsubscribeStopsNotifications =>
     bus := EventBus spawn
     col := EventCollector spawn
-    bus subscribe: col
-    bus notify: "before"
-    bus unsubscribe: col
-    bus notify: "after"
-    self assert: (col eventCount) equals: 1
-    self assert: ((col events) first) equals: "before"
+    bus subscribe: col; notify: "before"; unsubscribe: col; notify: "after"
+    self assert: col eventCount equals: 1
+    self assert: col events first equals: "before"
     bus stop
     col stop
 
@@ -45,11 +39,9 @@ TestCase subclass: EventBusTest
     bus := EventBus spawn
     c1  := EventCollector spawn
     c2  := EventCollector spawn
-    bus subscribe: c1
-    bus subscribe: c2
-    bus notify: "event"
-    self assert: (c1 eventCount) equals: 1
-    self assert: (c2 eventCount) equals: 1
+    bus subscribe: c1; subscribe: c2; notify: "event"
+    self assert: c1 eventCount equals: 1
+    self assert: c2 eventCount equals: 1
     bus stop
     c1 stop
     c2 stop
@@ -58,6 +50,6 @@ TestCase subclass: EventBusTest
     bus := EventBus spawn
     col := EventCollector spawn
     bus notify: "ghost"
-    self assert: (col eventCount) equals: 0
+    self assert: col eventCount equals: 0
     bus stop
     col stop

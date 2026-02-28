@@ -11,7 +11,7 @@
 /// [1 / 0] on: Exception do: [:e | e message]
 /// Exception signal: "something went wrong"
 /// ```
-Object subclass: Exception
+Value subclass: Exception
   /// Return the error message string.
   ///
   /// ## Examples

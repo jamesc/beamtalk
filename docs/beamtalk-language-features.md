@@ -172,6 +172,104 @@ ProtoObject (minimal - identity, DNU)
 - **BEAM interop**: Maps naturally to Erlang records/maps vs gen_server processes
 - **Idiomatic code**: Use value types for data, actors for behavior
 
+### Value subclass: in Depth
+
+`Value subclass:` defines an immutable value object. All slots are set at construction time; there is no mutation.
+
+#### Construction forms
+
+Three forms create instances — all produce equivalent results:
+
+```beamtalk
+// 1. new — all slots get their declared defaults
+p := Point new                       // => Point(0, 0)
+
+// 2. new: — provide a map of slot values; missing keys keep defaults
+p := Point new: #{#x => 3, #y => 4}  // => Point(3, 4)
+
+// 3. Keyword constructor — auto-generated from slot names
+p := Point x: 3 y: 4                 // => Point(3, 4)
+```
+
+The keyword constructor form (`Point x: 3 y: 4`) is preferred for readability. The argument order follows the order the slots were declared.
+
+#### with*: functional setters
+
+Each slot automatically gets a `with<SlotName>:` method that returns a **new instance** with that slot changed. The original object is unchanged.
+
+```beamtalk
+p  := Point x: 1 y: 2
+p2 := p withX: 10       // new object: x=10, y=2
+p  x                     // => 1   (original unchanged)
+p2 x                     // => 10
+p2 y                     // => 2
+
+// Chaining
+p3 := (Point new withX: 5) withY: 7   // x=5, y=7
+```
+
+#### Immutability enforcement
+
+Direct slot mutation is illegal in value types:
+
+- **Compile-time:** `self.x := newX` inside a `Value subclass:` method is a compile error (`Cannot assign to slot`).
+- **Runtime:** `fieldAt:put:` raises `immutable_value` (use `with*:` instead).
+
+```beamtalk
+// Compile error — rejected before the code runs:
+// Value subclass: BadPoint
+//   state: x = 0
+//   badSetX: v => self.x := v   ← error: Cannot assign to slot
+
+// Runtime error:
+p := Point x: 1 y: 2
+p fieldAt: #x put: 99   // raises: immutable_value
+```
+
+#### Value equality
+
+Value objects compare by **structural equality**: two objects with the same class and the same slot values are equal (`==`).
+
+```beamtalk
+p1 := Point x: 3 y: 4
+p2 := Point x: 3 y: 4
+p1 == p2    // => true
+
+p3 := Point x: 9 y: 9
+p1 == p3    // => false
+
+// with*: result equals a freshly constructed object
+(p1 withX: 10) == (Point x: 10 y: 4)   // => true
+```
+
+#### Value objects in collections
+
+Value objects work seamlessly with all collection methods:
+
+```beamtalk
+points := #((Point x: 1 y: 1), (Point x: 2 y: 2), (Point x: 3 y: 3))
+
+// collect: transforms elements
+points collect: [:p | p x]           // => #(1, 2, 3)
+
+// select: filters elements
+points select: [:p | p x > 1]        // => #(Point(2,2), Point(3,3))
+
+// inject:into: folds
+points inject: 0 into: [:sum :p | sum + p x]   // => 6
+```
+
+#### Reflection
+
+```beamtalk
+p := Point x: 3 y: 4
+p fieldAt: #x          // => 3
+p fieldAt: #y          // => 4
+p fieldNames size      // => 2  (contains #x and #y; order is not guaranteed)
+p class                // => Point
+Point superclass       // => Value
+```
+
 ### Message Sends
 
 ```beamtalk

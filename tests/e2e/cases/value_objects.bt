@@ -1,0 +1,153 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for Value subclass: construction, with*: setters, immutability,
+// and equality in the REPL (BT-926).
+//
+// These tests require E2E because:
+// - The @load-error directive (compile-time error checking) is a REPL feature.
+// - REPL interaction validates the full load-compile-eval-print cycle.
+//
+// Compile-time rejection of self.slot := in value types is already
+// verified by actor_slot.bt (@load-error on fixtures/actor_slot_value_error.bt).
+
+// @load tests/e2e/fixtures/value_point.bt
+
+// ===========================================================================
+// CONSTRUCTION FORMS
+// ===========================================================================
+
+// new — default-initialises all slots
+p := ValuePoint new
+// => _
+
+p x
+// => 0
+
+p y
+// => 0
+
+// new: — initialise from map
+p2 := ValuePoint new: #{#x => 3, #y => 4}
+// => _
+
+p2 x
+// => 3
+
+p2 y
+// => 4
+
+// Keyword constructor
+p3 := ValuePoint x: 10 y: 20
+// => _
+
+p3 x
+// => 10
+
+p3 y
+// => 20
+
+// ===========================================================================
+// with*: FUNCTIONAL SETTERS
+// ===========================================================================
+
+// with*: returns a new instance — original unchanged
+orig := ValuePoint x: 1 y: 2
+// => _
+
+moved := orig withX: 99
+// => _
+
+orig x
+// => 1
+
+moved x
+// => 99
+
+moved y
+// => 2
+
+// Chaining with*: setters
+chained := (ValuePoint new withX: 5) withY: 7
+// => _
+
+chained x
+// => 5
+
+chained y
+// => 7
+
+// ===========================================================================
+// IMMUTABILITY ENFORCEMENT
+// ===========================================================================
+
+// compile-time: self.slot := inside a Value subclass is rejected
+// @load-error tests/e2e/fixtures/actor_slot_value_error.bt => Cannot assign to slot
+
+// runtime: fieldAt:put: raises immutable_value
+immPt := ValuePoint x: 1 y: 2
+// => _
+
+immPt fieldAt: #x put: 99
+// => ERROR: immutable value
+
+// ===========================================================================
+// VALUE EQUALITY
+// ===========================================================================
+
+// Two value objects with the same fields are equal
+a := ValuePoint x: 3 y: 4
+// => _
+
+b := ValuePoint x: 3 y: 4
+// => _
+
+a == b
+// => true
+
+// Different values are not equal
+c := ValuePoint x: 9 y: 9
+// => _
+
+a == c
+// => false
+
+// with*: result equals a fresh object with the same values
+withResult := a withX: 10
+// => _
+
+fresh := ValuePoint x: 10 y: 4
+// => _
+
+withResult == fresh
+// => true
+
+// ===========================================================================
+// REFLECTION
+// ===========================================================================
+
+// fieldAt: reads slot by name
+reflPt := ValuePoint x: 7 y: 8
+// => _
+
+reflPt fieldAt: #x
+// => 7
+
+reflPt fieldAt: #y
+// => 8
+
+// fieldNames returns the slot count (exact order is implementation-defined)
+reflPt fieldNames size
+// => 2
+
+// ===========================================================================
+// CLASS MEMBERSHIP
+// ===========================================================================
+
+// class returns ValuePoint, not an actor class
+(ValuePoint x: 1 y: 2) class name
+// => ValuePoint
+
+// ValuePoint is a subclass of Value
+ValuePoint superclass name
+// => Value
