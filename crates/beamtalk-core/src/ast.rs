@@ -213,8 +213,10 @@ impl CommentAttachment {
 
 /// An expression in a statement position, with optional surrounding comments (ADR 0044).
 ///
-/// Method bodies, block bodies, and module-level expression sequences use
-/// `Vec<ExpressionStatement>` to preserve comments between statements.
+/// Wraps an [`Expression`] with a [`CommentAttachment`] for preserving comments
+/// between statements. Statement-position fields (method bodies, block bodies,
+/// module expressions) will migrate from `Vec<Expression>` to
+/// `Vec<ExpressionStatement>` in BT-974.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExpressionStatement {
     /// Comments attached to this statement.
