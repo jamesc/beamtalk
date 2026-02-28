@@ -120,37 +120,41 @@ fn rewrite_prose_links(markdown: &str, prose_pages: &[(&str, &str, &str)]) -> St
 }
 
 /// Return (emoji, description) for a prose doc card on the landing page.
-fn landing_card_meta(title: &str) -> (&'static str, &'static str) {
-    match title {
-        "Language Features" => (
+///
+/// Keyed by `output_file` (the stable `.html` filename) rather than display
+/// title so that renaming a title in `PROSE_PAGES` never silently drops card
+/// descriptions.
+fn landing_card_meta(output_file: &str) -> (&'static str, &'static str) {
+    match output_file {
+        "language-features.html" => (
             "🔤",
             "Syntax, semantics, and worked examples for the message-based programming model.",
         ),
-        "Design Principles" => (
+        "principles.html" => (
             "🧭",
             "The core principles guiding all design and implementation decisions.",
         ),
-        "Architecture" => (
+        "architecture.html" => (
             "🏗",
             "Compiler pipeline, runtime, hot code reload, and live development flow.",
         ),
-        "Agent-Native Development" => (
+        "agent-native-development.html" => (
             "🤖",
             "Why Beamtalk is uniquely suited as a development environment for AI agents.",
         ),
-        "Syntax Rationale" => (
+        "syntax-rationale.html" => (
             "💬",
             "Why Beamtalk keeps certain Smalltalk conventions and diverges from others.",
         ),
-        "Domain Model" => (
+        "ddd-model.html" => (
             "🗺",
             "Bounded contexts, aggregates, and ubiquitous language of the project.",
         ),
-        "Security" => (
+        "security.html" => (
             "🔒",
             "Security model, threat analysis, and sandboxing for untrusted code.",
         ),
-        "Known Limitations" => (
+        "known-limitations.html" => (
             "⚠️",
             "Current limitations and unimplemented features to be aware of.",
         ),
@@ -207,7 +211,7 @@ pub(super) fn write_site_landing_page(
     html.push_str("<span class=\"code-dot code-dot-r\"></span>\n");
     html.push_str("<span class=\"code-dot code-dot-y\"></span>\n");
     html.push_str("<span class=\"code-dot code-dot-g\"></span>\n");
-    html.push_str("<span>counter.bt</span>\n");
+    html.push_str("<span class=\"code-window-title\">counter.bt</span>\n");
     html.push_str("</div>\n"); // .code-window-bar
     html.push_str("<div class=\"code-window-body\">\n");
     html.push_str("<pre><code>");
@@ -234,7 +238,7 @@ pub(super) fn write_site_landing_page(
 
     // Prose docs cards
     for &(_, file, title) in prose_pages {
-        let (emoji, desc) = landing_card_meta(title);
+        let (emoji, desc) = landing_card_meta(file);
         let _ = writeln!(
             html,
             "<a href=\"docs/{file}\" class=\"landing-card\">\n\

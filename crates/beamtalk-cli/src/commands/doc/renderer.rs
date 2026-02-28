@@ -84,8 +84,12 @@ pub(super) fn render_doc(doc: &str) -> String {
             None
         }
         // Drop HTML comments (e.g. license headers); sanitize all other raw HTML.
+        // Only drop events that are purely a comment (starts *and* ends with the
+        // comment delimiters) so mixed chunks like `<!--x--><em>y</em>` are not
+        // silently swallowed.
         Event::Html(raw) | Event::InlineHtml(raw) => {
-            if raw.trim_start().starts_with("<!--") {
+            let trimmed = raw.trim();
+            if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
                 None
             } else {
                 Some(Event::Text(raw))

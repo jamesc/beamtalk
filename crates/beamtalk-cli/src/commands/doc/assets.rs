@@ -549,7 +549,7 @@ footer {
 .code-dot-r { background: #EF4444; }
 .code-dot-y { background: #F59E0B; }
 .code-dot-g { background: #10B981; }
-.code-window-bar span {
+.code-window-title {
   margin-left: 0.5rem;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.72rem;
