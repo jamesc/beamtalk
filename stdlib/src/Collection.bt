@@ -137,6 +137,7 @@ abstract typed Value subclass: Collection
     result := (self inject: #() into: [:acc :each |
       (block value: each) ifTrue: [acc addFirst: each] ifFalse: [acc]
     ]) reversed
+    // species pattern: see collect: above
     @expect dnu
     self species withAll: result
 
