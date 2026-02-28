@@ -28,7 +28,7 @@ use crate::commands::protocol::ProtocolClient;
 #[cfg(target_os = "linux")]
 use super::storage::read_proc_start_time;
 use super::storage::{
-    NodeInfo, get_workspace_metadata, read_port_file, read_workspace_cookie,
+    NodeInfo, get_workspace_metadata, read_port_file, read_workspace_cookie, remove_file_if_exists,
     remove_stale_runtime_files, save_node_info, workspace_dir,
 };
 
@@ -245,10 +245,23 @@ pub fn start_detached_node(
     #[cfg(windows)]
     let project_path_str = project_path_str.replace('\\', "\\\\");
 
-    // Remove stale runtime files (pid, port, node.info) from any previous run.
-    // Without this, the port/PID discovery loops may read stale values and connect
-    // to the wrong BEAM node, causing auth failures in wait_for_tcp_ready.
+    // If a `starting` tombstone is present, a previous startup was interrupted
+    // mid-flight (crash, OOM, SIGKILL, etc.).  Clean up all runtime files —
+    // including the tombstone itself — before attempting a fresh start (BT-969).
+    // `remove_stale_runtime_files` also handles the BT-967 case (stale port/pid/
+    // node.info from a previous aborted run without a tombstone).
     remove_stale_runtime_files(workspace_id)?;
+
+    // Write the tombstone before spawning the BEAM node.  If startup is
+    // interrupted at any point after this, the next call will detect the file
+    // and trigger the cleanup above (BT-969).
+    let tombstone_path = workspace_dir(workspace_id)?.join("starting");
+    std::fs::write(&tombstone_path, b"").map_err(|e| {
+        miette!(
+            "Failed to write startup tombstone {}: {e}",
+            tombstone_path.display()
+        )
+    })?;
 
     // Compute the PID file path so the BEAM node can write its own PID for reliable discovery.
     // This avoids flaky process-list scanning via sysinfo (which can miss newly-forked processes
@@ -400,6 +413,12 @@ pub fn start_detached_node(
 
     // Save node info
     save_node_info(workspace_id, &node_info)?;
+
+    // Remove the tombstone now that startup completed successfully (BT-969).
+    // On any failure path the tombstone is deliberately left in place so the
+    // next `start_detached_node` call can detect and clean up the partial state.
+    let tombstone_path = workspace_dir(workspace_id)?.join("starting");
+    remove_file_if_exists(&tombstone_path)?;
 
     Ok(node_info)
 }

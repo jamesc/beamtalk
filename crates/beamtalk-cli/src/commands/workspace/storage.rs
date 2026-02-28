@@ -277,7 +277,7 @@ pub(super) fn read_proc_start_time(pid: u32) -> Option<u64> {
 ///
 /// Used by stale-file cleanup to avoid TOCTOU races (`exists()` + `remove_file()`
 /// is racy if another process creates/removes the file between the two calls).
-fn remove_file_if_exists(path: &std::path::Path) -> Result<()> {
+pub(super) fn remove_file_if_exists(path: &std::path::Path) -> Result<()> {
     if let Err(err) = fs::remove_file(path) {
         if err.kind() != std::io::ErrorKind::NotFound {
             return Err(miette!(
@@ -289,12 +289,14 @@ fn remove_file_if_exists(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Remove stale runtime files (`node.info`, `port`, `pid`) from a workspace directory.
+/// Remove stale runtime files (`node.info`, `port`, `pid`, `starting`) from a workspace directory.
 ///
 /// These files are written during workspace startup and must be cleaned before
 /// restarting a node — a stale `port` file can cause `start_detached_node` to
 /// connect to the wrong BEAM node, and a stale `pid` file can report the wrong
-/// process.
+/// process.  The `starting` tombstone is written at the very beginning of
+/// `start_detached_node` and removed on success; its presence here indicates a
+/// partial startup that was interrupted (BT-969).
 ///
 /// Called by:
 /// - `cleanup_stale_node_info` — after detecting an orphaned workspace
@@ -304,6 +306,7 @@ pub fn remove_stale_runtime_files(workspace_id: &str) -> Result<()> {
     remove_file_if_exists(&ws_dir.join("node.info"))?;
     remove_file_if_exists(&ws_dir.join("port"))?;
     remove_file_if_exists(&ws_dir.join("pid"))?;
+    remove_file_if_exists(&ws_dir.join("starting"))?;
     Ok(())
 }
 
@@ -333,4 +336,50 @@ pub(super) fn acquire_workspace_lock(workspace_id: &str) -> Result<fs::File> {
 
     lockfile.lock_exclusive().into_diagnostic()?;
     Ok(lockfile)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that `remove_stale_runtime_files` removes all known runtime files
+    /// including the `starting` tombstone introduced in BT-969.
+    #[test]
+    fn test_remove_stale_runtime_files_removes_starting_tombstone() {
+        let ws_id = format!("test_stale_tombstone_{}", std::process::id());
+        let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
+        fs::create_dir_all(&ws_dir).unwrap();
+
+        // Write all runtime files including the tombstone.
+        for name in &["node.info", "port", "pid", "starting"] {
+            fs::write(ws_dir.join(name), b"dummy").unwrap();
+        }
+
+        remove_stale_runtime_files(&ws_id).expect("remove_stale_runtime_files should not fail");
+
+        for name in &["node.info", "port", "pid", "starting"] {
+            assert!(
+                !ws_dir.join(name).exists(),
+                "{name} should have been removed by remove_stale_runtime_files"
+            );
+        }
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&ws_dir);
+    }
+
+    /// Verify that `remove_stale_runtime_files` is idempotent — calling it when
+    /// the files are already absent (e.g. after a clean shutdown) must not error.
+    #[test]
+    fn test_remove_stale_runtime_files_idempotent_on_missing_files() {
+        let ws_id = format!("test_stale_idempotent_{}", std::process::id());
+        let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
+        fs::create_dir_all(&ws_dir).unwrap();
+
+        // No files written — must succeed without error.
+        remove_stale_runtime_files(&ws_id)
+            .expect("remove_stale_runtime_files should be idempotent on missing files");
+
+        let _ = fs::remove_dir_all(&ws_dir);
+    }
 }
