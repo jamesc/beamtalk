@@ -1874,7 +1874,7 @@ mod tests {
 
     // ── Field access / assignment in collection blocks (false-positive tests) ──
 
-    /// `self.field` read inside collect: is a maps:get, not a gen_server call — no hint.
+    /// `self.field` read inside collect: is a maps:get, not a `gen_server` call — no hint.
     #[test]
     fn self_field_read_in_collect_no_hint() {
         let src =
@@ -1892,7 +1892,7 @@ mod tests {
         );
     }
 
-    /// `self.field :=` write inside inject:into: is a maps:put, not a gen_server call — no hint.
+    /// `self.field :=` write inside inject:into: is a maps:put, not a `gen_server` call — no hint.
     #[test]
     fn self_field_write_in_inject_no_hint() {
         let src = "Actor subclass: Counter\n  accumulate: items =>\n    items inject: 0 into: [:acc :val |\n      self.total := self.total + val\n      acc + val]";
