@@ -170,7 +170,7 @@ are **not** preserved by this design — they remain at statement granularity on
 is a deliberate scope limitation: sub-expression comments are rare and the formatter can
 handle them via whitespace preservation rather than AST attachment.
 
-#### Class and method nodes
+#### Class, method, and state declaration nodes
 
 `ClassDefinition` and `MethodDefinition` already have `doc_comment: Option<String>` for
 `///` comments. They gain a full `CommentAttachment` for `//` and `/* */` comments that
@@ -189,6 +189,45 @@ pub struct ClassDefinition {
     // ... existing fields unchanged ...
 }
 ```
+
+`StateDeclaration` gains both `CommentAttachment` (for `//`/`/* */`) and
+`doc_comment: Option<String>` (for `///`). State fields commonly carry explanatory
+comments; capturing `///` at parse time is necessary so the formatter, LSP, and future
+field reflection can all use the same data source:
+
+```rust
+pub struct StateDeclaration {
+    pub comments: CommentAttachment,   // // and /* */ above the field
+    pub doc_comment: Option<String>,   // /// doc comment (field-level)
+    // ... existing fields unchanged (name, type_annotation, default_value, span) ...
+}
+```
+
+**Runtime compilation of field doc comments is deferred.** The `///` on a state field
+is collected by the parser and available throughout the AST pipeline (formatter, LSP,
+semantic analysis), but the compiler does not yet emit anything for it. A follow-up ADR
+covering `FieldDescriptor` objects will define the runtime storage and accessor API.
+
+`FieldDescriptor` is the right model — consistent with `Class` and `CompiledMethod`
+being first-class objects you introspect via message sends. A `FieldDescriptor` will
+carry `.name`, `.doc`, `.typeAnnotation`, `.defaultValue` as messages, participate in
+the metaclass tower, and be accessible via `MyClass fields` returning a collection of
+`FieldDescriptor` instances. This mirrors how `MyClass methods` returns `CompiledMethod`
+instances today.
+
+Type annotations will be stored on `FieldDescriptor` (and on `CompiledMethod` for
+consistency) as inert metadata — accessible via reflection but never enforced at
+runtime. This follows the Strongtalk model: type annotations are optional, the runtime
+performs no type checks, but the annotations survive as data so live tools and
+reflection APIs can read them without re-parsing source. The Elixir `@spec` precedent
+on BEAM validates this: typespecs are compiled into module attributes, used by Dialyzer
+and documentation tooling, ignored by the VM. A synthesised class built by a live tool
+with no source file would otherwise have no way to expose type information.
+
+The current `MethodDefinition.return_type` and `ParameterDefinition.type_annotation`
+fields in the AST are discarded by codegen today. The `FieldDescriptor` ADR will define
+the compilation target for both field and method type annotations, and `CompiledMethod`
+will be updated in the same pass for consistency.
 
 #### Module
 
@@ -210,7 +249,7 @@ fn collect_comment_attachment(&mut self) -> CommentAttachment {
             Trivia::LineComment(text) | Trivia::BlockComment(text) => {
                 leading.push(Comment { content: text.into(), kind: ..., span: ... });
             }
-            Trivia::DocComment(_) => { /* handled separately */ }
+            Trivia::DocComment(_) => { /* handled separately by collect_doc_comment() */ }
             Trivia::Whitespace(_) => {}
         }
     }
@@ -218,6 +257,21 @@ fn collect_comment_attachment(&mut self) -> CommentAttachment {
     CommentAttachment { leading, trailing }
 }
 ```
+
+**Note on trailing comments:** Leading comments are found in the *current* token's
+leading trivia — comments that precede the token the parser is about to consume.
+Trailing comments (end-of-line after a node) require a different mechanism: after
+constructing a node, the parser checks the *next* token's leading trivia for a comment
+on the same line as the node's last token. This is a post-parse attachment step, not a
+look-ahead into the current token.
+
+**Note on `collect_doc_comment` interaction:** The existing `collect_doc_comment()` uses
+`_ => lines.clear()` — any non-doc trivia (including `//` comments) resets the doc
+comment accumulator. This means a `//` comment interleaved before `///` lines is correctly
+excluded from the doc comment. The `collect_comment_attachment()` function processes the
+same trivia but skips `DocComment` entries, so each comment type has exactly one owner.
+The ordering dependency is: `collect_doc_comment()` runs first (for `///`), then
+`collect_comment_attachment()` runs on the same trivia (for `//` and `/* */`).
 
 ### Unparser / Formatter
 
@@ -337,21 +391,30 @@ what it needs, and nobody else pays a tax."
 **🏭 Operator:** "Zero runtime impact — the token stream is only retained for tooling
 paths, not compilation."
 
-**Tension:** This is the strongest alternative for pure formatting. The decisive weakness
-is synthesised ASTs: a class built in a live tool has no token stream. The formatter
-would need a fallback path (emit without comments) or the live tool would need to
-synthesise tokens — which is essentially building a second unparser. The "tooling ==
-compiler" principle demands that synthesised and parsed ASTs use the same code path,
-which token preservation cannot achieve.
+**Tension:** This is the strongest alternative for pure formatting. But it fails on two
+fronts, not one. First, synthesised ASTs have no token stream — a class built in a live
+tool cannot emit comments because there are no tokens to walk. Second, and more
+fundamentally, token preservation is a *formatting* concept only: it says nothing about
+where type annotations and doc comments live on `FieldDescriptor` and `CompiledMethod`
+at runtime. Those runtime objects need their data stored as fields — which is exactly
+what Option A provides. A system that uses Option D for formatting and Option A for
+runtime reflection ends up with two comment/annotation storage models anyway, which is
+the split we are trying to avoid.
 
 ### Tension Points
 
 Option B is faster to implement and has no AST churn. Option D (token preservation) is
-the industry standard for formatters. Option A is the only approach that handles
-synthesised ASTs from live tools. The question is whether live tool persistence is
-near-term enough to justify the churn now. The decision is yes: building the formatter
-on Option B or D would mean rebuilding on Option A later when live tools arrive. Pay the
-AST churn once, not twice.
+the industry standard for formatters. Option A is the only approach that handles both
+synthesised ASTs from live tools *and* runtime metadata storage on `FieldDescriptor`
+and `CompiledMethod`.
+
+Live tool persistence and `FieldDescriptor` are not hypothetical future concerns —
+they are confirmed requirements. `FieldDescriptor` will store `.doc`, `.typeAnnotation`,
+and `.defaultValue` as runtime fields; `CompiledMethod` will gain type annotation
+storage in the same pass. Option B and D have no answer for synthesised objects with no
+source file origin. Building the formatter on Option B or D and then rebuilding on
+Option A when `FieldDescriptor` lands means paying the AST churn twice. The decision
+is to pay it once, now.
 
 ## Alternatives Considered
 
@@ -422,13 +485,16 @@ The exact failure mode that Go and Elixir are trying to escape from.
 
 ### Negative
 - **Significant AST churn.** Method bodies and block bodies change from `Vec<Expression>`
-  to `Vec<ExpressionStatement>`. There are ~14 `Vec<Expression>` fields in `ast.rs`
-  (method bodies, block bodies, module expressions, match arms, list/array elements).
-  Downstream, ~35 files across codegen, lint, LSP, semantic analysis, and tests reference
-  `.body` on methods/blocks. All pattern matches and iteration must unwrap
-  `ExpressionStatement` to reach `Expression`. The `ast_walker` module (BT-961) must
-  be updated to traverse `ExpressionStatement`. Test helpers that construct
-  `body: vec![expr1, expr2]` gain boilerplate wrapping.
+  to `Vec<ExpressionStatement>`. Of the 14 `Vec<Expression>` declarations in `ast.rs`,
+  **6 are statement-position fields** that change (`Module.expressions`,
+  `ClassDefinition.expressions`, `MethodDefinition.body` × 3 variants, `Block.body`).
+  The remaining ~4 (`MessageSend.arguments`, list/array `elements`, etc.) are
+  sub-expression positions and stay as `Vec<Expression>`.
+  Downstream, 35 files contain ~190 `.body` references across codegen, lint, LSP,
+  semantic analysis, and tests. All pattern matches and iteration at statement positions
+  must unwrap `ExpressionStatement` to reach `Expression`. The `ast_walker` module
+  (BT-961) must be updated to traverse `ExpressionStatement`. Test helpers that
+  construct `body: vec![expr1, expr2]` gain boilerplate wrapping.
 - Parser must attach comments during construction rather than discarding trivia — moderate
   complexity increase
 - `CommentAttachment` adds fields to `ClassDefinition` and `MethodDefinition`
@@ -441,6 +507,14 @@ The exact failure mode that Go and Elixir are trying to escape from.
 - `Module.leading_comments` is replaced by leading comments on the first item in the module — equivalent semantics, different location
 - `ExpressionStatement` is a new wrapper type; it does not affect language semantics
 - Comments remain invisible to the codegen pipeline
+- **Error recovery:** Near `Expression::Error` nodes (from parse errors), comment
+  attachment proceeds normally — comments attach to the nearest valid node. If a parse
+  error prevents node construction, orphaned comments attach to the error recovery node.
+  This is no worse than the current behaviour (comments are discarded entirely).
+- **REPL scope boundary:** REPL input is parsed as a standalone expression sequence.
+  Comments entered in the REPL attach to `ExpressionStatement` nodes within that
+  sequence. They do not persist across REPL evaluations (the REPL evaluates and discards
+  the AST). This is correct — REPL comments are transient.
 
 ## Implementation
 
@@ -448,8 +522,11 @@ The exact failure mode that Go and Elixir are trying to escape from.
 - Add `CommentAttachment` struct to `ast.rs`
 - Add `ExpressionStatement` wrapper with convenience constructor (`ExpressionStatement::bare(expr)`)
 - Update `ClassDefinition` and `MethodDefinition` with `comments: CommentAttachment`
-- Change `Vec<Expression>` to `Vec<ExpressionStatement>` in method/block bodies and
-  module expressions (~14 fields in `ast.rs`)
+- Add `comments: CommentAttachment` and `doc_comment: Option<String>` to
+  `StateDeclaration` (state fields need both `//` and `///` captured at parse time)
+- Change `Vec<Expression>` to `Vec<ExpressionStatement>` in statement-position fields
+  (~6 fields in `ast.rs`: `Module.expressions`, `ClassDefinition.expressions`,
+  `MethodDefinition.body` × 3 variants, `Block.body`)
 - Update `Module` to remove `leading_comments` (moved to first-item leading)
 
 **Affected:** `crates/beamtalk-core/src/ast.rs`
@@ -458,7 +535,10 @@ The exact failure mode that Go and Elixir are trying to escape from.
 - Extend `collect_comment_attachment()` to handle `LineComment` and `BlockComment` trivia
   (extending the existing `collect_doc_comment()` pattern)
 - Attach `CommentAttachment` when constructing `ExpressionStatement` nodes
-- Attach `CommentAttachment` when constructing `ClassDefinition` and `MethodDefinition`
+- Attach `CommentAttachment` and collect `doc_comment` when constructing
+  `ClassDefinition`, `MethodDefinition`, and `StateDeclaration`
+- Codegen skips `StateDeclaration.doc_comment` (no runtime target yet — deferred to
+  `FieldDescriptor` ADR)
 - Update `parse_module()` to remove `leading_comments` collection
 - Ensure `///` doc comments are **not** duplicated into `CommentAttachment` (dedup rule)
 
@@ -505,6 +585,17 @@ A linked ADR will cover **dirty/clean class tracking** in the workspace — know
 in-memory class representations have been modified since last written to disk, so
 persistence can be selective.
 
+A second linked ADR will cover **`FieldDescriptor` objects** — first-class runtime
+objects (consistent with `Class` and `CompiledMethod`) that expose `.name`, `.doc`,
+`.typeAnnotation`, and `.defaultValue` via message sends. That ADR will define:
+- The compilation target for `StateDeclaration.doc_comment` and `StateDeclaration.type_annotation`
+- Runtime storage of type annotations on `CompiledMethod` (parameter types, return type) for consistency
+- The `MyClass fields` accessor API returning a collection of `FieldDescriptor` instances
+
+Until that ADR lands, field doc comments and type annotations are collected at parse
+time and available throughout the AST pipeline (formatter, LSP, type checker) but not
+compiled to runtime objects.
+
 ## References
 
 - Related issues: BT-962 (lint cleanup epic), BT-963–966 (lint violation fixes)
@@ -513,6 +604,8 @@ persistence can be selective.
   - ADR 0033 — Runtime-Embedded Documentation (superseded ADR 0008's EEP-48 chunk generation; `///` now compiles to `doc:` message sends populating `CompiledMethod.doc` at load time)
   - ADR 0018 — Document Tree Code Generation (Wadler-Lindig; unparser will use the same `Document` API)
   - ADR 0024 — Static-First, Live-Augmented IDE Tooling ("tooling == compiler" principle)
+  - ADR 0035 — Field-Based Reflection API (renamed instVar→field; `FieldDescriptor` is the natural next step)
+  - Future ADR: `FieldDescriptor` objects — runtime compilation target for `StateDeclaration.doc_comment`
 - Prior art:
   - [Pharo RBComment discussion](http://forum.world.st/Why-RBComment-is-not-RBCommentNode-td5094575.html)
   - [Gleam formatter source](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/format.rs)
