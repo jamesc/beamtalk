@@ -2757,8 +2757,7 @@ mod tests {
         let diags_with = run_with_expect(&module_with, &hierarchy);
         assert!(
             diags_with.is_empty(),
-            "@expect dnu should suppress DNU hint, got: {:?}",
-            diags_with
+            "@expect dnu should suppress DNU hint, got: {diags_with:?}"
         );
     }
 
@@ -2780,8 +2779,7 @@ mod tests {
         let diags_with = run_with_expect(&module_with, &hierarchy);
         assert!(
             diags_with.is_empty(),
-            "@expect type should suppress type warning, got: {:?}",
-            diags_with
+            "@expect type should suppress type warning, got: {diags_with:?}"
         );
     }
 
