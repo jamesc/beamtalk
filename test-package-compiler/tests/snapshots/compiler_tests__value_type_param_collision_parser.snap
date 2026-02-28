@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -258,70 +257,5 @@ Module {
         start: 445,
         end: 803,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 445,
-                end: 451,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 445,
-                end: 451,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Compiler snapshot test for BT-369: value-type temp var collision avoidance",
-            span: Span {
-                start: 445,
-                end: 451,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "//",
-            span: Span {
-                start: 445,
-                end: 451,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Verifies that method parameters with underscore-prefixed names (e.g., _seq0)",
-            span: Span {
-                start: 445,
-                end: 451,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// don't collide with codegen-internal temp vars used for expression sequencing.",
-            span: Span {
-                start: 445,
-                end: 451,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Both parameter binding and sequencing temp vars go through the fresh_var",
-            span: Span {
-                start: 445,
-                end: 451,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// counter, ensuring unique Core Erlang variable names.",
-            span: Span {
-                start: 445,
-                end: 451,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

@@ -9,7 +9,48 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 243,
+                            end: 250,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 243,
+                            end: 250,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test boundary condition: deeply nested expressions",
+                        span: Span {
+                            start: 243,
+                            end: 250,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Stress test parser stack depth with multiple nesting levels",
+                        span: Span {
+                            start: 243,
+                            end: 250,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Deeply nested parenthesized expressions (10 levels)",
+                        span: Span {
+                            start: 243,
+                            end: 250,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -120,7 +161,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Deeply nested message sends (8 levels)",
+                        span: Span {
+                            start: 323,
+                            end: 330,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -238,7 +288,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Deeply nested keyword messages (5 levels)",
+                        span: Span {
+                            start: 451,
+                            end: 458,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -437,7 +496,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Deeply nested blocks (6 levels)",
+                        span: Span {
+                            start: 559,
+                            end: 566,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -569,7 +637,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Complex mixed nesting (blocks + messages + operators)",
+                        span: Span {
+                            start: 643,
+                            end: 650,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -754,7 +831,16 @@ Module {
                             },
                             ExpressionStatement {
                                 comments: CommentAttachment {
-                                    leading: [],
+                                    leading: [
+                                        Comment {
+                                            content: "// Nested cascades with nested arguments (single line - multi-line cascades not yet supported)",
+                                            span: Span {
+                                                start: 786,
+                                                end: 793,
+                                            },
+                                            kind: Line,
+                                        },
+                                    ],
                                     trailing: None,
                                 },
                                 expression: Assignment {
@@ -1183,48 +1269,7 @@ Module {
         start: 243,
         end: 900,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 243,
-                end: 250,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 243,
-                end: 250,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test boundary condition: deeply nested expressions",
-            span: Span {
-                start: 243,
-                end: 250,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Stress test parser stack depth with multiple nesting levels",
-            span: Span {
-                start: 243,
-                end: 250,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Deeply nested parenthesized expressions (10 levels)",
-            span: Span {
-                start: 243,
-                end: 250,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

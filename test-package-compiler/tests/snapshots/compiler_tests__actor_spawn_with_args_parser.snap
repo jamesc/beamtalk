@@ -9,7 +9,88 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 368,
+                            end: 373,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 368,
+                            end: 373,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test actor spawn with initialization arguments",
+                        span: Span {
+                            start: 368,
+                            end: 373,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Counter spawnWith: passes initialization arguments to init/1",
+                        span: Span {
+                            start: 368,
+                            end: 373,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// which merges them with default field values.",
+                        span: Span {
+                            start: 368,
+                            end: 373,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "//",
+                        span: Span {
+                            start: 368,
+                            end: 373,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Once map literals are supported, use:",
+                        span: Span {
+                            start: 368,
+                            end: 373,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "//   counter := Counter spawnWith: #{value => 10}",
+                        span: Span {
+                            start: 368,
+                            end: 373,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "//",
+                        span: Span {
+                            start: 368,
+                            end: 373,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// For now, test with a simple value:",
+                        span: Span {
+                            start: 368,
+                            end: 373,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -148,7 +229,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Spawn with default values (value = 0)",
+                        span: Span {
+                            start: 469,
+                            end: 477,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -196,86 +286,5 @@ Module {
         start: 368,
         end: 494,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 368,
-                end: 373,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 368,
-                end: 373,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test actor spawn with initialization arguments",
-            span: Span {
-                start: 368,
-                end: 373,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Counter spawnWith: passes initialization arguments to init/1",
-            span: Span {
-                start: 368,
-                end: 373,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// which merges them with default field values.",
-            span: Span {
-                start: 368,
-                end: 373,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "//",
-            span: Span {
-                start: 368,
-                end: 373,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Once map literals are supported, use:",
-            span: Span {
-                start: 368,
-                end: 373,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "//   counter := Counter spawnWith: #{value => 10}",
-            span: Span {
-                start: 368,
-                end: 373,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "//",
-            span: Span {
-                start: 368,
-                end: 373,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// For now, test with a simple value:",
-            span: Span {
-                start: 368,
-                end: 373,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

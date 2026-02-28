@@ -9,7 +9,40 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 160,
+                            end: 163,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 160,
+                            end: 163,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test async unary message send within a method",
+                        span: Span {
+                            start: 160,
+                            end: 163,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Returns future from counter increment",
+                        span: Span {
+                            start: 160,
+                            end: 163,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -76,38 +109,5 @@ Module {
         start: 160,
         end: 189,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 160,
-                end: 163,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 160,
-                end: 163,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test async unary message send within a method",
-            span: Span {
-                start: 160,
-                end: 163,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Returns future from counter increment",
-            span: Span {
-                start: 160,
-                end: 163,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

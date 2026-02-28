@@ -9,7 +9,48 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 189,
+                            end: 194,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 189,
+                            end: 194,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test multi-keyword messages with complex arguments",
+                        span: Span {
+                            start: 189,
+                            end: 194,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Each argument can be a complex expression",
+                        span: Span {
+                            start: 189,
+                            end: 194,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Block arguments",
+                        span: Span {
+                            start: 189,
+                            end: 194,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -161,7 +202,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Binary operator arguments",
+                        span: Span {
+                            start: 262,
+                            end: 272,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -305,7 +355,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Mixed complexity",
+                        span: Span {
+                            start: 330,
+                            end: 336,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -423,7 +482,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Nested blocks and operators",
+                        span: Span {
+                            start: 431,
+                            end: 440,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -606,46 +674,5 @@ Module {
         start: 189,
         end: 520,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 189,
-                end: 194,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 189,
-                end: 194,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test multi-keyword messages with complex arguments",
-            span: Span {
-                start: 189,
-                end: 194,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Each argument can be a complex expression",
-            span: Span {
-                start: 189,
-                end: 194,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Block arguments",
-            span: Span {
-                start: 189,
-                end: 194,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

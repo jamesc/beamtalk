@@ -50,11 +50,9 @@
 //! assert_eq!(module.expressions.len(), 1);
 //! ```
 
-use crate::ast::{
-    Comment, CommentAttachment, CommentKind, Expression, ExpressionStatement, Module,
-};
+use crate::ast::{Comment, CommentAttachment, Expression, ExpressionStatement, Module};
 #[cfg(test)]
-use crate::ast::{Literal, MessageSelector};
+use crate::ast::{CommentKind, Literal, MessageSelector};
 use crate::source_analysis::{Span, Token, TokenKind, Trivia, lex_with_eof};
 use ecow::EcoString;
 
@@ -619,6 +617,29 @@ impl Parser {
         }
     }
 
+    /// Collects a trailing end-of-line comment from the last consumed token's trailing trivia.
+    ///
+    /// After parsing a complete expression, call this to check whether there is a
+    /// `// comment` on the same source line as the expression's last token.  The
+    /// lexer places same-line trailing comments in [`Token::trailing_trivia`], so
+    /// checking the previously-consumed token is sufficient — no look-ahead needed.
+    ///
+    /// Only `//` line comments are considered; doc comments (`///`) and block
+    /// comments (`/* */`) are ignored here (block comments can span multiple lines
+    /// and are already collected as leading comments by [`collect_comment_attachment`]).
+    pub(super) fn collect_trailing_comment(&self) -> Option<Comment> {
+        if self.current == 0 {
+            return None;
+        }
+        let last_token = &self.tokens[self.current - 1];
+        for trivia in last_token.trailing_trivia() {
+            if let super::Trivia::LineComment(text) = trivia {
+                return Some(Comment::line(text.clone(), last_token.span()));
+            }
+        }
+        None
+    }
+
     /// Reports an error at the current token.
     pub(super) fn error(&mut self, message: impl Into<EcoString>) {
         let span = self.current_token().span();
@@ -719,26 +740,12 @@ impl Parser {
         let mut classes = Vec::new();
         let mut method_definitions = Vec::new();
         let mut expressions = Vec::new();
-        let mut comments = Vec::new();
 
-        // Collect leading comments
-        for trivia in self.current_token().leading_trivia() {
-            if trivia.is_comment() {
-                comments.push(Comment {
-                    content: trivia.as_str().into(),
-                    span: start, // TODO: track trivia spans
-                    kind: match trivia {
-                        super::Trivia::LineComment(_) | super::Trivia::DocComment(_) => {
-                            CommentKind::Line
-                        }
-                        super::Trivia::BlockComment(_) => CommentKind::Block,
-                        super::Trivia::Whitespace(_) => continue,
-                    },
-                });
-            }
-        }
-
-        // Parse statements until EOF
+        // Parse statements until EOF.
+        // Leading comments on each expression are collected by collect_comment_attachment()
+        // immediately before parse_expression().  Class and standalone-method definitions
+        // collect their own comments inside parse_class_definition() /
+        // parse_standalone_method_definition() via the same helper.
         while !self.is_at_end() {
             // Check if this looks like a class definition
             if self.is_at_class_definition() {
@@ -748,9 +755,20 @@ impl Parser {
                 let method_def = self.parse_standalone_method_definition();
                 method_definitions.push(method_def);
             } else {
+                let pos_before = self.current;
+                let mut comments = self.collect_comment_attachment();
                 let expr = self.parse_expression();
+                // Only collect trailing comment if parse_expression consumed tokens;
+                // otherwise collect_trailing_comment() reads the previous token's
+                // trivia, which belongs to the prior statement.
+                if self.current > pos_before {
+                    comments.trailing = self.collect_trailing_comment();
+                }
                 let is_error = expr.is_error();
-                expressions.push(ExpressionStatement::bare(expr));
+                expressions.push(ExpressionStatement {
+                    comments,
+                    expression: expr,
+                });
 
                 // If we got an error, try to recover
                 if is_error {
@@ -777,6 +795,16 @@ impl Parser {
             }
         }
 
+        // Empty module edge case: if the file contains only comments and no items,
+        // collect those comments into file_leading_comments.  Non-empty modules carry
+        // their leading comments on the first item (class, method def, or expression).
+        let file_leading_comments =
+            if classes.is_empty() && method_definitions.is_empty() && expressions.is_empty() {
+                self.collect_comment_attachment().leading
+            } else {
+                Vec::new()
+            };
+
         // Get end span
         let end = if self.current > 0 {
             self.tokens[self.current - 1].span()
@@ -790,7 +818,7 @@ impl Parser {
             method_definitions,
             expressions,
             span,
-            file_leading_comments: comments,
+            file_leading_comments,
         }
     }
 
@@ -4707,5 +4735,172 @@ Actor subclass: Counter
             "content: {}",
             state.comments.leading[0].content
         );
+    }
+
+    // ========================================================================
+    // ExpressionStatement comment attachment tests (BT-976)
+    // ========================================================================
+
+    #[test]
+    fn expression_statement_leading_comment_in_method_body() {
+        // A `//` comment between two statements in a method body must appear as a
+        // leading comment on the second ExpressionStatement.
+        let source = "Object subclass: Foo\n  go =>\n    x := 1.\n    // Step two\n    y := 2\n";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        let body = &module.classes[0].methods[0].body;
+        assert_eq!(body.len(), 2, "expected 2 statements");
+        // First statement has no leading comment
+        assert!(
+            body[0].comments.leading.is_empty(),
+            "first statement should have no leading comment"
+        );
+        // Second statement has the `// Step two` comment as leading
+        assert_eq!(
+            body[1].comments.leading.len(),
+            1,
+            "expected one leading comment on second statement"
+        );
+        assert!(
+            body[1].comments.leading[0].content.contains("Step two"),
+            "content: {}",
+            body[1].comments.leading[0].content
+        );
+    }
+
+    #[test]
+    fn expression_statement_trailing_comment() {
+        // A `// comment` on the same line as a statement must appear as `trailing`
+        // on that ExpressionStatement.
+        let source = "Object subclass: Foo\n  go => x := 1 // inline note\n";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        let body = &module.classes[0].methods[0].body;
+        assert_eq!(body.len(), 1, "expected 1 statement");
+        assert!(
+            body[0].comments.trailing.is_some(),
+            "expected a trailing comment"
+        );
+        assert!(
+            body[0]
+                .comments
+                .trailing
+                .as_ref()
+                .unwrap()
+                .content
+                .contains("inline note"),
+            "trailing content: {:?}",
+            body[0].comments.trailing
+        );
+    }
+
+    #[test]
+    fn empty_module_file_leading_comments_populated() {
+        // A `.bt` file containing only comments and no items must populate
+        // `Module.file_leading_comments`.
+        let source = "// First comment\n// Second comment\n";
+        let (module, diagnostics) = parse(lex_with_eof(source));
+        assert!(diagnostics.is_empty(), "expected no diagnostics");
+        assert!(module.classes.is_empty());
+        assert!(module.expressions.is_empty());
+        assert_eq!(
+            module.file_leading_comments.len(),
+            2,
+            "expected 2 file-level comments"
+        );
+        assert!(
+            module.file_leading_comments[0].content.contains("First"),
+            "content: {}",
+            module.file_leading_comments[0].content
+        );
+        assert!(
+            module.file_leading_comments[1].content.contains("Second"),
+            "content: {}",
+            module.file_leading_comments[1].content
+        );
+    }
+
+    #[test]
+    fn non_empty_module_file_leading_comments_empty() {
+        // In a non-empty module, file-level leading comments attach to the first
+        // item — `file_leading_comments` must remain empty.
+        let source = "// File comment\nx := 42\n";
+        let (module, diagnostics) = parse(lex_with_eof(source));
+        assert!(diagnostics.is_empty(), "expected no diagnostics");
+        assert!(
+            module.file_leading_comments.is_empty(),
+            "file_leading_comments should be empty for non-empty module"
+        );
+        assert_eq!(module.expressions.len(), 1);
+        // The comment attaches to the first expression's ExpressionStatement
+        assert_eq!(
+            module.expressions[0].comments.leading.len(),
+            1,
+            "expected leading comment on first expression"
+        );
+        assert!(
+            module.expressions[0].comments.leading[0]
+                .content
+                .contains("File comment"),
+            "content: {}",
+            module.expressions[0].comments.leading[0].content
+        );
+    }
+
+    #[test]
+    fn block_body_expression_statement_leading_comment() {
+        // A `//` comment between statements in a block body attaches as leading
+        // on the following ExpressionStatement in the block.
+        let source = "Object subclass: Foo\n  go =>\n    [:each |\n      // Transform\n      each asUppercase]\n";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        let body = &module.classes[0].methods[0].body;
+        assert_eq!(body.len(), 1, "expected 1 statement in method body");
+        // The statement is a block expression
+        let Expression::Block(block) = &body[0].expression else {
+            panic!("expected Block expression, got {:?}", body[0].expression);
+        };
+        assert_eq!(block.body.len(), 1, "expected 1 statement in block");
+        assert_eq!(
+            block.body[0].comments.leading.len(),
+            1,
+            "expected leading comment on block statement"
+        );
+        assert!(
+            block.body[0].comments.leading[0]
+                .content
+                .contains("Transform"),
+            "content: {}",
+            block.body[0].comments.leading[0].content
+        );
+    }
+
+    #[test]
+    fn standalone_method_leading_comment_attached() {
+        // A `//` comment before a standalone method definition (`ClassName >> ...`)
+        // must appear as a leading comment on the MethodDefinition.
+        // Regression test: previously parse_standalone_method_definition() dropped
+        // comments from the class-name token's leading trivia.
+        let source = "// Note about Counter\nCounter >> increment => self.n := self.n + 1\n";
+        let (module, diagnostics) = parse(lex_with_eof(source));
+        assert!(
+            diagnostics.is_empty(),
+            "expected no diagnostics: {diagnostics:?}"
+        );
+        assert_eq!(module.method_definitions.len(), 1);
+        let method = &module.method_definitions[0].method;
+        assert_eq!(
+            method.comments.leading.len(),
+            1,
+            "expected one leading comment on standalone method"
+        );
+        assert!(
+            method.comments.leading[0]
+                .content
+                .contains("Note about Counter"),
+            "content: {}",
+            method.comments.leading[0].content
+        );
+        assert!(module.file_leading_comments.is_empty());
     }
 }

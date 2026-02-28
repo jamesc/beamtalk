@@ -9,7 +9,40 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 140,
+                            end: 146,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 140,
+                            end: 146,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test Dictionary (key-value map) operations",
+                        span: Span {
+                            start: 140,
+                            end: 146,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Dictionary creation",
+                        span: Span {
+                            start: 140,
+                            end: 146,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -138,7 +171,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Key access",
+                        span: Span {
+                            start: 226,
+                            end: 230,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -256,7 +298,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Safe access with default",
+                        span: Span {
+                            start: 303,
+                            end: 308,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -348,7 +399,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Update (returns new dictionary)",
+                        span: Span {
+                            start: 388,
+                            end: 393,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -423,7 +483,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Add new key",
+                        span: Span {
+                            start: 437,
+                            end: 444,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -498,7 +567,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Size",
+                        span: Span {
+                            start: 489,
+                            end: 493,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -539,7 +617,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Key test",
+                        span: Span {
+                            start: 522,
+                            end: 529,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -657,7 +744,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Remove key",
+                        span: Span {
+                            start: 609,
+                            end: 616,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -716,7 +812,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Get keys and values",
+                        span: Span {
+                            start: 668,
+                            end: 672,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -798,7 +903,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Iteration over keys and values",
+                        span: Span {
+                            start: 747,
+                            end: 753,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -955,7 +1069,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Transformation of values",
+                        span: Span {
+                            start: 853,
+                            end: 860,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1107,7 +1230,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Merge two dictionaries",
+                        span: Span {
+                            start: 935,
+                            end: 939,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1323,38 +1455,5 @@ Module {
         start: 140,
         end: 1019,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 140,
-                end: 146,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 140,
-                end: 146,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test Dictionary (key-value map) operations",
-            span: Span {
-                start: 140,
-                end: 146,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Dictionary creation",
-            span: Span {
-                start: 140,
-                end: 146,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

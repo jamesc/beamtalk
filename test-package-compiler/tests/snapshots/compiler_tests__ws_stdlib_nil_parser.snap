@@ -9,8 +9,74 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 600,
+                            end: 607,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 600,
+                            end: 607,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test Nil control flow and testing messages",
+                        span: Span {
+                            start: 600,
+                            end: 607,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 600,
+                            end: 607,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Basic Testing Methods",
+                        span: Span {
+                            start: 600,
+                            end: 607,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 600,
+                            end: 607,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test isNil / notNil",
+                        span: Span {
+                            start: 600,
+                            end: 607,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => true",
+                        span: Span {
+                            start: 615,
+                            end: 620,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -51,7 +117,16 @@ Module {
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "// => false",
+                        span: Span {
+                            start: 653,
+                            end: 659,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -91,7 +166,40 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 1172,
+                            end: 1179,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Control Flow Methods",
+                        span: Span {
+                            start: 1172,
+                            end: 1179,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 1172,
+                            end: 1179,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test ifNil: evaluates the block",
+                        span: Span {
+                            start: 1172,
+                            end: 1179,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -167,7 +275,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Test ifNotNil: returns nil (block not evaluated)",
+                        span: Span {
+                            start: 1259,
+                            end: 1266,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -272,7 +389,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Test ifNil:ifNotNil: evaluates nilBlock",
+                        span: Span {
+                            start: 1345,
+                            end: 1352,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -389,7 +515,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Test ifNotNil:ifNil: (reversed order) evaluates nilBlock",
+                        span: Span {
+                            start: 1473,
+                            end: 1480,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -506,7 +641,40 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 2055,
+                            end: 2062,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Copy Operations (Singleton)",
+                        span: Span {
+                            start: 2055,
+                            end: 2062,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 2055,
+                            end: 2062,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test copy operations return self (singleton)",
+                        span: Span {
+                            start: 2055,
+                            end: 2062,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -629,8 +797,26 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// Test printString",
+                        span: Span {
+                            start: 2147,
+                            end: 2155,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => \"nil\"",
+                        span: Span {
+                            start: 2163,
+                            end: 2174,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -670,8 +856,50 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 2719,
+                            end: 2727,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Edge Cases: Chaining and Composition",
+                        span: Span {
+                            start: 2719,
+                            end: 2727,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 2719,
+                            end: 2727,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Chaining: use ifNil: result in further computation",
+                        span: Span {
+                            start: 2719,
+                            end: 2727,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => 15",
+                        span: Span {
+                            start: 2751,
+                            end: 2752,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -773,8 +1001,26 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// Chaining: ifNil: with message send on result",
+                        span: Span {
+                            start: 2812,
+                            end: 2820,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => \"HELLO\"",
+                        span: Span {
+                            start: 2847,
+                            end: 2856,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -866,8 +1112,26 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// Nested ifNil: - outer nil, inner returns value from block",
+                        span: Span {
+                            start: 2934,
+                            end: 2942,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => \"nested default\"",
+                        span: Span {
+                            start: 2987,
+                            end: 2988,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -988,8 +1252,26 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// Block that itself returns nil",
+                        span: Span {
+                            start: 3047,
+                            end: 3055,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => nil",
+                        span: Span {
+                            start: 3074,
+                            end: 3075,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1064,8 +1346,50 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 3588,
+                            end: 3596,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Edge Cases: Equality and Identity",
+                        span: Span {
+                            start: 3588,
+                            end: 3596,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 3588,
+                            end: 3596,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// nil equality with itself",
+                        span: Span {
+                            start: 3588,
+                            end: 3596,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => true",
+                        span: Span {
+                            start: 3608,
+                            end: 3611,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1115,8 +1439,26 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// nil inequality with other values",
+                        span: Span {
+                            start: 3661,
+                            end: 3669,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => false",
+                        span: Span {
+                            start: 3681,
+                            end: 3682,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1167,7 +1509,16 @@ Module {
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "// => false",
+                        span: Span {
+                            start: 3718,
+                            end: 3720,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1218,7 +1569,16 @@ Module {
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "// => false (nil is not false!)",
+                        span: Span {
+                            start: 3755,
+                            end: 3760,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1268,8 +1628,50 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 4309,
+                            end: 4317,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Edge Cases: Boolean Logic Integration",
+                        span: Span {
+                            start: 4309,
+                            end: 4317,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 4309,
+                            end: 4317,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Combining isNil with boolean logic",
+                        span: Span {
+                            start: 4309,
+                            end: 4317,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => true",
+                        span: Span {
+                            start: 4341,
+                            end: 4342,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1356,7 +1758,16 @@ Module {
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "// => true (short-circuits)",
+                        span: Span {
+                            start: 4388,
+                            end: 4389,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1443,7 +1854,16 @@ Module {
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "// => false (short-circuits)",
+                        span: Span {
+                            start: 4453,
+                            end: 4454,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1530,7 +1950,16 @@ Module {
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "// => true",
+                        span: Span {
+                            start: 4517,
+                            end: 4518,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1616,8 +2045,26 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// Using isNil result in ifTrue:ifFalse:",
+                        span: Span {
+                            start: 4574,
+                            end: 4582,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => \"is nil\"",
+                        span: Span {
+                            start: 4634,
+                            end: 4635,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1736,8 +2183,50 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 5156,
+                            end: 5164,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Edge Cases: Block Expressions",
+                        span: Span {
+                            start: 5156,
+                            end: 5164,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 5156,
+                            end: 5164,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ifNil: with arithmetic in block",
+                        span: Span {
+                            start: 5156,
+                            end: 5164,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => 7",
+                        span: Span {
+                            start: 5189,
+                            end: 5190,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1854,8 +2343,26 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// ifNotNil: block should NOT be evaluated",
+                        span: Span {
+                            start: 5244,
+                            end: 5252,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => nil (block not evaluated)",
+                        span: Span {
+                            start: 5291,
+                            end: 5292,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -1980,7 +2487,40 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 5871,
+                            end: 5877,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Edge Cases: Multiple Consecutive Checks  ",
+                        span: Span {
+                            start: 5871,
+                            end: 5877,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 5871,
+                            end: 5877,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Multiple isNil checks in sequence (should all be consistent)",
+                        span: Span {
+                            start: 5871,
+                            end: 5877,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -2104,7 +2644,16 @@ Module {
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "// => true",
+                        span: Span {
+                            start: 5978,
+                            end: 5979,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -2225,7 +2774,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Assigning nil and then checking",
+                        span: Span {
+                            start: 6028,
+                            end: 6038,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -2256,7 +2814,16 @@ Module {
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "// => true",
+                        span: Span {
+                            start: 6069,
+                            end: 6074,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -2296,8 +2863,50 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 6612,
+                            end: 6620,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Edge Cases: ifNil: vs ifNotNil: Return Values",
+                        span: Span {
+                            start: 6612,
+                            end: 6620,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ═══════════════════════════════════════════════════════════════════════",
+                        span: Span {
+                            start: 6612,
+                            end: 6620,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ifNil: returns block result, not nil",
+                        span: Span {
+                            start: 6612,
+                            end: 6620,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => 42 (not nil)",
+                        span: Span {
+                            start: 6638,
+                            end: 6639,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -2372,8 +2981,26 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// ifNotNil: on nil returns nil itself",
+                        span: Span {
+                            start: 6700,
+                            end: 6708,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => nil (block not evaluated)",
+                        span: Span {
+                            start: 6729,
+                            end: 6730,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -2448,8 +3075,26 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// Verify ifNotNil: truly doesn't evaluate by checking return is nil",
+                        span: Span {
+                            start: 6834,
+                            end: 6842,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// => true",
+                        span: Span {
+                            start: 6869,
+                            end: 6874,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -2544,62 +3189,5 @@ Module {
         start: 600,
         end: 6874,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 600,
-                end: 607,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 600,
-                end: 607,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test Nil control flow and testing messages",
-            span: Span {
-                start: 600,
-                end: 607,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// ═══════════════════════════════════════════════════════════════════════",
-            span: Span {
-                start: 600,
-                end: 607,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Basic Testing Methods",
-            span: Span {
-                start: 600,
-                end: 607,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// ═══════════════════════════════════════════════════════════════════════",
-            span: Span {
-                start: 600,
-                end: 607,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test isNil / notNil",
-            span: Span {
-                start: 600,
-                end: 607,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

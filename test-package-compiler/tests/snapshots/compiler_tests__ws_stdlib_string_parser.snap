@@ -9,7 +9,40 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 116,
+                            end: 124,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 116,
+                            end: 124,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test string operations",
+                        span: Span {
+                            start: 116,
+                            end: 124,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// String literals",
+                        span: Span {
+                            start: 116,
+                            end: 124,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -69,7 +102,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Concatenation",
+                        span: Span {
+                            start: 170,
+                            end: 177,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -162,7 +204,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// String length",
+                        span: Span {
+                            start: 231,
+                            end: 234,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -203,7 +254,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// String comparison",
+                        span: Span {
+                            start: 276,
+                            end: 283,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -305,7 +365,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// String transformation",
+                        span: Span {
+                            start: 362,
+                            end: 367,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -387,7 +456,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// String testing",
+                        span: Span {
+                            start: 434,
+                            end: 441,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -469,7 +547,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// String searching",
+                        span: Span {
+                            start: 510,
+                            end: 515,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -590,38 +677,5 @@ Module {
         start: 116,
         end: 591,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 116,
-                end: 124,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 116,
-                end: 124,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test string operations",
-            span: Span {
-                start: 116,
-                end: 124,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// String literals",
-            span: Span {
-                start: 116,
-                end: 124,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

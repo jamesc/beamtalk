@@ -9,7 +9,56 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 323,
+                            end: 326,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 323,
+                            end: 326,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test boundary condition: Unicode in identifiers and strings",
+                        span: Span {
+                            start: 323,
+                            end: 326,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Validate proper UTF-8 handling in lexer and parser",
+                        span: Span {
+                            start: 323,
+                            end: 326,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Unicode characters in identifiers (if supported)",
+                        span: Span {
+                            start: 323,
+                            end: 326,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Note: This tests whether the lexer/parser gracefully handles or rejects Unicode",
+                        span: Span {
+                            start: 323,
+                            end: 326,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Identifier(
@@ -40,56 +89,7 @@ Module {
         start: 323,
         end: 800,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 323,
-                end: 326,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 323,
-                end: 326,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test boundary condition: Unicode in identifiers and strings",
-            span: Span {
-                start: 323,
-                end: 326,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Validate proper UTF-8 handling in lexer and parser",
-            span: Span {
-                start: 323,
-                end: 326,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Unicode characters in identifiers (if supported)",
-            span: Span {
-                start: 323,
-                end: 326,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Note: This tests whether the lexer/parser gracefully handles or rejects Unicode",
-            span: Span {
-                start: 323,
-                end: 326,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

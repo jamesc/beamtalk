@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -419,70 +418,5 @@ Module {
         start: 443,
         end: 708,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 443,
-                end: 449,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 443,
-                end: 449,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Compiler snapshot test for BT-367: multi-expression value-type method sequencing",
-            span: Span {
-                start: 443,
-                end: 449,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "//",
-            span: Span {
-                start: 443,
-                end: 449,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Verifies that value-type methods with multiple expressions generate",
-            span: Span {
-                start: 443,
-                end: 449,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// correct Core Erlang using `let ... in` to sequence non-last expressions.",
-            span: Span {
-                start: 443,
-                end: 449,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// The first expression (side-effecting) should be wrapped in a let binding,",
-            span: Span {
-                start: 443,
-                end: 449,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// and only the last expression should be returned directly.",
-            span: Span {
-                start: 443,
-                end: 449,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

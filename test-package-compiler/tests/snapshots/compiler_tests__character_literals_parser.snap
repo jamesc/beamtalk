@@ -9,7 +9,40 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 180,
+                            end: 187,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 180,
+                            end: 187,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test character literal codegen - $a compiles to integer codepoint",
+                        span: Span {
+                            start: 180,
+                            end: 187,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ===== Basic Character Literals =====",
+                        span: Span {
+                            start: 180,
+                            end: 187,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -99,7 +132,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== Character Comparison =====",
+                        span: Span {
+                            start: 257,
+                            end: 264,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -201,7 +243,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== Character Conversion =====",
+                        span: Span {
+                            start: 331,
+                            end: 336,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -283,7 +334,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== Escape Sequences =====",
+                        span: Span {
+                            start: 407,
+                            end: 414,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -346,38 +406,5 @@ Module {
         start: 180,
         end: 432,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 180,
-                end: 187,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 180,
-                end: 187,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test character literal codegen - $a compiles to integer codepoint",
-            span: Span {
-                start: 180,
-                end: 187,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// ===== Basic Character Literals =====",
-            span: Span {
-                start: 180,
-                end: 187,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

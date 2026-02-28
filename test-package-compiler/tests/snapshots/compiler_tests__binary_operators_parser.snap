@@ -9,7 +9,48 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 241,
+                            end: 249,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 241,
+                            end: 249,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test all binary operators for compilation verification",
+                        span: Span {
+                            start: 241,
+                            end: 249,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Comprehensive coverage of all operators supported in Core Erlang codegen",
+                        span: Span {
+                            start: 241,
+                            end: 249,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ===== Arithmetic Operators =====",
+                        span: Span {
+                            start: 241,
+                            end: 249,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -315,7 +356,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== Comparison Operators =====",
+                        span: Span {
+                            start: 404,
+                            end: 417,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -366,7 +416,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Loose inequality (/=)",
+                        span: Span {
+                            start: 454,
+                            end: 472,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -417,7 +476,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Strict equality (=:=)",
+                        span: Span {
+                            start: 511,
+                            end: 527,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -468,7 +536,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Strict inequality (=/=)",
+                        span: Span {
+                            start: 579,
+                            end: 598,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -519,7 +596,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Less than",
+                        span: Span {
+                            start: 626,
+                            end: 634,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -570,7 +656,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Greater than",
+                        span: Span {
+                            start: 662,
+                            end: 673,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -621,7 +716,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Less than or equal",
+                        span: Span {
+                            start: 707,
+                            end: 718,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -672,7 +776,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Greater than or equal",
+                        span: Span {
+                            start: 755,
+                            end: 769,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -723,7 +836,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== String Concatenation =====",
+                        span: Span {
+                            start: 819,
+                            end: 831,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -774,8 +896,34 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// ===== Complex Operator Expressions =====",
+                        span: Span {
+                            start: 973,
+                            end: 984,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Operator precedence (binary operators are left-to-right in Smalltalk)",
+                        span: Span {
+                            start: 973,
+                            end: 984,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// Should be (2 + 3) * 4 = 20",
+                        span: Span {
+                            start: 996,
+                            end: 997,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -847,7 +995,16 @@ Module {
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "// Should be (10 - 5) / 2 = 2",
+                        span: Span {
+                            start: 1053,
+                            end: 1054,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -918,7 +1075,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Nested operators",
+                        span: Span {
+                            start: 1107,
+                            end: 1113,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1023,7 +1189,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Operators with blocks",
+                        span: Span {
+                            start: 1162,
+                            end: 1173,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1127,7 +1302,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Operators in conditionals with defined variables",
+                        span: Span {
+                            start: 1250,
+                            end: 1251,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1314,46 +1498,5 @@ Module {
         start: 241,
         end: 1299,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 241,
-                end: 249,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 241,
-                end: 249,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test all binary operators for compilation verification",
-            span: Span {
-                start: 241,
-                end: 249,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Comprehensive coverage of all operators supported in Core Erlang codegen",
-            span: Span {
-                start: 241,
-                end: 249,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// ===== Arithmetic Operators =====",
-            span: Span {
-                start: 241,
-                end: 249,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

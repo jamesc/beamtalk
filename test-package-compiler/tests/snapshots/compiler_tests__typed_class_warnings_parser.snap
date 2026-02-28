@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -503,56 +502,7 @@ Module {
         start: 275,
         end: 684,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 275,
-                end: 280,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 275,
-                end: 280,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Smoke test for typed class annotation warnings (BT-941).",
-            span: Span {
-                start: 275,
-                end: 280,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "//",
-            span: Span {
-                start: 275,
-                end: 280,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// A `typed` class with deliberately incomplete annotations, so we can",
-            span: Span {
-                start: 275,
-                end: 280,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// verify the type checker surfaces warnings for missing annotations.",
-            span: Span {
-                start: 275,
-                end: 280,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

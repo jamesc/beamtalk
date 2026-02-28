@@ -9,7 +9,40 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 138,
+                            end: 144,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 138,
+                            end: 144,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test Set (unique elements) operations",
+                        span: Span {
+                            start: 138,
+                            end: 144,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Set creation from list",
+                        span: Span {
+                            start: 138,
+                            end: 144,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -170,40 +203,7 @@ Module {
         start: 138,
         end: 918,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 138,
-                end: 144,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 138,
-                end: 144,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test Set (unique elements) operations",
-            span: Span {
-                start: 138,
-                end: 144,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Set creation from list",
-            span: Span {
-                start: 138,
-                end: 144,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

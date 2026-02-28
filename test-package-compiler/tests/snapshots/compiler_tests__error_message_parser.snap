@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -240,40 +239,7 @@ Module {
         start: 186,
         end: 342,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 186,
-                end: 191,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 186,
-                end: 191,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test error: message compilation",
-            span: Span {
-                start: 186,
-                end: 191,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// The error: message should compile to erlang:error({beamtalk_error, Message})",
-            span: Span {
-                start: 186,
-                end: 191,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

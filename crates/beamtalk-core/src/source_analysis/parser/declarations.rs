@@ -796,9 +796,19 @@ impl Parser {
             && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
         {
             let pos_before = self.current;
+            let mut comments = self.collect_comment_attachment();
             let expr = self.parse_expression();
+            // Only collect trailing comment if parse_expression consumed tokens;
+            // otherwise collect_trailing_comment() reads the previous token's
+            // trivia, which belongs to the prior statement.
+            if self.current > pos_before {
+                comments.trailing = self.collect_trailing_comment();
+            }
             let is_error = expr.is_error();
-            body.push(ExpressionStatement::bare(expr));
+            body.push(ExpressionStatement {
+                comments,
+                expression: expr,
+            });
 
             // If parse_expression didn't consume any tokens (e.g. nesting
             // depth exceeded), break to avoid an infinite loop.
@@ -898,6 +908,11 @@ impl Parser {
     pub(super) fn parse_standalone_method_definition(&mut self) -> StandaloneMethodDefinition {
         let start = self.current_token().span();
 
+        // Collect leading comments from the class-name token's leading trivia.
+        // parse_identifier() advances past the class name without reading trivia,
+        // so we must collect here before the token is consumed.
+        let mut class_leading_comments = self.collect_comment_attachment().leading;
+
         // Parse class name
         let class_name = self.parse_identifier("Expected class name");
 
@@ -921,7 +936,7 @@ impl Parser {
         }
 
         // Parse method definition (selector => body)
-        let method = self.parse_method_definition().unwrap_or_else(|| {
+        let mut method = self.parse_method_definition().unwrap_or_else(|| {
             let span = self.current_token().span();
             MethodDefinition::new(
                 MessageSelector::Unary("error".into()),
@@ -930,6 +945,15 @@ impl Parser {
                 span,
             )
         });
+
+        // Prepend the class-name token's leading comments to the method's
+        // own comments.  parse_method_definition() reads trivia from the
+        // selector token, so comments before the class name would otherwise
+        // be lost.
+        if !class_leading_comments.is_empty() {
+            class_leading_comments.append(&mut method.comments.leading);
+            method.comments.leading = class_leading_comments;
+        }
 
         let span = start.merge(method.span);
 

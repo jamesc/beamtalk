@@ -641,8 +641,18 @@ impl Parser {
         let mut body = Vec::new();
         while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
             let pos_before = self.current;
+            let mut comments = self.collect_comment_attachment();
             let expr = self.parse_expression();
-            body.push(ExpressionStatement::bare(expr));
+            // Only collect trailing comment if parse_expression consumed tokens;
+            // otherwise collect_trailing_comment() reads the previous token's
+            // trivia, which belongs to the prior statement.
+            if self.current > pos_before {
+                comments.trailing = self.collect_trailing_comment();
+            }
+            body.push(ExpressionStatement {
+                comments,
+                expression: expr,
+            });
 
             // If parse_expression didn't consume any tokens (e.g. nesting
             // depth exceeded), break to avoid an infinite loop.

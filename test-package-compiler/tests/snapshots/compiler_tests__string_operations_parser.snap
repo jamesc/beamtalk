@@ -9,7 +9,40 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 177,
+                            end: 185,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 177,
+                            end: 185,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test string operations - comprehensive coverage of string messages",
+                        span: Span {
+                            start: 177,
+                            end: 185,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ===== String Concatenation =====",
+                        span: Span {
+                            start: 177,
+                            end: 185,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -162,7 +195,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== String Length =====",
+                        span: Span {
+                            start: 286,
+                            end: 289,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -203,7 +245,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== String Comparison =====",
+                        span: Span {
+                            start: 343,
+                            end: 350,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -407,7 +458,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== String Case Transformation =====",
+                        span: Span {
+                            start: 508,
+                            end: 513,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -489,7 +549,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== String Trimming =====",
+                        span: Span {
+                            start: 593,
+                            end: 599,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -560,7 +629,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== String Empty/Non-Empty Checks =====",
+                        span: Span {
+                            start: 684,
+                            end: 689,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -672,7 +750,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== String Character Access (1-based indexing) =====",
+                        span: Span {
+                            start: 813,
+                            end: 822,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -790,7 +877,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== String Search Operations =====",
+                        span: Span {
+                            start: 908,
+                            end: 913,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -908,7 +1004,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== String Prefix/Suffix Checks =====",
+                        span: Span {
+                            start: 1041,
+                            end: 1047,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1026,7 +1131,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== String Splitting =====",
+                        span: Span {
+                            start: 1142,
+                            end: 1145,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1115,7 +1229,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// ===== String Reverse =====",
+                        span: Span {
+                            start: 1214,
+                            end: 1222,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1159,38 +1282,5 @@ Module {
         start: 177,
         end: 1241,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 177,
-                end: 185,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 177,
-                end: 185,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test string operations - comprehensive coverage of string messages",
-            span: Span {
-                start: 177,
-                end: 185,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// ===== String Concatenation =====",
-            span: Span {
-                start: 177,
-                end: 185,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
