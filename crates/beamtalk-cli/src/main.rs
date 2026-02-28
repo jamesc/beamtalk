@@ -141,6 +141,23 @@ enum Command {
         path: String,
     },
 
+    /// Format Beamtalk source files in-place
+    Fmt {
+        /// Source files or directories to format
+        #[arg(default_value = ".")]
+        paths: Vec<String>,
+    },
+
+    /// Check Beamtalk source formatting without modifying files
+    ///
+    /// Prints a unified diff for every file that would change and exits
+    /// non-zero if any files need reformatting.
+    FmtCheck {
+        /// Source files or directories to check
+        #[arg(default_value = ".")]
+        paths: Vec<String>,
+    },
+
     /// Run style/redundancy lint checks on source files
     Lint {
         /// Source file or directory to lint
@@ -358,6 +375,8 @@ fn run() -> Result<()> {
             println!("(Not yet implemented)");
             Ok(())
         }
+        Command::Fmt { paths } => commands::fmt::run_fmt(&paths, false),
+        Command::FmtCheck { paths } => commands::fmt::run_fmt(&paths, true),
         Command::Lint { path, format } => commands::lint::run_lint(&path, format),
         Command::Workspace { action } => commands::workspace::cli::run(action),
         Command::TestStdlib {

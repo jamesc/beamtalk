@@ -161,15 +161,15 @@ fmt-check-rust:
     cargo fmt --all -- --check
 
 # Check all code formatting
-fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js
+fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js fmt-check-beamtalk
 
 # Format all Rust code
 fmt-rust:
     @echo "✨ Formatting Rust code..."
     cargo fmt --all
 
-# Format all code (Rust + Erlang + JS)
-fmt: fmt-rust fmt-erlang fmt-js
+# Format all code (Rust + Erlang + JS + Beamtalk)
+fmt: fmt-rust fmt-erlang fmt-js fmt-beamtalk
 
 # Check JS/TS formatting (Biome)
 [working-directory: 'editors/vscode']
@@ -200,6 +200,18 @@ fmt-erlang:
     @echo "✨ Formatting Erlang code..."
     rebar3 fmt -w
     @echo "✅ Erlang code formatted"
+
+# Format all Beamtalk source files
+fmt-beamtalk:
+    @echo "✨ Formatting Beamtalk source files..."
+    cargo run -p beamtalk-cli --quiet -- fmt stdlib/ tests/
+    @echo "✅ Beamtalk source files formatted"
+
+# Check Beamtalk source file formatting
+fmt-check-beamtalk:
+    @echo "📋 Checking Beamtalk source formatting..."
+    cargo run -p beamtalk-cli --quiet -- fmt-check stdlib/ tests/
+    @echo "✅ Beamtalk formatting check passed"
 
 # Run Dialyzer on Erlang runtime
 [working-directory: 'runtime']

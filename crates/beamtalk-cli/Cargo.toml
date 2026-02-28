@@ -53,9 +53,12 @@ tempfile = "3.14"
 tungstenite.workspace = true
 # why: Cross-platform process management for Windows PID discovery (ADR 0027)
 sysinfo.workspace = true
+# why: unified diff output for beamtalk fmt-check (BT-978)
+similar.workspace = true
 
 [dev-dependencies]
 serial_test = "3"
+tempfile = "3.14"
 
 [lints]
 workspace = true
