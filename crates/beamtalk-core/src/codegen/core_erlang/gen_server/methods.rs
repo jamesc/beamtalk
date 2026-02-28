@@ -1824,7 +1824,7 @@ impl CoreErlangGenerator {
             .collect();
 
         // Build instance methods list (Primary methods only, using mangled selector names)
-        let methods: Vec<(String, usize)> = class
+        let mut methods: Vec<(String, usize)> = class
             .methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
@@ -1832,12 +1832,32 @@ impl CoreErlangGenerator {
             .collect();
 
         // Build class methods list (Primary methods only)
-        let class_methods: Vec<(String, usize)> = class
+        let mut class_methods: Vec<(String, usize)> = class
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| (m.selector.to_erlang_atom(), m.selector.arity()))
             .collect();
+
+        // BT-923: For `Value subclass:` classes, include auto-generated slot methods
+        // (getters, with*: setters, keyword constructor) so that reflection via
+        // `methods` / `allMethods` shows the full public interface.
+        if let Some(auto) =
+            crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class)
+        {
+            use crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods;
+            for field in &auto.getters {
+                methods.push((field.clone(), 0));
+            }
+            for field in &auto.setters {
+                let sel = AutoSlotMethods::with_star_selector(field);
+                methods.push((sel, 1));
+            }
+            if let Some(kw_sel) = &auto.keyword_constructor {
+                let arity = class.state.len();
+                class_methods.push((kw_sel.clone(), arity));
+            }
+        }
 
         let fields_doc = Self::meta_atom_list(&fields);
         let methods_doc = Self::meta_method_tuple_list(&methods);

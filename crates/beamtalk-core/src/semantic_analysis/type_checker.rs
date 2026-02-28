@@ -276,11 +276,47 @@ impl TypeChecker {
                     Expression::FieldAccess {
                         receiver, field, ..
                     } => {
-                        // Check self.field := value against declared state type
-                        if let Expression::Identifier(recv_id) = receiver.as_ref() {
-                            if recv_id.name == "self" {
-                                self.check_field_assignment(field, &ty, *span, hierarchy, env);
-                            }
+                        let is_self_receiver = matches!(
+                            receiver.as_ref(),
+                            Expression::Identifier(recv_id) if recv_id.name == "self"
+                        );
+                        if is_self_receiver {
+                            // `self.field := value` — validate against declared state type
+                            self.check_field_assignment(field, &ty, *span, hierarchy, env);
+                        } else {
+                            // `other.field := value` or `(expr).field := value` —
+                            // objects cannot mutate another object's state.
+                            // Value types are immutable; actors can only mutate their
+                            // own state via `self.x :=`.
+                            // Suggest the functional `withField:` pattern.
+                            let with_sel = {
+                                let mut chars = field.name.chars();
+                                match chars.next() {
+                                    None => "with:".to_string(),
+                                    Some(first) => {
+                                        let cap: String = first.to_uppercase().collect();
+                                        format!("with{}{}:", cap, chars.as_str())
+                                    }
+                                }
+                            };
+                            let recv_name = match receiver.as_ref() {
+                                Expression::Identifier(recv_id) => recv_id.name.as_str(),
+                                _ => "receiver",
+                            };
+                            let field_name = field.name.as_str();
+                            let mut diag = Diagnostic::warning(
+                                format!(
+                                    "Cannot assign to `{recv_name}.{field_name}` — objects cannot mutate another object's state"
+                                ),
+                                *span,
+                            );
+                            diag.hint = Some(
+                                format!(
+                                    "Use `{recv_name} := {recv_name} {with_sel} newValue` to get an updated copy"
+                                )
+                                .into(),
+                            );
+                            self.diagnostics.push(diag);
                         }
                     }
                     _ => {}
@@ -3627,6 +3663,38 @@ mod tests {
         assert!(
             dnu_warnings.is_empty(),
             "Integer canUnderstand: should produce no warning, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_non_self_field_assignment_produces_warning_not_error() {
+        // `other.x := 1` should produce a Severity::Warning, not Severity::Error,
+        // consistent with the module's "Warnings only, never errors" design principle.
+        use crate::source_analysis::Severity;
+        let source =
+            "Value subclass: Point\n  state: x\n  state: y\n  bad: other =>\n    other.x := 1";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+            .0
+            .unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let field_diags: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Cannot assign"))
+            .collect();
+        assert_eq!(
+            field_diags.len(),
+            1,
+            "Expected exactly one non-self field assignment diagnostic, got: {field_diags:?}"
+        );
+        assert_eq!(
+            field_diags[0].severity,
+            Severity::Warning,
+            "Non-self field assignment should be a warning, not an error"
         );
     }
 }

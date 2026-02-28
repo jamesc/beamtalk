@@ -746,7 +746,95 @@ impl ClassHierarchy {
         ))
     }
 
+    /// Synthesizes auto-generated slot methods for a `Value subclass:` class
+    /// and appends them to `instance_methods` / `class_methods`.
+    ///
+    /// Mirrors the selector-computation logic in
+    /// `codegen::core_erlang::value_type_codegen::compute_auto_slot_methods` so
+    /// that the class hierarchy (and therefore the type checker) knows about
+    /// these methods before codegen runs.
+    fn add_value_auto_methods(
+        class: &ClassDefinition,
+        instance_methods: &mut Vec<MethodInfo>,
+        class_methods: &mut Vec<MethodInfo>,
+    ) {
+        let user_instance_selectors: HashSet<EcoString> = instance_methods
+            .iter()
+            .map(|m| m.selector.clone())
+            .collect();
+        let user_class_selectors: HashSet<EcoString> =
+            class_methods.iter().map(|m| m.selector.clone()).collect();
+
+        let class_name: EcoString = class.name.name.clone();
+
+        for slot in &class.state {
+            let slot_name = slot.name.name.as_str();
+
+            // Auto-getter: unary method returning the slot value
+            if !user_instance_selectors.contains(slot_name) {
+                instance_methods.push(MethodInfo {
+                    selector: slot.name.name.clone(),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: class_name.clone(),
+                    is_sealed: false,
+                    return_type: slot.type_annotation.as_ref().map(TypeAnnotation::type_name),
+                    param_types: vec![],
+                });
+            }
+
+            // Auto with*: setter: keyword method returning a new instance
+            let with_sel = {
+                let mut chars = slot_name.chars();
+                match chars.next() {
+                    None => EcoString::from("with:"),
+                    Some(first) => {
+                        let cap: String = first.to_uppercase().collect();
+                        EcoString::from(format!("with{}{}:", cap, chars.as_str()))
+                    }
+                }
+            };
+            if !user_instance_selectors.contains(&with_sel) {
+                instance_methods.push(MethodInfo {
+                    selector: with_sel,
+                    arity: 1,
+                    kind: MethodKind::Primary,
+                    defined_in: class_name.clone(),
+                    is_sealed: false,
+                    return_type: Some(class_name.clone()),
+                    param_types: vec![None],
+                });
+            }
+        }
+
+        // Auto keyword constructor on the class side (e.g., `x:y:`)
+        if !class.state.is_empty() {
+            let slot_names: Vec<&str> = class.state.iter().map(|s| s.name.name.as_str()).collect();
+            let kw_sel: EcoString = {
+                let mut s = String::new();
+                for name in &slot_names {
+                    s.push_str(name);
+                    s.push(':');
+                }
+                EcoString::from(s)
+            };
+            let arity = class.state.len();
+            if !user_class_selectors.contains(&kw_sel) {
+                class_methods.push(MethodInfo {
+                    selector: kw_sel,
+                    arity,
+                    kind: MethodKind::Primary,
+                    defined_in: class_name.clone(),
+                    is_sealed: false,
+                    return_type: Some(class_name.clone()),
+                    param_types: vec![None; arity],
+                });
+            }
+        }
+    }
+
     /// Add classes from a parsed module. Returns diagnostics for errors.
+    #[allow(clippy::too_many_lines)]
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
@@ -801,6 +889,49 @@ impl ClassHierarchy {
                 &mut diagnostics,
             );
 
+            let mut instance_methods: Vec<MethodInfo> = class
+                .methods
+                .iter()
+                .map(|m| MethodInfo {
+                    selector: m.selector.name(),
+                    arity: m.selector.arity(),
+                    kind: m.kind,
+                    defined_in: class.name.name.clone(),
+                    is_sealed: m.is_sealed,
+                    return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
+                    param_types: m
+                        .parameters
+                        .iter()
+                        .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                        .collect(),
+                })
+                .collect();
+
+            let mut class_methods: Vec<MethodInfo> = class
+                .class_methods
+                .iter()
+                .map(|m| MethodInfo {
+                    selector: m.selector.name(),
+                    arity: m.selector.arity(),
+                    kind: m.kind,
+                    defined_in: class.name.name.clone(),
+                    is_sealed: m.is_sealed,
+                    return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
+                    param_types: m
+                        .parameters
+                        .iter()
+                        .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                        .collect(),
+                })
+                .collect();
+
+            // BT-923: For `Value subclass:` classes, synthesize auto-generated slot
+            // methods in the hierarchy so the type checker can resolve them before
+            // codegen runs.  Mirrors the logic in `value_type_codegen::compute_auto_slot_methods`.
+            if class.class_kind == ClassKind::Value {
+                Self::add_value_auto_methods(class, &mut instance_methods, &mut class_methods);
+            }
+
             let class_info = ClassInfo {
                 name: class.name.name.clone(),
                 superclass: class.superclass.as_ref().map(|s| s.name.clone()),
@@ -818,40 +949,8 @@ impl ClassHierarchy {
                             .map(|ty| (s.name.name.clone(), ty.type_name()))
                     })
                     .collect(),
-                methods: class
-                    .methods
-                    .iter()
-                    .map(|m| MethodInfo {
-                        selector: m.selector.name(),
-                        arity: m.selector.arity(),
-                        kind: m.kind,
-                        defined_in: class.name.name.clone(),
-                        is_sealed: m.is_sealed,
-                        return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
-                        param_types: m
-                            .parameters
-                            .iter()
-                            .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
-                            .collect(),
-                    })
-                    .collect(),
-                class_methods: class
-                    .class_methods
-                    .iter()
-                    .map(|m| MethodInfo {
-                        selector: m.selector.name(),
-                        arity: m.selector.arity(),
-                        kind: m.kind,
-                        defined_in: class.name.name.clone(),
-                        is_sealed: m.is_sealed,
-                        return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
-                        param_types: m
-                            .parameters
-                            .iter()
-                            .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
-                            .collect(),
-                    })
-                    .collect(),
+                methods: instance_methods,
+                class_methods,
                 class_variables: class
                     .class_variables
                     .iter()
@@ -2431,6 +2530,118 @@ mod tests {
         let info = h.get_class("Point").expect("Point should be registered");
         assert!(info.is_value, "Value subclass should have is_value = true");
         assert!(h.is_value_subclass("Point"));
+    }
+
+    #[test]
+    fn value_subclass_auto_generates_slot_methods() {
+        let class = ClassDefinition {
+            name: Identifier::new("Point", test_span()),
+            superclass: Some(Identifier::new("Value", test_span())),
+            class_kind: ClassKind::Value,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![
+                StateDeclaration::new(Identifier::new("x", test_span()), test_span()),
+                StateDeclaration::new(Identifier::new("y", test_span()), test_span()),
+            ],
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        };
+        let module = Module {
+            classes: vec![class],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+        };
+        let (Ok(h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+        let info = h.get_class("Point").expect("Point should be registered");
+
+        // Auto-generated instance methods: getters (x, y) + setters (withX:, withY:)
+        let instance_sels: Vec<&str> = info.methods.iter().map(|m| m.selector.as_str()).collect();
+        assert!(
+            instance_sels.contains(&"x"),
+            "getter x missing: {instance_sels:?}"
+        );
+        assert!(
+            instance_sels.contains(&"y"),
+            "getter y missing: {instance_sels:?}"
+        );
+        assert!(
+            instance_sels.contains(&"withX:"),
+            "setter withX: missing: {instance_sels:?}"
+        );
+        assert!(
+            instance_sels.contains(&"withY:"),
+            "setter withY: missing: {instance_sels:?}"
+        );
+
+        // Auto-generated class method: keyword constructor x:y:
+        let class_sels: Vec<&str> = info
+            .class_methods
+            .iter()
+            .map(|m| m.selector.as_str())
+            .collect();
+        assert!(
+            class_sels.contains(&"x:y:"),
+            "keyword constructor x:y: missing: {class_sels:?}"
+        );
+    }
+
+    #[test]
+    fn value_subclass_auto_methods_respect_user_overrides() {
+        let class = ClassDefinition {
+            name: Identifier::new("Point", test_span()),
+            superclass: Some(Identifier::new("Value", test_span())),
+            class_kind: ClassKind::Value,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![StateDeclaration::new(
+                Identifier::new("x", test_span()),
+                test_span(),
+            )],
+            // User already defines getter `x`
+            methods: vec![MethodDefinition::new(
+                crate::ast::MessageSelector::Unary(EcoString::from("x")),
+                vec![],
+                vec![],
+                test_span(),
+            )],
+            class_methods: vec![],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        };
+        let module = Module {
+            classes: vec![class],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+        };
+        let (Ok(h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+        let info = h.get_class("Point").expect("Point should be registered");
+
+        // User-defined `x` should appear once, not duplicated by auto-generation
+        let x_count = info.methods.iter().filter(|m| m.selector == "x").count();
+        assert_eq!(x_count, 1, "getter `x` should appear exactly once");
+
+        // Auto-generated withX: should still be present
+        assert!(
+            info.methods.iter().any(|m| m.selector == "withX:"),
+            "withX: should be auto-generated"
+        );
     }
 
     #[test]

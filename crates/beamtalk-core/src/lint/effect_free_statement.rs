@@ -61,6 +61,37 @@ mod tests {
     }
 
     #[test]
+    fn discarded_map_literal_surfaced_by_lint_runner() {
+        let diags = lint("Object subclass: Foo\n  bar =>\n    #{#x => 1}\n    self doSomething");
+        let effect_free: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("no effect"))
+            .collect();
+        assert_eq!(
+            effect_free.len(),
+            1,
+            "Expected 1 effect-free lint for map literal, got: {effect_free:?}"
+        );
+        assert!(effect_free[0].message.contains("map literal"));
+    }
+
+    #[test]
+    fn map_literal_with_side_effect_not_flagged() {
+        // A map literal whose values contain side-effectful sends should NOT
+        // be flagged — the side effects execute even though the map is discarded.
+        let diags =
+            lint("Object subclass: Foo\n  bar =>\n    #{#x => self baz}\n    self doSomething");
+        let effect_free: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("map literal"))
+            .collect();
+        assert!(
+            effect_free.is_empty(),
+            "Map with side-effectful value should not be flagged: {effect_free:?}"
+        );
+    }
+
+    #[test]
     fn clean_method_no_effect_free_lint() {
         let diags = lint("Object subclass: Foo\n  bar => 42");
         let effect_free: Vec<_> = diags

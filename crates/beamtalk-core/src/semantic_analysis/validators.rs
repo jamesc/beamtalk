@@ -923,6 +923,13 @@ fn is_effect_free(expr: &Expression) -> bool {
         Expression::Literal(_, _)
         | Expression::Identifier(_)
         | Expression::ClassReference { .. } => true,
+        Expression::MapLiteral { pairs, .. } => pairs
+            .iter()
+            .all(|p| is_effect_free(&p.key) && is_effect_free(&p.value)),
+        Expression::ArrayLiteral { elements, .. } => elements.iter().all(is_effect_free),
+        Expression::ListLiteral { elements, tail, .. } => {
+            elements.iter().all(is_effect_free) && tail.as_ref().is_none_or(|t| is_effect_free(t))
+        }
         Expression::Parenthesized { expression, .. } => is_effect_free(expression),
         Expression::MessageSend {
             receiver,
@@ -977,6 +984,9 @@ fn effect_free_label(expr: &Expression) -> &'static str {
         Expression::Literal(_, _) => "literal",
         Expression::Identifier(_) => "variable reference",
         Expression::ClassReference { .. } => "class reference",
+        Expression::MapLiteral { .. } => "map literal",
+        Expression::ArrayLiteral { .. } => "array literal",
+        Expression::ListLiteral { .. } => "list literal",
         _ => "pure expression",
     }
 }
