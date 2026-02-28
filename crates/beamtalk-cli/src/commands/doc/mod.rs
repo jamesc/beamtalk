@@ -35,7 +35,7 @@ use assets::{write_css, write_search_js};
 use extractor::{collect_inherited_methods, find_source_files, parse_class_info};
 use layout::build_sidebar_html;
 use renderer::{write_class_page, write_index_page};
-use site::{generate_prose_docs, write_site_landing_page};
+use site::{generate_adr_docs, generate_prose_docs, write_site_landing_page};
 
 /// Prose documentation pages to render from the docs/ directory.
 const PROSE_PAGES: &[(&str, &str, &str)] = &[
@@ -66,6 +66,7 @@ const PROSE_PAGES: &[(&str, &str, &str)] = &[
         "agent-native-development.html",
         "Agent-Native Development",
     ),
+    ("beamtalk-tooling.md", "tooling.html", "Tooling"),
     (
         "known-limitations.md",
         "known-limitations.html",
@@ -88,12 +89,13 @@ pub fn run(path: &str, output_dir: &str) -> Result<()> {
     Ok(())
 }
 
-/// Generate the full documentation site with landing page, API docs, and prose pages.
+/// Generate the full documentation site with landing page, API docs, prose pages, and ADRs.
 ///
 /// Site structure:
 /// - `/` — Landing page with navigation
 /// - `/apidocs/` — API reference (class docs from `.bt` files)
 /// - `/docs/` — Prose documentation pages rendered from markdown
+/// - `/adr/` — Architecture Decision Records
 #[instrument(skip_all, fields(lib_path = %lib_path, docs_path = %docs_path, output = %output_dir))]
 pub fn run_site(lib_path: &str, docs_path: &str, output_dir: &str) -> Result<()> {
     info!("Generating documentation site");
@@ -109,14 +111,17 @@ pub fn run_site(lib_path: &str, docs_path: &str, output_dir: &str) -> Result<()>
     let apidocs_path = output_path.join("apidocs");
     generate_api_docs(&lib_source, &apidocs_path, "../")?;
 
-    // 2. Generate prose docs in docs/ subdirectory
+    // 2. Generate ADR pages; collect link-rewriting pairs for prose rendering
     let docs_source = Utf8PathBuf::from(docs_path);
-    generate_prose_docs(&docs_source, &output_path, PROSE_PAGES)?;
+    let adr_links = generate_adr_docs(&docs_source, &output_path)?;
 
-    // 3. Generate landing page
+    // 3. Generate prose docs in docs/ subdirectory (with ADR link rewriting)
+    generate_prose_docs(&docs_source, &output_path, PROSE_PAGES, &adr_links)?;
+
+    // 4. Generate landing page
     write_site_landing_page(&output_path, PROSE_PAGES)?;
 
-    // 4. Write shared CSS to root (prose pages and landing page reference it)
+    // 5. Write shared CSS to root (prose pages and landing page reference it)
     write_css(&output_path)?;
 
     println!("  Site root: {output_path}/");
@@ -409,6 +414,38 @@ mod tests {
     }
 
     #[test]
+    fn test_render_doc_drops_html_comments() {
+        // Multi-line block comment (as seen in stdlib/src/README.md)
+        let multiline = "<!--\nCopyright 2026 James Casey\nSPDX-License-Identifier: Apache-2.0\n-->\n# Title\n\nBody.";
+        let html = render_doc(multiline);
+        assert!(
+            !html.contains("<!--"),
+            "HTML comment delimiters should be removed"
+        );
+        assert!(
+            !html.contains("Copyright"),
+            "license text should not appear in output"
+        );
+        assert!(
+            html.contains("<h1>Title</h1>"),
+            "content after comment should render"
+        );
+
+        // Single-line inline comment
+        let inline = "<!-- short comment -->\n# Title\n";
+        let html = render_doc(inline);
+        assert!(!html.contains("<!--"), "inline comment should be removed");
+
+        // Inline comment within paragraph text
+        let inline2 = "Before <!-- note --> after.";
+        let html = render_doc(inline2);
+        assert!(
+            !html.contains("<!--"),
+            "inline comment in paragraph should be removed"
+        );
+    }
+
+    #[test]
     fn test_collect_inherited_methods() {
         let parent = ClassInfo {
             name: "Parent".into(),
@@ -590,6 +627,11 @@ mod tests {
         )
         .unwrap();
         fs::write(
+            docs_dir.join("beamtalk-tooling.md"),
+            "# Tooling\n\nCLI and REPL.",
+        )
+        .unwrap();
+        fs::write(
             docs_dir.join("known-limitations.md"),
             "# Known Limitations\n\nWhat's not yet supported.",
         )
@@ -597,11 +639,12 @@ mod tests {
 
         run_site(lib_dir.as_str(), docs_dir.as_str(), out_dir.as_str()).unwrap();
 
-        // Landing page exists
+        // Landing page exists and links to all sections
         let landing = fs::read_to_string(out_dir.join("index.html")).unwrap();
         assert!(landing.contains("Beamtalk"));
         assert!(landing.contains("apidocs/"));
         assert!(landing.contains("docs/language-features.html"));
+        assert!(landing.contains("adr/"));
 
         // API docs in subdirectory
         assert!(out_dir.join("apidocs/index.html").exists());
@@ -612,15 +655,21 @@ mod tests {
         let api_index = fs::read_to_string(out_dir.join("apidocs/index.html")).unwrap();
         assert!(api_index.contains("../"));
 
-        // Prose docs
+        // Prose docs (including new Tooling page)
         assert!(out_dir.join("docs/language-features.html").exists());
         assert!(out_dir.join("docs/principles.html").exists());
+        assert!(out_dir.join("docs/tooling.html").exists());
         assert!(out_dir.join("docs/known-limitations.html").exists());
 
         let prose = fs::read_to_string(out_dir.join("docs/language-features.html")).unwrap();
         assert!(prose.contains("Language Features"));
         assert!(prose.contains("../style.css"));
         assert!(prose.contains("../apidocs/"));
+        // Prose nav includes ADR link
+        assert!(prose.contains("../adr/"));
+
+        // ADR index (no ADR dir in test, so directory is absent but run_site succeeds)
+        // The adr/ dir is only created when docs/ADR/ exists in the source
 
         // Root CSS
         assert!(out_dir.join("style.css").exists());

@@ -226,6 +226,15 @@ body {
   color: var(--fg);
 }
 
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 9;
+}
+.sidebar-overlay.active { display: block; }
+
 @media (max-width: 768px) {
   .sidebar { transform: translateX(-100%); }
   .sidebar.open {
@@ -235,6 +244,42 @@ body {
   .sidebar-toggle { display: block; }
   .main-content { margin-left: 0; padding: 2rem 1.25rem; padding-top: 3.5rem; }
   .nav-links a:not(.nav-github):not(:first-child) { display: none; }
+
+  /* Collapse TOC to single column */
+  .toc ul { column-count: 1; }
+
+  /* Make tables scroll horizontally */
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Scale hero heading */
+  .landing-hero-text h1 { font-size: 2rem; }
+
+  /* Scale page headings */
+  h1 { font-size: 1.5rem; }
+
+  /* Stack method header on narrow screens */
+  .method-header { flex-direction: column; gap: 0.4rem; }
+  .source-link { margin-left: 0; }
+
+  /* Code block horizontal scroll with tighter padding */
+  pre { padding: 1rem; font-size: 0.82rem; }
+}
+
+@media (max-width: 480px) {
+  /* Very small screens: tighter padding */
+  .main-content { padding: 1.5rem 1rem; padding-top: 3.5rem; }
+  .landing-content { padding: 1.5rem 1rem 1.5rem; }
+
+  /* Full-width CTAs */
+  .landing-cta { flex-direction: column; }
+  .btn-primary, .btn-secondary { width: 100%; text-align: center; }
+
+  /* Smallest heading */
+  .landing-hero-text h1 { font-size: 1.75rem; }
+
+  /* Reduce method card padding */
+  .method { padding: 1rem; }
+
 }
 
 /* --- Typography --- */
@@ -428,6 +473,17 @@ tbody tr:hover { background: var(--sidebar-bg); }
 .hierarchy-tree > ul { border-left: none; padding-left: 0; }
 .hierarchy-tree li { margin: 0.25rem 0; font-size: 0.9rem; }
 .hierarchy-tree a { font-weight: 500; }
+.hierarchy-tree .class-summary {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  margin-left: 0.4rem;
+}
+
+/* --- ADR list --- */
+.adr-list { list-style: none; padding: 0; margin: 1.5rem 0; }
+.adr-list li { margin: 0.4rem 0; font-size: 0.95rem; }
+.adr-list a { color: var(--accent); text-decoration: none; }
+.adr-list a:hover { text-decoration: underline; }
 
 /* --- Inherited methods --- */
 .inherited-section { margin-top: 2.5rem; }

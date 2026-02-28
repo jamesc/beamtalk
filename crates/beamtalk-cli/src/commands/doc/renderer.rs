@@ -39,6 +39,8 @@ pub(super) fn class_link(name: &str, classes: &HashMap<String, &ClassInfo>) -> S
 /// Beamtalk code blocks get syntax highlighting via `highlight_beamtalk()`.
 ///
 /// Raw HTML events are escaped to prevent injection from doc comments.
+/// Block-level HTML comments (`<!-- … -->`) are silently dropped so that
+/// license headers in README files do not appear in rendered output.
 pub(super) fn render_doc(doc: &str) -> String {
     use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
 
@@ -51,11 +53,16 @@ pub(super) fn render_doc(doc: &str) -> String {
     let mut in_beamtalk_code = false;
     let mut in_code_block = false;
 
-    // Transform events in a single pass so push_html preserves formatter state
-    // (table header/body context, list nesting, etc.).
-    let events = parser.filter_map(|event| match event {
-        Event::Start(Tag::CodeBlock(kind)) => {
-            let lang = match &kind {
+    // pulldown-cmark 0.13 emits HtmlBlock content as one Event::Html per line,
+    // wrapped by Start(HtmlBlock)/End(HtmlBlock).  We must collect all events
+    // first so we can examine each HtmlBlock span as a whole before deciding
+    // whether it is a pure comment and should be dropped.
+    let raw_events: Vec<Event<'_>> = parser.collect();
+    let events = strip_html_comments(raw_events);
+
+    let events = events.into_iter().filter_map(|event| match event {
+        Event::Start(Tag::CodeBlock(ref kind)) => {
+            let lang = match kind {
                 CodeBlockKind::Fenced(lang) => lang.as_ref(),
                 CodeBlockKind::Indented => "",
             };
@@ -83,24 +90,61 @@ pub(super) fn render_doc(doc: &str) -> String {
             code_text.push_str(&text);
             None
         }
-        // Drop HTML comments (e.g. license headers); sanitize all other raw HTML.
-        // Only drop events that are purely a comment (starts *and* ends with the
-        // comment delimiters) so mixed chunks like `<!--x--><em>y</em>` are not
-        // silently swallowed.
-        Event::Html(raw) | Event::InlineHtml(raw) => {
-            let trimmed = raw.trim();
-            if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
-                None
-            } else {
-                Some(Event::Text(raw))
-            }
-        }
         _ if in_code_block => None,
         other => Some(other),
     });
 
     pulldown_cmark::html::push_html(&mut html, events);
     html
+}
+
+/// Remove HTML comment blocks from a pulldown-cmark event stream.
+///
+/// pulldown-cmark emits each `HtmlBlock` as a `Start(HtmlBlock)` sentinel,
+/// one `Event::Html` per source line, then `End(HtmlBlock)`.  We accumulate
+/// the full block text and drop the entire span when it is a pure HTML comment
+/// (`<!-- … -->`).  Non-comment HTML blocks are emitted as escaped
+/// `Event::Text` to prevent markup injection.
+///
+/// Inline HTML comments (`Event::InlineHtml`) that are a pure comment on a
+/// single token are also dropped; other inline HTML is escaped.
+fn strip_html_comments(events: Vec<pulldown_cmark::Event<'_>>) -> Vec<pulldown_cmark::Event<'_>> {
+    use pulldown_cmark::{CowStr, Event, Tag, TagEnd};
+
+    let mut out = Vec::with_capacity(events.len());
+    let mut iter = events.into_iter();
+
+    while let Some(event) = iter.next() {
+        match event {
+            Event::Start(Tag::HtmlBlock) => {
+                // Consume the whole block and decide whether to keep it.
+                let mut content = String::new();
+                for inner in iter.by_ref() {
+                    match inner {
+                        Event::End(TagEnd::HtmlBlock) => break,
+                        Event::Html(s) => content.push_str(&s),
+                        _ => {}
+                    }
+                }
+                let trimmed = content.trim();
+                if !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
+                    // Not a comment — emit as escaped text.
+                    out.push(Event::Text(CowStr::Boxed(content.into_boxed_str())));
+                }
+            }
+            // Inline or bare Html outside an HtmlBlock — drop if pure comment,
+            // otherwise escape to prevent injection.
+            Event::InlineHtml(raw) | Event::Html(raw) => {
+                let trimmed = raw.trim();
+                if !(trimmed.starts_with("<!--") && trimmed.ends_with("-->")) {
+                    out.push(Event::Text(raw));
+                }
+            }
+            other => out.push(other),
+        }
+    }
+
+    out
 }
 
 /// Write the index (landing) page.
@@ -123,8 +167,12 @@ pub(super) fn write_index_page(
     html.push_str("<div class=\"page-wrapper\">\n");
     html.push_str(
         "<button class=\"sidebar-toggle\" \
-         onclick=\"document.querySelector('.sidebar').classList.toggle('open')\" \
-         aria-label=\"Toggle navigation\">☰</button>\n",
+         onclick=\"var s=document.querySelector('.sidebar'),o=document.getElementById('sidebar-overlay');\
+s.classList.toggle('open');o.classList.toggle('active');\" \
+         aria-label=\"Toggle navigation\">☰</button>\n\
+<div id=\"sidebar-overlay\" class=\"sidebar-overlay\" \
+  onclick=\"document.querySelector('.sidebar').classList.remove('open');\
+this.classList.remove('active');\"></div>\n",
     );
     html.push_str(sidebar_html);
     html.push_str("<main class=\"main-content\">\n");
@@ -189,8 +237,12 @@ pub(super) fn write_class_page(
     html.push_str("<div class=\"page-wrapper\">\n");
     html.push_str(
         "<button class=\"sidebar-toggle\" \
-         onclick=\"document.querySelector('.sidebar').classList.toggle('open')\" \
-         aria-label=\"Toggle navigation\">☰</button>\n",
+         onclick=\"var s=document.querySelector('.sidebar'),o=document.getElementById('sidebar-overlay');\
+s.classList.toggle('open');o.classList.toggle('active');\" \
+         aria-label=\"Toggle navigation\">☰</button>\n\
+<div id=\"sidebar-overlay\" class=\"sidebar-overlay\" \
+  onclick=\"document.querySelector('.sidebar').classList.remove('open');\
+this.classList.remove('active');\"></div>\n",
     );
     html.push_str(&sidebar_html.replace(
         &format!("\">{}</a>", html_escape(&class.name)),
