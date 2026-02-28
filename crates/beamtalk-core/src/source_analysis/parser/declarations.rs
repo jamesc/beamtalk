@@ -9,8 +9,8 @@
 //! - Method definitions with optional `sealed` modifier
 
 use crate::ast::{
-    ClassDefinition, CommentAttachment, Expression, ExpressionStatement, Identifier, KeywordPart,
-    MessageSelector, MethodDefinition, MethodKind, ParameterDefinition, StandaloneMethodDefinition,
+    ClassDefinition, Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector,
+    MethodDefinition, MethodKind, ParameterDefinition, StandaloneMethodDefinition,
     StateDeclaration, TypeAnnotation,
 };
 use crate::source_analysis::{Span, TokenKind};
@@ -41,6 +41,7 @@ impl Parser {
     pub(super) fn parse_class_definition(&mut self) -> ClassDefinition {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
+        let comments = self.collect_comment_attachment();
         let mut is_abstract = false;
         let mut is_sealed = false;
         let mut is_typed = false;
@@ -119,6 +120,7 @@ impl Parser {
         class_def.class_methods = class_methods;
         class_def.class_variables = class_variables;
         class_def.doc_comment = doc_comment;
+        class_def.comments = comments;
         class_def
     }
 
@@ -399,6 +401,8 @@ impl Parser {
     /// - `state: fieldName: TypeName = defaultValue`
     fn parse_state_declaration(&mut self) -> Option<StateDeclaration> {
         let start = self.current_token().span();
+        let doc_comment = self.collect_doc_comment();
+        let comments = self.collect_comment_attachment();
 
         // Consume `state:`
         if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:") {
@@ -462,8 +466,8 @@ impl Parser {
             name,
             type_annotation,
             default_value,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
+            comments,
+            doc_comment,
             span,
         })
     }
@@ -477,6 +481,8 @@ impl Parser {
     /// - `classState: varName: TypeName = defaultValue`
     fn parse_classvar_declaration(&mut self) -> Option<StateDeclaration> {
         let start = self.current_token().span();
+        let doc_comment = self.collect_doc_comment();
+        let comments = self.collect_comment_attachment();
 
         // Consume `classState:`
         if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classState:") {
@@ -529,8 +535,8 @@ impl Parser {
             name,
             type_annotation,
             default_value,
-            comments: CommentAttachment::default(),
-            doc_comment: None,
+            comments,
+            doc_comment,
             span,
         })
     }
@@ -593,6 +599,7 @@ impl Parser {
     fn parse_method_definition(&mut self) -> Option<MethodDefinition> {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
+        let comments = self.collect_comment_attachment();
         let method_kind = MethodKind::Primary;
         let mut method_is_sealed = false;
         let mut _is_class_method = false;
@@ -647,6 +654,7 @@ impl Parser {
             span,
         );
         method.doc_comment = doc_comment;
+        method.comments = comments;
         Some(method)
     }
 

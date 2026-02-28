@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -100,7 +101,24 @@ Module {
             class_methods: [],
             class_variables: [],
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// BT-374: Workspace binding dispatch via persistent_term.",
+                        span: Span {
+                            start: 148,
+                            end: 153,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Transcript is a workspace binding — generates persistent_term lookup + actor send.",
+                        span: Span {
+                            start: 148,
+                            end: 153,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             doc_comment: None,

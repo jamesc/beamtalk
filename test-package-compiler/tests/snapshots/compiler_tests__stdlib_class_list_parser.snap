@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -53,7 +54,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Access",
+                                span: Span {
+                                    start: 251,
+                                    end: 255,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -329,7 +339,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Ordering",
+                                span: Span {
+                                    start: 489,
+                                    end: 493,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -503,7 +522,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Search",
+                                span: Span {
+                                    start: 639,
+                                    end: 646,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -626,7 +654,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Iteration — selector-based runtime dispatch",
+                                span: Span {
+                                    start: 794,
+                                    end: 797,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -908,7 +945,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Functional",
+                                span: Span {
+                                    start: 1024,
+                                    end: 1029,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -1252,7 +1298,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Concatenation",
+                                span: Span {
+                                    start: 1318,
+                                    end: 1320,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -1322,7 +1377,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Subsequence / Search",
+                                span: Span {
+                                    start: 1375,
+                                    end: 1380,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -1864,7 +1928,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Iteration with index",
+                                span: Span {
+                                    start: 1589,
+                                    end: 1603,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -1917,7 +1990,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Advanced",
+                                span: Span {
+                                    start: 1751,
+                                    end: 1755,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -2248,7 +2330,40 @@ Module {
             class_methods: [],
             class_variables: [],
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 208,
+                            end: 214,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 208,
+                            end: 214,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test List class compilation as a value type (not gen_server).",
+                        span: Span {
+                            start: 208,
+                            end: 214,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Mirrors lib/List.bt exactly — new/0 should return [] (empty list).",
+                        span: Span {
+                            start: 208,
+                            end: 214,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             doc_comment: None,

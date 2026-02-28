@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -146,7 +147,24 @@ Module {
             class_methods: [],
             class_variables: [],
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// BT-374: Workspace binding cascade dispatch.",
+                        span: Span {
+                            start: 130,
+                            end: 135,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Cascade messages to a workspace binding should use persistent_term PID lookup.",
+                        span: Span {
+                            start: 130,
+                            end: 135,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             doc_comment: None,

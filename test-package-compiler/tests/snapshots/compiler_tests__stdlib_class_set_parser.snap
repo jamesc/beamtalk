@@ -1,5 +1,6 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
 expression: output
 ---
 AST:
@@ -83,7 +84,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Size",
+                                span: Span {
+                                    start: 286,
+                                    end: 290,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -170,7 +180,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Membership",
+                                span: Span {
+                                    start: 365,
+                                    end: 374,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -223,7 +242,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Modification (returns new Set)",
+                                span: Span {
+                                    start: 448,
+                                    end: 452,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -329,7 +357,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Set operations (returns new Set)",
+                                span: Span {
+                                    start: 565,
+                                    end: 571,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -488,7 +525,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Predicates",
+                                span: Span {
+                                    start: 720,
+                                    end: 731,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -522,7 +568,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Conversion",
+                                span: Span {
+                                    start: 785,
+                                    end: 791,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -628,7 +683,16 @@ Module {
                     is_sealed: false,
                     kind: Primary,
                     comments: CommentAttachment {
-                        leading: [],
+                        leading: [
+                            Comment {
+                                content: "// Iteration",
+                                span: Span {
+                                    start: 876,
+                                    end: 879,
+                                },
+                                kind: Line,
+                            },
+                        ],
                         trailing: None,
                     },
                     doc_comment: None,
@@ -641,7 +705,40 @@ Module {
             class_methods: [],
             class_variables: [],
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 221,
+                            end: 227,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 221,
+                            end: 227,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test Set class compilation as a value type (not gen_server).",
+                        span: Span {
+                            start: 221,
+                            end: 227,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Mirrors lib/Set.bt exactly — new/0 should return tagged map with empty elements.",
+                        span: Span {
+                            start: 221,
+                            end: 227,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             doc_comment: None,
