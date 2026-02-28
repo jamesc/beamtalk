@@ -315,6 +315,7 @@ fn run() -> Result<()> {
                 allow_primitives,
                 workspace_mode: false,
                 suppress_warnings: no_warnings,
+                ..Default::default()
             };
             commands::build::build(&path, &options)
         }

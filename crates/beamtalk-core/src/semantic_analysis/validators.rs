@@ -1094,19 +1094,26 @@ fn check_seq_for_effect_free(
 /// BT-951: Warn (as a lint) when a statement is an effect-free expression
 /// whose value is silently discarded.
 ///
-/// Checks method bodies and standalone method bodies only. Module-level
-/// expressions (`module.expressions`) are intentionally skipped because
-/// bootstrap-test files use top-level expressions as test assertions
-/// (paired with `// =>` comments) and these are evaluated intentionally.
+/// Checks method bodies, standalone method bodies, and (by default)
+/// module-level expressions (`module.expressions`). Pass
+/// `skip_module_expression_lint = true` to suppress the module-level check —
+/// bootstrap-test compilation uses this because those files intentionally use
+/// top-level expressions as test assertions paired with `// =>` comments.
 ///
 /// Effect-free expressions include literals, variable references, and pure
 /// binary arithmetic / comparison expressions composed from pure sub-expressions.
 ///
 /// Uses `Severity::Lint` so the warning is suppressed during normal compilation
-/// and only surfaces when running `beamtalk lint`.
-pub(crate) fn check_effect_free_statements(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    // Skip module.expressions — those are intentional top-level test assertions.
-    // Only check method bodies and standalone method definitions.
+/// and only surfaces when running `beamtalk lint` or in the REPL.
+pub(crate) fn check_effect_free_statements(
+    module: &Module,
+    diagnostics: &mut Vec<Diagnostic>,
+    skip_module_expression_lint: bool,
+) {
+    // BT-979: Check module-level expressions unless the caller opts out.
+    if !skip_module_expression_lint {
+        check_seq_for_effect_free(&module.expressions, diagnostics);
+    }
     for class in &module.classes {
         for method in class.methods.iter().chain(class.class_methods.iter()) {
             check_seq_for_effect_free(&method.body, diagnostics);
@@ -1389,7 +1396,7 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
         let mut diagnostics = Vec::new();
-        check_effect_free_statements(&module, &mut diagnostics);
+        check_effect_free_statements(&module, &mut diagnostics, false);
         assert!(
             diagnostics.is_empty(),
             "Expected no lint for single literal return value, got: {diagnostics:?}"
@@ -1404,7 +1411,7 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
         let mut diagnostics = Vec::new();
-        check_effect_free_statements(&module, &mut diagnostics);
+        check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
             diagnostics.len(),
             1,
@@ -1430,7 +1437,7 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
         let mut diagnostics = Vec::new();
-        check_effect_free_statements(&module, &mut diagnostics);
+        check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
             diagnostics.len(),
             1,
@@ -1447,7 +1454,7 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
         let mut diagnostics = Vec::new();
-        check_effect_free_statements(&module, &mut diagnostics);
+        check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
             diagnostics.len(),
             1,
@@ -1469,7 +1476,7 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
         let mut diagnostics = Vec::new();
-        check_effect_free_statements(&module, &mut diagnostics);
+        check_effect_free_statements(&module, &mut diagnostics, false);
         assert!(
             diagnostics.is_empty(),
             "Expected no lint for effectful sends, got: {diagnostics:?}"
@@ -1484,7 +1491,7 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
         let mut diagnostics = Vec::new();
-        check_effect_free_statements(&module, &mut diagnostics);
+        check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
             diagnostics.len(),
             1,
@@ -1501,7 +1508,7 @@ mod tests {
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
         let mut diagnostics = Vec::new();
-        check_effect_free_statements(&module, &mut diagnostics);
+        check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
             diagnostics.len(),
             2,
@@ -1509,19 +1516,35 @@ mod tests {
         );
     }
 
-    /// Module-level expressions: NOT linted, because bootstrap-test files use
-    /// top-level expressions as intentional test assertions (paired with `// =>`).
+    /// BT-979: Module-level expressions ARE linted by default.
     #[test]
-    fn module_level_effect_free_not_linted() {
+    fn module_level_effect_free_linted_by_default() {
         let src = "42.\nself doSomething";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
         let mut diagnostics = Vec::new();
-        check_effect_free_statements(&module, &mut diagnostics);
+        check_effect_free_statements(&module, &mut diagnostics, false);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 lint for discarded module-level literal, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Lint);
+    }
+
+    /// BT-979: Module-level expressions NOT linted when opt-out flag is set.
+    #[test]
+    fn module_level_effect_free_skipped_with_flag() {
+        let src = "42.\nself doSomething";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_effect_free_statements(&module, &mut diagnostics, true);
         assert!(
             diagnostics.is_empty(),
-            "Expected no lint for module-level expressions (they are intentional test assertions), got: {diagnostics:?}"
+            "Expected no lint when skip_module_expression_lint is true, got: {diagnostics:?}"
         );
     }
 
@@ -1538,7 +1561,7 @@ mod tests {
             "Expected 1 standalone method"
         );
         let mut diagnostics = Vec::new();
-        check_effect_free_statements(&module, &mut diagnostics);
+        check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
             diagnostics.len(),
             1,
