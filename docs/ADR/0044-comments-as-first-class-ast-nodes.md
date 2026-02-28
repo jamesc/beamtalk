@@ -212,8 +212,9 @@ covering `FieldDescriptor` objects will define the runtime storage and accessor 
 being first-class objects you introspect via message sends. A `FieldDescriptor` will
 carry `.name`, `.doc`, `.typeAnnotation`, `.defaultValue` as messages, participate in
 the metaclass tower, and be accessible via `MyClass fields` returning a collection of
-`FieldDescriptor` instances. This mirrors how `MyClass methods` returns `CompiledMethod`
-instances today.
+`FieldDescriptor` instances held by the class object. This mirrors how `MyClass methods`
+returns `CompiledMethod` instances from the class's method dictionary today. Both are
+class-side objects — not per-instance data.
 
 Type annotations will be stored on `FieldDescriptor` (and on `CompiledMethod` for
 consistency) as inert metadata — accessible via reflection but never enforced at
@@ -336,11 +337,13 @@ or BEAM bytecode. `StateDeclaration.doc_comment` and type annotations are also s
 for now (deferred to the `FieldDescriptor` ADR).
 
 The `FieldDescriptor` ADR will introduce compilation targets for field doc comments,
-field type annotations, and method type annotations — compiled to message sends that
-populate runtime objects at class load time, following the same pattern as `CompiledMethod.doc`
-(ADR 0033). Those will appear as BEAM module behaviour (class initialisation calls), not
-as bytecode metadata. Regular `//` and `/* */` comments never reach the runtime under
-any scenario.
+field type annotations, and method type annotations — compiled to message sends to the
+**class object** during class definition, following the same pattern as `CompiledMethod.doc`
+(ADR 0033). These are class-side operations: `CompiledMethod` instances live in the
+class's method dictionary, and `FieldDescriptor` instances will be held by the class
+object — neither are per-instance data. The compiled output is class-definition
+behaviour in Core Erlang, not BEAM metadata chunks or instance initialisation.
+Regular `//` and `/* */` comments never reach the runtime under any scenario.
 
 **Tooling developer** (LSP, formatter, refactoring tools): Major improvement. Every
 tool gets complete AST data in one parse. No secondary pass to recover comments. No
