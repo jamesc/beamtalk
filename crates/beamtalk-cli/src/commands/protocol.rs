@@ -217,7 +217,31 @@ impl ProtocolClient {
             .into_diagnostic()
     }
 
-    /// Read a single JSON response from the WebSocket, skipping push messages.
+    /// Handle a server-initiated push message (ADR 0017).
+    ///
+    /// Transcript push messages are printed inline to stdout. Other push
+    /// types (actor lifecycle, etc.) are silently ignored.
+    ///
+    /// Returns `true` if the message was a push and should be skipped for
+    /// response parsing.
+    fn handle_push(parsed: &serde_json::Value) -> bool {
+        let is_push = parsed.get("push").is_some()
+            || parsed.get("type").and_then(|v| v.as_str()) == Some("push");
+        if !is_push {
+            return false;
+        }
+        if parsed.get("push").and_then(|v| v.as_str()) == Some("transcript") {
+            if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
+                use std::io::Write;
+                print!("{text}");
+                let _ = std::io::stdout().flush();
+            }
+        }
+        true
+    }
+
+    /// Read a single JSON response from the WebSocket, printing any transcript
+    /// push messages inline and skipping other push messages.
     fn read_response(&mut self) -> Result<serde_json::Value> {
         loop {
             let msg = self
@@ -228,10 +252,7 @@ impl ProtocolClient {
                 Message::Text(text) => {
                     let parsed: serde_json::Value = serde_json::from_str(&text)
                         .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {text}"))?;
-                    // Skip push messages (e.g. Transcript, actor lifecycle from ADR 0017)
-                    if parsed.get("push").is_some()
-                        || parsed.get("type").and_then(|v| v.as_str()) == Some("push")
-                    {
+                    if Self::handle_push(&parsed) {
                         continue;
                     }
                     return Ok(parsed);
@@ -246,18 +267,15 @@ impl ProtocolClient {
     }
 
     /// Read a single response line from the connection (WebSocket text frame).
-    /// Skips push messages (server-initiated, e.g. Transcript).
+    /// Prints transcript push messages inline; skips other push messages.
     /// Returns `Ok(line)` on success, or an error.
     /// When a read timeout is set and expires, returns `Err` with `WouldBlock` kind.
     pub fn read_response_line(&mut self) -> std::io::Result<String> {
         loop {
             match self.ws.read() {
                 Ok(Message::Text(text)) => {
-                    // Skip push messages (e.g. Transcript, actor lifecycle from ADR 0017)
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if parsed.get("push").is_some()
-                            || parsed.get("type").and_then(|v| v.as_str()) == Some("push")
-                        {
+                        if Self::handle_push(&parsed) {
                             continue;
                         }
                     }
@@ -315,11 +333,8 @@ impl ProtocolClient {
             loop {
                 match self.ws.read() {
                     Ok(Message::Text(text)) => {
-                        // Skip push messages (e.g. Transcript, actor lifecycle from ADR 0017)
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                            if parsed.get("push").is_some()
-                                || parsed.get("type").and_then(|v| v.as_str()) == Some("push")
-                            {
+                            if Self::handle_push(&parsed) {
                                 continue;
                             }
                         }
