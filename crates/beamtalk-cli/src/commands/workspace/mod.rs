@@ -1263,7 +1263,10 @@ mod tests {
             info0.port, info1.port,
             "both callers must return the same node port"
         );
-        assert!(is_node_running(info0), "node should be running after concurrent start");
+        assert!(
+            is_node_running(info0),
+            "node should be running after concurrent start"
+        );
 
         // Clean up
         let _guard = NodeGuard { pid: info0.pid };
