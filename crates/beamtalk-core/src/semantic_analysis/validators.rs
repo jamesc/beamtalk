@@ -13,7 +13,7 @@
 //! - Class variable access (BT-563)
 //! - Empty method bodies (BT-631)
 
-use crate::ast::{Block, Expression, Identifier, Module};
+use crate::ast::{Block, ClassKind, Expression, Identifier, Module};
 use crate::ast_walker::{for_each_expr_seq, walk_expression, walk_module};
 use crate::semantic_analysis::block_context::{classify_block, is_collection_hof_selector};
 use crate::semantic_analysis::{BlockContext, ClassHierarchy};
@@ -651,20 +651,29 @@ pub(crate) fn check_redundant_assignment(module: &Module, diagnostics: &mut Vec<
 
 /// BT-953: Warn when `self` is referenced inside a literal block passed to a
 /// collection higher-order method (collect:, do:, select:, reject:, inject:into:,
-/// detect:, detect:ifNone:).
+/// detect:, detect:ifNone:) inside an **Actor** class method.
 ///
-/// These methods pass the block to Erlang-side iteration. If the block body
-/// references `self` as a message receiver, the re-entrant self-send goes
-/// through the `calling_self` mechanism and can deadlock at runtime.
+/// Only `Actor subclass:` uses the `calling_self` / `gen_server` dispatch mechanism.
+/// `Object subclass:` and `Value subclass:` use direct synchronous Erlang function
+/// calls, so self-sends inside collection blocks are safe for those class kinds.
 ///
-/// Example: `items collect: [:x | self process: x]`  ← deadlock risk
+/// Example: `items collect: [:x | self process: x]`  ← deadlock risk (Actor only)
 pub(crate) fn check_self_capture_in_actor_block(
     module: &Module,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module(module, &mut |expr| {
-        check_self_capture_at(expr, diagnostics);
-    });
+    for class in &module.classes {
+        if class.class_kind != ClassKind::Actor {
+            continue;
+        }
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            for expr in &method.body {
+                walk_expression(expr, &mut |e| {
+                    check_self_capture_at(e, diagnostics);
+                });
+            }
+        }
+    }
 }
 
 /// Recursively searches an expression tree for any reference to `self`.
@@ -1681,28 +1690,41 @@ mod tests {
         );
     }
 
-    /// Value-object class (not Actor) also gets the hint — the deadlock risk
-    /// exists for any class using the `calling_self` mechanism.
+    /// `Object subclass:` does NOT use `calling_self` dispatch — no hint emitted.
     #[test]
-    fn self_capture_in_value_object_collect_hints() {
+    fn self_capture_in_object_subclass_no_hint() {
         let src = "Object subclass: Formatter\n  format: rows => rows collect: [:row | self formatRow: row]";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
         let mut diagnostics = Vec::new();
         check_self_capture_in_actor_block(&module, &mut diagnostics);
-        assert_eq!(
-            diagnostics.len(),
-            1,
-            "Expected 1 hint for self capture in value-object collect:, got: {diagnostics:?}"
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hints for Object subclass: (no calling_self dispatch), got: {diagnostics:?}"
         );
-        assert_eq!(diagnostics[0].severity, Severity::Hint);
     }
 
-    /// `self` inside a `do:` block emits a hint.
+    /// `Value subclass:` uses synchronous pure-function dispatch — no hint emitted.
+    #[test]
+    fn self_capture_in_value_subclass_no_hint() {
+        let src =
+            "Value subclass: Point\n  scale: factor => #(1, 2) collect: [:c | self transform: c]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hints for Value subclass: (synchronous dispatch), got: {diagnostics:?}"
+        );
+    }
+
+    /// `self` inside a `do:` block in an Actor class emits a hint.
     #[test]
     fn self_capture_in_do_block_hints() {
-        let src = "Object subclass: Runner\n  run: items => items do: [:x | self process: x]";
+        let src = "Actor subclass: Runner\n  run: items => items do: [:x | self process: x]";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -1716,11 +1738,10 @@ mod tests {
         assert_eq!(diagnostics[0].severity, Severity::Hint);
     }
 
-    /// `self` inside a map literal within a collect: block still triggers.
+    /// `self` inside a map literal within a collect: block in an Actor class still triggers.
     #[test]
     fn self_capture_nested_in_map_literal_hints() {
-        let src =
-            "Object subclass: Foo\n  run: items => items collect: [:x | #{key => self value}]";
+        let src = "Actor subclass: Foo\n  run: items => items collect: [:x | #{key => self value}]";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
