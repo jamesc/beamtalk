@@ -689,31 +689,46 @@ pub(crate) fn check_self_capture_in_actor_block(
     }
 }
 
-/// Recursively searches an expression tree for any reference to `self`.
-///
-/// Returns the `Span` of the first `self` identifier found, or `None`.
-/// Uses `child_expressions` to traverse all expression variants consistently.
-fn find_self_reference(expr: &Expression) -> Option<Span> {
-    // Check current node
-    if let Expression::Identifier(Identifier { name, span, .. }) = expr {
-        if name == "self" {
-            return Some(*span);
-        }
+/// Returns `true` if `expr` is a bare `self` identifier, unwrapping any
+/// surrounding parentheses.
+fn is_self_receiver(expr: &Expression) -> bool {
+    match expr {
+        Expression::Identifier(Identifier { name, .. }) => name == "self",
+        Expression::Parenthesized { expression, .. } => is_self_receiver(expression),
+        _ => false,
     }
-    // Recurse into children (covers all expression variants)
-    child_expressions(expr)
-        .into_iter()
-        .find_map(find_self_reference)
 }
 
-/// Searches a block's body for any `self` reference.
+/// Searches an expression tree for a `MessageSend` or `Cascade` whose
+/// immediate receiver is `self`.
+///
+/// Only these forms go through the `calling_self` / `gen_server` dispatch and
+/// can deadlock when called from inside a collection HOF block.
+/// `FieldAccess { receiver: self }` (`self.field`) compiles to `maps:get` /
+/// `maps:put` — a direct in-process map operation — and is safe.
+fn find_self_message_send(expr: &Expression) -> Option<Span> {
+    match expr {
+        Expression::MessageSend { receiver, span, .. }
+        | Expression::Cascade { receiver, span, .. } => {
+            if is_self_receiver(receiver) {
+                return Some(*span);
+            }
+        }
+        _ => {}
+    }
+    child_expressions(expr)
+        .into_iter()
+        .find_map(find_self_message_send)
+}
+
+/// Searches a block's body for a message send or cascade directly to `self`.
 fn find_self_reference_in_block(block: &Block) -> Option<Span> {
-    block.body.iter().find_map(find_self_reference)
+    block.body.iter().find_map(find_self_message_send)
 }
 
 /// Checks a single expression node for the self-capture pattern.
 ///
-/// Called by [`walk_module`] via [`check_self_capture_in_actor_block`]; the
+/// Called by [`check_self_capture_in_actor_block`]; the
 /// walker handles recursive traversal, so this function only inspects the
 /// current node.
 fn check_self_capture_at(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
@@ -1853,6 +1868,82 @@ mod tests {
             diagnostics.len(),
             1,
             "Expected 1 hint for transitive Actor subclass, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Hint);
+    }
+
+    // ── Field access / assignment in collection blocks (false-positive tests) ──
+
+    /// `self.field` read inside collect: is a maps:get, not a gen_server call — no hint.
+    #[test]
+    fn self_field_read_in_collect_no_hint() {
+        let src =
+            "Actor subclass: Counter\n  sumItems: items => items collect: [:x | x + self.total]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hint for self.field read (maps:get, not gen_server), got: {diagnostics:?}"
+        );
+    }
+
+    /// `self.field :=` write inside inject:into: is a maps:put, not a gen_server call — no hint.
+    #[test]
+    fn self_field_write_in_inject_no_hint() {
+        let src = "Actor subclass: Counter\n  accumulate: items =>\n    items inject: 0 into: [:acc :val |\n      self.total := self.total + val\n      acc + val]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hint for self.field := (maps:put, not gen_server), got: {diagnostics:?}"
+        );
+    }
+
+    /// Sending a message to a field value (`self.cache at: x`) inside a block is safe —
+    /// the receiver of the send is `self.cache` (a maps:get result), not `self`.
+    #[test]
+    fn message_send_to_self_field_no_hint() {
+        let src =
+            "Actor subclass: Repo\n  process: items => items collect: [:x | self.cache at: x]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no hint for message sent to self.field value (not self), got: {diagnostics:?}"
+        );
+    }
+
+    /// `self someMessage` (actual message send to self) inside collect: still fires.
+    #[test]
+    fn self_message_send_in_collect_still_hints() {
+        let src =
+            "Actor subclass: Counter\n  process: items => items collect: [:x | self transform: x]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_self_capture_in_actor_block(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 hint for actual self message send in collect:, got: {diagnostics:?}"
         );
         assert_eq!(diagnostics[0].severity, Severity::Hint);
     }
