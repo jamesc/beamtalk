@@ -1228,11 +1228,11 @@ impl CoreErlangGenerator {
             // this is definitely a value type.
             // BT-480: Include exception hierarchy classes — these inherit from Object
             // (Exception → Object) and must compile as value types, not actors.
-            // BT-925: Include "Value" — Value has no .bt file (runtime-only builtin) so
-            // it is absent from the class_superclass_index. Classes that directly extend
-            // Value (Collection, Number, Boolean, Exception) may see the chain terminate
-            // at "Value" when cross-file superclass info is incomplete. Recognise "Value"
-            // as a known value-type root so these abstract bases compile correctly.
+            // BT-925: Include "Value" — when cross-file superclass indexing is incomplete
+            // (e.g. independent file compilation), chains for direct Value subclasses
+            // (Collection, Number, Boolean, Exception) can terminate at "Value". Treat
+            // "Value" as a known value-type root so these classes compile as value types
+            // instead of actors.
             let known_value_roots = [
                 "Object",
                 "ProtoObject",
