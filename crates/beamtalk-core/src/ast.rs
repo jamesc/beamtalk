@@ -158,6 +158,28 @@ pub struct Comment {
     pub kind: CommentKind,
 }
 
+impl Comment {
+    /// Creates a line comment (`// text`).
+    #[must_use]
+    pub fn line(content: impl Into<EcoString>, span: Span) -> Self {
+        Self {
+            content: content.into(),
+            span,
+            kind: CommentKind::Line,
+        }
+    }
+
+    /// Creates a block comment (`/* text */`).
+    #[must_use]
+    pub fn block(content: impl Into<EcoString>, span: Span) -> Self {
+        Self {
+            content: content.into(),
+            span,
+            kind: CommentKind::Block,
+        }
+    }
+}
+
 /// The kind of comment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommentKind {
@@ -399,6 +421,8 @@ pub struct StateDeclaration {
     /// Non-doc comments (`//` and `/* */`) appearing before this field.
     pub comments: CommentAttachment,
     /// Doc comment attached to this field (`///` lines).
+    ///
+    /// **Note:** Always `None` until parser support lands in BT-975.
     pub doc_comment: Option<String>,
     /// Source location.
     pub span: Span,
@@ -2053,6 +2077,28 @@ mod tests {
             }),
         };
         assert!(!ca.is_empty());
+    }
+
+    #[test]
+    fn comment_attachment_with_both_leading_and_trailing() {
+        let ca = CommentAttachment {
+            leading: vec![Comment::line("leading", Span::new(0, 9))],
+            trailing: Some(Comment::line("trailing", Span::new(20, 30))),
+        };
+        assert!(!ca.is_empty());
+        assert_eq!(ca.leading.len(), 1);
+        assert!(ca.trailing.is_some());
+    }
+
+    #[test]
+    fn comment_constructors() {
+        let line = Comment::line("hello", Span::new(0, 7));
+        assert_eq!(line.kind, CommentKind::Line);
+        assert_eq!(line.content, "hello");
+
+        let block = Comment::block("world", Span::new(0, 9));
+        assert_eq!(block.kind, CommentKind::Block);
+        assert_eq!(block.content, "world");
     }
 
     #[test]
