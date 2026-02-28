@@ -11,9 +11,11 @@ use std::fmt::Write as _;
 use super::extractor::ClassInfo;
 use super::renderer::html_escape;
 
-/// Generate HTML page header with sidebar toggle.
-pub(super) fn page_header(title: &str, css_path: Option<&str>) -> String {
-    let css = css_path.unwrap_or("style.css");
+/// Generate HTML page header with top navigation bar.
+///
+/// `css` is the relative path to the stylesheet.
+/// `nav_prefix` is prepended to cross-site navigation links (e.g. `"../"` when in a subdirectory).
+pub(super) fn page_header(title: &str, css: &str, nav_prefix: &str) -> String {
     format!(
         "<!DOCTYPE html>\n\
          <html lang=\"en\">\n\
@@ -21,11 +23,21 @@ pub(super) fn page_header(title: &str, css_path: Option<&str>) -> String {
          <meta charset=\"utf-8\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
          <title>{title}</title>\n\
+         <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n\
+         <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n\
+         <link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap\" rel=\"stylesheet\">\n\
          <link rel=\"stylesheet\" href=\"{css}\">\n\
          </head>\n\
          <body>\n\
-         <button class=\"sidebar-toggle\" onclick=\"document.querySelector('.sidebar')\
-         .classList.toggle('open')\" aria-label=\"Toggle navigation\">☰</button>\n",
+         <header class=\"top-nav\">\n\
+         <a class=\"nav-logo\" href=\"{nav_prefix}\">Beamtalk</a>\n\
+         <nav class=\"nav-links\">\n\
+         <a href=\"{nav_prefix}docs/language-features.html\">Language</a>\n\
+         <a href=\"{nav_prefix}docs/architecture.html\">Architecture</a>\n\
+         <a href=\"{nav_prefix}apidocs/\">API</a>\n\
+         <a href=\"https://github.com/jamesc/beamtalk\" class=\"nav-github\">GitHub ↗</a>\n\
+         </nav>\n\
+         </header>\n",
     )
 }
 
@@ -59,11 +71,8 @@ pub(super) fn page_footer_simple() -> String {
 pub(super) fn build_sidebar_html(classes: &[ClassInfo], asset_prefix: &str) -> String {
     let mut html = String::new();
     html.push_str("<nav class=\"sidebar\">\n");
-    html.push_str("<div class=\"sidebar-header\">\n");
-    let _ = writeln!(
-        html,
-        "<h2><a href=\"{asset_prefix}index.html\">Beamtalk</a></h2>"
-    );
+
+    html.push_str("<div class=\"sidebar-search-wrap\">\n");
     html.push_str(
         "<input type=\"search\" class=\"sidebar-search\" \
          id=\"sidebar-search\" placeholder=\"Search classes…\" \
@@ -72,20 +81,19 @@ pub(super) fn build_sidebar_html(classes: &[ClassInfo], asset_prefix: &str) -> S
     );
     html.push_str("</div>\n");
 
-    // Cross-navigation links
+    // Cross-navigation links (only when in a subdirectory)
     if !asset_prefix.is_empty() {
-        html.push_str("<div class=\"sidebar-section\">\n");
+        html.push_str("<div class=\"sidebar-section-label\">Navigate</div>\n");
+        html.push_str("<ul class=\"sidebar-nav\">\n");
+        let _ = writeln!(html, "<li><a href=\"{asset_prefix}\">Home</a></li>");
         let _ = writeln!(
             html,
-            "<a href=\"{asset_prefix}\" class=\"sidebar-home-link\">← Home</a>"
+            "<li><a href=\"{asset_prefix}docs/language-features.html\">Documentation</a></li>"
         );
-        let _ = writeln!(
-            html,
-            "<a href=\"{asset_prefix}docs/language-features.html\" class=\"sidebar-docs-link\">Documentation</a>"
-        );
-        html.push_str("</div>\n");
+        html.push_str("</ul>\n");
     }
 
+    html.push_str("<div class=\"sidebar-section-label\">API Reference</div>\n");
     html.push_str("<ul class=\"sidebar-nav\" id=\"sidebar-nav\">\n");
 
     for class in classes {

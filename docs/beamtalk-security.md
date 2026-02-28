@@ -1,6 +1,3 @@
-<!-- Copyright 2026 James Casey -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-
 # Beamtalk Security Model
 
 This document describes the security design of the Beamtalk runtime, focusing on the REPL server, compiler daemon, and workspace management.

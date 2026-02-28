@@ -560,11 +560,13 @@ just dialyzer                # Erlang type checking
 
 ### License Headers
 
-All source files must include:
+All source **code** files (`.rs`, `.erl`, `.bt`, `.hrl`) must include:
 ```text
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 ```
+
+Do **not** add license headers to `.md` files. The repo `LICENSE` file covers all documentation content.
 
 ### Beamtalk Style
 

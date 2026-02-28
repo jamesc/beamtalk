@@ -11,6 +11,7 @@ use std::fmt::Write as _;
 use std::fs;
 use tracing::debug;
 
+use super::highlighter::highlight_beamtalk;
 use super::layout::{page_footer_simple, page_header};
 use super::renderer::{html_escape, render_doc};
 
@@ -52,8 +53,13 @@ pub(super) fn generate_prose_docs(
 
         let page_title = format!("{title} — Beamtalk");
         let mut html = String::new();
-        html.push_str(&page_header(&page_title, Some("../style.css")));
+        html.push_str(&page_header(&page_title, "../style.css", "../"));
         html.push_str("<div class=\"page-wrapper\">\n");
+        html.push_str(
+            "<button class=\"sidebar-toggle\" \
+             onclick=\"document.querySelector('.sidebar').classList.toggle('open')\" \
+             aria-label=\"Toggle navigation\">☰</button>\n",
+        );
         html.push_str(&prose_nav(output_file, prose_pages));
         html.push_str("<main class=\"main-content prose-content\">\n");
         html.push_str("<div class=\"breadcrumb\">");
@@ -81,12 +87,14 @@ pub(super) fn generate_prose_docs(
 fn prose_nav(active_file: &str, prose_pages: &[(&str, &str, &str)]) -> String {
     let mut html = String::new();
     html.push_str("<nav class=\"sidebar\">\n");
-    html.push_str("<div class=\"sidebar-header\">\n");
-    html.push_str("<h2><a href=\"../\">Beamtalk</a></h2>\n");
-    html.push_str("</div>\n");
+
+    html.push_str("<div class=\"sidebar-section-label\">Navigate</div>\n");
     html.push_str("<ul class=\"sidebar-nav\">\n");
     html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
+    html.push_str("</ul>\n");
 
+    html.push_str("<div class=\"sidebar-section-label\">Documentation</div>\n");
+    html.push_str("<ul class=\"sidebar-nav\">\n");
     for &(_, file, title) in prose_pages {
         let active = if file == active_file {
             " class=\"active\""
@@ -95,7 +103,6 @@ fn prose_nav(active_file: &str, prose_pages: &[(&str, &str, &str)]) -> String {
         };
         let _ = writeln!(html, "<li><a href=\"{file}\"{active}>{title}</a></li>");
     }
-
     html.push_str("</ul>\n</nav>\n");
     html
 }
@@ -112,77 +119,139 @@ fn rewrite_prose_links(markdown: &str, prose_pages: &[(&str, &str, &str)]) -> St
     result
 }
 
+/// Return (emoji, description) for a prose doc card on the landing page.
+fn landing_card_meta(title: &str) -> (&'static str, &'static str) {
+    match title {
+        "Language Features" => (
+            "🔤",
+            "Syntax, semantics, and worked examples for the message-based programming model.",
+        ),
+        "Design Principles" => (
+            "🧭",
+            "The core principles guiding all design and implementation decisions.",
+        ),
+        "Architecture" => (
+            "🏗",
+            "Compiler pipeline, runtime, hot code reload, and live development flow.",
+        ),
+        "Agent-Native Development" => (
+            "🤖",
+            "Why Beamtalk is uniquely suited as a development environment for AI agents.",
+        ),
+        "Syntax Rationale" => (
+            "💬",
+            "Why Beamtalk keeps certain Smalltalk conventions and diverges from others.",
+        ),
+        "Domain Model" => (
+            "🗺",
+            "Bounded contexts, aggregates, and ubiquitous language of the project.",
+        ),
+        "Security" => (
+            "🔒",
+            "Security model, threat analysis, and sandboxing for untrusted code.",
+        ),
+        "Known Limitations" => (
+            "⚠️",
+            "Current limitations and unimplemented features to be aware of.",
+        ),
+        _ => ("📄", ""),
+    }
+}
+
+/// Beamtalk code snippet shown on the landing page.
+const LANDING_CODE_SNIPPET: &str = "Actor subclass: Counter
+  state: value = 0
+
+  increment => self.value := self.value + 1
+  getValue  => self.value
+
+c := Counter spawn.
+c increment.
+c increment.
+c getValue.   \"=> 2\"";
+
 /// Generate the site landing page at the root.
 pub(super) fn write_site_landing_page(
     output_path: &Utf8Path,
     prose_pages: &[(&str, &str, &str)],
 ) -> Result<()> {
-    let mut html = String::new();
-    // Landing page has no sidebar, so omit the sidebar toggle button
-    html.push_str(
-        "<!DOCTYPE html>\n\
-         <html lang=\"en\">\n\
-         <head>\n\
-         <meta charset=\"utf-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>Beamtalk Documentation</title>\n\
-         <link rel=\"stylesheet\" href=\"style.css\">\n\
-         </head>\n\
-         <body>\n",
-    );
-    html.push_str("<div class=\"page-wrapper landing-wrapper\">\n");
-    html.push_str("<main class=\"main-content landing-content\">\n");
+    let highlighted_code = highlight_beamtalk(LANDING_CODE_SNIPPET);
 
-    // Hero section
+    let mut html = String::new();
+    html.push_str(&page_header("Beamtalk", "style.css", ""));
+    html.push_str("<div class=\"page-wrapper landing-wrapper\">\n");
+    html.push_str("<main class=\"landing-content\">\n");
+
+    // Hero: two-column — left: text + CTA, right: code window
     html.push_str("<div class=\"landing-hero\">\n");
+
+    // Left column
+    html.push_str("<div class=\"landing-hero-text\">\n");
     html.push_str("<h1>Beamtalk</h1>\n");
-    html.push_str("<p class=\"landing-tagline\">A live, interactive Smalltalk-like language for the BEAM VM</p>\n");
-    html.push_str("</div>\n");
+    html.push_str(
+        "<p class=\"landing-tagline\">A live, message-based language built on the \
+         BEAM VM. Smalltalk semantics, Erlang reliability, compiled to native \
+         bytecode.</p>\n",
+    );
+    html.push_str("<div class=\"landing-cta\">\n");
+    html.push_str(
+        "<a href=\"docs/language-features.html\" class=\"btn-primary\">Get started</a>\n",
+    );
+    html.push_str("<a href=\"apidocs/\" class=\"btn-secondary\">API Reference</a>\n");
+    html.push_str("</div>\n"); // .landing-cta
+    html.push_str("</div>\n"); // .landing-hero-text
+
+    // Right column: code window
+    html.push_str("<div class=\"landing-code-window\">\n");
+    html.push_str("<div class=\"code-window-bar\">\n");
+    html.push_str("<span class=\"code-dot code-dot-r\"></span>\n");
+    html.push_str("<span class=\"code-dot code-dot-y\"></span>\n");
+    html.push_str("<span class=\"code-dot code-dot-g\"></span>\n");
+    html.push_str("<span>counter.bt</span>\n");
+    html.push_str("</div>\n"); // .code-window-bar
+    html.push_str("<div class=\"code-window-body\">\n");
+    html.push_str("<pre><code>");
+    html.push_str(&highlighted_code);
+    html.push_str("</code></pre>\n");
+    html.push_str("</div>\n"); // .code-window-body
+    html.push_str("</div>\n"); // .landing-code-window
+
+    html.push_str("</div>\n"); // .landing-hero
 
     // Navigation cards
+    html.push_str("<div class=\"landing-section-label\">Explore the docs</div>\n");
     html.push_str("<div class=\"landing-cards\">\n");
 
     // API Reference card
     html.push_str("<a href=\"apidocs/\" class=\"landing-card\">\n");
+    html.push_str("<span class=\"landing-card-emoji\">📚</span>\n");
     html.push_str("<h2>API Reference</h2>\n");
-    html.push_str("<p>Standard library class documentation — Actor, Block, Integer, String, Collections, and more.</p>\n");
+    html.push_str(
+        "<p>Standard library classes — Actor, Block, Integer, String, \
+         Collections, and more.</p>\n",
+    );
     html.push_str("</a>\n");
 
     // Prose docs cards
     for &(_, file, title) in prose_pages {
-        let desc = match title {
-            "Language Features" => {
-                "Syntax, semantics, and examples for Beamtalk's message-based programming model."
-            }
-            "Design Principles" => {
-                "The 13 core principles guiding all design and implementation decisions."
-            }
-            "Architecture" => {
-                "Compiler pipeline, runtime, hot code reload, and live development flow."
-            }
-            "Agent-Native Development" => {
-                "Why Beamtalk is uniquely suited as a development environment for AI coding agents."
-            }
-            "Syntax Rationale" => {
-                "Why Beamtalk keeps certain Smalltalk conventions and diverges from others."
-            }
-            "Domain Model" => {
-                "Domain-Driven Design model: bounded contexts, aggregates, and ubiquitous language."
-            }
-            "Security" => "Security model, threat analysis, and sandboxing for untrusted code.",
-            _ => "",
-        };
+        let (emoji, desc) = landing_card_meta(title);
         let _ = writeln!(
             html,
-            "<a href=\"docs/{file}\" class=\"landing-card\">\n<h2>{title}</h2>\n<p>{desc}</p>\n</a>"
+            "<a href=\"docs/{file}\" class=\"landing-card\">\n\
+             <span class=\"landing-card-emoji\">{emoji}</span>\n\
+             <h2>{title}</h2>\n\
+             <p>{desc}</p>\n\
+             </a>"
         );
     }
 
-    html.push_str("</div>\n");
+    html.push_str("</div>\n"); // .landing-cards
 
-    // GitHub link
     html.push_str("<div class=\"landing-links\">\n");
-    html.push_str("<a href=\"https://github.com/jamesc/beamtalk\">GitHub Repository</a>\n");
+    html.push_str(
+        "<a href=\"https://github.com/jamesc/beamtalk\">View on GitHub</a> &nbsp;·&nbsp; \
+         <a href=\"docs/known-limitations.html\">Known Limitations</a>\n",
+    );
     html.push_str("</div>\n");
 
     html.push_str("</main>\n");
