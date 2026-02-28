@@ -60,7 +60,7 @@ c2 getValue
 // ===========================================================================
 
 // Add a new method that didn't exist in the original file
-Counter >> doubleValue => ^self.value * 2
+Counter >> doubleValue => self.value * 2
 // => _
 
 c3 := Counter spawn
@@ -82,4 +82,4 @@ c3 doubleValue
 
 // Source for newly added method should return its source
 (Counter >> #doubleValue) source
-// => doubleValue => ^self.value * 2
+// => doubleValue => self.value * 2
