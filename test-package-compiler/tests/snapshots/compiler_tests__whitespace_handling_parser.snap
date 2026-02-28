@@ -9,7 +9,48 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 155,
+                            end: 156,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 155,
+                            end: 156,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test whitespace handling",
+                        span: Span {
+                            start: 155,
+                            end: 156,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Whitespace should not affect parsing",
+                        span: Span {
+                            start: 155,
+                            end: 156,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Extra spaces",
+                        span: Span {
+                            start: 155,
+                            end: 156,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -60,7 +101,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Tabs and spaces mixed",
+                        span: Span {
+                            start: 202,
+                            end: 203,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -111,7 +161,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Multiple newlines",
+                        span: Span {
+                            start: 238,
+                            end: 244,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -162,7 +221,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Trailing whitespace (simulated)",
+                        span: Span {
+                            start: 291,
+                            end: 292,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -192,7 +260,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Leading whitespace",
+                        span: Span {
+                            start: 330,
+                            end: 342,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -222,7 +299,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Whitespace in message sends",
+                        span: Span {
+                            start: 381,
+                            end: 387,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -285,46 +371,5 @@ Module {
         start: 155,
         end: 428,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 155,
-                end: 156,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 155,
-                end: 156,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test whitespace handling",
-            span: Span {
-                start: 155,
-                end: 156,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Whitespace should not affect parsing",
-            span: Span {
-                start: 155,
-                end: 156,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Extra spaces",
-            span: Span {
-                start: 155,
-                end: 156,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

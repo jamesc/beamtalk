@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -259,38 +258,5 @@ Module {
         start: 203,
         end: 333,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 203,
-                end: 209,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 203,
-                end: 209,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test that overriding a sealed method produces a diagnostic error.",
-            span: Span {
-                start: 203,
-                end: 209,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Parent defines a sealed method, Child tries to override it.",
-            span: Span {
-                start: 203,
-                end: 209,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

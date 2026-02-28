@@ -9,7 +9,40 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 186,
+                            end: 192,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 186,
+                            end: 192,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test async keyword message send within a method",
+                        span: Span {
+                            start: 186,
+                            end: 192,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Uses a non-Dictionary selector to test async message protocol",
+                        span: Span {
+                            start: 186,
+                            end: 192,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -110,38 +143,5 @@ Module {
         start: 186,
         end: 227,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 186,
-                end: 192,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 186,
-                end: 192,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test async keyword message send within a method",
-            span: Span {
-                start: 186,
-                end: 192,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Uses a non-Dictionary selector to test async message protocol",
-            span: Span {
-                start: 186,
-                end: 192,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

@@ -9,7 +9,40 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 140,
+                            end: 145,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 140,
+                            end: 145,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test block evaluation and control flow",
+                        span: Span {
+                            start: 140,
+                            end: 145,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Simple block evaluation",
+                        span: Span {
+                            start: 140,
+                            end: 145,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -97,7 +130,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Block with one argument",
+                        span: Span {
+                            start: 204,
+                            end: 213,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -232,7 +274,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Block with two arguments",
+                        span: Span {
+                            start: 289,
+                            end: 292,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -390,7 +441,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// While loop",
+                        span: Span {
+                            start: 360,
+                            end: 367,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -555,7 +615,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Block captures variables",
+                        span: Span {
+                            start: 452,
+                            end: 457,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -697,38 +766,5 @@ Module {
         start: 140,
         end: 521,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 140,
-                end: 145,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 140,
-                end: 145,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test block evaluation and control flow",
-            span: Span {
-                start: 140,
-                end: 145,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Simple block evaluation",
-            span: Span {
-                start: 140,
-                end: 145,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

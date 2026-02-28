@@ -9,7 +9,72 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 376,
+                            end: 381,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 376,
+                            end: 381,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test control flow constructs with variable and field mutations",
+                        span: Span {
+                            start: 376,
+                            end: 381,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Per BT-90 design: literal blocks in control flow positions can mutate",
+                        span: Span {
+                            start: 376,
+                            end: 381,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ========================================",
+                        span: Span {
+                            start: 376,
+                            end: 381,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Local Variable Mutations",
+                        span: Span {
+                            start: 376,
+                            end: 381,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ========================================",
+                        span: Span {
+                            start: 376,
+                            end: 381,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Simple whileTrue with local variable mutation",
+                        span: Span {
+                            start: 376,
+                            end: 381,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -174,7 +239,24 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Expected: count = 3",
+                        span: Span {
+                            start: 485,
+                            end: 491,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// whileFalse with mutation",
+                        span: Span {
+                            start: 485,
+                            end: 491,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -339,7 +421,24 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Expected: count2 = 0",
+                        span: Span {
+                            start: 615,
+                            end: 618,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Multiple variables mutated in one loop",
+                        span: Span {
+                            start: 615,
+                            end: 618,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -666,7 +765,48 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Expected: sum = 6 (1+2+3), product = 6 (1*2*3), i = 4",
+                        span: Span {
+                            start: 948,
+                            end: 955,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ========================================",
+                        span: Span {
+                            start: 948,
+                            end: 955,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Control Flow with Index Variables",
+                        span: Span {
+                            start: 948,
+                            end: 955,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ========================================",
+                        span: Span {
+                            start: 948,
+                            end: 955,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// timesRepeat with mutation",
+                        span: Span {
+                            start: 948,
+                            end: 955,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -793,7 +933,24 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Expected: counter = 5",
+                        span: Span {
+                            start: 1066,
+                            end: 1071,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// to:do: with index and accumulator",
+                        span: Span {
+                            start: 1066,
+                            end: 1071,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -944,7 +1101,48 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Expected: total = 55 (sum 1..10)",
+                        span: Span {
+                            start: 1314,
+                            end: 1321,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ========================================",
+                        span: Span {
+                            start: 1314,
+                            end: 1321,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Collection Iteration with Mutations",
+                        span: Span {
+                            start: 1314,
+                            end: 1321,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ========================================",
+                        span: Span {
+                            start: 1314,
+                            end: 1321,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Array do: with accumulation",
+                        span: Span {
+                            start: 1314,
+                            end: 1321,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1153,7 +1351,24 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Expected: arraySum = 15",
+                        span: Span {
+                            start: 1491,
+                            end: 1500,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// collect: (returns new collection, but can mutate locals)",
+                        span: Span {
+                            start: 1491,
+                            end: 1500,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1466,7 +1681,24 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Expected: evenCount = 2, doubled = #[2,4,6,8,10]",
+                        span: Span {
+                            start: 1703,
+                            end: 1713,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// select: with side effects",
+                        span: Span {
+                            start: 1703,
+                            end: 1713,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1673,7 +1905,24 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Expected: matchCount = 5, evens = #[2,4]",
+                        span: Span {
+                            start: 1888,
+                            end: 1895,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// inject:into: with external mutation",
+                        span: Span {
+                            start: 1888,
+                            end: 1895,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1928,7 +2177,48 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Expected: maxSeen = 5, finalSum = 15",
+                        span: Span {
+                            start: 2197,
+                            end: 2205,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ========================================",
+                        span: Span {
+                            start: 2197,
+                            end: 2205,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Nested Control Flow",
+                        span: Span {
+                            start: 2197,
+                            end: 2205,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ========================================",
+                        span: Span {
+                            start: 2197,
+                            end: 2205,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Nested loops with multiple mutations",
+                        span: Span {
+                            start: 2197,
+                            end: 2205,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -2420,7 +2710,40 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Expected: innerSum = 6, outerSum = (2 + 4 + 6) = 12",
+                        span: Span {
+                            start: 2588,
+                            end: 2595,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ========================================",
+                        span: Span {
+                            start: 2588,
+                            end: 2595,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Field Mutations (Actor State)",
+                        span: Span {
+                            start: 2588,
+                            end: 2595,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// ========================================",
+                        span: Span {
+                            start: 2588,
+                            end: 2595,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Error {
@@ -3572,72 +3895,7 @@ Module {
         start: 376,
         end: 3742,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 376,
-                end: 381,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 376,
-                end: 381,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test control flow constructs with variable and field mutations",
-            span: Span {
-                start: 376,
-                end: 381,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Per BT-90 design: literal blocks in control flow positions can mutate",
-            span: Span {
-                start: 376,
-                end: 381,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// ========================================",
-            span: Span {
-                start: 376,
-                end: 381,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Local Variable Mutations",
-            span: Span {
-                start: 376,
-                end: 381,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// ========================================",
-            span: Span {
-                start: 376,
-                end: 381,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Simple whileTrue with local variable mutation",
-            span: Span {
-                start: 376,
-                end: 381,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

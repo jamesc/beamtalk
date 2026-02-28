@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -453,30 +452,5 @@ Module {
         start: 138,
         end: 422,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 138,
-                end: 143,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 138,
-                end: 143,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test class method codegen (class-side methods, class variables)",
-            span: Span {
-                start: 138,
-                end: 143,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

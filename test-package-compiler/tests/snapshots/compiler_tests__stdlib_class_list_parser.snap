@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -2379,40 +2378,7 @@ Module {
         start: 208,
         end: 2049,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 208,
-                end: 214,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 208,
-                end: 214,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test List class compilation as a value type (not gen_server).",
-            span: Span {
-                start: 208,
-                end: 214,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Mirrors lib/List.bt exactly — new/0 should return [] (empty list).",
-            span: Span {
-                start: 208,
-                end: 214,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

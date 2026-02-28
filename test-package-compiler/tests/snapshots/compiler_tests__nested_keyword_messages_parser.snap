@@ -9,7 +9,48 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 196,
+                            end: 200,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 196,
+                            end: 200,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test nested keyword message sends",
+                        span: Span {
+                            start: 196,
+                            end: 200,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Keyword messages nested inside other keyword messages",
+                        span: Span {
+                            start: 196,
+                            end: 200,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Nested in argument position",
+                        span: Span {
+                            start: 196,
+                            end: 200,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -139,7 +180,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Multiple levels of nesting",
+                        span: Span {
+                            start: 279,
+                            end: 285,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -269,7 +319,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Nested in receiver position",
+                        span: Span {
+                            start: 384,
+                            end: 385,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -348,7 +407,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Complex nesting with multiple keywords",
+                        span: Span {
+                            start: 463,
+                            end: 469,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -463,46 +531,5 @@ Module {
         start: 196,
         end: 524,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 196,
-                end: 200,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 196,
-                end: 200,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test nested keyword message sends",
-            span: Span {
-                start: 196,
-                end: 200,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Keyword messages nested inside other keyword messages",
-            span: Span {
-                start: 196,
-                end: 200,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Nested in argument position",
-            span: Span {
-                start: 196,
-                end: 200,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

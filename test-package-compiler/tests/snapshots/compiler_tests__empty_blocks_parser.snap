@@ -9,7 +9,48 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 175,
+                            end: 180,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 175,
+                            end: 180,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test empty block edge case",
+                        span: Span {
+                            start: 175,
+                            end: 180,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Blocks with no body or only whitespace",
+                        span: Span {
+                            start: 175,
+                            end: 180,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Empty block - no expressions",
+                        span: Span {
+                            start: 175,
+                            end: 180,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -40,7 +81,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Empty block with single space",
+                        span: Span {
+                            start: 221,
+                            end: 235,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -71,7 +121,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Empty block with newlines",
+                        span: Span {
+                            start: 273,
+                            end: 290,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -102,7 +161,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Empty block used as argument",
+                        span: Span {
+                            start: 332,
+                            end: 342,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -150,46 +218,5 @@ Module {
         start: 175,
         end: 349,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 175,
-                end: 180,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 175,
-                end: 180,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test empty block edge case",
-            span: Span {
-                start: 175,
-                end: 180,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Blocks with no body or only whitespace",
-            span: Span {
-                start: 175,
-                end: 180,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Empty block - no expressions",
-            span: Span {
-                start: 175,
-                end: 180,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

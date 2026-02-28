@@ -9,7 +9,56 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 256,
+                            end: 261,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 256,
+                            end: 261,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test actor state mutation with proper state threading",
+                        span: Span {
+                            start: 256,
+                            end: 261,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "//",
+                        span: Span {
+                            start: 256,
+                            end: 261,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Each assignment to self.field should update the actor's state,",
+                        span: Span {
+                            start: 256,
+                            end: 261,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// and the updated state should be returned to gen_server.",
+                        span: Span {
+                            start: 256,
+                            end: 261,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -39,7 +88,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Single assignment - increments value by 1",
+                        span: Span {
+                            start: 314,
+                            end: 323,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -182,7 +240,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Get current value (no mutation)",
+                        span: Span {
+                            start: 410,
+                            end: 418,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -251,54 +318,5 @@ Module {
         start: 256,
         end: 438,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 256,
-                end: 261,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 256,
-                end: 261,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test actor state mutation with proper state threading",
-            span: Span {
-                start: 256,
-                end: 261,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "//",
-            span: Span {
-                start: 256,
-                end: 261,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Each assignment to self.field should update the actor's state,",
-            span: Span {
-                start: 256,
-                end: 261,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// and the updated state should be returned to gen_server.",
-            span: Span {
-                start: 256,
-                end: 261,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

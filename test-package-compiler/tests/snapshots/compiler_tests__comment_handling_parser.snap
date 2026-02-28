@@ -9,8 +9,58 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 161,
+                            end: 162,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 161,
+                            end: 162,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test comment handling",
+                        span: Span {
+                            start: 161,
+                            end: 162,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Comments should be preserved as trivia",
+                        span: Span {
+                            start: 161,
+                            end: 162,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Single line comment",
+                        span: Span {
+                            start: 161,
+                            end: 162,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// inline comment",
+                        span: Span {
+                            start: 166,
+                            end: 167,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -39,7 +89,32 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Multiple comments",
+                        span: Span {
+                            start: 244,
+                            end: 245,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Comment line 1",
+                        span: Span {
+                            start: 244,
+                            end: 245,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Comment line 2",
+                        span: Span {
+                            start: 244,
+                            end: 245,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -69,7 +144,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Comment between expressions",
+                        span: Span {
+                            start: 284,
+                            end: 285,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -99,7 +183,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Middle comment",
+                        span: Span {
+                            start: 309,
+                            end: 310,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -129,8 +222,26 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// Comment in message send",
+                        span: Span {
+                            start: 344,
+                            end: 350,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// comment here",
+                        span: Span {
+                            start: 344,
+                            end: 350,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Identifier(
                 Identifier {
@@ -145,7 +256,16 @@ Module {
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
-                trailing: None,
+                trailing: Some(
+                    Comment {
+                        content: "// and here",
+                        span: Span {
+                            start: 380,
+                            end: 385,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: MessageSend {
                 receiver: Error {
@@ -168,7 +288,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Block with comments",
+                        span: Span {
+                            start: 422,
+                            end: 427,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -187,7 +316,16 @@ Module {
                         body: [
                             ExpressionStatement {
                                 comments: CommentAttachment {
-                                    leading: [],
+                                    leading: [
+                                        Comment {
+                                            content: "// Inside block",
+                                            span: Span {
+                                                start: 457,
+                                                end: 459,
+                                            },
+                                            kind: Line,
+                                        },
+                                    ],
                                     trailing: None,
                                 },
                                 expression: Literal(
@@ -218,48 +356,7 @@ Module {
         start: 161,
         end: 461,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 161,
-                end: 162,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 161,
-                end: 162,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test comment handling",
-            span: Span {
-                start: 161,
-                end: 162,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Comments should be preserved as trivia",
-            span: Span {
-                start: 161,
-                end: 162,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Single line comment",
-            span: Span {
-                start: 161,
-                end: 162,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

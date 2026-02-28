@@ -9,7 +9,40 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 133,
+                            end: 136,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 133,
+                            end: 136,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test integer arithmetic and operations",
+                        span: Span {
+                            start: 133,
+                            end: 136,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Basic arithmetic",
+                        span: Span {
+                            start: 133,
+                            end: 136,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -213,8 +246,26 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
-                trailing: None,
+                leading: [
+                    Comment {
+                        content: "// Integer division and modulo",
+                        span: Span {
+                            start: 235,
+                            end: 241,
+                        },
+                        kind: Line,
+                    },
+                ],
+                trailing: Some(
+                    Comment {
+                        content: "// 5",
+                        span: Span {
+                            start: 245,
+                            end: 247,
+                        },
+                        kind: Line,
+                    },
+                ),
             },
             expression: Assignment {
                 target: Identifier(
@@ -294,7 +345,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Comparison",
+                        span: Span {
+                            start: 288,
+                            end: 294,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -447,7 +507,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Iteration - times repeat",
+                        span: Span {
+                            start: 370,
+                            end: 377,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -574,7 +643,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Range iteration",
+                        span: Span {
+                            start: 443,
+                            end: 446,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -725,7 +803,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Number tests",
+                        span: Span {
+                            start: 504,
+                            end: 510,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -848,7 +935,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Custom step iteration - positive step (odd numbers)",
+                        span: Span {
+                            start: 615,
+                            end: 621,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1015,7 +1111,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Custom step iteration - negative step (countdown)",
+                        span: Span {
+                            start: 728,
+                            end: 737,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -1185,38 +1290,5 @@ Module {
         start: 133,
         end: 796,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 133,
-                end: 136,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 133,
-                end: 136,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test integer arithmetic and operations",
-            span: Span {
-                start: 133,
-                end: 136,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Basic arithmetic",
-            span: Span {
-                start: 133,
-                end: 136,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -259,62 +258,5 @@ Module {
         start: 286,
         end: 534,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 286,
-                end: 292,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 286,
-                end: 292,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Compiler snapshot test for >> (method lookup) operator (BT-101, BT-323)",
-            span: Span {
-                start: 286,
-                end: 292,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "//",
-            span: Span {
-                start: 286,
-                end: 292,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Tests codegen for:",
-            span: Span {
-                start: 286,
-                end: 292,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// - >> on class literal (compile-time optimized atom path)",
-            span: Span {
-                start: 286,
-                end: 292,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// - >> on variable receiver (runtime resolution path)",
-            span: Span {
-                start: 286,
-                end: 292,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

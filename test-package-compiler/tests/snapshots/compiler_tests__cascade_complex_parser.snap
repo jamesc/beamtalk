@@ -9,7 +9,48 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 208,
+                            end: 215,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 208,
+                            end: 215,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test complex cascade scenarios",
+                        span: Span {
+                            start: 208,
+                            end: 215,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Multiple cascaded messages with different types",
+                        span: Span {
+                            start: 208,
+                            end: 215,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Cascade with unary, binary, and keyword messages",
+                        span: Span {
+                            start: 208,
+                            end: 215,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -112,7 +153,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Cascade with keyword messages",
+                        span: Span {
+                            start: 317,
+                            end: 323,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Identifier(
@@ -313,48 +363,7 @@ Module {
         start: 208,
         end: 612,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 208,
-                end: 215,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 208,
-                end: 215,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test complex cascade scenarios",
-            span: Span {
-                start: 208,
-                end: 215,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Multiple cascaded messages with different types",
-            span: Span {
-                start: 208,
-                end: 215,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Cascade with unary, binary, and keyword messages",
-            span: Span {
-                start: 208,
-                end: 215,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

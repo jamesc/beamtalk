@@ -9,7 +9,48 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 193,
+                            end: 197,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 193,
+                            end: 197,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test error recovery: malformed message sends",
+                        span: Span {
+                            start: 193,
+                            end: 197,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Parser should handle incomplete messages",
+                        span: Span {
+                            start: 193,
+                            end: 197,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Incomplete keyword message",
+                        span: Span {
+                            start: 193,
+                            end: 197,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -53,7 +94,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Missing keyword part",
+                        span: Span {
+                            start: 231,
+                            end: 236,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -108,7 +158,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Extra keyword without argument",
+                        span: Span {
+                            start: 286,
+                            end: 292,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
@@ -181,7 +240,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Valid code after error",
+                        span: Span {
+                            start: 368,
+                            end: 374,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -235,48 +303,7 @@ Module {
         start: 193,
         end: 383,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 193,
-                end: 197,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 193,
-                end: 197,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test error recovery: malformed message sends",
-            span: Span {
-                start: 193,
-                end: 197,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Parser should handle incomplete messages",
-            span: Span {
-                start: 193,
-                end: 197,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Incomplete keyword message",
-            span: Span {
-                start: 193,
-                end: 197,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

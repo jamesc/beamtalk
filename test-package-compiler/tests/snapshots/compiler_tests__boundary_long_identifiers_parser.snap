@@ -9,7 +9,48 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 218,
+                            end: 319,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 218,
+                            end: 319,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test boundary condition: long identifiers and strings",
+                        span: Span {
+                            start: 218,
+                            end: 319,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Validate parser handles extremely long tokens",
+                        span: Span {
+                            start: 218,
+                            end: 319,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Very long identifier (100 characters)",
+                        span: Span {
+                            start: 218,
+                            end: 319,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -39,7 +80,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Very long string literal (200+ characters)",
+                        span: Span {
+                            start: 373,
+                            end: 383,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -69,7 +119,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Long keyword message selector (multiple long keywords)",
+                        span: Span {
+                            start: 662,
+                            end: 668,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -171,7 +230,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Long identifier in nested context",
+                        span: Span {
+                            start: 873,
+                            end: 916,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -239,48 +307,7 @@ Module {
         start: 218,
         end: 997,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 218,
-                end: 319,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 218,
-                end: 319,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test boundary condition: long identifiers and strings",
-            span: Span {
-                start: 218,
-                end: 319,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Validate parser handles extremely long tokens",
-            span: Span {
-                start: 218,
-                end: 319,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Very long identifier (100 characters)",
-            span: Span {
-                start: 218,
-                end: 319,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

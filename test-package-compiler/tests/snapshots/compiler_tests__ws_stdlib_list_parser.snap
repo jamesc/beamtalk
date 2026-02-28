@@ -9,7 +9,40 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 126,
+                            end: 133,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 126,
+                            end: 133,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test List (linked list) operations",
+                        span: Span {
+                            start: 126,
+                            end: 133,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// List creation",
+                        span: Span {
+                            start: 126,
+                            end: 133,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -227,40 +260,7 @@ Module {
         start: 126,
         end: 838,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 126,
-                end: 133,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 126,
-                end: 133,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test List (linked list) operations",
-            span: Span {
-                start: 126,
-                end: 133,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// List creation",
-            span: Span {
-                start: 126,
-                end: 133,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

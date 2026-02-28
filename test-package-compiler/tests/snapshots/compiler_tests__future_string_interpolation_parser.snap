@@ -9,7 +9,40 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 164,
+                            end: 168,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 164,
+                            end: 168,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test string interpolation compilation (ADR 0023 Phase 3)",
+                        span: Span {
+                            start: 164,
+                            end: 168,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Simple variable interpolation",
+                        span: Span {
+                            start: 164,
+                            end: 168,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -85,7 +118,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Expression interpolation",
+                        span: Span {
+                            start: 238,
+                            end: 241,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -182,7 +224,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Multiple interpolations in one string",
+                        span: Span {
+                            start: 342,
+                            end: 351,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -299,7 +350,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Escape sequences in interpolated strings",
+                        span: Span {
+                            start: 469,
+                            end: 476,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -342,7 +402,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Unicode in interpolated strings",
+                        span: Span {
+                            start: 562,
+                            end: 570,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -432,7 +501,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Integer printString conversion",
+                        span: Span {
+                            start: 663,
+                            end: 668,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -526,7 +604,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Adjacent interpolations",
+                        span: Span {
+                            start: 735,
+                            end: 743,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -577,7 +664,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Only interpolation (no literal segments)",
+                        span: Span {
+                            start: 816,
+                            end: 820,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -617,7 +713,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Plain string (no interpolation, zero overhead)",
+                        span: Span {
+                            start: 884,
+                            end: 889,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -650,38 +755,5 @@ Module {
         start: 164,
         end: 908,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 164,
-                end: 168,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 164,
-                end: 168,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test string interpolation compilation (ADR 0023 Phase 3)",
-            span: Span {
-                start: 164,
-                end: 168,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Simple variable interpolation",
-            span: Span {
-                start: 164,
-                end: 168,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }

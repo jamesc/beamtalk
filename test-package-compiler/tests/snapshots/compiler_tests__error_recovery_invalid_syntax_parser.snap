@@ -9,7 +9,48 @@ Module {
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Copyright 2026 James Casey",
+                        span: Span {
+                            start: 179,
+                            end: 180,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 179,
+                            end: 180,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Test error recovery: invalid syntax",
+                        span: Span {
+                            start: 179,
+                            end: 180,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Parser should create error nodes and continue",
+                        span: Span {
+                            start: 179,
+                            end: 180,
+                        },
+                        kind: Line,
+                    },
+                    Comment {
+                        content: "// Unexpected token",
+                        span: Span {
+                            start: 179,
+                            end: 180,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -52,7 +93,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Missing operand",
+                        span: Span {
+                            start: 209,
+                            end: 210,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Assignment {
@@ -95,7 +145,16 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "// Malformed keyword message (missing part)",
+                        span: Span {
+                            start: 306,
+                            end: 312,
+                        },
+                        kind: Line,
+                    },
+                ],
                 trailing: None,
             },
             expression: Error {
@@ -111,48 +170,7 @@ Module {
         start: 179,
         end: 372,
     },
-    file_leading_comments: [
-        Comment {
-            content: "// Copyright 2026 James Casey",
-            span: Span {
-                start: 179,
-                end: 180,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// SPDX-License-Identifier: Apache-2.0",
-            span: Span {
-                start: 179,
-                end: 180,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Test error recovery: invalid syntax",
-            span: Span {
-                start: 179,
-                end: 180,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Parser should create error nodes and continue",
-            span: Span {
-                start: 179,
-                end: 180,
-            },
-            kind: Line,
-        },
-        Comment {
-            content: "// Unexpected token",
-            span: Span {
-                start: 179,
-                end: 180,
-            },
-            kind: Line,
-        },
-    ],
+    file_leading_comments: [],
 }
 
 Diagnostics:

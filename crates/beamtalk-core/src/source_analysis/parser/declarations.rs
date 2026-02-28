@@ -796,9 +796,14 @@ impl Parser {
             && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
         {
             let pos_before = self.current;
+            let mut comments = self.collect_comment_attachment();
             let expr = self.parse_expression();
+            comments.trailing = self.collect_trailing_comment();
             let is_error = expr.is_error();
-            body.push(ExpressionStatement::bare(expr));
+            body.push(ExpressionStatement {
+                comments,
+                expression: expr,
+            });
 
             // If parse_expression didn't consume any tokens (e.g. nesting
             // depth exceeded), break to avoid an infinite loop.
