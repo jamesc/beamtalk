@@ -144,6 +144,17 @@ pub(super) fn write_hierarchy_tree(html: &mut String, classes: &[ClassInfo]) {
         v.sort_unstable();
     }
 
+    // Build name → first-line summary map
+    let summaries: HashMap<&str, &str> = classes
+        .iter()
+        .filter_map(|c| {
+            c.doc_comment
+                .as_ref()
+                .and_then(|d| d.lines().next())
+                .map(|line| (c.name.as_str(), line))
+        })
+        .collect();
+
     // Find roots (classes without a parent in our set)
     let class_names: std::collections::HashSet<&str> =
         classes.iter().map(|c| c.name.as_str()).collect();
@@ -166,23 +177,41 @@ pub(super) fn write_hierarchy_tree(html: &mut String, classes: &[ClassInfo]) {
     html.push_str("<h2>Class Hierarchy</h2>\n");
     html.push_str("<ul>\n");
     for root in &roots {
-        write_hierarchy_node(html, root, &children);
+        write_hierarchy_node(html, root, &children, &summaries);
     }
     html.push_str("</ul>\n</div>\n");
 }
 
 /// Recursively write a hierarchy tree node.
-fn write_hierarchy_node(html: &mut String, name: &str, children: &HashMap<String, Vec<&str>>) {
-    let _ = write!(
-        html,
-        "<li><a href=\"{name}.html\">{name}</a>",
-        name = html_escape(name),
-    );
+fn write_hierarchy_node(
+    html: &mut String,
+    name: &str,
+    children: &HashMap<String, Vec<&str>>,
+    summaries: &HashMap<&str, &str>,
+) {
+    let escaped = html_escape(name);
+    let _ = write!(html, "<li><a href=\"{escaped}.html\">{escaped}</a>");
+
+    if let Some(summary) = summaries.get(name) {
+        // Strip a leading "ClassName — " prefix if present (common doc style)
+        let separator = " — ";
+        let text = summary
+            .find(separator)
+            .map(|i| summary[i + separator.len()..].trim())
+            .unwrap_or(summary);
+        if !text.is_empty() {
+            let _ = write!(
+                html,
+                " <span class=\"class-summary\">{}</span>",
+                html_escape(text)
+            );
+        }
+    }
 
     if let Some(kids) = children.get(name) {
         html.push_str("\n<ul>\n");
         for kid in kids {
-            write_hierarchy_node(html, kid, children);
+            write_hierarchy_node(html, kid, children, summaries);
         }
         html.push_str("</ul>\n");
     }
