@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: " Copyright 2026 James Casey",
                         span: Span {
                             start: 180,
                             end: 187,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: " SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 180,
                             end: 187,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test character literal codegen - $a compiles to integer codepoint",
+                        content: " Test character literal codegen - $a compiles to integer codepoint",
                         span: Span {
                             start: 180,
                             end: 187,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// ===== Basic Character Literals =====",
+                        content: " ===== Basic Character Literals =====",
                         span: Span {
                             start: 180,
                             end: 187,
@@ -134,7 +134,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// ===== Character Comparison =====",
+                        content: " ===== Character Comparison =====",
                         span: Span {
                             start: 257,
                             end: 264,
@@ -245,7 +245,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// ===== Character Conversion =====",
+                        content: " ===== Character Conversion =====",
                         span: Span {
                             start: 331,
                             end: 336,
@@ -336,7 +336,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// ===== Escape Sequences =====",
+                        content: " ===== Escape Sequences =====",
                         span: Span {
                             start: 407,
                             end: 414,

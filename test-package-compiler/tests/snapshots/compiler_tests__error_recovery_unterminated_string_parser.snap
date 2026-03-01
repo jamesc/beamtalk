@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: " Copyright 2026 James Casey",
                         span: Span {
                             start: 188,
                             end: 192,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: " SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 188,
                             end: 192,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test error recovery: unterminated string",
+                        content: " Test error recovery: unterminated string",
                         span: Span {
                             start: 188,
                             end: 192,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Lexer should recover and continue",
+                        content: " Lexer should recover and continue",
                         span: Span {
                             start: 188,
                             end: 192,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Unterminated double quote string",
+                        content: " Unterminated double quote string",
                         span: Span {
                             start: 188,
                             end: 192,
@@ -104,7 +104,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// More code",
+                        content: " More code",
                         span: Span {
                             start: 337,
                             end: 338,

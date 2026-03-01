@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: " Copyright 2026 James Casey",
                         span: Span {
                             start: 180,
                             end: 184,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: " SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 180,
                             end: 184,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test non-ASCII string literals encode correctly as UTF-8 bytes",
+                        content: " Test non-ASCII string literals encode correctly as UTF-8 bytes",
                         span: Span {
                             start: 180,
                             end: 184,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// ===== Multi-byte UTF-8 Characters =====",
+                        content: " ===== Multi-byte UTF-8 Characters =====",
                         span: Span {
                             start: 180,
                             end: 184,
@@ -134,7 +134,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// ===== Mixed ASCII and Non-ASCII =====",
+                        content: " ===== Mixed ASCII and Non-ASCII =====",
                         span: Span {
                             start: 278,
                             end: 283,

@@ -81,7 +81,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Class literal: generates call with atom class name",
+                                content: " Class literal: generates call with atom class name",
                                 span: Span {
                                     start: 379,
                                     end: 392,
@@ -165,7 +165,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Variable receiver: generates call with evaluated receiver expression",
+                                content: " Variable receiver: generates call with evaluated receiver expression",
                                 span: Span {
                                     start: 495,
                                     end: 510,
@@ -187,7 +187,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: " Copyright 2026 James Casey",
                         span: Span {
                             start: 286,
                             end: 292,
@@ -195,7 +195,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: " SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 286,
                             end: 292,
@@ -203,7 +203,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Compiler snapshot test for >> (method lookup) operator (BT-101, BT-323)",
+                        content: " Compiler snapshot test for >> (method lookup) operator (BT-101, BT-323)",
                         span: Span {
                             start: 286,
                             end: 292,
@@ -211,7 +211,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "//",
+                        content: "",
                         span: Span {
                             start: 286,
                             end: 292,
@@ -219,7 +219,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Tests codegen for:",
+                        content: " Tests codegen for:",
                         span: Span {
                             start: 286,
                             end: 292,
@@ -227,7 +227,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// - >> on class literal (compile-time optimized atom path)",
+                        content: " - >> on class literal (compile-time optimized atom path)",
                         span: Span {
                             start: 286,
                             end: 292,
@@ -235,7 +235,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// - >> on variable receiver (runtime resolution path)",
+                        content: " - >> on variable receiver (runtime resolution path)",
                         span: Span {
                             start: 286,
                             end: 292,

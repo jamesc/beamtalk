@@ -85,7 +85,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Size",
+                                content: " Size",
                                 span: Span {
                                     start: 286,
                                     end: 290,
@@ -181,7 +181,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Membership",
+                                content: " Membership",
                                 span: Span {
                                     start: 365,
                                     end: 374,
@@ -243,7 +243,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Modification (returns new Set)",
+                                content: " Modification (returns new Set)",
                                 span: Span {
                                     start: 448,
                                     end: 452,
@@ -358,7 +358,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Set operations (returns new Set)",
+                                content: " Set operations (returns new Set)",
                                 span: Span {
                                     start: 565,
                                     end: 571,
@@ -526,7 +526,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Predicates",
+                                content: " Predicates",
                                 span: Span {
                                     start: 720,
                                     end: 731,
@@ -569,7 +569,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Conversion",
+                                content: " Conversion",
                                 span: Span {
                                     start: 785,
                                     end: 791,
@@ -684,7 +684,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Iteration",
+                                content: " Iteration",
                                 span: Span {
                                     start: 876,
                                     end: 879,
@@ -706,7 +706,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: " Copyright 2026 James Casey",
                         span: Span {
                             start: 221,
                             end: 227,
@@ -714,7 +714,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: " SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 221,
                             end: 227,
@@ -722,7 +722,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test Set class compilation as a value type (not gen_server).",
+                        content: " Test Set class compilation as a value type (not gen_server).",
                         span: Span {
                             start: 221,
                             end: 227,
@@ -730,7 +730,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Mirrors lib/Set.bt exactly — new/0 should return tagged map with empty elements.",
+                        content: " Mirrors lib/Set.bt exactly — new/0 should return tagged map with empty elements.",
                         span: Span {
                             start: 221,
                             end: 227,

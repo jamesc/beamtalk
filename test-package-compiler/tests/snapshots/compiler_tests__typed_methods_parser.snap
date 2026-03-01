@@ -120,7 +120,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Unary method with return type",
+                                content: " Unary method with return type",
                                 span: Span {
                                     start: 143,
                                     end: 151,
@@ -265,7 +265,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Keyword method with typed parameter and return type",
+                                content: " Keyword method with typed parameter and return type",
                                 span: Span {
                                     start: 237,
                                     end: 245,
@@ -468,7 +468,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Method with union return type",
+                                content: " Method with union return type",
                                 span: Span {
                                     start: 352,
                                     end: 358,
@@ -574,7 +574,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Untyped method (should not generate spec)",
+                                content: " Untyped method (should not generate spec)",
                                 span: Span {
                                     start: 486,
                                     end: 495,
@@ -596,7 +596,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Typed method definitions for spec generation",
+                        content: " Typed method definitions for spec generation",
                         span: Span {
                             start: 48,
                             end: 53,

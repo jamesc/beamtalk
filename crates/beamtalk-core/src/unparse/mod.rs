@@ -1302,4 +1302,69 @@ mod tests {
             _ => false,
         }
     }
+
+    /// Assert that `source` round-trips through parse→unparse and that the
+    /// second pass is idempotent: `unparse(parse(unparse(parse(source)))) ==
+    /// unparse(parse(source))`.
+    ///
+    /// Use this for sources that are already in canonical form so the first
+    /// unparse pass should not change them.
+    #[track_caller]
+    fn assert_idempotent(source: &str) {
+        let pass1 = unparse_module(&parse_source(source));
+        let pass2 = unparse_module(&parse_source(&pass1));
+        assert_eq!(
+            pass1, pass2,
+            "unparser is not idempotent for source:\n{source}\n\npass1:\n{pass1}\n\npass2:\n{pass2}"
+        );
+    }
+
+    // --- Idempotency tests with realistic source strings ---
+
+    #[test]
+    fn idempotent_line_comment() {
+        assert_idempotent("// a line comment\nx := 42\n");
+    }
+
+    #[test]
+    fn idempotent_license_header() {
+        assert_idempotent(
+            "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\nx := 1\n",
+        );
+    }
+
+    #[test]
+    fn idempotent_class_with_line_comment() {
+        assert_idempotent("// A useful class\nObject subclass: Foo\n  bar => 42\n");
+    }
+
+    #[test]
+    fn idempotent_class_definition() {
+        assert_idempotent(
+            "Actor subclass: Counter\n  state: value = 0\n\n  getValue => self.value\n",
+        );
+    }
+
+    // --- Idempotency tests using example .bt files ---
+
+    #[test]
+    fn idempotent_hello_bt() {
+        assert_idempotent(include_str!(
+            "../../../../examples/getting-started/src/hello.bt"
+        ));
+    }
+
+    #[test]
+    fn idempotent_hanoi_bt() {
+        assert_idempotent(include_str!(
+            "../../../../examples/getting-started/src/hanoi.bt"
+        ));
+    }
+
+    #[test]
+    fn idempotent_point_bt() {
+        assert_idempotent(include_str!(
+            "../../../../examples/getting-started/src/point.bt"
+        ));
+    }
 }

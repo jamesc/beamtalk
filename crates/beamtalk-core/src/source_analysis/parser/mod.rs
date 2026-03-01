@@ -674,10 +674,25 @@ impl Parser {
         for trivia in self.current_token().leading_trivia() {
             match trivia {
                 super::Trivia::LineComment(text) => {
-                    leading.push(Comment::line(text.clone(), token_span));
+                    // Strip `// ` (with space) or `//` — Comment.content is
+                    // documented as "text without delimiters", consistent with
+                    // how collect_doc_comment strips `/// ` from DocComment.
+                    let s = text.as_str();
+                    let content = s
+                        .strip_prefix("// ")
+                        .or_else(|| s.strip_prefix("//"))
+                        .unwrap_or(s);
+                    leading.push(Comment::line(content, token_span));
                 }
                 super::Trivia::BlockComment(text) => {
-                    leading.push(Comment::block(text.clone(), token_span));
+                    // Strip `/* ` / ` */` delimiters.
+                    let s = text.as_str();
+                    let content = s
+                        .strip_prefix("/* ")
+                        .and_then(|s| s.strip_suffix(" */"))
+                        .or_else(|| s.strip_prefix("/*").and_then(|s| s.strip_suffix("*/")))
+                        .unwrap_or(s);
+                    leading.push(Comment::block(content, token_span));
                 }
                 // DocComment is handled by collect_doc_comment — skip here.
                 super::Trivia::DocComment(_) | super::Trivia::Whitespace(_) => {}
@@ -706,7 +721,12 @@ impl Parser {
         let last_token = &self.tokens[self.current - 1];
         for trivia in last_token.trailing_trivia() {
             if let super::Trivia::LineComment(text) = trivia {
-                return Some(Comment::line(text.clone(), last_token.span()));
+                let s = text.as_str();
+                let content = s
+                    .strip_prefix("// ")
+                    .or_else(|| s.strip_prefix("//"))
+                    .unwrap_or(s);
+                return Some(Comment::line(content, last_token.span()));
             }
         }
         None

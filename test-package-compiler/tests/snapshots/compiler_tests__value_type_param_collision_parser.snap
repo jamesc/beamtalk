@@ -132,7 +132,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Multi-expression method with a parameter named _seq0.",
+                                content: " Multi-expression method with a parameter named _seq0.",
                                 span: Span {
                                     start: 758,
                                     end: 766,
@@ -140,7 +140,7 @@ Module {
                                 kind: Line,
                             },
                             Comment {
-                                content: "// Before BT-369, to_core_var kept \"_seq0\" verbatim while fresh_temp_var(\"seq\")",
+                                content: " Before BT-369, to_core_var kept \"_seq0\" verbatim while fresh_temp_var(\"seq\")",
                                 span: Span {
                                     start: 758,
                                     end: 766,
@@ -148,7 +148,7 @@ Module {
                                 kind: Line,
                             },
                             Comment {
-                                content: "// could produce \"_seq1\", \"_seq2\" — a near-miss that could collide if naming",
+                                content: " could produce \"_seq1\", \"_seq2\" — a near-miss that could collide if naming",
                                 span: Span {
                                     start: 758,
                                     end: 766,
@@ -156,7 +156,7 @@ Module {
                                 kind: Line,
                             },
                             Comment {
-                                content: "// conventions changed. Now both use the counter.",
+                                content: " conventions changed. Now both use the counter.",
                                 span: Span {
                                     start: 758,
                                     end: 766,
@@ -178,7 +178,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: " Copyright 2026 James Casey",
                         span: Span {
                             start: 445,
                             end: 451,
@@ -186,7 +186,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: " SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 445,
                             end: 451,
@@ -194,7 +194,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Compiler snapshot test for BT-369: value-type temp var collision avoidance",
+                        content: " Compiler snapshot test for BT-369: value-type temp var collision avoidance",
                         span: Span {
                             start: 445,
                             end: 451,
@@ -202,7 +202,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "//",
+                        content: "",
                         span: Span {
                             start: 445,
                             end: 451,
@@ -210,7 +210,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Verifies that method parameters with underscore-prefixed names (e.g., _seq0)",
+                        content: " Verifies that method parameters with underscore-prefixed names (e.g., _seq0)",
                         span: Span {
                             start: 445,
                             end: 451,
@@ -218,7 +218,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// don't collide with codegen-internal temp vars used for expression sequencing.",
+                        content: " don't collide with codegen-internal temp vars used for expression sequencing.",
                         span: Span {
                             start: 445,
                             end: 451,
@@ -226,7 +226,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Both parameter binding and sequencing temp vars go through the fresh_var",
+                        content: " Both parameter binding and sequencing temp vars go through the fresh_var",
                         span: Span {
                             start: 445,
                             end: 451,
@@ -234,7 +234,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// counter, ensuring unique Core Erlang variable names.",
+                        content: " counter, ensuring unique Core Erlang variable names.",
                         span: Span {
                             start: 445,
                             end: 451,

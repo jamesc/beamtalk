@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: " Copyright 2026 James Casey",
                         span: Span {
                             start: 161,
                             end: 162,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: " SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 161,
                             end: 162,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test comment handling",
+                        content: " Test comment handling",
                         span: Span {
                             start: 161,
                             end: 162,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Comments should be preserved as trivia",
+                        content: " Comments should be preserved as trivia",
                         span: Span {
                             start: 161,
                             end: 162,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Single line comment",
+                        content: " Single line comment",
                         span: Span {
                             start: 161,
                             end: 162,
@@ -53,7 +53,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: "// inline comment",
+                        content: " inline comment",
                         span: Span {
                             start: 166,
                             end: 167,
@@ -91,7 +91,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Multiple comments",
+                        content: " Multiple comments",
                         span: Span {
                             start: 244,
                             end: 245,
@@ -99,7 +99,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Comment line 1",
+                        content: " Comment line 1",
                         span: Span {
                             start: 244,
                             end: 245,
@@ -107,7 +107,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Comment line 2",
+                        content: " Comment line 2",
                         span: Span {
                             start: 244,
                             end: 245,
@@ -146,7 +146,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Comment between expressions",
+                        content: " Comment between expressions",
                         span: Span {
                             start: 284,
                             end: 285,
@@ -185,7 +185,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Middle comment",
+                        content: " Middle comment",
                         span: Span {
                             start: 309,
                             end: 310,
@@ -224,7 +224,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Comment in message send",
+                        content: " Comment in message send",
                         span: Span {
                             start: 344,
                             end: 350,
@@ -234,7 +234,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: "// comment here",
+                        content: " comment here",
                         span: Span {
                             start: 344,
                             end: 350,
@@ -258,7 +258,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: "// and here",
+                        content: " and here",
                         span: Span {
                             start: 380,
                             end: 385,
@@ -290,7 +290,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Block with comments",
+                        content: " Block with comments",
                         span: Span {
                             start: 422,
                             end: 427,
@@ -318,7 +318,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [
                                         Comment {
-                                            content: "// Inside block",
+                                            content: " Inside block",
                                             span: Span {
                                                 start: 457,
                                                 end: 459,

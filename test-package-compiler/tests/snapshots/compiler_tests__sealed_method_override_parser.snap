@@ -69,7 +69,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: " Copyright 2026 James Casey",
                         span: Span {
                             start: 203,
                             end: 209,
@@ -77,7 +77,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: " SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 203,
                             end: 209,
@@ -85,7 +85,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test that overriding a sealed method produces a diagnostic error.",
+                        content: " Test that overriding a sealed method produces a diagnostic error.",
                         span: Span {
                             start: 203,
                             end: 209,
@@ -93,7 +93,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Parent defines a sealed method, Child tries to override it.",
+                        content: " Parent defines a sealed method, Child tries to override it.",
                         span: Span {
                             start: 203,
                             end: 209,

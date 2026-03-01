@@ -120,7 +120,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Fully annotated — no warning expected",
+                                content: " Fully annotated — no warning expected",
                                 span: Span {
                                     start: 386,
                                     end: 394,
@@ -254,7 +254,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Missing return type annotation — warning expected",
+                                content: " Missing return type annotation — warning expected",
                                 span: Span {
                                     start: 480,
                                     end: 489,
@@ -417,7 +417,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Missing parameter type annotation — warning expected",
+                                content: " Missing parameter type annotation — warning expected",
                                 span: Span {
                                     start: 605,
                                     end: 609,
@@ -439,7 +439,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: " Copyright 2026 James Casey",
                         span: Span {
                             start: 275,
                             end: 280,
@@ -447,7 +447,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: " SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 275,
                             end: 280,
@@ -455,7 +455,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Smoke test for typed class annotation warnings (BT-941).",
+                        content: " Smoke test for typed class annotation warnings (BT-941).",
                         span: Span {
                             start: 275,
                             end: 280,
@@ -463,7 +463,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "//",
+                        content: "",
                         span: Span {
                             start: 275,
                             end: 280,
@@ -471,7 +471,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// A `typed` class with deliberately incomplete annotations, so we can",
+                        content: " A `typed` class with deliberately incomplete annotations, so we can",
                         span: Span {
                             start: 275,
                             end: 280,
@@ -479,7 +479,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// verify the type checker surfaces warnings for missing annotations.",
+                        content: " verify the type checker surfaces warnings for missing annotations.",
                         span: Span {
                             start: 275,
                             end: 280,

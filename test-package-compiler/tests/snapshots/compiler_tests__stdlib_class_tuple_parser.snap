@@ -55,7 +55,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Size and access",
+                                content: " Size and access",
                                 span: Span {
                                     start: 294,
                                     end: 298,
@@ -151,7 +151,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Pattern matching for Erlang result types",
+                                content: " Pattern matching for Erlang result types",
                                 span: Span {
                                     start: 401,
                                     end: 405,
@@ -228,7 +228,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Unwrapping",
+                                content: " Unwrapping",
                                 span: Span {
                                     start: 480,
                                     end: 486,
@@ -377,7 +377,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Conversion",
+                                content: " Conversion",
                                 span: Span {
                                     start: 627,
                                     end: 635,
@@ -399,7 +399,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: " Copyright 2026 James Casey",
                         span: Span {
                             start: 240,
                             end: 246,
@@ -407,7 +407,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: " SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 240,
                             end: 246,
@@ -415,7 +415,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test Tuple class compilation as a value type (not gen_server).",
+                        content: " Test Tuple class compilation as a value type (not gen_server).",
                         span: Span {
                             start: 240,
                             end: 246,
@@ -423,7 +423,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Tuple is a sealed Object subclass backed by Erlang tuples.",
+                        content: " Tuple is a sealed Object subclass backed by Erlang tuples.",
                         span: Span {
                             start: 240,
                             end: 246,
@@ -431,7 +431,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// new/0 should return {} (empty tuple).",
+                        content: " new/0 should return {} (empty tuple).",
                         span: Span {
                             start: 240,
                             end: 246,

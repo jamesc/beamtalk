@@ -161,15 +161,15 @@ fmt-check-rust:
     cargo fmt --all -- --check
 
 # Check all code formatting
-fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js fmt-check-beamtalk
+fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js
 
 # Format all Rust code
 fmt-rust:
     @echo "✨ Formatting Rust code..."
     cargo fmt --all
 
-# Format all code (Rust + Erlang + JS + Beamtalk)
-fmt: fmt-rust fmt-erlang fmt-js fmt-beamtalk
+# Format all code (Rust + Erlang + JS)
+fmt: fmt-rust fmt-erlang fmt-js
 
 # Check JS/TS formatting (Biome)
 [working-directory: 'editors/vscode']

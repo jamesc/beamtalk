@@ -55,7 +55,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Access",
+                                content: " Access",
                                 span: Span {
                                     start: 251,
                                     end: 255,
@@ -340,7 +340,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Ordering",
+                                content: " Ordering",
                                 span: Span {
                                     start: 489,
                                     end: 493,
@@ -523,7 +523,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Search",
+                                content: " Search",
                                 span: Span {
                                     start: 639,
                                     end: 646,
@@ -655,7 +655,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Iteration — selector-based runtime dispatch",
+                                content: " Iteration — selector-based runtime dispatch",
                                 span: Span {
                                     start: 794,
                                     end: 797,
@@ -946,7 +946,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Functional",
+                                content: " Functional",
                                 span: Span {
                                     start: 1024,
                                     end: 1029,
@@ -1299,7 +1299,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Concatenation",
+                                content: " Concatenation",
                                 span: Span {
                                     start: 1318,
                                     end: 1320,
@@ -1378,7 +1378,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Subsequence / Search",
+                                content: " Subsequence / Search",
                                 span: Span {
                                     start: 1375,
                                     end: 1380,
@@ -1929,7 +1929,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Iteration with index",
+                                content: " Iteration with index",
                                 span: Span {
                                     start: 1589,
                                     end: 1603,
@@ -1991,7 +1991,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Advanced",
+                                content: " Advanced",
                                 span: Span {
                                     start: 1751,
                                     end: 1755,
@@ -2331,7 +2331,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: " Copyright 2026 James Casey",
                         span: Span {
                             start: 208,
                             end: 214,
@@ -2339,7 +2339,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: " SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 208,
                             end: 214,
@@ -2347,7 +2347,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test List class compilation as a value type (not gen_server).",
+                        content: " Test List class compilation as a value type (not gen_server).",
                         span: Span {
                             start: 208,
                             end: 214,
@@ -2355,7 +2355,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Mirrors lib/List.bt exactly — new/0 should return [] (empty list).",
+                        content: " Mirrors lib/List.bt exactly — new/0 should return [] (empty list).",
                         span: Span {
                             start: 208,
                             end: 214,
