@@ -369,6 +369,10 @@ fn compile_fixture(
         allow_primitives: false,
         workspace_mode: false,
         suppress_warnings,
+        // BT-979: Bootstrap-test fixtures use top-level expressions as test assertions
+        // paired with `// =>` comments. Skip the module-expression lint to avoid
+        // false positives on intentional assertion expressions.
+        skip_module_expression_lint: true,
     };
 
     crate::beam_compiler::compile_source(fixture_path, &module_name, &core_file, &options)

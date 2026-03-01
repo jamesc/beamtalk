@@ -26,7 +26,12 @@ pub(crate) struct EffectFreeStatementPass;
 
 impl LintPass for EffectFreeStatementPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        crate::semantic_analysis::validators::check_effect_free_statements(module, diagnostics);
+        // BT-979: lint always checks module.expressions (skip_module_expression_lint = false)
+        crate::semantic_analysis::validators::check_effect_free_statements(
+            module,
+            diagnostics,
+            false,
+        );
     }
 }
 
@@ -101,6 +106,39 @@ mod tests {
         assert!(
             effect_free.is_empty(),
             "Expected no effect-free lints, got: {effect_free:?}"
+        );
+    }
+
+    // BT-979: Module-level expression linting
+
+    #[test]
+    fn discarded_module_level_map_literal_surfaced() {
+        // Two module-level expressions: the first (map literal) is discarded.
+        // This matches the REPL scenario: `#{#x => 1} #{#y => 2}`
+        let diags = lint("#{#x => 1}\n#{#y => 2}");
+        let effect_free: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("no effect"))
+            .collect();
+        assert_eq!(
+            effect_free.len(),
+            1,
+            "Expected 1 effect-free lint for discarded module-level map literal, got: {effect_free:?}"
+        );
+        assert!(effect_free[0].message.contains("map literal"));
+    }
+
+    #[test]
+    fn single_module_level_expression_not_flagged() {
+        // A single module-level expression is the last (and only) expression — not flagged.
+        let diags = lint("1 + 2");
+        let effect_free: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("no effect"))
+            .collect();
+        assert!(
+            effect_free.is_empty(),
+            "Single module-level expression should not be flagged: {effect_free:?}"
         );
     }
 }
