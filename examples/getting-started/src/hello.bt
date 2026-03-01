@@ -7,8 +7,9 @@
 ///   $ beamtalk repl
 ///   > :load examples/hello.bt
 ///   Loaded Hello
-///   > Hello new
-///   {__class__: Hello}
+///   > Hello new greeting
+///   │ Hello, World!
+///   nil
 Object subclass: Hello
 
-  greeting => "Hello, World!"
+  greeting => self traceCr: "Hello, World!"

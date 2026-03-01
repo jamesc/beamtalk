@@ -22,7 +22,6 @@ Object subclass: Hanoi
   solve: n from: source to: target via: auxiliary =>
     (n > 0) ifTrue: [
       self solve: n - 1 from: source to: auxiliary via: target
-      TranscriptStream current show: "Move disk from " ++ source ++ " to " ++ target
-      TranscriptStream current cr
+      self traceCr: "Move disk from " ++ source ++ " to " ++ target
       self solve: n - 1 from: auxiliary to: target via: source
     ] ifFalse: [nil]

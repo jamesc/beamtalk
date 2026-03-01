@@ -515,7 +515,8 @@ ADR 0009 splits the runtime into `beamtalk_runtime` (core language) and `beamtal
 | Component | OTP App | Rationale |
 |-----------|---------|-----------|
 | `SystemDictionary` (Beamtalk) | `beamtalk_runtime` | Introspection of classes is a core language feature |
-| `TranscriptStream` (Transcript) | `beamtalk_workspace` | I/O is a workspace service |
+| `TranscriptStream` class (`.bt` + Erlang modules) | `beamtalk_runtime` | The class definition is a core language entity; available in batch compile |
+| `TranscriptStream` singleton instance (`Transcript` binding) | `beamtalk_workspace` | Spawned and bound at workspace startup; not available in batch compile |
 | Workspace bindings (`persistent_term`) | `beamtalk_workspace` | Populated at workspace startup |
 
 This means:
@@ -530,13 +531,13 @@ Singleton actors are **permanent workers** under their owning supervisor:
 ```
 beamtalk_runtime_sup (one_for_one)            [beamtalk_runtime app]
 ├── beamtalk_bootstrap
-├── beamtalk_stdlib
+├── beamtalk_stdlib                            ← includes TranscriptStream class definition
 ├── beamtalk_object_instances
 └── beamtalk_system_dictionary                 ← Beamtalk singleton
 
 beamtalk_workspace_sup (one_for_one)          [beamtalk_workspace app]
 ├── beamtalk_workspace_meta
-├── beamtalk_transcript_stream                 ← Transcript singleton
+├── beamtalk_transcript_stream                 ← Transcript singleton instance (workspace only)
 ├── beamtalk_repl_server
 ├── beamtalk_actor_sup
 └── ...
