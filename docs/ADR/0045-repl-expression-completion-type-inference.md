@@ -11,11 +11,13 @@ Completions fail for expressions with chained sends. Typing `"hello" size cl` sh
 
 Evaluating subexpressions to infer their type is not viable: `counter increment cl` would mutate state as a side effect of requesting completions. The solution must be **inference without evaluation**.
 
-Two type-inference assets already exist in the codebase:
+Three type-inference assets are relevant:
 
 1. **Runtime method signature maps** (BT-988, BT-990): each class's `class_state` stores `method_signatures` and `class_method_signatures` as `#{selector() => binary()}` display strings (e.g., `size => <<"size -> Integer">>`). These are present for all registered classes, including user-defined classes created in the REPL.
 
-2. **Rust `TypeChecker`** (ADR 0025, `crates/beamtalk-core/src/semantic_analysis/type_checker.rs`): walks the AST, infers `InferredType::Known(ClassName)` or `InferredType::Dynamic` for each expression span. This runs in the compiler context against a `ClassHierarchy` built from the full module graph.
+2. **Rust `TypeChecker`** (ADR 0025, `crates/beamtalk-core/src/semantic_analysis/type_checker.rs`): walks the AST, infers `InferredType::Known(ClassName)` or `InferredType::Dynamic` for each expression span. This runs in the compiler context against a `ClassHierarchy` built from the full module graph. Currently stores results in a `TypeMap` for LSP queries only — does not write back to the AST.
+
+3. **Compile-time body inference** (new in this ADR): the TypeChecker's inference results for method return types can be written back to `MethodDefinition.return_type` before codegen, so that `method_return_types` in the emitted BEAM module contains inferred types alongside explicit annotations. This bridges assets 1 and 2: the TypeChecker's inference powers the runtime return-type maps without requiring explicit annotation on every method.
 
 The key constraint is: **the Rust compiler port process has no access to the runtime class registry**. The port is stateless — it handles one request at a time and constructs only `ClassHierarchy::with_builtins()`, which contains stdlib classes but not classes defined by the user in their REPL session. Routing completion through the port would make user-defined classes (`Counter`, `MyTree`, custom actors) invisible to inference. This defeats the primary REPL use case.
 
@@ -39,7 +41,7 @@ A new field is added to `class_state` in `beamtalk_object_class.erl`, storing ma
 }).
 ```
 
-The codegen emits both maps in the same pass. `method_return_types` is populated from `MethodDefinition.return_type` — the same source as the display signature `->` suffix — so they are always consistent. Only `TypeAnnotation::Simple` annotations produce return-type entries (e.g., `-> Integer` maps to `size => 'Integer'`). Union types (`Integer | False`), generic types (`List<Integer>`), and singleton types (`#north`) are omitted — the chain resolution treats them as dynamic. This is an acceptable initial limitation because the vast majority of method return types are simple class names; complex types can be supported in a future iteration if warranted.
+The codegen emits both maps in the same pass. `method_return_types` is populated from `MethodDefinition.return_type` — the same source as the display signature `->` suffix — so they are always consistent. Only `TypeAnnotation::Simple` values produce return-type entries (e.g., `-> Integer` maps to `size => 'Integer'`). These may come from explicit programmer annotations or from the compile-time body inference writeback pass (Phase 1b), which synthesises `Simple` annotations from `InferredType::Known` results. Union types (`Integer | False`), generic types (`List<Integer>`), and singleton types (`#north`) are omitted — the chain resolution treats them as dynamic. This is an acceptable initial limitation because the vast majority of method return types are simple class names; complex types can be supported in a future iteration if warranted.
 
 When `return_type` is `None` or non-Simple, the selector is absent from the map (absence = dynamic):
 
@@ -143,9 +145,16 @@ These are genuine limitations. The `tokenise_send_chain/1` function returns `err
 
 Keyword sends as the *final* message (the completion target) work naturally because the prefix is stripped before chain resolution. Keyword sends as *intermediate* messages in the chain are the hard case and a natural follow-up issue.
 
-### Annotation Coverage
+### Return-Type Coverage
 
-The chain resolution breaks silently when a method in the chain has no `-> ClassName` annotation in its signature. Coverage is therefore a function of how many methods in the stdlib and user codebases carry return-type annotations. As part of this work, the built-in method definitions in `generated_builtins.rs` will be audited and annotated where the return type is unambiguous. Approximately half of the ~337 current built-in methods have `return_type: None`; the audit will target those on high-frequency chains (Integer arithmetic, String manipulation, Collection operations) first.
+Chain resolution breaks silently when a method in the chain has neither an explicit `-> ClassName` annotation nor a body-inference result that yields a Simple type. Coverage therefore comes from two sources:
+
+1. **Explicit annotations** — the programmer writes `-> Integer` on the method. Required for builtins (defined in Rust, not compiled through the TypeChecker) and for methods whose return type is too complex for body inference (union types, dynamic dispatch).
+2. **Compile-time body inference** (Phase 1b) — the TypeChecker infers the return type from the method body and the writeback pass populates `MethodDefinition.return_type` before codegen. This covers the common case of user-defined methods with straightforward return expressions (e.g., `getValue => ^balance` where `balance` is Integer).
+
+For **builtins**, body inference does not apply — they are defined in `generated_builtins.rs` as Rust data structures, not compiled Beamtalk source. The ~337 built-in method entries must be manually audited; approximately half currently have `return_type: None`. The audit targets high-frequency chains first (Integer arithmetic, String manipulation, Collection operations).
+
+For **user-defined methods**, body inference handles many cases automatically. Explicit annotation is only needed when the body returns a union type, uses dynamic dispatch, or delegates through cross-method calls that the TypeChecker cannot resolve to a single class.
 
 ### REPL Session Example
 
@@ -156,11 +165,11 @@ clock  collect:  collect:separatedBy:  isZero  max:  min:  ...
 bt> #(1, 2, 3) size <TAB>
 clock  collect:  collect:separatedBy:  isZero  max:  min:  ...
 
-bt> counter getValue <TAB>       % user-defined class, annotation present
+bt> counter getValue <TAB>       % user-defined class, return type known (annotation or inferred)
 toUpperCase  reversed  size  ...
 
 bt> counter getValue unknownChain <TAB>
-(no completions — annotation absent, chain breaks)
+(no completions — return type unknown, chain breaks)
 
 bt> counter <TAB>                % single-token binding — existing path unchanged
 deposit:  withdraw:  balance  ...
@@ -180,7 +189,7 @@ deposit:  withdraw:  balance  ...
 
 ## User Impact
 
-**Newcomer** (Python/JS/Ruby background): Completions work for common patterns (`"hello" size <TAB>`, `myList size <TAB>`) without any configuration. Chains through unannotated methods silently produce no completions rather than an error — the REPL remains fully functional. The experience improves over time as more stdlib methods are annotated.
+**Newcomer** (Python/JS/Ruby background): Completions work for common patterns (`"hello" size <TAB>`, `myList size <TAB>`) without any configuration. For user-defined classes, body inference handles many cases automatically — the user doesn't need to know about type annotations for simple methods. Chains through methods where inference fails silently produce no completions rather than an error — the REPL remains fully functional.
 
 **Smalltalk developer**: Matches workspace ergonomics — completions after message sends feel natural. The annotation requirement is familiar: Pharo completion quality also depends on type hints. The dev is incentivised to annotate method return types, which also improves `:h` documentation output (BT-988 display signatures) and LSP hover types.
 
@@ -222,9 +231,9 @@ Fast path via Erlang runtime registry; fallback to Rust port for unannotated met
 
 The ClassHierarchy-in-port problem has a clean solution that does not require source code or whole-world recompilation: **BEAM metadata streaming via a background actor**. When a Beamtalk class is compiled and loaded in the REPL, the generated BEAM module already contains the full class metadata as callable functions (`instance_methods/0`, `class_methods/0`, and with this ADR's work, `method_return_types/0`). A background actor can stream this metadata to the compiler session gen-server as classes are registered, populating an incremental `ClassHierarchy` without source. The compiler session can reconstruct its state after a crash by reading all loaded Beamtalk BEAM modules directly — the same recovery model as Dialyzer's PLT. A follow-up issue (BT-993) tracks this design.
 
-Note: BT-993 is specifically about enabling the Rust TypeChecker *port* to see user-defined classes — relevant for cross-class diagnostics and the TypeChecker fallback path (Option C). For chain-based completion, BT-993 is not required: compile-time body inference already writes inferred Simple return types into `method_return_types/0` for user-defined classes before the BEAM module is emitted (see Consequences > Neutral). The completion feature is complete at Phase 2 of this ADR; BT-993 is the path to richer diagnostic coverage beyond completion.
+Note: BT-993 is specifically about enabling the Rust TypeChecker *port* to see user-defined classes — relevant for cross-class diagnostics and the TypeChecker fallback path (Option C). For chain-based completion, BT-993 is not required: a compile-time body inference writeback pass (Phase 1b of this ADR) populates `method_return_types/0` with inferred Simple return types for user-defined classes before the BEAM module is emitted (see Consequences > Neutral). The completion feature is complete at Phase 2 of this ADR; BT-993 is the path to richer diagnostic coverage beyond completion.
 
-**Tension points**: The BEAM veteran and language designer cohorts make the strongest case for Option B/C. The core tension is "coverage today vs. architectural coherence long-term." Option A has better coverage for user-defined classes today; Option B has better architectural coherence for the future. The decision takes coverage as the priority because the REPL is the primary editing surface. Option A is not a permanent commitment — it is the starting point of a progression toward Option C.
+**Tension points**: The BEAM veteran and language designer cohorts make the strongest case for Option B/C. The core tension is "REPL visibility vs. architectural coherence." Option A has structurally better coverage for user-defined classes — the runtime class registry sees every loaded class, and the compile-time body inference writeback (Phase 1b) means even unannotated user-defined methods get inferred return types in the chain walk. Option B has better architectural coherence for future diagnostic features (cross-class type checking, protocol conformance). The decision takes REPL coverage as the priority because the REPL is the primary editing surface. Option A is not a permanent commitment — it is the starting point of a progression toward Option C.
 
 ## Alternatives Considered
 
@@ -255,10 +264,10 @@ Rejected for this ADR as a primary mechanism because: the cache is stale after b
 - Adds two new fields to `class_state` and corresponding codegen output.
 
 ### Neutral
-- Return-type annotation coverage directly determines completion quality. This creates organic incentive to annotate method return types — a side effect that also improves `:h` documentation and LSP hover types.
+- Return-type coverage (explicit annotations + body inference) directly determines completion quality. For builtins, explicit annotations are the only source; for user-defined methods, body inference covers many cases automatically. This creates organic incentive to annotate methods where inference is insufficient — a side effect that also improves `:h` documentation and LSP hover types.
 - The existing single-token completion path is unchanged; chain resolution is additive.
 - The TypeChecker (`InferredType`) and the runtime return-type maps both derive from `MethodDefinition.return_type` — the same source — so they cannot diverge as long as the codegen emits both correctly.
-- **Compile-time body inference covers unannotated user-defined methods without BT-993.** The TypeChecker already infers return types from method bodies during compilation. Where inference yields a Simple type (e.g., `^42` → `Integer`), that result can be written back to `MethodDefinition.return_type` before codegen — the same field populated by explicit annotations. The BEAM module then contains the inferred return type in `method_return_types/0`, and the Erlang chain walk finds it when the class registers. Explicit annotation is only required for cases body inference cannot resolve (complex unions, cross-method inference, dynamic returns). BT-993 (BEAM metadata streaming) is needed for the Rust TypeChecker *port* to see user-defined classes for cross-class diagnostics and Option C fallback — it is not a prerequisite for chain-based completion coverage of user-defined classes.
+- **Compile-time body inference can cover unannotated user-defined methods without BT-993.** The TypeChecker already infers return types from method bodies during semantic analysis — but currently stores results only in a `TypeMap` for LSP queries, not back into the AST. A new **writeback pass** (Phase 1b) takes the TypeChecker's inferred return type for each method, and where the result is `InferredType::Known(ClassName)` and the method has no explicit annotation, synthesises a `TypeAnnotation::Simple` and writes it to `MethodDefinition.return_type` before codegen. This requires the AST to be mutable between semantic analysis and codegen — a pipeline change, but a contained one. Once implemented, the BEAM module contains inferred return types in `method_return_types/0`, and the Erlang chain walk finds them when the class registers. Explicit annotation is only required for cases body inference cannot resolve (complex unions, cross-method inference, dynamic returns). BT-993 (BEAM metadata streaming) is needed for the Rust TypeChecker *port* to see user-defined classes for cross-class diagnostics and Option C fallback — it is not a prerequisite for chain-based completion coverage of user-defined classes.
 
 ## Implementation
 
@@ -272,13 +281,22 @@ Before the annotation audit, validate the data pipeline with a minimal spike:
 
 This confirms the codegen → registry → lookup pipeline before investing in the annotation audit.
 
-### Phase 1: Annotation audit and codegen
+### Phase 1a: Annotation audit and codegen
 
 - **`runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl`**: add `method_return_types` and `class_method_return_types` fields to `class_state`
 - **`crates/beamtalk-core/src/codegen/`**: emit both new maps from `MethodDefinition.return_type` in the same codegen pass that emits `method_signatures`; omit the selector key entirely when `return_type` is `None` or non-Simple (absence = dynamic, consistent with the record type and Decision section)
-- **`crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs`**: audit ~337 built-in method entries; add `return_type` for unambiguous cases (Integer arithmetic, String operations, Collection operations, Boolean predicates)
-- **`stdlib/src/*.bt`**: add `-> ClassName` return-type annotations on key stdlib methods
+- **`crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs`**: audit ~337 built-in method entries; add `return_type` for unambiguous cases (Integer arithmetic, String operations, Collection operations, Boolean predicates). This audit is primarily about builtins — user-defined methods are covered by Phase 1b.
+- **`stdlib/src/*.bt`**: add `-> ClassName` return-type annotations on key stdlib methods where body inference alone would be insufficient (e.g., methods with union return types, dynamic dispatch)
 - Target: high-frequency chains covered before Phase 2
+
+### Phase 1b: Compile-time body inference writeback
+
+The TypeChecker currently infers method return types during semantic analysis but stores results only in a `TypeMap` (span → `InferredType`) for LSP queries. A new writeback pass bridges inference and codegen:
+
+- **`crates/beamtalk-core/src/semantic_analysis/mod.rs`** (or new `return_type_writeback.rs`): after `infer_types` runs, iterate over methods where `return_type` is `None`. For each, look up the method body's inferred type in the `TypeMap`. If the result is `InferredType::Known(class_name)`, synthesise a `TypeAnnotation::Simple(Identifier::new(class_name, synthetic_span))` and write it to `method.return_type`.
+- **Pipeline change**: the `Module` AST must be mutable between semantic analysis and codegen. Currently `infer_types` takes `&Module`; the writeback runs as a separate pass on `&mut Module` after inference completes.
+- **Conservative scope**: only write back `Known` → `Simple` mappings. `Dynamic`, `Unknown`, and complex inferred types are left as `None` (absence = dynamic). This maintains the same guarantee as explicit annotations: codegen only sees `Simple` types in the return-type maps.
+- **Validation**: for a user-defined class `Counter` with method `getValue => ^balance` (where `balance` is typed as `Integer`), the writeback should populate `method_return_types` with `getValue => 'Integer'` even without an explicit `-> Integer` annotation. Verify via REPL: `counter getValue <TAB>` offers Integer methods.
 
 ### Phase 2: Runtime chain resolution
 
@@ -298,6 +316,7 @@ This confirms the codegen → registry → lookup pipeline before investing in t
 | `beamtalk_object_class.erl` | Two new fields on `class_state`; thread through `apply_class_info/2` and `put_method/3` |
 | `beamtalk_class_registry.erl` | New `get_method_return_type/2` and `get_class_method_return_type/2` with superclass chain walking |
 | Codegen (Rust, `crates/beamtalk-core/src/codegen/`) | Emit new return-type maps from `MethodDefinition.return_type` (Simple annotations only) |
+| Semantic analysis (`type_checker.rs`, new writeback pass) | New pass: write `InferredType::Known` results back to `MethodDefinition.return_type` for unannotated methods before codegen |
 | Rust builtins (`generated_builtins.rs`) | Return-type annotation audit; add `return_type` for ~half of built-in methods |
 | Stdlib (`.bt` files) | Add/verify `-> ClassName` return-type annotations on key methods |
 | Completion engine (`beamtalk_repl_ops_dev.erl`) | Chain resolution path; prefix stripping for multi-token receivers |
