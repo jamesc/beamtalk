@@ -92,7 +92,7 @@ start_link() ->
 %%
 %% Options:
 %%   {workspace, atom()} - Workspace name (for future phases)
-%%   {version, binary()} - Version string (defaults to "0.1.0-dev")
+%%   {version, binary()} - Version string (defaults to OTP app vsn, or "unknown")
 -spec start_link(proplists:proplist()) -> {ok, pid()} | {error, term()}.
 start_link(Opts) ->
     gen_server:start_link(?MODULE, Opts, []).
@@ -148,7 +148,7 @@ init(Opts) ->
     VersionDefault =
         case application:get_key(beamtalk_runtime, vsn) of
             {ok, Vsn} -> list_to_binary(Vsn);
-            _ -> <<"0.1.0">>
+            _ -> <<"unknown">>
         end,
     Version = proplists:get_value(version, Opts, VersionDefault),
     Workspace = proplists:get_value(workspace, Opts, undefined),

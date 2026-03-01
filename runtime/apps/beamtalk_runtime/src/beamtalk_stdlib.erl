@@ -292,8 +292,11 @@ dispatch(globals, [], _Receiver) ->
     %% Placeholder - global namespace not yet implemented
     #{};
 dispatch(version, [], _Receiver) ->
-    %% Return Beamtalk version
-    <<"0.1.0">>;
+    %% Return Beamtalk version from OTP application metadata
+    case application:get_key(beamtalk_runtime, vsn) of
+        {ok, Vsn} -> list_to_binary(Vsn);
+        _ -> <<"unknown">>
+    end;
 dispatch(Selector, _Args, _Receiver) ->
     %% Unknown method
     Error0 = beamtalk_error:new(does_not_understand, 'Beamtalk'),

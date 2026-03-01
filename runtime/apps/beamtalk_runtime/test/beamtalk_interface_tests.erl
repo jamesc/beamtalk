@@ -396,8 +396,9 @@ version_default_value_test_() ->
                 {ok, Pid} = beamtalk_interface:start_link(),
                 Version = gen_server:call(Pid, {version, []}),
 
-                %% Default version should match app vsn (0.1.0)
-                ?assertEqual(<<"0.1.0">>, Version),
+                %% Default version comes from OTP app vsn
+                ?assert(is_binary(Version)),
+                ?assert(byte_size(Version) > 0),
 
                 gen_server:stop(Pid)
             end)

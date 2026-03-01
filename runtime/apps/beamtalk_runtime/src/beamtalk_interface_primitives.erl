@@ -57,7 +57,7 @@ dispatch('help:selector:', [ClassArg, SelectorArg], _Self) ->
 dispatch(version, [], _Self) ->
     case application:get_key(beamtalk_runtime, vsn) of
         {ok, Vsn} -> list_to_binary(Vsn);
-        _ -> <<"0.1.0">>
+        _ -> <<"unknown">>
     end;
 dispatch(Selector, _Args, _Self) ->
     Err0 = beamtalk_error:new(does_not_understand, 'BeamtalkInterface'),
