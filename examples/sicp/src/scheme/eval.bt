@@ -103,7 +103,7 @@ Object subclass: SchemeEval
   /// Called when `head` is a `SchemeSymbol`; `tail` is the rest of the list.
   evalSpecialOrApply: head tail: tail in: env =>
     sym := head name
-    ^sym match: [
+    sym match: [
       // (quote expr) — return unevaluated
       "quote"  -> tail first;
 
