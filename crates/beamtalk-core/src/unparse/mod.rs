@@ -538,7 +538,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             name, is_quoted, ..
         } => {
             if *is_quoted {
-                docvec!["@primitive '", Document::String(name.to_string()), "'"]
+                docvec!["@primitive \"", Document::String(name.to_string()), "\""]
             } else {
                 docvec!["@primitive ", Document::String(name.to_string())]
             }

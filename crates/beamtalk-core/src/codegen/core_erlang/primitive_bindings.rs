@@ -17,7 +17,7 @@
 //!
 //! # Binding Types
 //!
-//! - **Selector-based** (`@primitive '+'`): The quoted name is a selector that
+//! - **Selector-based** (`@primitive "+"`): The quoted name is a selector that
 //!   routes through `beamtalk_X:dispatch('selector', Args, Self)` at runtime.
 //! - **Structural intrinsic** (`@primitive timesRepeat`): The unquoted name
 //!   identifies a code generation pattern handled by the compiler.
@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 pub enum PrimitiveBinding {
     /// Selector-based primitive: routes through runtime dispatch.
     ///
-    /// Example: `+ other => @primitive '+'` generates
+    /// Example: `+ other => @primitive "+"` generates
     /// `call 'beamtalk_integer':'dispatch'('+', [Other], Self)`
     SelectorBased {
         /// The selector atom to pass to the runtime dispatch module.

@@ -5,8 +5,8 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Maps `@primitive 'selector'` annotations to direct Erlang BIF calls.
-//! When a stdlib `.bt` file declares `+ other => @primitive '+'`, this module
+//! Maps `@primitive "selector"` annotations to direct Erlang BIF calls.
+//! When a stdlib `.bt` file declares `+ other => @primitive "+"`, this module
 //! provides the actual Core Erlang expression to emit instead of delegating
 //! through a hand-written dispatch module.
 //!

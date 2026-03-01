@@ -926,7 +926,7 @@ impl Parser {
         Pattern::Tuple { elements, span }
     }
 
-    /// Parses a `@primitive` or `@intrinsic` pragma: `@primitive 'selector'` or `@intrinsic intrinsicName`.
+    /// Parses a `@primitive` or `@intrinsic` pragma: `@primitive "selector"` or `@intrinsic intrinsicName`.
     ///
     /// The `@primitive`/`@intrinsic` token has already been identified by `parse_primary`.
     /// This method consumes it and parses the primitive name that follows.
@@ -955,7 +955,7 @@ impl Parser {
         }
 
         match self.current_kind() {
-            // Quoted selector: @primitive '+'
+            // Quoted selector: @primitive "+"
             TokenKind::String(name) => {
                 let name = name.clone();
                 let end_token = self.advance();
