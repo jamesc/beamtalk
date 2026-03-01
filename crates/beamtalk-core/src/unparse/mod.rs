@@ -588,17 +588,42 @@ fn unparse_block(block: &Block) -> Document<'static> {
         [] => docvec!["[", params_doc, "]"],
 
         // Multi-statement block: always break, statements separated by newlines.
+        // The `.` terminator is emitted immediately after the expression and
+        // before any trailing comment, so the comment cannot swallow the separator.
         // Closed bracket goes on its own line.
         stmts if stmts.len() > 1 => {
             let mut body_docs: Vec<Document<'static>> = Vec::new();
             for (i, stmt) in stmts.iter().enumerate() {
                 if i > 0 {
-                    body_docs.push(Document::Str("."));
                     body_docs.push(line());
                 }
-                body_docs.push(unparse_expression_statement(stmt));
+                // Leading comments
+                body_docs.extend(unparse_comment_attachment_leading(&stmt.comments));
+                // Expression
+                body_docs.push(unparse_expression(&stmt.expression));
+                // Statement terminator before trailing comment (not after last stmt)
+                if i + 1 < stmts.len() {
+                    body_docs.push(Document::Str("."));
+                }
+                // Trailing comment after the `.` (on the same line)
+                if let Some(trail) = &stmt.comments.trailing {
+                    body_docs.push(Document::Str("  "));
+                    body_docs.push(unparse_comment(trail));
+                }
             }
             let body = concat(body_docs);
+            docvec!["[", params_doc, nest(2, docvec![line(), body]), line(), "]"]
+        }
+
+        // Single-statement block with a trailing LINE comment must break:
+        // rendering `[stmt // comment]` inline would put `]` inside the comment.
+        [single]
+            if matches!(
+                single.comments.trailing.as_ref().map(|c| c.kind),
+                Some(CommentKind::Line)
+            ) =>
+        {
+            let body = unparse_expression_statement(single);
             docvec!["[", params_doc, nest(2, docvec![line(), body]), line(), "]"]
         }
 
