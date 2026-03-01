@@ -326,6 +326,22 @@ The TypeChecker currently infers method return types during semantic analysis bu
 
 Not applicable — this is additive. The existing single-token completion path is unchanged.
 
+## Implementation Tracking
+
+**Epic:** [BT-1001](https://linear.app/beamtalk/issue/BT-1001) — REPL Expression-Level Completion via Chain Resolution
+**Status:** Planned
+
+| Issue | Phase | Description | Size |
+|-------|-------|-------------|------|
+| [BT-1002](https://linear.app/beamtalk/issue/BT-1002) | 0 | Runtime + registry + codegen infrastructure | M |
+| [BT-1003](https://linear.app/beamtalk/issue/BT-1003) | 1 | Audit built-in method return types | M |
+| [BT-1004](https://linear.app/beamtalk/issue/BT-1004) | 1 | Stdlib `.bt` return-type annotations | S |
+| [BT-1005](https://linear.app/beamtalk/issue/BT-1005) | 1 | Compile-time body inference writeback pass | M |
+| [BT-1006](https://linear.app/beamtalk/issue/BT-1006) | 2 | REPL chain resolution engine | M |
+| [BT-1007](https://linear.app/beamtalk/issue/BT-1007) | 3 | Tests: unit + e2e | S |
+
+Start with **BT-1002** (no dependencies).
+
 ## References
 
 - Related issues: BT-989, BT-993 (incremental compiler ClassHierarchy — upgrade path to Option C)
