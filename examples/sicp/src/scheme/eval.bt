@@ -94,55 +94,64 @@ Object subclass: SchemeEval
     head := expr first
     tail := expr rest
 
-    // Special form dispatch on head symbol name
+    // Special form dispatch (symbols) or function application
     (head class =:= SchemeSymbol) ifTrue: [
-      sym := head name
-
-      // (quote expr) — return unevaluated
-      (sym =:= "quote") ifTrue: [^tail first]
-
-      // (define name expr) — bind name in the current environment
-      (sym =:= "define") ifTrue: [
-        varName := (tail at: 1) name
-        val     := self eval: (tail at: 2) in: env
-        env define: varName value: val
-        ^nil]
-
-      // (lambda (params...) body) — create a closure
-      (sym =:= "lambda") ifTrue: [
-        params := (tail at: 1) collect: [:p | p name]
-        ^SchemeLambda withParams: params body: (tail at: 2) env: env]
-
-      // (if test then else?) — conditional branch
-      (sym =:= "if") ifTrue: [
-        condVal := self eval: (tail at: 1) in: env
-        (condVal == false or: [condVal isNil]) ifTrue: [
-          ^(tail size > 2) ifTrue: [self eval: (tail at: 3) in: env] ifFalse: [nil]
-        ] ifFalse: [
-          ^self eval: (tail at: 2) in: env]]
-
-      // (cond (test expr) ... (else expr))
-      (sym =:= "cond") ifTrue: [^self evalCond: tail in: env]
-
-      // (and expr ...) — short-circuit conjunction
-      (sym =:= "and") ifTrue: [^self evalAnd: tail in: env]
-
-      // (or expr ...) — short-circuit disjunction
-      (sym =:= "or") ifTrue: [^self evalOr: tail in: env]
-
-      // (let ((var expr) ...) body) — local bindings
-      (sym =:= "let") ifTrue: [
-        binds    := tail at: 1
-        body     := tail at: 2
-        params   := binds collect: [:b | (b at: 1) name]
-        vals     := binds collect: [:b | self eval: (b at: 2) in: env]
-        childEnv := env extend: params values: vals
-        ^self eval: body in: childEnv]]
-
-    // Function application: evaluate head, evaluate all args, apply
+      ^self evalSpecialOrApply: head tail: tail in: env]
     func     := self eval: head in: env
     evalArgs := tail collect: [:a | self eval: a in: env]
     self apply: func args: evalArgs in: env
+
+  /// Dispatch `head` as a special form or function application.
+  /// Called when `head` is a `SchemeSymbol`; `tail` is the rest of the list.
+  evalSpecialOrApply: head tail: tail in: env =>
+    sym := head name
+    ^sym match: [
+      // (quote expr) — return unevaluated
+      "quote"  -> tail first;
+
+      // (define name expr) — bind name in the current environment
+      "define" -> [
+        varName := (tail at: 1) name
+        defVal  := self eval: (tail at: 2) in: env
+        env define: varName value: defVal.
+        nil] value;
+
+      // (lambda (params...) body) — create a closure
+      "lambda" -> [
+        params := (tail at: 1) collect: [:p | p name]
+        SchemeLambda withParams: params body: (tail at: 2) env: env] value;
+
+      // (if test then else?) — conditional branch
+      "if" -> [
+        condVal := self eval: (tail at: 1) in: env
+        isFalsy := condVal == false or: [condVal isNil]
+        isFalsy ifTrue: [
+          (tail size > 2) ifTrue: [self eval: (tail at: 3) in: env] ifFalse: [nil]] ifFalse: [
+          self eval: (tail at: 2) in: env]] value;
+
+      // (cond (test expr) ... (else expr))
+      "cond" -> self evalCond: tail in: env;
+
+      // (and expr ...) — short-circuit conjunction
+      "and" -> self evalAnd: tail in: env;
+
+      // (or expr ...) — short-circuit disjunction
+      "or" -> self evalOr: tail in: env;
+
+      // (let ((var expr) ...) body) — local bindings
+      "let" -> [
+        binds    := tail at: 1
+        letBody  := tail at: 2
+        params   := binds collect: [:b | (b at: 1) name]
+        argVals  := binds collect: [:b | self eval: (b at: 2) in: env]
+        childEnv := env extend: params values: argVals
+        self eval: letBody in: childEnv] value;
+
+      // Not a special form — evaluate head as a function and apply
+      _ -> [
+        func     := self eval: head in: env
+        evalArgs := tail collect: [:a | self eval: a in: env]
+        self apply: func args: evalArgs in: env] value]
 
   /// Apply `func` to the evaluated argument list `args`.
   ///

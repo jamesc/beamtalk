@@ -1,29 +1,22 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// Message — Value type for chat messages (BT-568)
+/// Message — immutable value type for chat messages (BT-568)
 ///
 /// Demonstrates:
-/// 1. **Value types** — Object subclass (not Actor), no process overhead
+/// 1. **Value types** — `Value subclass:` (not Actor), no process overhead
 /// 2. **State** — text and sender fields with defaults
-/// 3. **Immutability** — value types are immutable Erlang maps
-/// 4. **new: initialization** — creating instances with field values
+/// 3. **Immutability** — enforced by the compiler; mutations are errors
+/// 4. **Auto-generated getters** — `text` and `sender` provided by Value
 ///
 /// Usage in REPL:
 ///   > :load examples/chat-room/message.bt
-///   > args := #{#text => "Hello!", #sender => "Alice"}
-///   > msg := Message new: args
-///   > msg getText
+///   > msg := Message text: "Hello!" sender: "Alice"
+///   > msg text
 ///   > msg describe
-Object subclass: Message
+Value subclass: Message
   state: text = ""
   state: sender = "Anonymous"
-
-  // Get the message text
-  getText => self.text
-
-  // Get the sender name
-  getSender => self.sender
 
   // Human-readable description
   describe => self.sender ++ ": " ++ self.text

@@ -5,16 +5,16 @@
 ///
 /// Using a dedicated class keeps symbols separate from string literals so the
 /// evaluator can distinguish "look this name up in the environment" from
-/// "return this string value as-is". Symbols compare by name.
+/// "return this string value as-is". Symbols with the same name are equal.
 ///
 /// ## Examples
 /// ```beamtalk
 /// sym := SchemeSymbol withName: "define"
 /// sym name           // => "define"
-/// sym =:= (SchemeSymbol withName: "define")  // => true
-/// sym =:= (SchemeSymbol withName: "lambda")  // => false
+/// sym == (SchemeSymbol withName: "define")  // => true
+/// sym == (SchemeSymbol withName: "lambda")  // => false
 /// ```
-Object subclass: SchemeSymbol
+Value subclass: SchemeSymbol
   state: name = ""
 
   /// Create a new symbol with the given name string.
@@ -23,27 +23,7 @@ Object subclass: SchemeSymbol
   /// ```beamtalk
   /// SchemeSymbol withName: "car"   // => a SchemeSymbol
   /// ```
-  class withName: n => self new: #{#name => n}
-
-  /// Return the symbol's name string.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (SchemeSymbol withName: "foo") name   // => "foo"
-  /// ```
-  name => self.name
-
-  /// Test equality: true if `other` is a SchemeSymbol with the same name.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (SchemeSymbol withName: "x") =:= (SchemeSymbol withName: "x")   // => true
-  /// (SchemeSymbol withName: "x") =:= (SchemeSymbol withName: "y")   // => false
-  /// (SchemeSymbol withName: "x") =:= "x"                            // => false
-  /// ```
-  =:= other =>
-    (other class =:= SchemeSymbol) ifFalse: [^false]
-    self.name =:= other name
+  class withName: n => SchemeSymbol name: n
 
   /// Return the symbol name as a string (same as `name`).
   ///
