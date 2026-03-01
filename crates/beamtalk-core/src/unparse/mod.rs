@@ -113,6 +113,11 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&class.comments));
 
+    // Blank line between leading comments (e.g. license block) and doc/header
+    if !class.comments.leading.is_empty() {
+        docs.push(line());
+    }
+
     // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &class.doc_comment {
         for line_text in doc.lines() {
@@ -171,8 +176,8 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         docs.push(unparse_class_state_declaration(state));
     }
 
-    // Blank line before methods if there are state declarations
-    if !class.state.is_empty() || !class.class_variables.is_empty() {
+    // Blank line before first method (always, regardless of whether state is present)
+    if !class.methods.is_empty() || !class.class_methods.is_empty() {
         docs.push(line());
     }
 
@@ -180,12 +185,25 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     // at indent=2, giving the leading comment and method signature their correct
     // 2-space indentation.  A leading comment's trailing line() also runs at
     // indent=2, so the signature is never shifted to column 0.
-    for method in &class.methods {
+    for (i, method) in class.methods.iter().enumerate() {
+        if i > 0 {
+            // Blank line between consecutive methods
+            docs.push(line());
+        }
         docs.push(nest(2, docvec![line(), unparse_method_definition(method)]));
     }
 
+    // Blank line between last instance method and first class-side method
+    if !class.methods.is_empty() && !class.class_methods.is_empty() {
+        docs.push(line());
+    }
+
     // Class-side methods
-    for method in &class.class_methods {
+    for (i, method) in class.class_methods.iter().enumerate() {
+        if i > 0 {
+            // Blank line between consecutive class-side methods
+            docs.push(line());
+        }
         docs.push(nest(
             2,
             docvec![line(), "class ", unparse_method_definition(method)],
