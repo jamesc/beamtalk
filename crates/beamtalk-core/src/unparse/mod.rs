@@ -193,6 +193,11 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         docs.push(nest(2, docvec![line(), unparse_method_definition(method)]));
     }
 
+    // Blank line between last instance method and first class-side method
+    if !class.methods.is_empty() && !class.class_methods.is_empty() {
+        docs.push(line());
+    }
+
     // Class-side methods
     for (i, method) in class.class_methods.iter().enumerate() {
         if i > 0 {
