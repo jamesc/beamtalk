@@ -340,7 +340,21 @@ format_method_help(ClassName, SelectorAtom, DefiningClass, MethodObj) ->
     SelectorBin = atom_to_binary(SelectorAtom, utf8),
     NameBin = atom_to_binary(ClassName, utf8),
 
-    Header = iolist_to_binary([NameBin, <<" >> ">>, SelectorBin]),
+    Header = iolist_to_binary([<<"== ">>, NameBin, <<" >> ">>, SelectorBin, <<" ==">>]),
+
+    IsSealed =
+        case maps:get('__method_info__', MethodObj, #{}) of
+            MethodInfo when is_map(MethodInfo) ->
+                maps:get(is_sealed, MethodInfo, false);
+            _ ->
+                false
+        end,
+
+    SealedLine =
+        case IsSealed of
+            true -> <<"\n[sealed]">>;
+            false -> <<>>
+        end,
 
     InheritedPart =
         case DefiningClass of
@@ -352,7 +366,13 @@ format_method_help(ClassName, SelectorAtom, DefiningClass, MethodObj) ->
                 ])
         end,
 
-    SignatureLine = iolist_to_binary([<<"\n  ">>, SelectorBin]),
+    Signature =
+        case maps:get('__signature__', MethodObj, nil) of
+            nil -> SelectorBin;
+            SigBin when is_binary(SigBin) -> SigBin
+        end,
+
+    SignatureLine = iolist_to_binary([<<"\n  ">>, Signature]),
 
     DocPart =
         case maps:get('__doc__', MethodObj, nil) of
@@ -360,7 +380,7 @@ format_method_help(ClassName, SelectorAtom, DefiningClass, MethodObj) ->
             DocBin when is_binary(DocBin) -> iolist_to_binary([<<"\n\n">>, DocBin])
         end,
 
-    iolist_to_binary([Header, InheritedPart, SignatureLine, DocPart]).
+    iolist_to_binary([Header, SealedLine, InheritedPart, SignatureLine, DocPart]).
 
 %% @private Get method signature from a class pid.
 -spec get_method_sig(pid(), atom()) -> {binary(), binary() | none}.
