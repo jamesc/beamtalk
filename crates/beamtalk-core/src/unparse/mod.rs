@@ -332,8 +332,8 @@ fn unparse_method_definition_with_prefix(
             } else {
                 docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
             }
+            docs.push(line());
         }
-        docs.push(line());
     }
 
     // Optional prefix (e.g. "class ") then method signature
