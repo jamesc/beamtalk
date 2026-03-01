@@ -17,6 +17,7 @@ Module {
                             end: 250,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -25,6 +26,7 @@ Module {
                             end: 250,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test boundary condition: deeply nested expressions",
@@ -33,6 +35,7 @@ Module {
                             end: 250,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Stress test parser stack depth with multiple nesting levels",
@@ -41,6 +44,7 @@ Module {
                             end: 250,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Deeply nested parenthesized expressions (10 levels)",
@@ -49,6 +53,7 @@ Module {
                             end: 250,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -170,6 +175,7 @@ Module {
                             end: 330,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -298,6 +304,7 @@ Module {
                             end: 458,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -507,6 +514,7 @@ Module {
                             end: 566,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -655,6 +663,7 @@ Module {
                             end: 650,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -855,6 +864,7 @@ Module {
                                                 end: 793,
                                             },
                                             kind: Line,
+                                            preceding_blank_line: true,
                                         },
                                     ],
                                     trailing: None,
@@ -1288,6 +1298,7 @@ Module {
         end: 900,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
 
 Diagnostics:

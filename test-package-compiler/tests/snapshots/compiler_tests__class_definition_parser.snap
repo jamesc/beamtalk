@@ -224,6 +224,7 @@ Module {
                             end: 109,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -232,6 +233,7 @@ Module {
                             end: 109,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test class definition parsing",
@@ -240,6 +242,7 @@ Module {
                             end: 109,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -258,4 +261,5 @@ Module {
         end: 217,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

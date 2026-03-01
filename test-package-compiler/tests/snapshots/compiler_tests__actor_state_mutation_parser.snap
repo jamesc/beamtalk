@@ -17,6 +17,7 @@ Module {
                             end: 261,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -25,6 +26,7 @@ Module {
                             end: 261,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test actor state mutation with proper state threading",
@@ -33,6 +35,7 @@ Module {
                             end: 261,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "",
@@ -41,6 +44,7 @@ Module {
                             end: 261,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Each assignment to self.field should update the actor's state,",
@@ -49,6 +53,7 @@ Module {
                             end: 261,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "and the updated state should be returned to gen_server.",
@@ -57,6 +62,7 @@ Module {
                             end: 261,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -97,6 +103,7 @@ Module {
                             end: 323,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -252,6 +259,7 @@ Module {
                             end: 418,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -325,4 +333,33 @@ Module {
         end: 438,
     },
     file_leading_comments: [],
+    file_trailing_comments: [
+        Comment {
+            content: "Note: Multi-statement blocks with parameters (e.g., [:n | self.value := n. ^self.value])",
+            span: Span {
+                start: 680,
+                end: 680,
+            },
+            kind: Line,
+            preceding_blank_line: true,
+        },
+        Comment {
+            content: "have a known parser limitation tracked for future work. The increment and getValue",
+            span: Span {
+                start: 680,
+                end: 680,
+            },
+            kind: Line,
+            preceding_blank_line: false,
+        },
+        Comment {
+            content: "methods above demonstrate state threading works correctly.",
+            span: Span {
+                start: 680,
+                end: 680,
+            },
+            kind: Line,
+            preceding_blank_line: false,
+        },
+    ],
 }

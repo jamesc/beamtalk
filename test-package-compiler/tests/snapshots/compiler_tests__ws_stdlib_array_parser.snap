@@ -17,6 +17,7 @@ Module {
                             end: 127,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -25,6 +26,7 @@ Module {
                             end: 127,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test Array (tuple) operations",
@@ -33,6 +35,7 @@ Module {
                             end: 127,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Array creation",
@@ -41,6 +44,7 @@ Module {
                             end: 127,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -280,6 +284,7 @@ Module {
         end: 732,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
 
 Diagnostics:

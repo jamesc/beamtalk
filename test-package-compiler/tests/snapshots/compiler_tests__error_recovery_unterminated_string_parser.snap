@@ -17,6 +17,7 @@ Module {
                             end: 192,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -25,6 +26,7 @@ Module {
                             end: 192,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test error recovery: unterminated string",
@@ -33,6 +35,7 @@ Module {
                             end: 192,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Lexer should recover and continue",
@@ -41,6 +44,7 @@ Module {
                             end: 192,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Unterminated double quote string",
@@ -49,6 +53,7 @@ Module {
                             end: 192,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -111,6 +116,7 @@ Module {
                             end: 338,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -168,4 +174,5 @@ Module {
         end: 347,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

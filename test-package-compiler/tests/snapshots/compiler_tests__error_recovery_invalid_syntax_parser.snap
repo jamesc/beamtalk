@@ -17,6 +17,7 @@ Module {
                             end: 180,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -25,6 +26,7 @@ Module {
                             end: 180,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test error recovery: invalid syntax",
@@ -33,6 +35,7 @@ Module {
                             end: 180,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Parser should create error nodes and continue",
@@ -41,6 +44,7 @@ Module {
                             end: 180,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Unexpected token",
@@ -49,6 +53,7 @@ Module {
                             end: 180,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -103,6 +108,7 @@ Module {
                             end: 210,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -157,6 +163,7 @@ Module {
                             end: 312,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -176,6 +183,7 @@ Module {
         end: 372,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
 
 Diagnostics:

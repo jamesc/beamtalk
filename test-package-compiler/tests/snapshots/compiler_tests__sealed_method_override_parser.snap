@@ -76,6 +76,7 @@ Module {
                             end: 209,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -84,6 +85,7 @@ Module {
                             end: 209,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test that overriding a sealed method produces a diagnostic error.",
@@ -92,6 +94,7 @@ Module {
                             end: 209,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Parent defines a sealed method, Child tries to override it.",
@@ -100,6 +103,7 @@ Module {
                             end: 209,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -262,4 +266,5 @@ Module {
         end: 333,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

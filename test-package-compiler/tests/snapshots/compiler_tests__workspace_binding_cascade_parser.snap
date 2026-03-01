@@ -155,6 +155,7 @@ Module {
                             end: 135,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Cascade messages to a workspace binding should use persistent_term PID lookup.",
@@ -163,6 +164,7 @@ Module {
                             end: 135,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -181,4 +183,5 @@ Module {
         end: 205,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

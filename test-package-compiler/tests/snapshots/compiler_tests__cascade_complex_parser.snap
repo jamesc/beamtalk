@@ -17,6 +17,7 @@ Module {
                             end: 215,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -25,6 +26,7 @@ Module {
                             end: 215,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test complex cascade scenarios",
@@ -33,6 +35,7 @@ Module {
                             end: 215,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Multiple cascaded messages with different types",
@@ -41,6 +44,7 @@ Module {
                             end: 215,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Cascade with unary, binary, and keyword messages",
@@ -49,6 +53,7 @@ Module {
                             end: 215,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -164,6 +169,7 @@ Module {
                             end: 323,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -376,6 +382,7 @@ Module {
         end: 612,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
 
 Diagnostics:

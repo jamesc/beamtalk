@@ -17,6 +17,7 @@ Module {
                             end: 319,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -25,6 +26,7 @@ Module {
                             end: 319,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test boundary condition: long identifiers and strings",
@@ -33,6 +35,7 @@ Module {
                             end: 319,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Validate parser handles extremely long tokens",
@@ -41,6 +44,7 @@ Module {
                             end: 319,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Very long identifier (100 characters)",
@@ -49,6 +53,7 @@ Module {
                             end: 319,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -89,6 +94,7 @@ Module {
                             end: 383,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -129,6 +135,7 @@ Module {
                             end: 668,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -244,6 +251,7 @@ Module {
                             end: 916,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -315,6 +323,7 @@ Module {
         end: 997,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
 
 Diagnostics:

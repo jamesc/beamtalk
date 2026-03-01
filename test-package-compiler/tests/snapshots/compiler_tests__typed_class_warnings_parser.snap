@@ -127,6 +127,7 @@ Module {
                                     end: 394,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -263,6 +264,7 @@ Module {
                                     end: 489,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -428,6 +430,7 @@ Module {
                                     end: 609,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -450,6 +453,7 @@ Module {
                             end: 280,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -458,6 +462,7 @@ Module {
                             end: 280,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Smoke test for typed class annotation warnings (BT-941).",
@@ -466,6 +471,7 @@ Module {
                             end: 280,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "",
@@ -474,6 +480,7 @@ Module {
                             end: 280,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "A `typed` class with deliberately incomplete annotations, so we can",
@@ -482,6 +489,7 @@ Module {
                             end: 280,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "verify the type checker surfaces warnings for missing annotations.",
@@ -490,6 +498,7 @@ Module {
                             end: 280,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -508,6 +517,7 @@ Module {
         end: 684,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
 
 Diagnostics:

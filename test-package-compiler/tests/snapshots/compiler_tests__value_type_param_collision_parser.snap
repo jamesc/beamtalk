@@ -140,6 +140,7 @@ Module {
                                     end: 766,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                             Comment {
                                 content: "Before BT-369, to_core_var kept \"_seq0\" verbatim while fresh_temp_var(\"seq\")",
@@ -148,6 +149,7 @@ Module {
                                     end: 766,
                                 },
                                 kind: Line,
+                                preceding_blank_line: false,
                             },
                             Comment {
                                 content: "could produce \"_seq1\", \"_seq2\" — a near-miss that could collide if naming",
@@ -156,6 +158,7 @@ Module {
                                     end: 766,
                                 },
                                 kind: Line,
+                                preceding_blank_line: false,
                             },
                             Comment {
                                 content: "conventions changed. Now both use the counter.",
@@ -164,6 +167,7 @@ Module {
                                     end: 766,
                                 },
                                 kind: Line,
+                                preceding_blank_line: false,
                             },
                         ],
                         trailing: None,
@@ -186,6 +190,7 @@ Module {
                             end: 451,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -194,6 +199,7 @@ Module {
                             end: 451,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Compiler snapshot test for BT-369: value-type temp var collision avoidance",
@@ -202,6 +208,7 @@ Module {
                             end: 451,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "",
@@ -210,6 +217,7 @@ Module {
                             end: 451,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Verifies that method parameters with underscore-prefixed names (e.g., _seq0)",
@@ -218,6 +226,7 @@ Module {
                             end: 451,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "don't collide with codegen-internal temp vars used for expression sequencing.",
@@ -226,6 +235,7 @@ Module {
                             end: 451,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Both parameter binding and sequencing temp vars go through the fresh_var",
@@ -234,6 +244,7 @@ Module {
                             end: 451,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "counter, ensuring unique Core Erlang variable names.",
@@ -242,6 +253,7 @@ Module {
                             end: 451,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -260,4 +272,5 @@ Module {
         end: 803,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

@@ -152,6 +152,15 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
         docs.push(unparse_expression_statement(stmt));
     }
 
+    // File-level trailing comments (after the last class/method/expression)
+    for comment in &module.file_trailing_comments {
+        if comment.preceding_blank_line {
+            docs.push(line());
+        }
+        docs.push(unparse_comment(comment));
+        docs.push(line());
+    }
+
     concat(docs)
 }
 
@@ -980,7 +989,13 @@ fn unparse_expect_category(cat: ExpectCategory) -> Document<'static> {
 /// Line comments become `// content`, block comments become `/* content */`.
 fn unparse_comment(comment: &Comment) -> Document<'static> {
     match comment.kind {
-        CommentKind::Line => docvec!["// ", Document::String(comment.content.to_string())],
+        CommentKind::Line => {
+            if comment.content.is_empty() {
+                Document::Str("//")
+            } else {
+                docvec!["// ", Document::String(comment.content.to_string())]
+            }
+        }
         CommentKind::Block => {
             docvec!["/* ", Document::String(comment.content.to_string()), " */"]
         }
@@ -993,7 +1008,12 @@ fn unparse_comment(comment: &Comment) -> Document<'static> {
 /// element starts on a fresh line.
 fn unparse_comment_attachment_leading(ca: &CommentAttachment) -> Vec<Document<'static>> {
     let mut docs: Vec<Document<'static>> = Vec::new();
-    for comment in &ca.leading {
+    for (i, comment) in ca.leading.iter().enumerate() {
+        // Emit blank line between comment groups (but not before the first —
+        // the calling context already manages spacing before the attachment).
+        if i > 0 && comment.preceding_blank_line {
+            docs.push(line());
+        }
         docs.push(unparse_comment(comment));
         docs.push(line());
     }
@@ -1449,6 +1469,30 @@ mod tests {
                 "line {i} has trailing whitespace: {line_text:?}"
             );
         }
+    }
+
+    // --- File trailing comments ---
+
+    #[test]
+    fn file_trailing_comments_preserved() {
+        let source =
+            "Object subclass: Foo\n  bar => 1\n\n// trailing comment 1\n// trailing comment 2\n";
+        let module = parse_source(source);
+        assert_eq!(
+            module.file_trailing_comments.len(),
+            2,
+            "expected 2 trailing comments, got: {:?}",
+            module.file_trailing_comments
+        );
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("// trailing comment 1"),
+            "missing trailing comment 1 in: {output}"
+        );
+        assert!(
+            output.contains("// trailing comment 2"),
+            "missing trailing comment 2 in: {output}"
+        );
     }
 
     // --- Round-trip: parse → unparse → parse ---

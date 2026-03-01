@@ -62,6 +62,7 @@ Module {
                                     end: 301,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -445,6 +446,7 @@ Module {
                                     end: 613,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -562,6 +564,7 @@ Module {
                                     end: 717,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -584,6 +587,7 @@ Module {
                             end: 253,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -592,6 +596,7 @@ Module {
                             end: 253,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test Dictionary class compilation as a value type (not gen_server).",
@@ -600,6 +605,7 @@ Module {
                             end: 253,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Dictionary is a sealed Object subclass backed by Erlang maps.",
@@ -608,6 +614,7 @@ Module {
                             end: 253,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "new/0 should return #{} (empty map).",
@@ -616,6 +623,7 @@ Module {
                             end: 253,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -634,4 +642,5 @@ Module {
         end: 756,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

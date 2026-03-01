@@ -424,6 +424,7 @@ Module {
                             end: 143,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -432,6 +433,7 @@ Module {
                             end: 143,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test class method codegen (class-side methods, class variables)",
@@ -440,6 +442,7 @@ Module {
                             end: 143,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -458,4 +461,5 @@ Module {
         end: 422,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

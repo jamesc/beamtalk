@@ -17,6 +17,7 @@ Module {
                             end: 187,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -25,6 +26,7 @@ Module {
                             end: 187,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test character literal codegen - $a compiles to integer codepoint",
@@ -33,6 +35,7 @@ Module {
                             end: 187,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "===== Basic Character Literals =====",
@@ -41,6 +44,7 @@ Module {
                             end: 187,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -143,6 +147,7 @@ Module {
                             end: 264,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -256,6 +261,7 @@ Module {
                             end: 336,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -349,6 +355,7 @@ Module {
                             end: 414,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -416,4 +423,5 @@ Module {
         end: 432,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
