@@ -29,7 +29,7 @@ helpResult includesSubstring: "Instance methods:"
 
 // help:selector: returns method documentation for a known method
 methodHelp := Beamtalk help: Integer selector: #asString
-// => Integer >> asString_
+// => == Integer >> asString ==_
 
 // Method help result is non-empty
 methodHelp isEmpty

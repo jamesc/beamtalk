@@ -16,6 +16,7 @@ use crate::docvec;
 ///
 /// These back the `@primitive "classXxx"` method bodies in `lib/Behaviour.bt`.
 /// Each maps to a direct call to `beamtalk_behaviour_intrinsics:Func(Self)`.
+#[allow(clippy::too_many_lines)]
 pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         "classSuperclass" => Some(docvec![
@@ -113,6 +114,14 @@ pub fn generate_behaviour_bif(selector: &str, params: &[String]) -> Option<Docum
                 sel.clone(),
                 ", ",
                 doc.clone(),
+                ")",
+            ])
+        }
+        "classDocForMethod" => {
+            let sel = params.first()?;
+            Some(docvec![
+                "call 'beamtalk_behaviour_intrinsics':'classDocForMethod'(Self, ",
+                sel.clone(),
                 ")",
             ])
         }
@@ -252,6 +261,21 @@ mod tests {
             result,
             Some(
                 "call 'beamtalk_behaviour_intrinsics':'classSetMethodDoc'(Self, Selector, DocStr)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_class_doc_for_method() {
+        let result = doc_to_string(generate_behaviour_bif(
+            "classDocForMethod",
+            &["Selector".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_behaviour_intrinsics':'classDocForMethod'(Self, Selector)"
                     .to_string()
             )
         );

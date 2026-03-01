@@ -187,6 +187,16 @@ abstract Object subclass: Behaviour
   /// ```
   sealed setDocForMethod: aSelector to: aString => @primitive "classSetMethodDoc"
 
+  /// Return the documentation string for a specific method, or nil if no doc
+  /// is set or the method does not exist.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter docForMethod: #increment   // => "Increase the counter by one." (or nil)
+  /// Counter docForMethod: #nonExistent // => nil
+  /// ```
+  sealed docForMethod: aSelector => @primitive "classDocForMethod"
+
   // --- Identity ---
 
   /// Test whether this is a Behaviour (class-describing object).

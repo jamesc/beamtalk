@@ -49,3 +49,15 @@ TestCase subclass: RuntimeDocTest
   testDocSetterReturnsSelf =>
     result := DocTestHelper doc: "Chainable"
     self assert: result equals: DocTestHelper
+
+  // --- docForMethod: ---
+
+  testDocForMethodReturnsDoc =>
+    DocTestHelper setDocForMethod: #greet to: "Say hello"
+    self assert: (DocTestHelper docForMethod: #greet) equals: "Say hello"
+
+  testDocForMethodNilWhenNoDoc =>
+    self assert: (DocTestHelper docForMethod: #add:to:) equals: nil
+
+  testDocForMethodNilForNonExistent =>
+    self assert: (DocTestHelper docForMethod: #nonExistent) equals: nil

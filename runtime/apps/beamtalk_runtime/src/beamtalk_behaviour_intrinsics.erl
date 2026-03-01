@@ -37,6 +37,7 @@
 %%% | classDoc/1                  | Class doc string from class gen_server state (ADR 0033)   |
 %%% | classSetDoc/2               | Set class doc string (ADR 0033)                           |
 %%% | classSetMethodDoc/3         | Set method doc string for a selector (ADR 0033)           |
+%%% | classDocForMethod/2         | Get method doc string for a selector, or nil (BT-991)     |
 %%% | classRemoveFromSystem/1     | Remove class and cleanup runtime state                    |
 %%% | classSourceFile/1           | Source file path from beamtalk_source module attr (BT-845)|
 %%% | classReload/1               | Recompile from sourceFile + hot-swap (BT-845)             |
@@ -74,6 +75,7 @@
     classDoc/1,
     classSetDoc/2,
     classSetMethodDoc/3,
+    classDocForMethod/2,
     %% BT-785: Class removal
     classRemoveFromSystem/1,
     %% BT-845: ADR 0040 Phase 2 — class-based reload
@@ -408,6 +410,21 @@ classSetMethodDoc(Self, Selector, DocBinary) ->
     ClassPid = erlang:element(4, Self),
     ok = gen_server:call(ClassPid, {set_method_doc, Selector, DocBinary}),
     Self.
+
+%% @doc Get the documentation string for a specific method selector, or nil.
+%%
+%% BT-991: Completes the documentation API symmetry on Behaviour.
+%% Returns the doc binary if set, nil if the method does not exist or has no
+%% documentation. Walks the superclass chain via beamtalk_method_resolver.
+-spec classDocForMethod(#beamtalk_object{}, atom()) -> binary() | 'nil'.
+classDocForMethod(Self, Selector) ->
+    ClassPid = erlang:element(4, Self),
+    case beamtalk_method_resolver:resolve(ClassPid, Selector) of
+        nil ->
+            nil;
+        MethodObj when is_map(MethodObj) ->
+            maps:get('__doc__', MethodObj, nil)
+    end.
 
 %% @doc Remove this class from the system, performing full cleanup.
 %%
