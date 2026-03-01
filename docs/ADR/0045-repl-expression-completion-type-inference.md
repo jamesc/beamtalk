@@ -234,7 +234,7 @@ Rejected because: the purity analysis is itself a non-trivial static analysis pr
 
 ### Cache prior evaluation results
 
-After the user evaluates `'hello' size` and sees `5`, cache `{'hello' size', Integer}` and use that for completion the next time the same prefix is typed. This is not speculative evaluation — it reuses results the user already caused.
+After the user evaluates `'hello' size` and sees `5`, cache `{'hello' size, Integer}` and use that for completion the next time the same prefix is typed. This is not speculative evaluation — it reuses results the user already caused.
 
 Rejected for this ADR as a primary mechanism because: the cache is stale after bindings change, requires matching against arbitrary expression text (a fuzzy equality problem), and only works for expressions the user has already fully evaluated. It could be a useful complement to chain resolution in a future iteration but does not cover the primary case of typing a new expression for the first time.
 
@@ -272,7 +272,7 @@ This confirms the codegen → registry → lookup pipeline before investing in t
 ### Phase 1: Annotation audit and codegen
 
 - **`runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl`**: add `method_return_types` and `class_method_return_types` fields to `class_state`
-- **`crates/beamtalk-core/src/codegen/`**: emit both new maps from `MethodDefinition.return_type` in the same codegen pass that emits `method_signatures`; emit `'dynamic'` atom when `return_type` is `None` and the method body is too complex to infer, or omit the key (absence = dynamic)
+- **`crates/beamtalk-core/src/codegen/`**: emit both new maps from `MethodDefinition.return_type` in the same codegen pass that emits `method_signatures`; omit the selector key entirely when `return_type` is `None` or non-Simple (absence = dynamic, consistent with the record type and Decision section)
 - **`crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs`**: audit ~337 built-in method entries; add `return_type` for unambiguous cases (Integer arithmetic, String operations, Collection operations, Boolean predicates)
 - **`stdlib/src/*.bt`**: add `-> ClassName` return-type annotations on key stdlib methods
 - Target: high-frequency chains covered before Phase 2
