@@ -365,9 +365,10 @@ fn unparse_method_definition_with_prefix(
             if body_str.contains('\n') {
                 docs.push(nest(2, docvec![line(), body, trail_doc]));
             } else {
-                docs.push(group(docvec![
-                    nest(2, docvec![break_("", " "), body, trail_doc]),
-                ]));
+                docs.push(group(docvec![nest(
+                    2,
+                    docvec![break_("", " "), body, trail_doc]
+                ),]));
             }
         }
         stmts => {
@@ -769,15 +770,13 @@ fn unparse_concat_chain(expr: &Expression) -> Option<Document<'static>> {
         Some(inline)
     } else {
         // One segment per line, continuation lines start with "++ "
-        let mut docs: Vec<Document<'static>> = vec![seg_docs[0].clone()];
+        let first = seg_docs[0].clone();
+        let mut continuation: Vec<Document<'static>> = Vec::new();
         for seg_doc in &seg_docs[1..] {
-            docs.push(line());
-            docs.push(docvec!["++ ", seg_doc.clone()]);
+            continuation.push(line());
+            continuation.push(docvec!["++ ", seg_doc.clone()]);
         }
-        Some(docvec![
-            seg_docs[0].clone(),
-            nest(2, concat(docs[1..].to_vec()))
-        ])
+        Some(docvec![first, nest(2, concat(continuation))])
     }
 }
 
@@ -1088,12 +1087,7 @@ fn unparse_map_literal(pairs: &[MapPair]) -> Document<'static> {
         }
         body.push(pair_doc);
     }
-    group(docvec![
-        "#{",
-        nest(2, concat(body)),
-        break_("", ""),
-        "}",
-    ])
+    group(docvec!["#{", nest(2, concat(body)), break_("", ""), "}",])
 }
 
 fn unparse_map_pair(pair: &MapPair) -> Document<'static> {
@@ -1791,6 +1785,30 @@ mod tests {
         assert!(
             output.contains("assert: txn to equals: \"Bob\""),
             "last cascade message should not have trailing semicolon: {output}"
+        );
+    }
+
+    // --- Map literal formatting ---
+
+    #[test]
+    fn map_literal_short_stays_inline() {
+        let source = "Actor subclass: A\n  m => #{#a => 1, #b => 2}";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("#{#a => 1, #b => 2}"),
+            "short map should stay inline: {output}"
+        );
+    }
+
+    #[test]
+    fn map_literal_long_breaks() {
+        let source = "Actor subclass: A\n  m => #{#name => \"Alice\", #age => 30, #city => \"Wonderland\", #country => \"Fantasy\"}";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("#{\n"),
+            "long map should break to multi-line: {output}"
         );
     }
 
