@@ -220,7 +220,7 @@ Fast path via Erlang runtime registry; fallback to Rust port for unannotated met
 
 **Why deferred, not rejected**: Option C's fast path is Option A — the `method_return_types` chain walk — verbatim. The fallback adds port-based inference for unannotated methods on top. This means Option A is the correct first step: it builds exactly the infrastructure Option C needs, without committing to the port fallback before the ClassHierarchy-in-port problem is solved. Option C is not rejected — it is the natural upgrade path from Option A.
 
-The ClassHierarchy-in-port problem has a clean solution that does not require source code or whole-world recompilation: **BEAM metadata streaming via a background actor**. When a Beamtalk class is compiled and loaded in the REPL, the generated BEAM module already contains the full class metadata as callable functions (`instance_methods/0`, `class_methods/0`, and with this ADR's work, `method_return_types/0`). A background actor can stream this metadata to the compiler session gen-server as classes are registered, populating an incremental `ClassHierarchy` without source. The compiler session can reconstruct its state after a crash by reading all loaded Beamtalk BEAM modules directly — the same recovery model as Dialyzer's PLT. This mechanism is sufficient for completion and cross-class type checking; body-level inference for unannotated methods requires source and is a secondary concern. A follow-up issue (BT-XXXX) tracks this design.
+The ClassHierarchy-in-port problem has a clean solution that does not require source code or whole-world recompilation: **BEAM metadata streaming via a background actor**. When a Beamtalk class is compiled and loaded in the REPL, the generated BEAM module already contains the full class metadata as callable functions (`instance_methods/0`, `class_methods/0`, and with this ADR's work, `method_return_types/0`). A background actor can stream this metadata to the compiler session gen-server as classes are registered, populating an incremental `ClassHierarchy` without source. The compiler session can reconstruct its state after a crash by reading all loaded Beamtalk BEAM modules directly — the same recovery model as Dialyzer's PLT. This mechanism is sufficient for completion and cross-class type checking; body-level inference for unannotated methods requires source and is a secondary concern. A follow-up issue (BT-993) tracks this design.
 
 **Tension points**: The BEAM veteran and language designer cohorts make the strongest case for Option B/C. The core tension is "coverage today vs. architectural coherence long-term." Option A has better coverage for user-defined classes today; Option B has better architectural coherence for the future. The decision takes coverage as the priority because the REPL is the primary editing surface. Option A is not a permanent commitment — it is the starting point of a progression toward Option C.
 
@@ -306,7 +306,7 @@ Not applicable — this is additive. The existing single-token completion path i
 
 ## References
 
-- Related issues: BT-989
+- Related issues: BT-989, BT-993 (incremental compiler ClassHierarchy — upgrade path to Option C)
 - Related ADRs: ADR 0022 (embedded compiler via OTP Port), ADR 0024 (static-first IDE tooling), ADR 0025 (gradual typing and protocols), ADR 0033 (runtime-embedded documentation)
 - Current completion implementation: `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_dev.erl`
 - Method signature storage: `runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl`
