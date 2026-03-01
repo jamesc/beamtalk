@@ -5,9 +5,9 @@ Proposed 2026-03-01
 
 ## Context
 
-The REPL completion system handles single-token receivers: class names, workspace bindings, and simple literals (integers, strings). Concretely, `'hello' si` offers String methods, `counter m` offers Counter methods (via runtime `class_of/1`), and `Integer cl` offers Integer class methods. These work because the receiver is a single, classifiable token.
+The REPL completion system handles single-token receivers: class names, workspace bindings, and simple literals (integers, strings). Concretely, `"hello" si` offers String methods, `counter m` offers Counter methods (via runtime `class_of/1`), and `Integer cl` offers Integer class methods. These work because the receiver is a single, classifiable token.
 
-Completions fail for expressions with chained sends. Typing `'hello' size cl` should offer Integer methods (because `String >> size` returns an Integer), but the current engine cannot determine that. Similarly, `#(1 2 3) collect: [:x | x * 2] si` and `counter getValue to` produce no completions because the receiver is not a single token.
+Completions fail for expressions with chained sends. Typing `"hello" size cl` should offer Integer methods (because `String#size` is annotated `-> Integer`), but the current engine cannot determine that. Similarly, `#(1, 2, 3) collect: [:x | x * 2] si` and `counter getValue to` produce no completions because the receiver is not a single token.
 
 Evaluating subexpressions to infer their type is not viable: `counter increment cl` would mutate state as a side effect of requesting completions. The solution must be **inference without evaluation**.
 
@@ -59,7 +59,7 @@ The completion engine is extended with a chain-resolution path triggered when th
 
 ```erlang
 %% Resolve the type at the end of a send chain.
-%% e.g., 'hello' size  →  Integer
+%% e.g., "hello" size  →  Integer
 %%        counter getValue reversed  →  String (if getValue -> String)
 -spec resolve_chain_type(binary(), map()) -> {ok, atom()} | undefined.
 resolve_chain_type(Expr, Bindings) ->
@@ -122,17 +122,17 @@ get_context_completions(Code, Bindings) ->
 The incomplete token at the cursor is stripped before chain resolution, leaving a complete send chain:
 
 ```
-User types:  'hello' size cl
+User types:  "hello" size cl
              ─────────────── ──
              ReceiverExpr   Prefix
-Chain:       'hello'  →  size  →  [prefix cl stripped]
+Chain:       "hello"  →  size  →  [prefix cl stripped]
 Resolved:    String   →  Integer
 Offered:     clock, collect:, collect:separatedBy:, isZero, max:, min:, ...
 ```
 
 ### Send Chain Scope
 
-Chain resolution initially supports **unary send chains** — sequences of unary (zero-argument) messages separated by whitespace. This covers the common patterns: `'hello' size cl<TAB>`, `counter getValue to<TAB>`, `#(1 2 3) size is<TAB>`.
+Chain resolution initially supports **unary send chains** — sequences of unary (zero-argument) messages separated by whitespace. This covers the common patterns: `"hello" size cl<TAB>`, `counter getValue to<TAB>`, `#(1, 2, 3) size is<TAB>`.
 
 **Not in initial scope:**
 - **Keyword sends mid-chain:** `myList inject: 0 into: [...] si<TAB>` — reconstructing `inject:into:` as a single selector from space-separated tokens requires bracket matching and keyword-arg parsing. This is a significant parsing problem deferred to a follow-up.
@@ -150,10 +150,10 @@ The chain resolution breaks silently when a method in the chain has no `-> Class
 ### REPL Session Example
 
 ```
-bt> 'hello' size <TAB>
+bt> "hello" size <TAB>
 clock  collect:  collect:separatedBy:  isZero  max:  min:  ...
 
-bt> #(1 2 3) size <TAB>
+bt> #(1, 2, 3) size <TAB>
 clock  collect:  collect:separatedBy:  isZero  max:  min:  ...
 
 bt> counter getValue <TAB>       % user-defined class, annotation present
@@ -168,7 +168,7 @@ deposit:  withdraw:  balance  ...
 
 ## Prior Art
 
-**Pharo Smalltalk**: The Pharo completion system uses AST-level type hints without evaluation. The default algorithm extracts type information from method argument naming conventions (`aString`, `anInteger`) for ~36% coverage; heuristics improve this to ~50%. Pharo workspaces also use results of prior evaluations: if you have evaluated `'hello' size` and the result `5` is visible in the workspace, the completion engine can use that runtime result. Beamtalk adopts the same "no evaluation" principle; the chain-inference approach is closer to Pharo's static AST analysis path than to the result-caching path.
+**Pharo Smalltalk**: The Pharo completion system uses AST-level type hints without evaluation. The default algorithm extracts type information from method argument naming conventions (`aString`, `anInteger`) for ~36% coverage; heuristics improve this to ~50%. Pharo workspaces also use results of prior evaluations: if you have evaluated `"hello" size` and the result `5` is visible in the workspace, the completion engine can use that runtime result. Beamtalk adopts the same "no evaluation" principle; the chain-inference approach is closer to Pharo's static AST analysis path than to the result-caching path.
 
 **Elixir IEx / ElixirSense**: Completion uses `@spec` type annotations on compiled module metadata. Return types must be explicitly annotated; IEx does not infer intermediate types for chained calls. Elixir stores type information separately from documentation strings — `@spec` is a typed contract, `@doc` is a display string. Beamtalk's decision to store `method_return_types` separately from `method_signatures` follows this same principle: display and machine-readable data have different consumers and different stability requirements.
 
@@ -180,7 +180,7 @@ deposit:  withdraw:  balance  ...
 
 ## User Impact
 
-**Newcomer** (Python/JS/Ruby background): Completions work for common patterns (`'hello' size <TAB>`, `myList size <TAB>`) without any configuration. Chains through unannotated methods silently produce no completions rather than an error — the REPL remains fully functional. The experience improves over time as more stdlib methods are annotated.
+**Newcomer** (Python/JS/Ruby background): Completions work for common patterns (`"hello" size <TAB>`, `myList size <TAB>`) without any configuration. Chains through unannotated methods silently produce no completions rather than an error — the REPL remains fully functional. The experience improves over time as more stdlib methods are annotated.
 
 **Smalltalk developer**: Matches workspace ergonomics — completions after message sends feel natural. The annotation requirement is familiar: Pharo completion quality also depends on type hints. The dev is incentivised to annotate method return types, which also improves `:h` documentation output (BT-988 display signatures) and LSP hover types.
 
@@ -228,13 +228,13 @@ The ClassHierarchy-in-port problem has a clean solution that does not require so
 
 ### Speculative evaluation for pure expressions
 
-Evaluate the receiver expression only when it can be statically determined to be "pure" (no sends to actor objects, no I/O primitives). This would catch `#(1 2 3) size` and similar literal-heavy chains.
+Evaluate the receiver expression only when it can be statically determined to be "pure" (no sends to actor objects, no I/O primitives). This would catch `#(1, 2, 3) size` and similar literal-heavy chains.
 
 Rejected because: the purity analysis is itself a non-trivial static analysis problem. Actor status may not be known statically (a binding could hold either a value object or an actor). The boundary between "safe to evaluate" and "has side effects" is the same problem as full type inference, but with worse failure modes. The Erlang chain resolution is strictly safer.
 
 ### Cache prior evaluation results
 
-After the user evaluates `'hello' size` and sees `5`, cache `{'hello' size, Integer}` and use that for completion the next time the same prefix is typed. This is not speculative evaluation — it reuses results the user already caused.
+After the user evaluates `"hello" size` and sees `5`, cache `{"hello" size, Integer}` and use that for completion the next time the same prefix is typed. This is not speculative evaluation — it reuses results the user already caused.
 
 Rejected for this ADR as a primary mechanism because: the cache is stale after bindings change, requires matching against arbitrary expression text (a fuzzy equality problem), and only works for expressions the user has already fully evaluated. It could be a useful complement to chain resolution in a future iteration but does not cover the primary case of typing a new expression for the first time.
 
@@ -286,7 +286,7 @@ This confirms the codegen → registry → lookup pipeline before investing in t
 ### Phase 3: Tests
 
 - Unit tests for `walk_chain/2` (single hop, multi-hop, broken chain, absent annotation)
-- E2e REPL completion tests: `'hello' size <TAB>` → Integer methods; `counter getValue <TAB>` → correct methods for return type; `counter unknownChain <TAB>` → empty
+- E2e REPL completion tests: `"hello" size <TAB>` → Integer methods; `counter getValue <TAB>` → correct methods for return type; `counter unknownChain <TAB>` → empty
 
 ### Affected components
 
