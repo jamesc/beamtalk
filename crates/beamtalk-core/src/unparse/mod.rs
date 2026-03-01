@@ -243,24 +243,7 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         docs.push(line());
     }
 
-    // Instance methods — the line() is placed INSIDE nest(2, ...) so it renders
-    // at indent=2, giving the leading comment and method signature their correct
-    // 2-space indentation.  A leading comment's trailing line() also runs at
-    // indent=2, so the signature is never shifted to column 0.
-    for (i, method) in class.methods.iter().enumerate() {
-        if i > 0 {
-            // Blank line between consecutive methods
-            docs.push(line());
-        }
-        docs.push(nest(2, docvec![line(), unparse_method_definition(method)]));
-    }
-
-    // Blank line between last instance method and first class-side method
-    if !class.methods.is_empty() && !class.class_methods.is_empty() {
-        docs.push(line());
-    }
-
-    // Class-side methods
+    // Class-side methods (before instance methods)
     for (i, method) in class.class_methods.iter().enumerate() {
         if i > 0 {
             // Blank line between consecutive class-side methods
@@ -273,6 +256,23 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
                 unparse_method_definition_with_prefix(method, Document::Str("class "))
             ],
         ));
+    }
+
+    // Blank line between last class-side method and first instance method
+    if !class.methods.is_empty() && !class.class_methods.is_empty() {
+        docs.push(line());
+    }
+
+    // Instance methods — the line() is placed INSIDE nest(2, ...) so it renders
+    // at indent=2, giving the leading comment and method signature their correct
+    // 2-space indentation.  A leading comment's trailing line() also runs at
+    // indent=2, so the signature is never shifted to column 0.
+    for (i, method) in class.methods.iter().enumerate() {
+        if i > 0 {
+            // Blank line between consecutive methods
+            docs.push(line());
+        }
+        docs.push(nest(2, docvec![line(), unparse_method_definition(method)]));
     }
 
     concat(docs)
