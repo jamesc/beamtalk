@@ -783,8 +783,7 @@ fn unparse_block(block: &Block) -> Document<'static> {
         [] => docvec!["[", params_doc, "]"],
 
         // Multi-statement block: always break, statements separated by newlines.
-        // The `.` terminator is emitted immediately after the expression and
-        // before any trailing comment, so the comment cannot swallow the separator.
+        // Newlines act as statement separators — no `.` needed.
         // Closed bracket goes on its own line.
         stmts if stmts.len() > 1 => {
             let mut body_docs: Vec<Document<'static>> = Vec::new();
@@ -800,11 +799,7 @@ fn unparse_block(block: &Block) -> Document<'static> {
                 body_docs.extend(unparse_comment_attachment_leading(&stmt.comments));
                 // Expression
                 body_docs.push(unparse_expression(&stmt.expression));
-                // Statement terminator before trailing comment (not after last stmt)
-                if i + 1 < stmts.len() {
-                    body_docs.push(Document::Str("."));
-                }
-                // Trailing comment after the `.` (on the same line)
+                // Trailing comment (on the same line)
                 if let Some(trail) = &stmt.comments.trailing {
                     body_docs.push(Document::Str("  "));
                     body_docs.push(unparse_comment(trail));
@@ -1990,10 +1985,10 @@ mod tests {
         let source = "[\n  x println.\n  y println\n]";
         let module = parse_source(source);
         let out = unparse_module(&module);
-        // Multi-statement: always broken, separated by ".\n  " (dot then newline+indent)
+        // Multi-statement: always broken, newlines separate statements (no dots)
         assert!(
-            out.contains("x println.\n  y println"),
-            "expected broken multi-stmt block in: {out:?}"
+            out.contains("x println\n  y println"),
+            "expected broken multi-stmt block without dots in: {out:?}"
         );
     }
 
