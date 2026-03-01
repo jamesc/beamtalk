@@ -216,7 +216,7 @@ ProtoObject subclass: Object
   /// ```
   notImplemented => self error: "Method not yet implemented"
 
-  /// Send aString to the current transcript without a trailing newline.
+  /// Send aValue to the current transcript without a trailing newline.
   ///
   /// Nil-safe: does nothing when no transcript is set (batch compile, tests).
   ///
@@ -224,9 +224,9 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 trace: "value: "
   /// ```
-  trace: aString: String => TranscriptStream current ifNotNil: [:t | t show: aString]
+  trace: aValue => TranscriptStream current ifNotNil: [:t | t show: aValue]
 
-  /// Send aString to the current transcript followed by a newline.
+  /// Send aValue to the current transcript followed by a newline.
   ///
   /// Nil-safe: does nothing when no transcript is set (batch compile, tests).
   ///
@@ -234,7 +234,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 traceCr: "hello world"
   /// ```
-  traceCr: aString: String => TranscriptStream current ifNotNil: [:t | t show: aString; cr]
+  traceCr: aValue => TranscriptStream current ifNotNil: [:t | t show: aValue; cr]
 
   /// Raise an error with the given message.
   ///
