@@ -252,28 +252,58 @@ format_class_output_sealed_method_test() ->
 
 format_method_output_own_method_test() ->
     Result = beamtalk_repl_docs:format_method_output(
-        'Integer', <<"+">>, 'Integer', {<<"+ other">>, <<"Adds numbers.">>}
+        'Integer',
+        <<"+">>,
+        'Integer',
+        {<<"+ other: Integer -> Integer">>, <<"Adds numbers.">>, false}
     ),
-    ?assert(binary:match(Result, <<"Integer >> +">>) =/= nomatch),
-    ?assert(binary:match(Result, <<"+ other">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"== Integer >> + ==">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"+ other: Integer -> Integer">>) =/= nomatch),
     ?assert(binary:match(Result, <<"Adds numbers.">>) =/= nomatch),
     %% Should NOT show "inherited from" since defining class == queried class
-    ?assertEqual(nomatch, binary:match(Result, <<"inherited">>)).
+    ?assertEqual(nomatch, binary:match(Result, <<"inherited">>)),
+    %% Should NOT show [sealed] for non-sealed method
+    ?assertEqual(nomatch, binary:match(Result, <<"[sealed]">>)).
 
 format_method_output_inherited_method_test() ->
     Result = beamtalk_repl_docs:format_method_output(
-        'Integer', <<"class">>, 'Object', {<<"class">>, <<"Returns the class.">>}
+        'Integer', <<"class">>, 'Object', {<<"class">>, <<"Returns the class.">>, false}
     ),
-    ?assert(binary:match(Result, <<"Integer >> class">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"== Integer >> class ==">>) =/= nomatch),
     ?assert(binary:match(Result, <<"(inherited from Object)">>) =/= nomatch),
     ?assert(binary:match(Result, <<"Returns the class.">>) =/= nomatch).
 
 format_method_output_no_doc_test() ->
     Result = beamtalk_repl_docs:format_method_output(
-        'Counter', <<"increment">>, 'Counter', {<<"increment">>, none}
+        'Counter', <<"increment">>, 'Counter', {<<"increment">>, none, false}
     ),
-    ?assert(binary:match(Result, <<"Counter >> increment">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"== Counter >> increment ==">>) =/= nomatch),
     ?assert(binary:match(Result, <<"increment">>) =/= nomatch).
+
+format_method_output_sealed_method_test() ->
+    Result = beamtalk_repl_docs:format_method_output(
+        'Integer',
+        <<"+">>,
+        'Integer',
+        {<<"+ other: Integer -> Integer">>, <<"Adds numbers.">>, true}
+    ),
+    ?assert(binary:match(Result, <<"== Integer >> + ==">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"[sealed]">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"+ other: Integer -> Integer">>) =/= nomatch).
+
+format_method_output_signature_with_types_test() ->
+    Result = beamtalk_repl_docs:format_method_output(
+        'List', <<"collect:">>, 'List', {<<"collect: block: Block -> List">>, none, false}
+    ),
+    ?assert(binary:match(Result, <<"== List >> collect: ==">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"collect: block: Block -> List">>) =/= nomatch).
+
+format_method_output_unary_with_return_type_test() ->
+    Result = beamtalk_repl_docs:format_method_output(
+        'List', <<"size">>, 'List', {<<"size -> Integer">>, none, false}
+    ),
+    ?assert(binary:match(Result, <<"== List >> size ==">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"size -> Integer">>) =/= nomatch).
 
 %%====================================================================
 %% Metaclass documentation tests (BT-618)
@@ -295,12 +325,12 @@ format_class_docs_metaclass_test() ->
 
 format_metaclass_method_doc_known_test() ->
     {ok, Result} = beamtalk_repl_docs:format_metaclass_method_doc(<<"spawn">>),
-    ?assert(binary:match(Result, <<"Metaclass >> spawn">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"== Metaclass >> spawn ==">>) =/= nomatch),
     ?assert(binary:match(Result, <<"actor">>) =/= nomatch).
 
 format_metaclass_method_doc_new_test() ->
     {ok, Result} = beamtalk_repl_docs:format_metaclass_method_doc(<<"new">>),
-    ?assert(binary:match(Result, <<"Metaclass >> new">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"== Metaclass >> new ==">>) =/= nomatch),
     ?assert(binary:match(Result, <<"new instance">>) =/= nomatch).
 
 format_metaclass_method_doc_unknown_test() ->
@@ -312,7 +342,7 @@ format_metaclass_method_doc_unknown_test() ->
 format_method_doc_metaclass_test() ->
     ?assertMatch({ok, _}, beamtalk_repl_docs:format_method_doc('Metaclass', <<"spawn">>)),
     {ok, Result} = beamtalk_repl_docs:format_method_doc('Metaclass', <<"spawn">>),
-    ?assert(binary:match(Result, <<"Metaclass >> spawn">>) =/= nomatch).
+    ?assert(binary:match(Result, <<"== Metaclass >> spawn ==">>) =/= nomatch).
 
 format_method_doc_metaclass_unknown_test() ->
     ?assertMatch(
@@ -373,7 +403,7 @@ format_method_doc_known_test_() ->
         {"format_method_doc returns docs for Integer +", fun() ->
             {ok, Result} = beamtalk_repl_docs:format_method_doc('Integer', <<"+">>),
             ?assert(is_binary(Result)),
-            ?assert(binary:match(Result, <<"Integer >> +">>) =/= nomatch)
+            ?assert(binary:match(Result, <<"== Integer >> + ==">>) =/= nomatch)
         end},
         {"format_method_doc returns error for unknown class", fun() ->
             ?assertMatch(

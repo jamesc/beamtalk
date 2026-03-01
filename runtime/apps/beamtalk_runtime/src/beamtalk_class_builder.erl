@@ -298,15 +298,19 @@ build_compiled_class_info(
             method_source,
             maps:get(methodSource, BuilderState, undefined),
             maybe_put(
-                class_state,
-                maps:get(classState, BuilderState, undefined),
+                method_signatures,
+                maps:get(methodSignatures, BuilderState, undefined),
                 maybe_put(
-                    doc,
-                    maps:get(classDoc, BuilderState, undefined),
+                    class_state,
+                    maps:get(classState, BuilderState, undefined),
                     maybe_put(
-                        method_docs,
-                        maps:get(methodDocs, BuilderState, undefined),
-                        Base
+                        doc,
+                        maps:get(classDoc, BuilderState, undefined),
+                        maybe_put(
+                            method_docs,
+                            maps:get(methodDocs, BuilderState, undefined),
+                            Base
+                        )
                     )
                 )
             )

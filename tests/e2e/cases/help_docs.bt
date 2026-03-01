@@ -15,11 +15,11 @@
 
 // :help with a known method — should show method signature and doc
 :help Integer +
-// => Integer >> +_
+// => == Integer >> + ==_
 
 // :help with an inherited method — should show inheritance info
 :help Integer isPositive
-// => Integer >> isPositive_(inherited from Number)_
+// => == Integer >> isPositive ==_(inherited from Number)_
 
 // :help with an unknown class — should show helpful error
 :help FakeClassName
@@ -35,7 +35,7 @@
 
 // :help Metaclass with a known class-side method (BT-618)
 :help Metaclass spawn
-// => Metaclass >> spawn_
+// => == Metaclass >> spawn ==_
 
 // :help Metaclass with unknown method — should show error (BT-618)
 :help Metaclass nonExistentMethod

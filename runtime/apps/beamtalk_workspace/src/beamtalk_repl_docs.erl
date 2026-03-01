@@ -129,7 +129,7 @@ format_method_doc(ClassName, SelectorBin) ->
                             MethodObj when is_map(MethodObj) ->
                                 %% Find which class defines this method
                                 DefiningClass = find_defining_class(ClassPid, SelectorAtom),
-                                %% Extract doc and signature from CompiledMethod
+                                %% Extract doc, signature, and sealed from CompiledMethod
                                 DocInfo = method_doc_info(MethodObj, SelectorAtom),
                                 Output = format_method_output(
                                     ClassName,
@@ -173,8 +173,9 @@ format_metaclass_method_doc(SelectorBin) ->
         {ok, Doc} ->
             {ok,
                 iolist_to_binary([
-                    <<"Metaclass >> ">>,
+                    <<"== Metaclass >> ">>,
                     SelectorBin,
+                    <<" ==">>,
                     <<"\n  ">>,
                     SelectorBin,
                     <<"\n\n">>,
@@ -207,8 +208,8 @@ safe_to_existing_atom(Bin) when is_binary(Bin) ->
     end.
 
 %% @doc Get method doc info from a CompiledMethod map.
-%% Returns {Signature, DocText | none}.
--spec method_doc_info(map(), atom()) -> {binary(), binary() | none}.
+%% Returns {Signature, DocText | none, IsSealed}.
+-spec method_doc_info(map(), atom()) -> {binary(), binary() | none, boolean()}.
 method_doc_info(MethodObj, SelectorAtom) ->
     %% Extract doc from __doc__ field
     Doc =
@@ -216,9 +217,21 @@ method_doc_info(MethodObj, SelectorAtom) ->
             nil -> none;
             DocBin when is_binary(DocBin) -> DocBin
         end,
-    %% Use selector as signature (CompiledMethod has selector info)
-    Signature = atom_to_binary(SelectorAtom, utf8),
-    {Signature, Doc}.
+    %% BT-988: Use __signature__ if present, fall back to selector atom
+    Signature =
+        case maps:get('__signature__', MethodObj, nil) of
+            nil -> atom_to_binary(SelectorAtom, utf8);
+            SigBin when is_binary(SigBin) -> SigBin
+        end,
+    %% Extract is_sealed from __method_info__
+    IsSealed =
+        case maps:get('__method_info__', MethodObj, #{}) of
+            MethodInfo when is_map(MethodInfo) ->
+                maps:get(is_sealed, MethodInfo, false);
+            _ ->
+                false
+        end,
+    {Signature, Doc, IsSealed}.
 
 %% @doc Get method signatures and docs from runtime for a list of selectors.
 -spec get_method_signatures_with_sealed(pid(), [atom()], map()) ->
@@ -240,7 +253,8 @@ get_method_doc_from_class(ClassPid, Selector) ->
         nil ->
             {atom_to_binary(Selector, utf8), none};
         MethodObj when is_map(MethodObj) ->
-            method_doc_info(MethodObj, Selector)
+            {Sig, Doc, _IsSealed} = method_doc_info(MethodObj, Selector),
+            {Sig, Doc}
     end.
 
 %% @doc Find which class in the hierarchy defines a selector.
@@ -452,14 +466,21 @@ collect_chain_methods(SuperName, Depth) ->
     atom(),
     binary(),
     atom(),
-    {binary(), binary() | none}
+    {binary(), binary() | none, boolean()}
 ) -> binary().
-format_method_output(ClassName, SelectorBin, DefiningClass, {Signature, DocText}) ->
+format_method_output(ClassName, SelectorBin, DefiningClass, {Signature, DocText, IsSealed}) ->
     Header = iolist_to_binary([
+        <<"== ">>,
         atom_to_binary(ClassName, utf8),
         <<" >> ">>,
-        SelectorBin
+        SelectorBin,
+        <<" ==">>
     ]),
+    SealedLine =
+        case IsSealed of
+            true -> <<"\n[sealed]">>;
+            false -> <<>>
+        end,
     Inherited =
         case DefiningClass of
             ClassName ->
@@ -477,4 +498,4 @@ format_method_output(ClassName, SelectorBin, DefiningClass, {Signature, DocText}
             none -> <<>>;
             Text -> iolist_to_binary([<<"\n\n">>, Text])
         end,
-    iolist_to_binary([Header, Inherited, SignatureLine, Doc]).
+    iolist_to_binary([Header, SealedLine, Inherited, SignatureLine, Doc]).
