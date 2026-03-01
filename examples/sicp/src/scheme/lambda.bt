@@ -16,8 +16,8 @@
 /// lam closureEnv   // => the SchemeEnv actor
 /// ```
 Object subclass: SchemeLambda
-  state: params = #()   // List of parameter name strings
-  state: body = nil   // Unevaluated body expression (AST)
+  state: params     = #()   // List of parameter name strings
+  state: body       = nil   // Unevaluated body expression (AST)
   state: closureEnv = nil   // SchemeEnv actor at point of definition
 
   /// Create a new lambda capturing `p` as parameter names, `b` as the body
@@ -31,10 +31,10 @@ Object subclass: SchemeLambda
     self new: #{#params => p, #body => b, #closureEnv => e}
 
   /// Return the list of parameter name strings.
-  params => self.params
+  params     => self.params
 
   /// Return the unevaluated body AST node.
-  body => self.body
+  body       => self.body
 
   /// Return the `SchemeEnv` actor captured at definition time.
   closureEnv => self.closureEnv

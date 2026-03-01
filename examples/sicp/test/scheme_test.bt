@@ -17,9 +17,9 @@ TestCase subclass: SchemeTest
 
   // Helpers shared across tests
   eval: str =>
-    reader := SchemeReader new
-    ev := SchemeEval new
-    env := ev defaultEnv
+    reader  := SchemeReader new
+    ev      := SchemeEval new
+    env     := ev defaultEnv
     ev eval: (reader read: str) in: env
 
   evalStr: str =>
@@ -33,7 +33,7 @@ TestCase subclass: SchemeTest
 
   testReaderSymbol =>
     reader := SchemeReader new
-    sym := reader read: "foo"
+    sym    := reader read: "foo"
     self assert: (sym class =:= SchemeSymbol)
 
   testReaderBoolTrue =>
@@ -92,8 +92,8 @@ TestCase subclass: SchemeTest
 
   testDefine =>
     reader := SchemeReader new
-    ev := SchemeEval new
-    env := ev defaultEnv
+    ev     := SchemeEval new
+    env    := ev defaultEnv
     ev eval: (reader read: "(define x 10)") in: env
     self assert: (ev eval: (reader read: "x") in: env) equals: 10
 
@@ -171,8 +171,8 @@ TestCase subclass: SchemeTest
 
   testClosure =>
     reader := SchemeReader new
-    ev := SchemeEval new
-    env := ev defaultEnv
+    ev     := SchemeEval new
+    env    := ev defaultEnv
     ev eval: (reader read: "(define make-adder (lambda (n) (lambda (x) (+ n x))))") in: env
     ev eval: (reader read: "(define add5 (make-adder 5))") in: env
     self assert: (ev eval: (reader read: "(add5 10)") in: env) equals: 15
