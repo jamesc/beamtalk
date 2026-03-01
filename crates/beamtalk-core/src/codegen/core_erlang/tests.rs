@@ -5580,3 +5580,89 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
         "No keyword constructor should be generated for empty Value subclass. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_repl_expression_spawn_uses_class_module_index() {
+    // When a REPL expression like `Counter spawn` is compiled in a workspace
+    // with package "getting_started", the class_module_index must be consulted
+    // so the generated code calls 'bt@getting_started@counter':'spawn'()
+    // instead of the heuristic fallback 'bt@counter':'spawn'().
+    let src = "Counter spawn";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let expressions: Vec<_> = module
+        .expressions
+        .iter()
+        .map(|s| s.expression.clone())
+        .collect();
+
+    let mut index = std::collections::HashMap::new();
+    index.insert(
+        "Counter".to_string(),
+        "bt@getting_started@counter".to_string(),
+    );
+
+    let code = generate_repl_expressions_with_index(&expressions, "repl_test_mod", index)
+        .expect("codegen should work");
+
+    assert!(
+        code.contains("'bt@getting_started@counter':'spawn'"),
+        "spawn must use package-qualified module from class_module_index. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'bt@counter':'spawn'"),
+        "Heuristic module name must NOT appear when class_module_index is provided. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_repl_expression_spawn_without_index_uses_heuristic() {
+    // Without class_module_index, spawn falls back to the heuristic bt@ prefix.
+    let src = "Counter spawn";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let expressions: Vec<_> = module
+        .expressions
+        .iter()
+        .map(|s| s.expression.clone())
+        .collect();
+
+    let code =
+        generate_repl_expressions(&expressions, "repl_test_mod").expect("codegen should work");
+
+    assert!(
+        code.contains("'bt@counter':'spawn'"),
+        "Without class_module_index, spawn should use heuristic bt@ prefix. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_repl_expression_spawn_with_args_uses_class_module_index() {
+    // `Counter spawnWith: #{ value: 10 }` must also use class_module_index.
+    let src = "Counter spawnWith: #{ value: 10 }";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let expressions: Vec<_> = module
+        .expressions
+        .iter()
+        .map(|s| s.expression.clone())
+        .collect();
+
+    let mut index = std::collections::HashMap::new();
+    index.insert(
+        "Counter".to_string(),
+        "bt@getting_started@counter".to_string(),
+    );
+
+    let code = generate_repl_expressions_with_index(&expressions, "repl_test_mod", index)
+        .expect("codegen should work");
+
+    assert!(
+        code.contains("'bt@getting_started@counter':'spawn'"),
+        "spawnWith: must use package-qualified module from class_module_index. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'bt@counter':'spawn'"),
+        "Heuristic module name must NOT appear when class_module_index is provided. Got:\n{code}"
+    );
+}

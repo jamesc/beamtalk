@@ -28,6 +28,31 @@
 Actor subclass: Counter
   state: value = 0
 
+  /// Increase the counter by one.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c := Counter spawn
+  /// c increment
+  /// c getValue              // => 1
+  /// ```
   increment => self.value := self.value + 1
+
+  /// Decrease the counter by one.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c := Counter spawn
+  /// c decrement
+  /// c getValue              // => -1
+  /// ```
   decrement => self.value := self.value - 1
+
+  /// Return the current counter value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c := Counter spawn
+  /// c getValue              // => 0
+  /// ```
   getValue => self.value
