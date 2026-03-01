@@ -1239,6 +1239,49 @@ context_completions_instance_binding_returns_instance_methods_test() ->
         cleanup_mock_class('TestCompletionClassB', Pid)
     end.
 
+%% BT: Uppercase global binding (e.g. Transcript) falls back to binding lookup
+context_completions_uppercase_global_binding_returns_instance_methods_test() ->
+    Pid = spawn_mock_class('TestCompletionClassD', #{spawn => ok, 'spawnWith:' => ok}, [
+        show, subscribe, recent
+    ]),
+    try
+        %% Transcript-style: uppercase name that is a binding, not a class
+        Binding = #beamtalk_object{
+            class = 'TestCompletionClassD', class_mod = undefined, pid = self()
+        },
+        Bindings = #{'TestCompletionClassD_inst' => Binding, 'TranscriptMock' => Binding},
+        Result = beamtalk_repl_ops_dev:get_context_completions(<<"TranscriptMock s">>, Bindings),
+        %% Instance methods matching "s" should appear
+        ?assert(lists:member(<<"show">>, Result)),
+        ?assert(lists:member(<<"subscribe">>, Result)),
+        %% Class-side builtins starting with "s" must NOT appear
+        ?assertNot(lists:member(<<"spawn">>, Result)),
+        ?assertNot(lists:member(<<"spawnWith:">>, Result))
+    after
+        cleanup_mock_class('TestCompletionClassD', Pid)
+    end.
+
+%% BT: Value-type binding (tagged map from `new`) returns instance methods
+context_completions_value_type_binding_returns_instance_methods_test() ->
+    Pid = spawn_mock_class('TestCompletionClassC', #{spawn => ok, 'spawnWith:' => ok}, [
+        parse, pairOf, printString
+    ]),
+    try
+        %% Value-type instances are tagged maps with '$beamtalk_class' key
+        Binding = #{'$beamtalk_class' => 'TestCompletionClassC'},
+        Bindings = #{s => Binding},
+        Result = beamtalk_repl_ops_dev:get_context_completions(<<"s p">>, Bindings),
+        %% Instance methods matching "p" should appear
+        ?assert(lists:member(<<"parse">>, Result)),
+        ?assert(lists:member(<<"pairOf">>, Result)),
+        ?assert(lists:member(<<"printString">>, Result)),
+        %% Class-side methods must NOT appear
+        ?assertNot(lists:member(<<"spawn">>, Result)),
+        ?assertNot(lists:member(<<"spawnWith:">>, Result))
+    after
+        cleanup_mock_class('TestCompletionClassC', Pid)
+    end.
+
 %% Helper: spawn a mock class gen_server process and register it in the class registry.
 spawn_mock_class(Name, ClassMethods, InstanceMethods) ->
     RegName = beamtalk_class_registry:registry_name(Name),
