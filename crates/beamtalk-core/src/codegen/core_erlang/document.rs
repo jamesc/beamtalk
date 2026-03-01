@@ -28,6 +28,9 @@
 /// Indentation width used throughout Core Erlang generation.
 pub const INDENT: isize = 4;
 
+/// Default line width for pretty-printing (characters per line).
+pub const DEFAULT_LINE_WIDTH: isize = 80;
+
 /// A pretty-printable document tree.
 ///
 /// Documents are composable, immutable tree structures that describe
@@ -206,61 +209,133 @@ pub fn concat<'a>(docs: impl IntoIterator<Item = Document<'a>>) -> Document<'a> 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     /// All breaks render as their unbroken string (flat).
-    #[expect(dead_code, reason = "Will be used for Group fitting in Phase 2")]
     Flat,
     /// All breaks render as newlines (broken).
     Break,
 }
 
 impl Document<'_> {
-    /// Renders the document to a string.
+    /// Renders the document to a string using the default line width.
     ///
-    /// This is a simple renderer that does not perform line-width fitting.
-    /// Core Erlang has mostly fixed formatting, so we render `Group`/`Break`
-    /// in break mode (always break). This keeps output predictable and
-    /// byte-identical with the existing `write!` approach.
+    /// Uses the Wadler-Lindig algorithm: `Group` nodes are rendered flat when
+    /// their content fits within [`DEFAULT_LINE_WIDTH`] columns, and broken
+    /// (multi-line) otherwise.
     #[must_use]
     pub fn to_pretty_string(&self) -> String {
-        let mut output = String::new();
-        self.render_to(&mut output, 0, Mode::Break);
-        output
+        self.to_pretty_string_width(DEFAULT_LINE_WIDTH)
     }
 
-    /// Recursively renders this document into the output string.
-    fn render_to(&self, output: &mut String, indent: isize, mode: Mode) {
-        match self {
-            Document::Str(s) => output.push_str(s),
-            Document::String(s) => output.push_str(s),
-            Document::Nil => {}
-            Document::Line => {
-                output.push('\n');
-                write_indent(output, indent);
-            }
-            Document::Nest(extra, doc) => {
-                doc.render_to(output, indent + extra, mode);
-            }
-            Document::Vec(docs) => {
-                for doc in docs {
-                    doc.render_to(output, indent, mode);
+    /// Renders the document to a string using the given line width.
+    ///
+    /// Uses the Wadler-Lindig algorithm iteratively with a work-list. When
+    /// deciding whether to render a `Group` flat, the fit check considers both
+    /// the group's content **and** all trailing siblings in the same container,
+    /// so a group is only flattened when `group + continuation` fits within
+    /// `width` columns — matching the standard Wadler-Lindig semantics.
+    #[must_use]
+    pub fn to_pretty_string_width(&self, width: isize) -> String {
+        use std::collections::VecDeque;
+
+        let mut output = String::new();
+        let mut col = 0_isize;
+
+        // Work list: (indent, mode, document_ref).
+        // Elements are processed front-to-back; items pushed with push_front
+        // are processed next, allowing us to expand composite documents in order.
+        let mut work: VecDeque<(isize, Mode, &Document<'_>)> = VecDeque::new();
+        work.push_back((0, Mode::Break, self));
+
+        while let Some((indent, mode, doc)) = work.pop_front() {
+            match doc {
+                Document::Nil => {}
+                Document::Str(s) => {
+                    output.push_str(s);
+                    col += isize::try_from(s.len()).unwrap_or(isize::MAX);
                 }
-            }
-            Document::Group(doc) => {
-                // Try flat mode first: if it fits on one conceptual line, use it
-                // For now, always break (Core Erlang has fixed formatting)
-                doc.render_to(output, indent, Mode::Break);
-            }
-            Document::Break { broken, unbroken } => match mode {
-                Mode::Break => {
-                    output.push_str(broken);
+                Document::String(s) => {
+                    output.push_str(s.as_str());
+                    col += isize::try_from(s.len()).unwrap_or(isize::MAX);
+                }
+                Document::Line => {
                     output.push('\n');
-                    write_indent(output, indent);
+                    write_indent(&mut output, indent);
+                    col = indent;
                 }
-                Mode::Flat => {
-                    output.push_str(unbroken);
+                Document::Nest(extra, inner) => {
+                    work.push_front((indent + extra, mode, inner));
                 }
+                Document::Vec(docs) => {
+                    // Push in reverse so the first element is processed first.
+                    for d in docs.iter().rev() {
+                        work.push_front((indent, mode, d));
+                    }
+                }
+                Document::Group(inner) => {
+                    // Fit check: group content in Flat mode + continuation in
+                    // their current modes, to correctly account for trailing
+                    // siblings that share the same line.
+                    let remaining = width - col;
+                    let fits_flat = {
+                        let mut check: VecDeque<(Mode, &Document<'_>)> = VecDeque::new();
+                        check.push_back((Mode::Flat, inner.as_ref()));
+                        for (_, cont_mode, cont_doc) in &work {
+                            check.push_back((*cont_mode, cont_doc));
+                        }
+                        fits(remaining, check)
+                    };
+                    let child_mode = if fits_flat { Mode::Flat } else { Mode::Break };
+                    work.push_front((indent, child_mode, inner));
+                }
+                Document::Break { broken, unbroken } => match mode {
+                    Mode::Break => {
+                        output.push_str(broken);
+                        output.push('\n');
+                        write_indent(&mut output, indent);
+                        col = indent;
+                    }
+                    Mode::Flat => {
+                        output.push_str(unbroken);
+                        col += isize::try_from(unbroken.len()).unwrap_or(isize::MAX);
+                    }
+                },
+            }
+        }
+
+        output
+    }
+}
+
+/// Returns `true` if the work-list (rendered with each item in its given mode)
+/// fits within `remaining` columns before the next mandatory line break.
+///
+/// Uses an iterative work-list to avoid recursion overflow on deeply nested docs.
+fn fits(mut remaining: isize, mut work: std::collections::VecDeque<(Mode, &Document<'_>)>) -> bool {
+    while let Some((mode, current)) = work.pop_front() {
+        if remaining < 0 {
+            return false;
+        }
+        match current {
+            Document::Nil => {}
+            Document::Str(s) => remaining -= isize::try_from(s.len()).unwrap_or(isize::MAX),
+            Document::String(s) => remaining -= isize::try_from(s.len()).unwrap_or(isize::MAX),
+            // A mandatory Line always resets the column — content after it is fine.
+            Document::Line => return true,
+            Document::Break { unbroken, .. } => match mode {
+                Mode::Flat => remaining -= isize::try_from(unbroken.len()).unwrap_or(isize::MAX),
+                // A break in break mode is a newline — remaining space resets.
+                Mode::Break => return true,
             },
+            Document::Nest(_, inner) => work.push_front((mode, inner)),
+            Document::Vec(docs) => {
+                for d in docs.iter().rev() {
+                    work.push_front((mode, d));
+                }
+            }
+            // Nested groups are also tried flat when checking fits.
+            Document::Group(inner) => work.push_front((Mode::Flat, inner)),
         }
     }
+    remaining >= 0
 }
 
 /// Writes `indent` spaces to the output string.
@@ -397,10 +472,33 @@ mod tests {
     }
 
     #[test]
-    fn group_break_in_break_mode() {
-        let doc = group(docvec!["a", break_("", " "), "b",]);
-        // In break mode (default), breaks render as broken (newline)
-        assert_eq!(doc.to_pretty_string(), "a\nb");
+    fn group_fits_inline() {
+        // "a b" is 3 chars — fits in 80 columns, so group renders flat
+        let doc = group(docvec!["a", break_("", " "), "b"]);
+        assert_eq!(doc.to_pretty_string(), "a b");
+    }
+
+    #[test]
+    fn group_breaks_when_too_long() {
+        // 80 'x' chars + " y" overflows width=80, so group breaks
+        let long = "x".repeat(79);
+        let doc = group(docvec![Document::String(long), break_("", " "), "y"]);
+        assert_eq!(doc.to_pretty_string(), "x".repeat(79) + "\ny");
+    }
+
+    #[test]
+    fn group_fits_with_explicit_narrow_width() {
+        // "ab" is 2 chars; with width=1 it overflows, group breaks
+        let doc = group(docvec!["a", break_("", ""), "b"]);
+        assert_eq!(doc.to_pretty_string_width(1), "a\nb");
+    }
+
+    #[test]
+    fn group_fit_considers_continuation_docs() {
+        // group("a b") fits in 4 chars alone, but "a b c" = 5 chars overflows width=4.
+        // The fit check must consider trailing " c" sibling, so the group breaks.
+        let doc = docvec![group(docvec!["a", break_("", " "), "b"]), " c"];
+        assert_eq!(doc.to_pretty_string_width(4), "a\nb c");
     }
 
     #[test]

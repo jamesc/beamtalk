@@ -35,7 +35,7 @@ use crate::ast::{
     MessageSelector, MethodDefinition, Module, Pattern, StandaloneMethodDefinition,
     StateDeclaration, StringSegment, TypeAnnotation,
 };
-use crate::codegen::core_erlang::document::{Document, concat, line, nil};
+use crate::codegen::core_erlang::document::{Document, break_, concat, group, line, nest, nil};
 use crate::docvec;
 
 // --- Public entry points ---
@@ -113,10 +113,14 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&class.comments));
 
-    // Doc comment
+    // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &class.doc_comment {
         for line_text in doc.lines() {
-            docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            if line_text.is_empty() {
+                docs.push(Document::Str("///"));
+            } else {
+                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            }
             docs.push(line());
         }
     }
@@ -172,18 +176,20 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         docs.push(line());
     }
 
-    // Instance methods
+    // Instance methods — the line() is placed INSIDE nest(2, ...) so it renders
+    // at indent=2, giving the leading comment and method signature their correct
+    // 2-space indentation.  A leading comment's trailing line() also runs at
+    // indent=2, so the signature is never shifted to column 0.
     for method in &class.methods {
-        docs.push(line());
-        docs.push(Document::Str("  "));
-        docs.push(unparse_method_definition(method));
+        docs.push(nest(2, docvec![line(), unparse_method_definition(method)]));
     }
 
     // Class-side methods
     for method in &class.class_methods {
-        docs.push(line());
-        docs.push(Document::Str("  class "));
-        docs.push(unparse_method_definition(method));
+        docs.push(nest(
+            2,
+            docvec![line(), "class ", unparse_method_definition(method)],
+        ));
     }
 
     concat(docs)
@@ -220,10 +226,14 @@ pub(crate) fn unparse_method_definition(method: &MethodDefinition) -> Document<'
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&method.comments));
 
-    // Doc comment
+    // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &method.doc_comment {
         for line_text in doc.lines() {
-            docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            if line_text.is_empty() {
+                docs.push(Document::Str("///"));
+            } else {
+                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            }
             docs.push(line());
         }
     }
@@ -341,10 +351,14 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&state.comments));
 
-    // Doc comment
+    // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &state.doc_comment {
         for line_text in doc.lines() {
-            docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            if line_text.is_empty() {
+                docs.push(Document::Str("///"));
+            } else {
+                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            }
             docs.push(line());
         }
     }
@@ -569,26 +583,80 @@ fn unparse_message_send(
 // --- Block unparsing ---
 
 fn unparse_block(block: &Block) -> Document<'static> {
-    let mut inner: Vec<Document<'static>> = Vec::new();
-
-    if !block.parameters.is_empty() {
+    // Build the parameter prefix: `:x :y | ` (if any)
+    let params_doc: Document<'static> = if block.parameters.is_empty() {
+        nil()
+    } else {
         let params: Vec<Document<'static>> = block
             .parameters
             .iter()
             .map(unparse_block_parameter)
             .collect();
-        inner.extend(join_docs_vec(params, " "));
-        inner.push(Document::Str(" | "));
-    }
+        let mut p = join_docs_vec(params, " ");
+        p.push(Document::Str(" | "));
+        concat(p)
+    };
 
-    for (i, stmt) in block.body.iter().enumerate() {
-        if i > 0 {
-            inner.push(Document::Str(". "));
+    match block.body.as_slice() {
+        // Empty block: `[]`
+        [] => docvec!["[", params_doc, "]"],
+
+        // Multi-statement block: always break, statements separated by newlines.
+        // The `.` terminator is emitted immediately after the expression and
+        // before any trailing comment, so the comment cannot swallow the separator.
+        // Closed bracket goes on its own line.
+        stmts if stmts.len() > 1 => {
+            let mut body_docs: Vec<Document<'static>> = Vec::new();
+            for (i, stmt) in stmts.iter().enumerate() {
+                if i > 0 {
+                    body_docs.push(line());
+                }
+                // Leading comments
+                body_docs.extend(unparse_comment_attachment_leading(&stmt.comments));
+                // Expression
+                body_docs.push(unparse_expression(&stmt.expression));
+                // Statement terminator before trailing comment (not after last stmt)
+                if i + 1 < stmts.len() {
+                    body_docs.push(Document::Str("."));
+                }
+                // Trailing comment after the `.` (on the same line)
+                if let Some(trail) = &stmt.comments.trailing {
+                    body_docs.push(Document::Str("  "));
+                    body_docs.push(unparse_comment(trail));
+                }
+            }
+            let body = concat(body_docs);
+            docvec!["[", params_doc, nest(2, docvec![line(), body]), line(), "]"]
         }
-        inner.push(unparse_expression_statement(stmt));
-    }
 
-    docvec!["[", concat(inner), "]"]
+        // Single-statement block with a trailing LINE comment must break:
+        // rendering `[stmt // comment]` inline would put `]` inside the comment.
+        [single]
+            if matches!(
+                single.comments.trailing.as_ref().map(|c| c.kind),
+                Some(CommentKind::Line)
+            ) =>
+        {
+            let body = unparse_expression_statement(single);
+            docvec!["[", params_doc, nest(2, docvec![line(), body]), line(), "]"]
+        }
+
+        // Single-statement block: width-aware via group().
+        // Fits on one line → `[expr]`; too long → broken across lines.
+        [single] => {
+            let body = unparse_expression_statement(single);
+            group(docvec![
+                "[",
+                params_doc,
+                nest(2, docvec![break_("", ""), body]),
+                break_("", ""),
+                "]",
+            ])
+        }
+
+        // Unreachable: the slice patterns above are exhaustive.
+        _ => unreachable!(),
+    }
 }
 
 fn unparse_block_parameter(param: &BlockParameter) -> Document<'static> {
@@ -1343,6 +1411,74 @@ mod tests {
         assert_idempotent(
             "Actor subclass: Counter\n  state: value = 0\n\n  getValue => self.value\n",
         );
+    }
+
+    // --- Block formatting ---
+
+    #[test]
+    fn short_block_renders_inline() {
+        // A short single-statement block fits within 80 columns → inline
+        let source = "x ifTrue: [^1]";
+        let module = parse_source(source);
+        let out = unparse_module(&module);
+        assert_eq!(out, "x ifTrue: [^1]");
+    }
+
+    #[test]
+    fn short_block_with_param_renders_inline() {
+        let source = "coll do: [:x | x println]";
+        let module = parse_source(source);
+        let out = unparse_module(&module);
+        assert_eq!(out, "coll do: [:x | x println]");
+    }
+
+    #[test]
+    fn multi_statement_block_always_breaks() {
+        let source = "[\n  x println.\n  y println\n]";
+        let module = parse_source(source);
+        let out = unparse_module(&module);
+        // Multi-statement: always broken, separated by ".\n  " (dot then newline+indent)
+        assert!(
+            out.contains("x println.\n  y println"),
+            "expected broken multi-stmt block in: {out:?}"
+        );
+    }
+
+    #[test]
+    fn long_block_breaks() {
+        // Construct a block whose content exceeds 80 columns
+        let long_name =
+            "aVeryLongVariableNameThatDefinitelyExceedsTheLineWidthLimitWhenInsideABlock";
+        let source = format!("x ifTrue: [{long_name}]");
+        let module = parse_source(&source);
+        let out = unparse_module(&module);
+        // Should break: body on next line with 2-space indent, ] on its own line
+        assert!(
+            out.contains(&format!("[\n  {long_name}\n]")),
+            "expected broken block in: {out:?}"
+        );
+    }
+
+    // --- Idempotency tests for block formatting ---
+
+    #[test]
+    fn idempotent_short_block_inline() {
+        assert_idempotent("x ifTrue: [^1]\n");
+    }
+
+    #[test]
+    fn idempotent_block_with_param() {
+        assert_idempotent("coll do: [:x | x println]\n");
+    }
+
+    #[test]
+    fn idempotent_multi_statement_block() {
+        assert_idempotent("[\n  x println.\n  y println\n]\n");
+    }
+
+    #[test]
+    fn idempotent_iftrue_guard() {
+        assert_idempotent("flag ifTrue: [^42]\n");
     }
 
     // --- Idempotency tests using example .bt files ---
