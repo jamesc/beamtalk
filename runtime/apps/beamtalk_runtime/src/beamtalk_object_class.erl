@@ -522,12 +522,19 @@ code_change(OldVsn, State, Extra) ->
 
 %% @private Walk superclass chain to find an inherited class method.
 %% Returns a CompiledMethod-like map or nil if not found.
+%% Each hop is a gen_server:call to the superclass process, which handles its
+%% own {class_method, _} lookup.  The self() guard prevents deadlock if a
+%% class lists itself as its own superclass; the 5 s timeout caps any deeper
+%% cycle that might slip through.
 -spec find_inherited_class_method(atom(), atom() | none) -> map() | nil.
 find_inherited_class_method(_Selector, none) ->
     nil;
 find_inherited_class_method(Selector, SuperName) ->
     case beamtalk_class_registry:whereis_class(SuperName) of
         undefined ->
+            nil;
+        SuperPid when SuperPid =:= self() ->
+            %% Guard against self-call which would deadlock
             nil;
         SuperPid ->
             try
