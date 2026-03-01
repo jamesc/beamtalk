@@ -363,10 +363,12 @@ handle_call(
         end,
     {reply, Result, State};
 %% BT-990: Return CompiledMethod-like map for class-side methods.
+%% Walks superclass chain for inherited class methods (mirrors dispatch behaviour).
 handle_call(
     {class_method, Selector},
     _From,
     #class_state{
+        superclass = Superclass,
         class_methods = ClassMethods,
         class_method_signatures = ClassMethodSigs
     } = State
@@ -383,7 +385,8 @@ handle_call(
                     '__doc__' => nil
                 };
             error ->
-                nil
+                %% Not found locally — walk superclass chain
+                find_inherited_class_method(Selector, Superclass)
         end,
     {reply, Result, State};
 handle_call({put_method, Selector, Fun, Source}, _From, State) ->
@@ -516,6 +519,24 @@ code_change(OldVsn, State, Extra) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+%% @private Walk superclass chain to find an inherited class method.
+%% Returns a CompiledMethod-like map or nil if not found.
+-spec find_inherited_class_method(atom(), atom() | none) -> map() | nil.
+find_inherited_class_method(_Selector, none) ->
+    nil;
+find_inherited_class_method(Selector, SuperName) ->
+    case beamtalk_class_registry:whereis_class(SuperName) of
+        undefined ->
+            nil;
+        SuperPid ->
+            try
+                gen_server:call(SuperPid, {class_method, Selector}, 5000)
+            catch
+                exit:{timeout, _} -> nil;
+                exit:{noproc, _} -> nil
+            end
+    end.
 
 %% @private Apply ClassInfo map to existing State, returning updated State.
 %% ADR 0032 Phase 1: No flattened tables to rebuild.
