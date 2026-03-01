@@ -125,10 +125,36 @@ format_method_doc(ClassName, SelectorBin) ->
                         %% Use >> to walk hierarchy and get CompiledMethod
                         case beamtalk_method_resolver:resolve(ClassPid, SelectorAtom) of
                             nil ->
-                                {error, {method_not_found, ClassName, SelectorBin}};
+                                %% BT-990: Try class-side method before giving up
+                                case
+                                    gen_server:call(
+                                        ClassPid,
+                                        {class_method, SelectorAtom},
+                                        5000
+                                    )
+                                of
+                                    nil ->
+                                        {error, {method_not_found, ClassName, SelectorBin}};
+                                    ClassMethodObj when is_map(ClassMethodObj) ->
+                                        DefClass = find_defining_class_method(
+                                            ClassPid, SelectorAtom
+                                        ),
+                                        DocInfo = method_doc_info(
+                                            ClassMethodObj, SelectorAtom
+                                        ),
+                                        Output = format_method_output(
+                                            ClassName,
+                                            SelectorBin,
+                                            DefClass,
+                                            DocInfo
+                                        ),
+                                        {ok, Output}
+                                end;
                             MethodObj when is_map(MethodObj) ->
                                 %% Find which class defines this method
-                                DefiningClass = find_defining_class(ClassPid, SelectorAtom),
+                                DefiningClass = find_defining_class(
+                                    ClassPid, SelectorAtom
+                                ),
                                 %% Extract doc, signature, and sealed from CompiledMethod
                                 DocInfo = method_doc_info(MethodObj, SelectorAtom),
                                 Output = format_method_output(
@@ -287,6 +313,35 @@ find_defining_class(ClassPid, Selector, Depth) ->
             end;
         _MethodInfo ->
             ClassName
+    end.
+
+%% @doc Find which class in the hierarchy defines a class-side method.
+%% Uses {class_method, Selector} which walks the chain internally;
+%% we query each class locally via get_local_class_methods to find
+%% exactly where the method is defined.
+-spec find_defining_class_method(pid(), atom()) -> atom().
+find_defining_class_method(ClassPid, Selector) ->
+    find_defining_class_method(ClassPid, Selector, 0).
+
+-spec find_defining_class_method(pid(), atom(), non_neg_integer()) -> atom().
+find_defining_class_method(ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    gen_server:call(ClassPid, class_name, 5000);
+find_defining_class_method(ClassPid, Selector, Depth) ->
+    ClassName = gen_server:call(ClassPid, class_name, 5000),
+    LocalClassMethods = gen_server:call(ClassPid, get_local_class_methods, 5000),
+    case maps:is_key(Selector, LocalClassMethods) of
+        true ->
+            ClassName;
+        false ->
+            case gen_server:call(ClassPid, superclass, 5000) of
+                none ->
+                    ClassName;
+                Super ->
+                    case beamtalk_class_registry:whereis_class(Super) of
+                        undefined -> ClassName;
+                        SuperPid -> find_defining_class_method(SuperPid, Selector, Depth + 1)
+                    end
+            end
     end.
 
 %% @doc Group inherited methods by defining class.

@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for class method :help display (BT-990)
+
+Object subclass: HelpTestWidget
+
+  class create: name: String -> HelpTestWidget =>
+    self new: name

@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for inherited class method :help display (BT-990)
+
+HelpTestWidget subclass: HelpTestSubWidget

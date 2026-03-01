@@ -79,6 +79,8 @@
     method_source = #{} :: #{selector() => binary()},
     %% BT-988: Method display signatures for :help command
     method_signatures = #{} :: #{selector() => binary()},
+    %% BT-990: Class-side method display signatures for :help command
+    class_method_signatures = #{} :: #{selector() => binary()},
     %% ADR 0033: Runtime-embedded documentation
     doc = none :: binary() | none,
     method_docs = #{} :: #{selector() => binary()}
@@ -284,6 +286,7 @@ init({ClassName, ClassInfo}) ->
         class_state = maps:get(class_state, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
         method_signatures = maps:get(method_signatures, ClassInfo, #{}),
+        class_method_signatures = maps:get(class_method_signatures, ClassInfo, #{}),
         doc = maps:get(doc, ClassInfo, none),
         method_docs = maps:get(method_docs, ClassInfo, #{})
     },
@@ -357,6 +360,33 @@ handle_call(
                 };
             error ->
                 nil
+        end,
+    {reply, Result, State};
+%% BT-990: Return CompiledMethod-like map for class-side methods.
+%% Walks superclass chain for inherited class methods (mirrors dispatch behaviour).
+handle_call(
+    {class_method, Selector},
+    _From,
+    #class_state{
+        superclass = Superclass,
+        class_methods = ClassMethods,
+        class_method_signatures = ClassMethodSigs
+    } = State
+) ->
+    Result =
+        case maps:find(Selector, ClassMethods) of
+            {ok, MethodInfo} ->
+                #{
+                    '$beamtalk_class' => 'CompiledMethod',
+                    '__selector__' => Selector,
+                    '__source__' => <<"">>,
+                    '__signature__' => maps:get(Selector, ClassMethodSigs, nil),
+                    '__method_info__' => MethodInfo,
+                    '__doc__' => nil
+                };
+            error ->
+                %% Not found locally — walk superclass chain
+                find_inherited_class_method(Selector, Superclass)
         end,
     {reply, Result, State};
 handle_call({put_method, Selector, Fun, Source}, _From, State) ->
@@ -490,6 +520,31 @@ code_change(OldVsn, State, Extra) ->
 %% Internal functions
 %%====================================================================
 
+%% @private Walk superclass chain to find an inherited class method.
+%% Returns a CompiledMethod-like map or nil if not found.
+%% Each hop is a gen_server:call to the superclass process, which handles its
+%% own {class_method, _} lookup.  The self() guard prevents deadlock if a
+%% class lists itself as its own superclass; the 5 s timeout caps any deeper
+%% cycle that might slip through.
+-spec find_inherited_class_method(atom(), atom() | none) -> map() | nil.
+find_inherited_class_method(_Selector, none) ->
+    nil;
+find_inherited_class_method(Selector, SuperName) ->
+    case beamtalk_class_registry:whereis_class(SuperName) of
+        undefined ->
+            nil;
+        SuperPid when SuperPid =:= self() ->
+            %% Guard against self-call which would deadlock
+            nil;
+        SuperPid ->
+            try
+                gen_server:call(SuperPid, {class_method, Selector}, 5000)
+            catch
+                exit:{timeout, _} -> nil;
+                exit:{noproc, _} -> nil
+            end
+    end.
+
 %% @private Apply ClassInfo map to existing State, returning updated State.
 %% ADR 0032 Phase 1: No flattened tables to rebuild.
 %% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
@@ -510,6 +565,9 @@ apply_class_info(State, ClassInfo) ->
         method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
         method_signatures = maps:get(
             method_signatures, ClassInfo, State#class_state.method_signatures
+        ),
+        class_method_signatures = maps:get(
+            class_method_signatures, ClassInfo, State#class_state.class_method_signatures
         ),
         is_constructible = maps:get(is_constructible, ClassInfo, undefined),
         doc = maps:get(doc, ClassInfo, State#class_state.doc),
