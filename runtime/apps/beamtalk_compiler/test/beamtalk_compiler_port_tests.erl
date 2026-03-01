@@ -272,5 +272,10 @@ class_module_index_used_for_spawn_with_args_expression_test() ->
             ),
         ?assert(
             binary:match(CoreErlang, <<"'bt@getting_started@counter':'spawn'">>) =/= nomatch
+        ),
+        %% Must NOT contain the heuristic fallback module name
+        ?assertEqual(
+            nomatch,
+            binary:match(CoreErlang, <<"'bt@counter':'spawn'">>)
         )
     end).

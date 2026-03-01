@@ -5661,4 +5661,8 @@ fn test_repl_expression_spawn_with_args_uses_class_module_index() {
         code.contains("'bt@getting_started@counter':'spawn'"),
         "spawnWith: must use package-qualified module from class_module_index. Got:\n{code}"
     );
+    assert!(
+        !code.contains("'bt@counter':'spawn'"),
+        "Heuristic module name must NOT appear when class_module_index is provided. Got:\n{code}"
+    );
 }
