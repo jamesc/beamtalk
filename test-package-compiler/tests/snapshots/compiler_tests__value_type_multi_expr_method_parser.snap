@@ -152,6 +152,7 @@ Module {
                                     end: 548,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -328,6 +329,7 @@ Module {
                                     end: 665,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -350,6 +352,7 @@ Module {
                             end: 449,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -358,6 +361,7 @@ Module {
                             end: 449,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Compiler snapshot test for BT-367: multi-expression value-type method sequencing",
@@ -366,6 +370,7 @@ Module {
                             end: 449,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "",
@@ -374,6 +379,7 @@ Module {
                             end: 449,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Verifies that value-type methods with multiple expressions generate",
@@ -382,6 +388,7 @@ Module {
                             end: 449,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "correct Core Erlang using `let ... in` to sequence non-last expressions.",
@@ -390,6 +397,7 @@ Module {
                             end: 449,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "The first expression (side-effecting) should be wrapped in a let binding,",
@@ -398,6 +406,7 @@ Module {
                             end: 449,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "and only the last expression should be returned directly.",
@@ -406,6 +415,7 @@ Module {
                             end: 449,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -424,4 +434,5 @@ Module {
         end: 708,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

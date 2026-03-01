@@ -17,6 +17,7 @@ Module {
                             end: 607,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -25,6 +26,7 @@ Module {
                             end: 607,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test Nil control flow and testing messages",
@@ -33,6 +35,7 @@ Module {
                             end: 607,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
@@ -41,6 +44,7 @@ Module {
                             end: 607,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Basic Testing Methods",
@@ -49,6 +53,7 @@ Module {
                             end: 607,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
@@ -57,6 +62,7 @@ Module {
                             end: 607,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test isNil / notNil",
@@ -65,6 +71,7 @@ Module {
                             end: 607,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -75,6 +82,7 @@ Module {
                             end: 620,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -126,6 +134,7 @@ Module {
                             end: 659,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -176,6 +185,7 @@ Module {
                             end: 1179,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Control Flow Methods",
@@ -184,6 +194,7 @@ Module {
                             end: 1179,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
@@ -192,6 +203,7 @@ Module {
                             end: 1179,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test ifNil: evaluates the block",
@@ -200,6 +212,7 @@ Module {
                             end: 1179,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -287,6 +300,7 @@ Module {
                             end: 1266,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -403,6 +417,7 @@ Module {
                             end: 1352,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -532,6 +547,7 @@ Module {
                             end: 1480,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -661,6 +677,7 @@ Module {
                             end: 2062,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Copy Operations (Singleton)",
@@ -669,6 +686,7 @@ Module {
                             end: 2062,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
@@ -677,6 +695,7 @@ Module {
                             end: 2062,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test copy operations return self (singleton)",
@@ -685,6 +704,7 @@ Module {
                             end: 2062,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -820,6 +840,7 @@ Module {
                             end: 2155,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -830,6 +851,7 @@ Module {
                             end: 2174,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -880,6 +902,7 @@ Module {
                             end: 2727,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Edge Cases: Chaining and Composition",
@@ -888,6 +911,7 @@ Module {
                             end: 2727,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
@@ -896,6 +920,7 @@ Module {
                             end: 2727,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Chaining: use ifNil: result in further computation",
@@ -904,6 +929,7 @@ Module {
                             end: 2727,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -914,6 +940,7 @@ Module {
                             end: 2752,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -1027,6 +1054,7 @@ Module {
                             end: 2820,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -1037,6 +1065,7 @@ Module {
                             end: 2856,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -1140,6 +1169,7 @@ Module {
                             end: 2942,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -1150,6 +1180,7 @@ Module {
                             end: 2988,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -1283,6 +1314,7 @@ Module {
                             end: 3055,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -1293,6 +1325,7 @@ Module {
                             end: 3075,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -1379,6 +1412,7 @@ Module {
                             end: 3596,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Edge Cases: Equality and Identity",
@@ -1387,6 +1421,7 @@ Module {
                             end: 3596,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
@@ -1395,6 +1430,7 @@ Module {
                             end: 3596,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "nil equality with itself",
@@ -1403,6 +1439,7 @@ Module {
                             end: 3596,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -1413,6 +1450,7 @@ Module {
                             end: 3611,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -1473,6 +1511,7 @@ Module {
                             end: 3669,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -1483,6 +1522,7 @@ Module {
                             end: 3682,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -1544,6 +1584,7 @@ Module {
                             end: 3720,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -1605,6 +1646,7 @@ Module {
                             end: 3760,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -1665,6 +1707,7 @@ Module {
                             end: 4317,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Edge Cases: Boolean Logic Integration",
@@ -1673,6 +1716,7 @@ Module {
                             end: 4317,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
@@ -1681,6 +1725,7 @@ Module {
                             end: 4317,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Combining isNil with boolean logic",
@@ -1689,6 +1734,7 @@ Module {
                             end: 4317,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -1699,6 +1745,7 @@ Module {
                             end: 4342,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -1797,6 +1844,7 @@ Module {
                             end: 4389,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -1895,6 +1943,7 @@ Module {
                             end: 4454,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -1993,6 +2042,7 @@ Module {
                             end: 4518,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -2090,6 +2140,7 @@ Module {
                             end: 4582,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -2100,6 +2151,7 @@ Module {
                             end: 4635,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -2231,6 +2283,7 @@ Module {
                             end: 5164,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Edge Cases: Block Expressions",
@@ -2239,6 +2292,7 @@ Module {
                             end: 5164,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
@@ -2247,6 +2301,7 @@ Module {
                             end: 5164,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "ifNil: with arithmetic in block",
@@ -2255,6 +2310,7 @@ Module {
                             end: 5164,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -2265,6 +2321,7 @@ Module {
                             end: 5190,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -2393,6 +2450,7 @@ Module {
                             end: 5252,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -2403,6 +2461,7 @@ Module {
                             end: 5292,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -2539,6 +2598,7 @@ Module {
                             end: 5877,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Edge Cases: Multiple Consecutive Checks  ",
@@ -2547,6 +2607,7 @@ Module {
                             end: 5877,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
@@ -2555,6 +2616,7 @@ Module {
                             end: 5877,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Multiple isNil checks in sequence (should all be consistent)",
@@ -2563,6 +2625,7 @@ Module {
                             end: 5877,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -2699,6 +2762,7 @@ Module {
                             end: 5979,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -2832,6 +2896,7 @@ Module {
                             end: 6038,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -2873,6 +2938,7 @@ Module {
                             end: 6074,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -2923,6 +2989,7 @@ Module {
                             end: 6620,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Edge Cases: ifNil: vs ifNotNil: Return Values",
@@ -2931,6 +2998,7 @@ Module {
                             end: 6620,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "═══════════════════════════════════════════════════════════════════════",
@@ -2939,6 +3007,7 @@ Module {
                             end: 6620,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "ifNil: returns block result, not nil",
@@ -2947,6 +3016,7 @@ Module {
                             end: 6620,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -2957,6 +3027,7 @@ Module {
                             end: 6639,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -3043,6 +3114,7 @@ Module {
                             end: 6708,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -3053,6 +3125,7 @@ Module {
                             end: 6730,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -3139,6 +3212,7 @@ Module {
                             end: 6842,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: Some(
@@ -3149,6 +3223,7 @@ Module {
                             end: 6874,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ),
             },
@@ -3248,4 +3323,5 @@ Module {
         end: 6874,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

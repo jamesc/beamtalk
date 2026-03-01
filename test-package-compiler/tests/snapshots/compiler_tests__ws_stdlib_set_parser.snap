@@ -17,6 +17,7 @@ Module {
                             end: 144,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -25,6 +26,7 @@ Module {
                             end: 144,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test Set (unique elements) operations",
@@ -33,6 +35,7 @@ Module {
                             end: 144,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Set creation from list",
@@ -41,6 +44,7 @@ Module {
                             end: 144,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -212,6 +216,7 @@ Module {
         end: 918,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
 
 Diagnostics:

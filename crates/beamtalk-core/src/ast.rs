@@ -57,6 +57,7 @@
 //!     ],
 //!     span: Span::new(0, 10),
 //!     file_leading_comments: Vec::new(),
+//!     file_trailing_comments: Vec::new(),
 //! };
 //! # assert_eq!(module.expressions.len(), 1);
 //! ```
@@ -103,6 +104,10 @@ pub struct Module {
     ///
     /// Comments at the very start of the file, before any expressions or class definitions.
     pub file_leading_comments: Vec<Comment>,
+    /// File-level trailing comments (ADR 0044).
+    ///
+    /// Comments at the end of the file, after the last class/method/expression.
+    pub file_trailing_comments: Vec<Comment>,
 }
 
 impl Module {
@@ -115,6 +120,7 @@ impl Module {
             expressions,
             span,
             file_leading_comments: Vec::new(),
+            file_trailing_comments: Vec::new(),
         }
     }
 
@@ -127,6 +133,7 @@ impl Module {
             expressions: Vec::new(),
             span,
             file_leading_comments: Vec::new(),
+            file_trailing_comments: Vec::new(),
         }
     }
 
@@ -143,6 +150,7 @@ impl Module {
             expressions,
             span,
             file_leading_comments,
+            file_trailing_comments: Vec::new(),
         }
     }
 }
@@ -158,6 +166,8 @@ pub struct Comment {
     pub span: Span,
     /// Whether this is a block comment (`/* */`) or line comment (`//`).
     pub kind: CommentKind,
+    /// Whether this comment was preceded by a blank line in the source.
+    pub preceding_blank_line: bool,
 }
 
 impl Comment {
@@ -168,6 +178,7 @@ impl Comment {
             content: content.into(),
             span,
             kind: CommentKind::Line,
+            preceding_blank_line: false,
         }
     }
 
@@ -178,6 +189,7 @@ impl Comment {
             content: content.into(),
             span,
             kind: CommentKind::Block,
+            preceding_blank_line: false,
         }
     }
 }
@@ -980,8 +992,10 @@ pub enum Expression {
     Primitive {
         /// The primitive name (selector string or intrinsic identifier).
         name: EcoString,
-        /// Whether the name was quoted (`'+'`) vs bare (`basicNew`).
+        /// Whether the name was quoted (`"+"`) vs bare (`basicNew`).
         is_quoted: bool,
+        /// Whether the original source used `@intrinsic` instead of `@primitive`.
+        is_intrinsic: bool,
         /// Source location of the entire `@primitive name` expression.
         span: Span,
     },
@@ -1319,6 +1333,8 @@ pub struct MatchArm {
     pub guard: Option<Expression>,
     /// The expression to evaluate if the pattern matches.
     pub body: Expression,
+    /// Comments attached to this match arm.
+    pub comments: CommentAttachment,
     /// Source location of this match arm.
     pub span: Span,
 }
@@ -1331,6 +1347,7 @@ impl MatchArm {
             pattern,
             guard: None,
             body,
+            comments: CommentAttachment::default(),
             span,
         }
     }
@@ -1342,6 +1359,7 @@ impl MatchArm {
             pattern,
             guard: Some(guard),
             body,
+            comments: CommentAttachment::default(),
             span,
         }
     }
@@ -2069,11 +2087,7 @@ mod tests {
     #[test]
     fn comment_attachment_with_leading_not_empty() {
         let ca = CommentAttachment {
-            leading: vec![Comment {
-                content: "a comment".into(),
-                span: Span::new(0, 11),
-                kind: CommentKind::Line,
-            }],
+            leading: vec![Comment::line("a comment", Span::new(0, 11))],
             trailing: None,
         };
         assert!(!ca.is_empty());
@@ -2083,11 +2097,7 @@ mod tests {
     fn comment_attachment_with_trailing_not_empty() {
         let ca = CommentAttachment {
             leading: Vec::new(),
-            trailing: Some(Comment {
-                content: "trailing".into(),
-                span: Span::new(10, 20),
-                kind: CommentKind::Line,
-            }),
+            trailing: Some(Comment::line("trailing", Span::new(10, 20))),
         };
         assert!(!ca.is_empty());
     }
@@ -2127,11 +2137,7 @@ mod tests {
         let expr = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
         let stmt = ExpressionStatement {
             comments: CommentAttachment {
-                leading: vec![Comment {
-                    content: "before".into(),
-                    span: Span::new(0, 8),
-                    kind: CommentKind::Line,
-                }],
+                leading: vec![Comment::line("before", Span::new(0, 8))],
                 trailing: None,
             },
             expression: expr,

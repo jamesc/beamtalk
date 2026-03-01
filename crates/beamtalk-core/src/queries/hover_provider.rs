@@ -745,10 +745,11 @@ fn find_hover_in_expr(
             name,
             is_quoted,
             span,
+            ..
         } => {
             if offset >= span.start() && offset < span.end() {
                 let display = if *is_quoted {
-                    format!("Primitive: `@primitive '{name}'`")
+                    format!("Primitive: `@primitive \"{name}\"`")
                 } else {
                     format!("Primitive: `@primitive {name}`")
                 };
@@ -1149,12 +1150,13 @@ mod tests {
         let expr = Expression::Primitive {
             name: "erlang_add".into(),
             is_quoted: true,
+            is_intrinsic: false,
             span: Span::new(0, 22),
         };
         let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new());
         assert!(hover.is_some());
         let hover = hover.unwrap();
-        assert!(hover.contents.contains("`@primitive 'erlang_add'`"));
+        assert!(hover.contents.contains("`@primitive \"erlang_add\"`"));
     }
 
     #[test]
@@ -1168,6 +1170,7 @@ mod tests {
         let expr = Expression::Primitive {
             name: "size".into(),
             is_quoted: false,
+            is_intrinsic: false,
             span: Span::new(0, 15),
         };
         let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new());

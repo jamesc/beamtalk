@@ -97,6 +97,7 @@ Module {
                             end: 186,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -105,6 +106,7 @@ Module {
                             end: 186,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test that subclassing a sealed class produces a diagnostic error.",
@@ -113,6 +115,7 @@ Module {
                             end: 186,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Integer is a built-in sealed class.",
@@ -121,6 +124,7 @@ Module {
                             end: 186,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -139,4 +143,5 @@ Module {
         end: 224,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

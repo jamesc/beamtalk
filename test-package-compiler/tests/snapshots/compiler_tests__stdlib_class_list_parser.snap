@@ -42,6 +42,7 @@ Module {
                             expression: Primitive {
                                 name: "size",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 259,
                                     end: 276,
@@ -62,6 +63,7 @@ Module {
                                     end: 255,
                                 },
                                 kind: Line,
+                                preceding_blank_line: false,
                             },
                         ],
                         trailing: None,
@@ -86,6 +88,7 @@ Module {
                             expression: Primitive {
                                 name: "isEmpty",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 290,
                                     end: 310,
@@ -121,6 +124,7 @@ Module {
                             expression: Primitive {
                                 name: "first",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 322,
                                     end: 340,
@@ -156,6 +160,7 @@ Module {
                             expression: Primitive {
                                 name: "rest",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 351,
                                     end: 368,
@@ -191,6 +196,7 @@ Module {
                             expression: Primitive {
                                 name: "last",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 379,
                                     end: 396,
@@ -245,6 +251,7 @@ Module {
                             expression: Primitive {
                                 name: "at:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 412,
                                     end: 428,
@@ -299,6 +306,7 @@ Module {
                             expression: Primitive {
                                 name: "includes:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 449,
                                     end: 471,
@@ -334,6 +342,7 @@ Module {
                             expression: Primitive {
                                 name: "sort",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 497,
                                     end: 514,
@@ -354,6 +363,7 @@ Module {
                                     end: 493,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -397,6 +407,7 @@ Module {
                             expression: Primitive {
                                 name: "sort:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 537,
                                     end: 555,
@@ -432,6 +443,7 @@ Module {
                             expression: Primitive {
                                 name: "reversed",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 570,
                                     end: 591,
@@ -467,6 +479,7 @@ Module {
                             expression: Primitive {
                                 name: "unique",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 604,
                                     end: 623,
@@ -521,6 +534,7 @@ Module {
                             expression: Primitive {
                                 name: "detect:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 656,
                                     end: 676,
@@ -541,6 +555,7 @@ Module {
                                     end: 646,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -601,6 +616,7 @@ Module {
                             expression: Primitive {
                                 name: "detect:ifNone:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 712,
                                     end: 739,
@@ -655,6 +671,7 @@ Module {
                             expression: Primitive {
                                 name: "do:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 807,
                                     end: 823,
@@ -675,6 +692,7 @@ Module {
                                     end: 797,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -718,6 +736,7 @@ Module {
                             expression: Primitive {
                                 name: "collect:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 844,
                                     end: 865,
@@ -772,6 +791,7 @@ Module {
                             expression: Primitive {
                                 name: "select:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 885,
                                     end: 905,
@@ -826,6 +846,7 @@ Module {
                             expression: Primitive {
                                 name: "reject:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 925,
                                     end: 945,
@@ -897,6 +918,7 @@ Module {
                             expression: Primitive {
                                 name: "inject:into:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 979,
                                     end: 1004,
@@ -951,6 +973,7 @@ Module {
                             expression: Primitive {
                                 name: "take:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1035,
                                     end: 1053,
@@ -971,6 +994,7 @@ Module {
                                     end: 1029,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -1014,6 +1038,7 @@ Module {
                             expression: Primitive {
                                 name: "drop:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1067,
                                     end: 1085,
@@ -1049,6 +1074,7 @@ Module {
                             expression: Primitive {
                                 name: "flatten",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1099,
                                     end: 1119,
@@ -1103,6 +1129,7 @@ Module {
                             expression: Primitive {
                                 name: "flatMap:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1140,
                                     end: 1161,
@@ -1157,6 +1184,7 @@ Module {
                             expression: Primitive {
                                 name: "count:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1180,
                                     end: 1199,
@@ -1211,6 +1239,7 @@ Module {
                             expression: Primitive {
                                 name: "anySatisfy:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1223,
                                     end: 1247,
@@ -1265,6 +1294,7 @@ Module {
                             expression: Primitive {
                                 name: "allSatisfy:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1271,
                                     end: 1295,
@@ -1311,6 +1341,7 @@ Module {
                             expression: Primitive {
                                 name: "++",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1330,
                                     end: 1345,
@@ -1331,6 +1362,7 @@ Module {
                                     end: 1320,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -1391,6 +1423,7 @@ Module {
                             expression: Primitive {
                                 name: "from:to:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1398,
                                     end: 1419,
@@ -1411,6 +1444,7 @@ Module {
                                     end: 1380,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -1973,6 +2007,7 @@ Module {
                                     end: 1603,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -2016,6 +2051,7 @@ Module {
                             expression: Primitive {
                                 name: "zip:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1765,
                                     end: 1782,
@@ -2036,6 +2072,7 @@ Module {
                                     end: 1755,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -2079,6 +2116,7 @@ Module {
                             expression: Primitive {
                                 name: "groupBy:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1803,
                                     end: 1824,
@@ -2133,6 +2171,7 @@ Module {
                             expression: Primitive {
                                 name: "partition:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1847,
                                     end: 1870,
@@ -2187,6 +2226,7 @@ Module {
                             expression: Primitive {
                                 name: "takeWhile:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1893,
                                     end: 1916,
@@ -2241,6 +2281,7 @@ Module {
                             expression: Primitive {
                                 name: "dropWhile:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1939,
                                     end: 1962,
@@ -2295,6 +2336,7 @@ Module {
                             expression: Primitive {
                                 name: "intersperse:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 1991,
                                     end: 2016,
@@ -2349,6 +2391,7 @@ Module {
                             expression: Primitive {
                                 name: "add:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 2032,
                                     end: 2049,
@@ -2382,6 +2425,7 @@ Module {
                             end: 214,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -2390,6 +2434,7 @@ Module {
                             end: 214,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test List class compilation as a value type (not gen_server).",
@@ -2398,6 +2443,7 @@ Module {
                             end: 214,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Mirrors lib/List.bt exactly — new/0 should return [] (empty list).",
@@ -2406,6 +2452,7 @@ Module {
                             end: 214,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -2424,6 +2471,7 @@ Module {
         end: 2049,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
 
 Diagnostics:

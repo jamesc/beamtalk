@@ -159,6 +159,7 @@ Module {
                             end: 249,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -167,6 +168,7 @@ Module {
                             end: 249,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test empty method bodies (BT-859)",
@@ -175,6 +177,7 @@ Module {
                             end: 249,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Empty method bodies are a compile-time error.",
@@ -183,6 +186,7 @@ Module {
                             end: 249,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Developers must use `self notImplemented` or `self subclassResponsibility` instead.",
@@ -191,6 +195,7 @@ Module {
                             end: 249,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -209,4 +214,5 @@ Module {
         end: 354,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

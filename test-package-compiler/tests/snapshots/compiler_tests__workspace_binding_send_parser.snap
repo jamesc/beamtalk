@@ -109,6 +109,7 @@ Module {
                             end: 153,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Transcript is a workspace binding — generates persistent_term lookup + actor send.",
@@ -117,6 +118,7 @@ Module {
                             end: 153,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -135,4 +137,5 @@ Module {
         end: 215,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

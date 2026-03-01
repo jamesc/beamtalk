@@ -152,6 +152,15 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
         docs.push(unparse_expression_statement(stmt));
     }
 
+    // File-level trailing comments (after the last class/method/expression)
+    for comment in &module.file_trailing_comments {
+        if comment.preceding_blank_line {
+            docs.push(line());
+        }
+        docs.push(unparse_comment(comment));
+        docs.push(line());
+    }
+
     concat(docs)
 }
 
@@ -187,7 +196,7 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     let superclass = class
         .superclass
         .as_ref()
-        .map_or_else(|| "Object".to_string(), |s| s.name.to_string());
+        .map_or_else(|| "nil".to_string(), |s| s.name.to_string());
 
     let mut modifiers: Vec<Document<'static>> = Vec::new();
     if class.is_abstract {
@@ -234,6 +243,26 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         docs.push(line());
     }
 
+    // Class-side methods (before instance methods)
+    for (i, method) in class.class_methods.iter().enumerate() {
+        if i > 0 {
+            // Blank line between consecutive class-side methods
+            docs.push(line());
+        }
+        docs.push(nest(
+            2,
+            docvec![
+                line(),
+                unparse_method_definition_with_prefix(method, Document::Str("class "))
+            ],
+        ));
+    }
+
+    // Blank line between last class-side method and first instance method
+    if !class.methods.is_empty() && !class.class_methods.is_empty() {
+        docs.push(line());
+    }
+
     // Instance methods — the line() is placed INSIDE nest(2, ...) so it renders
     // at indent=2, giving the leading comment and method signature their correct
     // 2-space indentation.  A leading comment's trailing line() also runs at
@@ -244,23 +273,6 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
             docs.push(line());
         }
         docs.push(nest(2, docvec![line(), unparse_method_definition(method)]));
-    }
-
-    // Blank line between last instance method and first class-side method
-    if !class.methods.is_empty() && !class.class_methods.is_empty() {
-        docs.push(line());
-    }
-
-    // Class-side methods
-    for (i, method) in class.class_methods.iter().enumerate() {
-        if i > 0 {
-            // Blank line between consecutive class-side methods
-            docs.push(line());
-        }
-        docs.push(nest(
-            2,
-            docvec![line(), "class ", unparse_method_definition(method)],
-        ));
     }
 
     concat(docs)
@@ -292,6 +304,17 @@ pub(crate) fn unparse_standalone_method_definition(
 ///    line; multi-expression bodies or bodies with leading comments go on new lines.
 #[must_use]
 pub(crate) fn unparse_method_definition(method: &MethodDefinition) -> Document<'static> {
+    unparse_method_definition_with_prefix(method, nil())
+}
+
+/// Builds a method definition document with an optional prefix before the signature.
+///
+/// The prefix (e.g. `"class "`) is inserted between the comments/doc-comment and the
+/// method signature, so that `class` appears on the signature line, not before the comments.
+fn unparse_method_definition_with_prefix(
+    method: &MethodDefinition,
+    prefix: Document<'static>,
+) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // Non-doc leading comments
@@ -299,6 +322,10 @@ pub(crate) fn unparse_method_definition(method: &MethodDefinition) -> Document<'
 
     // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &method.doc_comment {
+        // Blank line between leading comments and doc comment (e.g. section separators)
+        if !method.comments.leading.is_empty() {
+            docs.push(line());
+        }
         for line_text in doc.lines() {
             if line_text.is_empty() {
                 docs.push(Document::Str("///"));
@@ -309,7 +336,8 @@ pub(crate) fn unparse_method_definition(method: &MethodDefinition) -> Document<'
         }
     }
 
-    // Method signature
+    // Optional prefix (e.g. "class ") then method signature
+    docs.push(prefix);
     docs.push(unparse_method_signature(method));
 
     // Body — single expression with no leading comments goes on the same line;
@@ -323,12 +351,24 @@ pub(crate) fn unparse_method_definition(method: &MethodDefinition) -> Document<'
             }
         }
         [single] if single.comments.leading.is_empty() => {
-            // Single expression with no leading comments — emit inline
-            docs.push(Document::Str(" "));
-            docs.push(unparse_expression(&single.expression));
-            if let Some(trail) = &single.comments.trailing {
-                docs.push(Document::Str("  "));
-                docs.push(unparse_comment(trail));
+            // Single expression with no leading comments — try inline,
+            // break to indented next line if too wide or if body is multi-line.
+            let body = unparse_expression(&single.expression);
+            let trail_doc = if let Some(trail) = &single.comments.trailing {
+                docvec!["  ", unparse_comment(trail)]
+            } else {
+                nil()
+            };
+            // If the body renders as multi-line, always break to next line
+            // to avoid half the expression dangling on the signature line.
+            let body_str = body.to_pretty_string();
+            if body_str.contains('\n') {
+                docs.push(nest(2, docvec![line(), body, trail_doc]));
+            } else {
+                docs.push(group(docvec![nest(
+                    2,
+                    docvec![break_("", " "), body, trail_doc]
+                ),]));
             }
         }
         stmts => {
@@ -337,20 +377,23 @@ pub(crate) fn unparse_method_definition(method: &MethodDefinition) -> Document<'
                 docs.push(Document::Str("  "));
                 docs.push(unparse_comment(trail));
             }
+            let mut body_docs: Vec<Document<'static>> = Vec::new();
             for stmt in stmts {
                 // BT-987: emit an extra blank line before statements that had one in source
                 if stmt.preceding_blank_line {
-                    docs.push(line());
+                    // Use a raw newline for blank lines to avoid trailing whitespace
+                    // from indentation on empty lines.
+                    body_docs.push(line());
                 }
-                docs.push(line());
-                docs.extend(unparse_comment_attachment_leading(&stmt.comments));
-                docs.push(Document::Str("  "));
-                docs.push(unparse_expression(&stmt.expression));
+                body_docs.push(line());
+                body_docs.extend(unparse_comment_attachment_leading(&stmt.comments));
+                body_docs.push(unparse_expression(&stmt.expression));
                 if let Some(trail) = &stmt.comments.trailing {
-                    docs.push(Document::Str("  "));
-                    docs.push(unparse_comment(trail));
+                    body_docs.push(Document::Str("  "));
+                    body_docs.push(unparse_comment(trail));
                 }
             }
+            docs.push(nest(2, concat(body_docs)));
         }
     }
 
@@ -510,7 +553,15 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             arguments,
             is_cast,
             ..
-        } => unparse_message_send(receiver, selector, arguments, *is_cast),
+        } => {
+            // Flatten ++ chains for width-aware line breaking
+            if matches!(selector, MessageSelector::Binary(op) if op.as_str() == "++") && !*is_cast {
+                if let Some(doc) = unparse_concat_chain(expr) {
+                    return doc;
+                }
+            }
+            unparse_message_send(receiver, selector, arguments, *is_cast)
+        }
         Expression::Block(block) => unparse_block(block),
         Expression::Assignment { target, value, .. } => {
             docvec![
@@ -535,12 +586,20 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
         }
         Expression::ArrayLiteral { elements, .. } => unparse_array_literal(elements),
         Expression::Primitive {
-            name, is_quoted, ..
+            name,
+            is_quoted,
+            is_intrinsic,
+            ..
         } => {
-            if *is_quoted {
-                docvec!["@primitive '", Document::String(name.to_string()), "'"]
+            let directive = if *is_intrinsic {
+                "@intrinsic"
             } else {
-                docvec!["@primitive ", Document::String(name.to_string())]
+                "@primitive"
+            };
+            if *is_quoted {
+                docvec![directive, " \"", Document::String(name.to_string()), "\""]
+            } else {
+                docvec![directive, " ", Document::String(name.to_string())]
             }
         }
         Expression::StringInterpolation { segments, .. } => unparse_string_interpolation(segments),
@@ -563,9 +622,10 @@ fn unparse_literal(lit: &Literal) -> Document<'static> {
         Literal::Integer(n) => Document::String(n.to_string()),
         Literal::Float(f) => Document::String(format_float(*f)),
         Literal::String(s) => {
-            // Double-quoted strings; escape internal double quotes and backslashes
-            let escaped = s.as_str().replace('\\', "\\\\").replace('"', "\\\"");
-            docvec!["\"", Document::String(escaped), "\""]
+            // The lexer unescapes doubled delimiters ("") to bare " in the AST,
+            // but preserves backslash escapes (\" stays as \"). We need to
+            // re-escape any bare " that isn't already preceded by \.
+            docvec!["\"", Document::String(escape_string_quotes(s)), "\""]
         }
         Literal::Symbol(s) => {
             // Symbols: #name or #'name with spaces'
@@ -600,6 +660,30 @@ fn format_float(f: f64) -> String {
     } else {
         format!("{f}.0")
     }
+}
+
+/// Escape bare `"` characters in a string that aren't already backslash-escaped.
+/// The lexer unescapes doubled delimiters (`""` → `"`) but preserves backslash
+/// escapes (`\"` stays as `\"`). We re-escape bare quotes using `\"`.
+fn escape_string_quotes(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            // Backslash escape sequence — preserve as-is
+            result.push('\\');
+            if let Some(next) = chars.next() {
+                result.push(next);
+            }
+        } else if c == '"' {
+            // Bare quote — re-escape it
+            result.push('\\');
+            result.push('"');
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 /// Returns true if a symbol name needs quoting.
@@ -655,6 +739,66 @@ fn unparse_message_send(
     docvec![msg, cast_suffix]
 }
 
+// --- String concatenation chain (++) ---
+
+/// Flattens a `++` chain from the nested AST into a list of segments,
+/// then formats as all-inline or all-broken (one segment per line).
+///
+/// ```text
+/// // Inline (fits):
+/// "hello " ++ name ++ "!"
+///
+/// // Broken (doesn't fit):
+/// "Arity mismatch: expected "
+///   ++ params size printString
+///   ++ ", got "
+///   ++ vals size printString
+/// ```
+fn unparse_concat_chain(expr: &Expression) -> Option<Document<'static>> {
+    let mut segments = Vec::new();
+    collect_concat_segments(expr, &mut segments);
+    if segments.len() < 2 {
+        return None;
+    }
+
+    // Build the inline version to measure width
+    let seg_docs: Vec<Document<'static>> = segments.iter().map(|s| unparse_expression(s)).collect();
+    let inline = join_docs(seg_docs.clone(), " ++ ");
+    let inline_width = inline.to_pretty_string().len();
+
+    if inline_width <= 80 {
+        Some(inline)
+    } else {
+        // One segment per line, continuation lines start with "++ "
+        let first = seg_docs[0].clone();
+        let mut continuation: Vec<Document<'static>> = Vec::new();
+        for seg_doc in &seg_docs[1..] {
+            continuation.push(line());
+            continuation.push(docvec!["++ ", seg_doc.clone()]);
+        }
+        Some(docvec![first, nest(2, concat(continuation))])
+    }
+}
+
+/// Walks left-nested `++` binary sends and collects the leaf expressions.
+fn collect_concat_segments<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+    if let Expression::MessageSend {
+        receiver,
+        selector: MessageSelector::Binary(op),
+        arguments,
+        is_cast: false,
+        ..
+    } = expr
+    {
+        if op.as_str() == "++" && arguments.len() == 1 {
+            collect_concat_segments(receiver, out);
+            out.push(&arguments[0]);
+            return;
+        }
+    }
+    out.push(expr);
+}
+
 // --- Block unparsing ---
 
 fn unparse_block(block: &Block) -> Document<'static> {
@@ -677,8 +821,7 @@ fn unparse_block(block: &Block) -> Document<'static> {
         [] => docvec!["[", params_doc, "]"],
 
         // Multi-statement block: always break, statements separated by newlines.
-        // The `.` terminator is emitted immediately after the expression and
-        // before any trailing comment, so the comment cannot swallow the separator.
+        // Newlines act as statement separators — no `.` needed.
         // Closed bracket goes on its own line.
         stmts if stmts.len() > 1 => {
             let mut body_docs: Vec<Document<'static>> = Vec::new();
@@ -694,11 +837,7 @@ fn unparse_block(block: &Block) -> Document<'static> {
                 body_docs.extend(unparse_comment_attachment_leading(&stmt.comments));
                 // Expression
                 body_docs.push(unparse_expression(&stmt.expression));
-                // Statement terminator before trailing comment (not after last stmt)
-                if i + 1 < stmts.len() {
-                    body_docs.push(Document::Str("."));
-                }
-                // Trailing comment after the `.` (on the same line)
+                // Trailing comment (on the same line)
                 if let Some(trail) = &stmt.comments.trailing {
                     body_docs.push(Document::Str("  "));
                     body_docs.push(unparse_comment(trail));
@@ -744,47 +883,113 @@ fn unparse_block_parameter(param: &BlockParameter) -> Document<'static> {
 
 // --- Cascade unparsing ---
 
-fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Document<'static> {
-    let mut docs: Vec<Document<'static>> = vec![unparse_expression(receiver)];
-
-    for msg in messages {
-        docs.push(Document::Str("; "));
-        let msg_doc = match &msg.selector {
-            MessageSelector::Unary(name) => Document::String(name.to_string()),
-            MessageSelector::Binary(op) => {
-                let arg = unparse_expression(&msg.arguments[0]);
-                docvec![Document::String(op.to_string()), " ", arg]
-            }
-            MessageSelector::Keyword(parts) => {
-                let mut kw_docs: Vec<Document<'static>> = Vec::new();
-                for (i, part) in parts.iter().enumerate() {
-                    if i > 0 {
-                        kw_docs.push(Document::Str(" "));
-                    }
-                    kw_docs.push(unparse_keyword_part(part));
-                    if i < msg.arguments.len() {
-                        kw_docs.push(Document::Str(" "));
-                        kw_docs.push(unparse_expression(&msg.arguments[i]));
-                    }
+fn unparse_cascade_message(msg: &CascadeMessage) -> Document<'static> {
+    match &msg.selector {
+        MessageSelector::Unary(name) => Document::String(name.to_string()),
+        MessageSelector::Binary(op) => {
+            let arg = unparse_expression(&msg.arguments[0]);
+            docvec![Document::String(op.to_string()), " ", arg]
+        }
+        MessageSelector::Keyword(parts) => {
+            let mut kw_docs: Vec<Document<'static>> = Vec::new();
+            for (i, part) in parts.iter().enumerate() {
+                if i > 0 {
+                    kw_docs.push(Document::Str(" "));
                 }
-                concat(kw_docs)
+                kw_docs.push(unparse_keyword_part(part));
+                if i < msg.arguments.len() {
+                    kw_docs.push(Document::Str(" "));
+                    kw_docs.push(unparse_expression(&msg.arguments[i]));
+                }
             }
-        };
-        docs.push(msg_doc);
+            concat(kw_docs)
+        }
     }
+}
 
-    concat(docs)
+fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Document<'static> {
+    let receiver_doc = unparse_expression(receiver);
+    let msg_docs: Vec<Document<'static>> = messages.iter().map(unparse_cascade_message).collect();
+
+    if messages.len() == 1 {
+        // Single cascade message: always inline
+        docvec![receiver_doc, "; ", msg_docs.into_iter().next().unwrap()]
+    } else {
+        // Multiple cascade messages: try inline, break to one-per-line
+        // Build inline version to measure
+        let mut inline_parts: Vec<Document<'static>> = vec![receiver_doc.clone()];
+        for msg_doc in &msg_docs {
+            inline_parts.push(Document::Str("; "));
+            inline_parts.push(msg_doc.clone());
+        }
+        let inline = concat(inline_parts);
+        let inline_width = inline.to_pretty_string().len();
+
+        if inline_width <= 80 {
+            inline
+        } else {
+            // One message per line: receiver on first line, then ;-separated continuations
+            let mut continuation: Vec<Document<'static>> = Vec::new();
+            for (i, msg_doc) in msg_docs.into_iter().enumerate() {
+                if i > 0 {
+                    continuation.push(Document::Str(";"));
+                }
+                continuation.push(line());
+                continuation.push(msg_doc);
+            }
+            docvec![receiver_doc, ";", nest(2, concat(continuation))]
+        }
+    }
 }
 
 // --- Match unparsing ---
 
 fn unparse_match(value: &Expression, arms: &[MatchArm]) -> Document<'static> {
     let arm_docs: Vec<Document<'static>> = arms.iter().map(unparse_match_arm).collect();
-    let joined = join_docs(arm_docs, "; ");
-    docvec![unparse_expression(value), " match: [", joined, "]"]
+    if arm_docs.len() <= 1 {
+        // Single arm: try inline, break if too wide
+        let joined = join_docs(arm_docs, "; ");
+        group(docvec![unparse_expression(value), " match: [", joined, "]"])
+    } else {
+        // Multiple arms: one per line
+        let mut body: Vec<Document<'static>> = Vec::new();
+        for (i, (arm, arm_doc)) in arms.iter().zip(arm_docs).enumerate() {
+            // Preserve blank line before arms that had one in source
+            // (skip for first arm — the opening bracket provides separation)
+            let has_blank = i > 0
+                && arm
+                    .comments
+                    .leading
+                    .first()
+                    .is_some_and(|c| c.preceding_blank_line);
+            if has_blank {
+                body.push(line());
+            }
+            body.push(line());
+            body.push(arm_doc);
+            if i < arms.len() - 1 {
+                body.push(Document::Str(";"));
+            }
+        }
+        docvec![
+            unparse_expression(value),
+            " match: [",
+            nest(2, concat(body)),
+            line(),
+            "]"
+        ]
+    }
 }
 
 fn unparse_match_arm(arm: &MatchArm) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = Vec::new();
+
+    // Leading comments (e.g. `// (quote expr) — return unevaluated`)
+    let leading = unparse_comment_attachment_leading(&arm.comments);
+    if !leading.is_empty() {
+        docs.extend(leading);
+    }
+
     let pat = unparse_pattern(&arm.pattern);
     let guard = if let Some(g) = &arm.guard {
         docvec![" when: ", unparse_expression(g)]
@@ -792,7 +997,8 @@ fn unparse_match_arm(arm: &MatchArm) -> Document<'static> {
         nil()
     };
     let body = unparse_expression(&arm.body);
-    docvec![pat, guard, " -> ", body]
+    docs.push(docvec![pat, guard, " -> ", body]);
+    concat(docs)
 }
 
 fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
@@ -870,8 +1076,18 @@ fn unparse_map_literal(pairs: &[MapPair]) -> Document<'static> {
         return Document::Str("#{}");
     }
     let pair_docs: Vec<Document<'static>> = pairs.iter().map(unparse_map_pair).collect();
-    let joined = join_docs(pair_docs, ", ");
-    docvec!["#{", joined, "}"]
+    // Try inline first (#{a => 1, b => 2}), break to one-per-line if too wide
+    let mut body = Vec::new();
+    for (i, pair_doc) in pair_docs.into_iter().enumerate() {
+        if i > 0 {
+            body.push(Document::Str(","));
+            body.push(break_("", " "));
+        } else {
+            body.push(break_("", ""));
+        }
+        body.push(pair_doc);
+    }
+    group(docvec!["#{", nest(2, concat(body)), break_("", ""), "}",])
 }
 
 fn unparse_map_pair(pair: &MapPair) -> Document<'static> {
@@ -915,9 +1131,8 @@ fn unparse_string_interpolation(segments: &[StringSegment]) -> Document<'static>
     for seg in segments {
         match seg {
             StringSegment::Literal(s) => {
-                // Escape double-quotes in literal segments
-                let escaped = s.as_str().replace('"', "\\\"");
-                inner.push(Document::String(escaped));
+                // Literal segments may contain bare " from doubled-delimiter unescaping.
+                inner.push(Document::String(escape_string_quotes(s)));
             }
             StringSegment::Interpolation(expr) => {
                 inner.push(Document::Str("{"));
@@ -977,7 +1192,13 @@ fn unparse_expect_category(cat: ExpectCategory) -> Document<'static> {
 /// Line comments become `// content`, block comments become `/* content */`.
 fn unparse_comment(comment: &Comment) -> Document<'static> {
     match comment.kind {
-        CommentKind::Line => docvec!["// ", Document::String(comment.content.to_string())],
+        CommentKind::Line => {
+            if comment.content.is_empty() {
+                Document::Str("//")
+            } else {
+                docvec!["// ", Document::String(comment.content.to_string())]
+            }
+        }
         CommentKind::Block => {
             docvec!["/* ", Document::String(comment.content.to_string()), " */"]
         }
@@ -990,7 +1211,12 @@ fn unparse_comment(comment: &Comment) -> Document<'static> {
 /// element starts on a fresh line.
 fn unparse_comment_attachment_leading(ca: &CommentAttachment) -> Vec<Document<'static>> {
     let mut docs: Vec<Document<'static>> = Vec::new();
-    for comment in &ca.leading {
+    for (i, comment) in ca.leading.iter().enumerate() {
+        // Emit blank line between comment groups (but not before the first —
+        // the calling context already manages spacing before the attachment).
+        if i > 0 && comment.preceding_blank_line {
+            docs.push(line());
+        }
         docs.push(unparse_comment(comment));
         docs.push(line());
     }
@@ -1194,6 +1420,16 @@ mod tests {
     }
 
     #[test]
+    fn string_literal_with_embedded_double_quotes() {
+        // Bare " in the AST (from doubled-delimiter unescaping) gets re-escaped as \"
+        let expr = Expression::Literal(Literal::String("say \"hello\"".into()), span());
+        assert_eq!(
+            unparse_expression(&expr).to_pretty_string(),
+            "\"say \\\"hello\\\"\""
+        );
+    }
+
+    #[test]
     fn symbol_literal_simple() {
         let expr = Expression::Literal(Literal::Symbol("ok".into()), span());
         assert_eq!(unparse_expression(&expr).to_pretty_string(), "#ok");
@@ -1327,15 +1563,8 @@ mod tests {
             span(),
         );
         let output = unparse_method_definition(&method).to_pretty_string();
-        // Leading comment in body forces multi-line
-        assert!(
-            output.contains("// the result"),
-            "expected '// the result' in: {output}"
-        );
-        assert!(
-            output.contains("compute =>"),
-            "expected 'compute =>' in: {output}"
-        );
+        // Leading comment in body forces multi-line, comment indented with body
+        assert_eq!(output, "compute =>\n  // the result\n  x");
     }
 
     // --- Blank line preservation (BT-987) ---
@@ -1376,6 +1605,211 @@ mod tests {
         );
         let output = unparse_method_definition(&method).to_pretty_string();
         assert_eq!(output, "doStuff =>\n  1\n  2");
+    }
+
+    // --- Method body comment indentation ---
+
+    #[test]
+    fn method_body_leading_comment_indented_with_body() {
+        // A single expression with a leading comment forces multi-line.
+        // The comment must be indented at the same level as the expression.
+        let body_stmt = ExpressionStatement {
+            comments: CommentAttachment {
+                leading: vec![Comment::line("do the thing", span())],
+                trailing: None,
+            },
+            expression: Expression::Identifier(Identifier::new("x", span())),
+            preceding_blank_line: false,
+        };
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("compute".into()),
+            Vec::new(),
+            vec![body_stmt],
+            span(),
+        );
+        let output = unparse_method_definition(&method).to_pretty_string();
+        assert_eq!(output, "compute =>\n  // do the thing\n  x");
+    }
+
+    #[test]
+    fn method_body_multiple_leading_comments_indented() {
+        let body_stmt = ExpressionStatement {
+            comments: CommentAttachment {
+                leading: vec![
+                    Comment::line("first comment", span()),
+                    Comment::line("second comment", span()),
+                ],
+                trailing: None,
+            },
+            expression: Expression::Literal(Literal::Integer(42), span()),
+            preceding_blank_line: false,
+        };
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("run".into()),
+            Vec::new(),
+            vec![body_stmt],
+            span(),
+        );
+        let output = unparse_method_definition(&method).to_pretty_string();
+        assert_eq!(
+            output,
+            "run =>\n  // first comment\n  // second comment\n  42"
+        );
+    }
+
+    #[test]
+    fn method_body_blank_line_has_no_trailing_whitespace() {
+        let body = vec![
+            ExpressionStatement::bare(Expression::Literal(Literal::Integer(1), span())),
+            ExpressionStatement {
+                comments: CommentAttachment::default(),
+                expression: Expression::Literal(Literal::Integer(2), span()),
+                preceding_blank_line: true,
+            },
+        ];
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("doStuff".into()),
+            Vec::new(),
+            body,
+            span(),
+        );
+        let output = unparse_method_definition(&method).to_pretty_string();
+        // The blank line between 1 and 2 must be truly empty (no trailing spaces).
+        for (i, line_text) in output.lines().enumerate() {
+            assert_eq!(
+                line_text,
+                line_text.trim_end(),
+                "line {i} has trailing whitespace: {line_text:?}"
+            );
+        }
+    }
+
+    // --- Class-side method prefix placement ---
+
+    #[test]
+    fn class_method_doc_comment_before_class_keyword() {
+        // The `class` keyword must appear on the signature line, not before the doc comment.
+        let source = "Object subclass: Foo\n  /// Doc for bar\n  class bar => 1\n";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        // Doc comment should come first, then "class bar =>"
+        assert!(
+            output.contains("/// Doc for bar\n  class bar => 1"),
+            "expected doc comment before 'class' keyword in: {output}"
+        );
+    }
+
+    // --- File trailing comments ---
+
+    #[test]
+    fn file_trailing_comments_preserved() {
+        let source =
+            "Object subclass: Foo\n  bar => 1\n\n// trailing comment 1\n// trailing comment 2\n";
+        let module = parse_source(source);
+        assert_eq!(
+            module.file_trailing_comments.len(),
+            2,
+            "expected 2 trailing comments, got: {:?}",
+            module.file_trailing_comments
+        );
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("// trailing comment 1"),
+            "missing trailing comment 1 in: {output}"
+        );
+        assert!(
+            output.contains("// trailing comment 2"),
+            "missing trailing comment 2 in: {output}"
+        );
+    }
+
+    // --- Match expression formatting ---
+
+    #[test]
+    fn match_single_arm_inline() {
+        let source = "Actor subclass: A\n  m => x match: [1 -> \"one\"]";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("x match: [1 -> \"one\"]"),
+            "single arm should be inline: {output}"
+        );
+    }
+
+    #[test]
+    fn match_multi_arm_one_per_line() {
+        let source =
+            "Actor subclass: A\n  m => x match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        // Each arm should be on its own line, indented inside the brackets
+        assert!(
+            output.contains("x match: [\n"),
+            "multi-arm match should break after opening bracket: {output}"
+        );
+        assert!(
+            output.contains("1 -> \"one\";\n"),
+            "first arm should end with semicolon: {output}"
+        );
+        assert!(
+            output.contains("_ -> \"other\"\n"),
+            "last arm should not have semicolon: {output}"
+        );
+    }
+
+    #[test]
+    fn cascade_short_stays_inline() {
+        let source = "Actor subclass: A\n  m => self foo; bar; baz";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("self foo; bar; baz"),
+            "short cascade should stay inline: {output}"
+        );
+    }
+
+    #[test]
+    fn cascade_multi_message_one_per_line() {
+        let source = "Actor subclass: A\n  m =>\n    self assert: txn amount equals: 500; assert: txn from equals: \"Alice\"; assert: txn to equals: \"Bob\"";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        // Each cascade message should be on its own line
+        assert!(
+            output.contains("assert: txn amount equals: 500;\n"),
+            "first cascade message should end with semicolon+newline: {output}"
+        );
+        assert!(
+            output.contains("assert: txn from equals: \"Alice\";\n"),
+            "middle cascade message should end with semicolon+newline: {output}"
+        );
+        assert!(
+            output.contains("assert: txn to equals: \"Bob\""),
+            "last cascade message should not have trailing semicolon: {output}"
+        );
+    }
+
+    // --- Map literal formatting ---
+
+    #[test]
+    fn map_literal_short_stays_inline() {
+        let source = "Actor subclass: A\n  m => #{#a => 1, #b => 2}";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("#{#a => 1, #b => 2}"),
+            "short map should stay inline: {output}"
+        );
+    }
+
+    #[test]
+    fn map_literal_long_breaks() {
+        let source = "Actor subclass: A\n  m => #{#name => \"Alice\", #age => 30, #city => \"Wonderland\", #country => \"Fantasy\"}";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("#{\n"),
+            "long map should break to multi-line: {output}"
+        );
     }
 
     // --- Round-trip: parse → unparse → parse ---
@@ -1601,10 +2035,10 @@ mod tests {
         let source = "[\n  x println.\n  y println\n]";
         let module = parse_source(source);
         let out = unparse_module(&module);
-        // Multi-statement: always broken, separated by ".\n  " (dot then newline+indent)
+        // Multi-statement: always broken, newlines separate statements (no dots)
         assert!(
-            out.contains("x println.\n  y println"),
-            "expected broken multi-stmt block in: {out:?}"
+            out.contains("x println\n  y println"),
+            "expected broken multi-stmt block without dots in: {out:?}"
         );
     }
 

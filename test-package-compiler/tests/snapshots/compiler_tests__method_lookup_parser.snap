@@ -88,6 +88,7 @@ Module {
                                     end: 392,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -173,6 +174,7 @@ Module {
                                     end: 510,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -195,6 +197,7 @@ Module {
                             end: 292,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -203,6 +206,7 @@ Module {
                             end: 292,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Compiler snapshot test for >> (method lookup) operator (BT-101, BT-323)",
@@ -211,6 +215,7 @@ Module {
                             end: 292,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "",
@@ -219,6 +224,7 @@ Module {
                             end: 292,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Tests codegen for:",
@@ -227,6 +233,7 @@ Module {
                             end: 292,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "- >> on class literal (compile-time optimized atom path)",
@@ -235,6 +242,7 @@ Module {
                             end: 292,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "- >> on variable receiver (runtime resolution path)",
@@ -243,6 +251,7 @@ Module {
                             end: 292,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -261,4 +270,5 @@ Module {
         end: 534,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

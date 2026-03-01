@@ -167,6 +167,7 @@ Module {
                                     end: 156,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -279,6 +280,7 @@ Module {
                             expression: Primitive {
                                 name: "distanceTo:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 281,
                                     end: 305,
@@ -309,6 +311,7 @@ Module {
                                     end: 246,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -333,6 +336,7 @@ Module {
                             expression: Primitive {
                                 name: "printString",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 354,
                                     end: 378,
@@ -353,6 +357,7 @@ Module {
                                     end: 350,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -375,6 +380,7 @@ Module {
                             end: 54,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -393,4 +399,5 @@ Module {
         end: 378,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

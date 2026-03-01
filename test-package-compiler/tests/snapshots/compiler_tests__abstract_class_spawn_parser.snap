@@ -87,6 +87,7 @@ Module {
                             end: 153,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -95,6 +96,7 @@ Module {
                             end: 153,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test that instantiating an abstract class produces a diagnostic error.",
@@ -103,6 +105,7 @@ Module {
                             end: 153,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -153,4 +156,5 @@ Module {
         end: 226,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
