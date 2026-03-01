@@ -7,46 +7,80 @@ Proposed 2026-03-01
 
 The REPL completion system handles single-token receivers: class names, workspace bindings, and simple literals (integers, strings). Concretely, `'hello' si` offers String methods, `counter m` offers Counter methods (via runtime `class_of/1`), and `Integer cl` offers Integer class methods. These work because the receiver is a single, classifiable token.
 
-Completions fail for expressions with chained sends. Typing `'hello' size cl` should offer Integer methods (because `String >> size` returns an Integer), but the current engine cannot determine that. Similarly, `#(1 2 3) collect: [:x | x * 2] si` and `(Counter >> #increment) s` produce no completions because the receiver is not a single token.
+Completions fail for expressions with chained sends. Typing `'hello' size cl` should offer Integer methods (because `String >> size` returns an Integer), but the current engine cannot determine that. Similarly, `#(1 2 3) collect: [:x | x * 2] si` and `counter getValue to` produce no completions because the receiver is not a single token.
 
 Evaluating subexpressions to infer their type is not viable: `counter increment cl` would mutate state as a side effect of requesting completions. The solution must be **inference without evaluation**.
 
 Two type-inference assets already exist in the codebase:
 
-1. **Rust `TypeChecker`** (ADR 0025, `crates/beamtalk-core/src/semantic_analysis/type_checker.rs`): walks the AST, infers `InferredType::Known(ClassName)` or `InferredType::Dynamic` for each expression span. Already handles `'hello' size → Known("Integer")` when `String#size` is in the class hierarchy.
+1. **Runtime method signature maps** (BT-988, BT-990): each class's `class_state` stores `method_signatures` and `class_method_signatures` as `#{selector() => binary()}` display strings (e.g., `size => <<"size -> Integer">>`). These are present for all registered classes, including user-defined classes created in the REPL.
 
-2. **Runtime method signature maps** (BT-988, BT-990): each class's `class_state` stores `method_signatures` and `class_method_signatures` as `#{selector() => binary()}` display strings (e.g., `size => <<"size -> Integer">>`). These are human-readable but not machine-typed.
+2. **Rust `TypeChecker`** (ADR 0025, `crates/beamtalk-core/src/semantic_analysis/type_checker.rs`): walks the AST, infers `InferredType::Known(ClassName)` or `InferredType::Dynamic` for each expression span. This runs in the compiler context against a `ClassHierarchy` built from the full module graph.
 
-The OTP Port (ADR 0022) provides a live channel from the Erlang runtime to the embedded Rust compiler. The question is: **where does expression-level type inference for completion run, and how does the inferred type flow back to the completion engine?**
+The key constraint is: **the Rust compiler port process has no access to the runtime class registry**. The port is stateless — it handles one request at a time and constructs only `ClassHierarchy::with_builtins()`, which contains stdlib classes but not classes defined by the user in their REPL session. Routing completion through the port would make user-defined classes (`Counter`, `MyTree`, custom actors) invisible to inference. This defeats the primary REPL use case.
+
+The question is: **how does expression-level type inference for completion run, and how are return types propagated to the completion engine?**
 
 ## Decision
 
-Expression-level completion is driven by the **Rust TypeChecker via the OTP Port**, using a new lightweight `type_at_cursor` operation. The Erlang completion engine strips the incomplete final token (the prefix), sends the remaining expression plus the current workspace bindings to the Rust compiler, receives an inferred class name, and performs the final method lookup against the runtime class registry.
+Expression-level completion is driven by the **Erlang runtime**, using the existing `method_signatures` and `class_method_signatures` maps stored on each class. The completion engine parses the expression into a chain of message sends, resolves the receiver type, then walks the chain one hop at a time — looking up each send's return type from the class's signature map — until it arrives at the type of the final receiver. The final method lookup against that class produces the completions.
 
-### Protocol
+This requires two things: the signature maps must contain `-> ClassName` annotations for methods whose return types matter for completion, and a small Erlang function to extract the class name from a display signature string.
 
-A new port operation `type_at_cursor` is added alongside the existing `compile` operation:
+### Return-Type Extraction
+
+A project-controlled contract on the display signature format allows straightforward suffix parsing:
 
 ```erlang
-%% Request (Erlang → Rust compiler port)
-Request = #{
-    op       => <<"type_at_cursor">>,
-    source   => <<"'hello' size ">>,   %% expression with prefix stripped
-    bindings => #{                      %% current workspace binding types
-        <<"counter">> => <<"Counter">>,
-        <<"x">>       => <<"Integer">>
-    }
-},
+%% Extract return type from a display signature string.
+%% Returns {ok, ClassName} if annotated, or undefined if not.
+-spec return_type_from_signature(binary()) -> {ok, atom()} | undefined.
+return_type_from_signature(Sig) ->
+    case binary:split(Sig, <<" -> ">>) of
+        [_Selector, ReturnType] ->
+            {ok, binary_to_atom(ReturnType, utf8)};
+        _ ->
+            undefined
+    end.
+```
 
-%% Response (Rust → Erlang)
-{ok, <<"Integer">>}   %% Known type — offer Integer methods
-{ok, <<"dynamic">>}   %% Unknown — fall back to current behaviour
-{error, Reason}        %% Parse/compile failure — fall back
+### Chain Resolution
+
+The completion engine is extended with a chain-resolution path triggered when the receiver is not a single classifiable token:
+
+```erlang
+%% Resolve the type at the end of a send chain.
+%% e.g., 'hello' size  →  Integer
+%%        counter getValue reversed  →  String (if getValue -> String)
+-spec resolve_chain_type(binary(), map()) -> {ok, atom()} | undefined.
+resolve_chain_type(Expr, Bindings) ->
+    case tokenise_send_chain(Expr) of
+        {ok, ReceiverToken, Sends} ->
+            case classify_receiver(ReceiverToken, Bindings) of
+                {instance, ClassName} -> walk_chain(ClassName, Sends);
+                {class, ClassName}    -> walk_chain_class(ClassName, Sends);
+                undefined             -> undefined
+            end;
+        error ->
+            undefined
+    end.
+
+walk_chain(ClassName, []) ->
+    {ok, ClassName};
+walk_chain(ClassName, [Selector | Rest]) ->
+    case beamtalk_class_registry:get_method_signature(ClassName, Selector) of
+        {ok, Sig} ->
+            case return_type_from_signature(Sig) of
+                {ok, NextClass} -> walk_chain(NextClass, Rest);
+                undefined       -> undefined   %% chain breaks — annotation missing
+            end;
+        _ -> undefined
+    end.
 ```
 
 ### Completion Engine Changes
 
-`beamtalk_repl_ops_dev:get_context_completions/2` is extended with an expression-level path triggered when the receiver is not a single classifiable token:
+`beamtalk_repl_ops_dev:get_context_completions/2` is extended with the chain path:
 
 ```erlang
 get_context_completions(Code, Bindings) ->
@@ -55,57 +89,32 @@ get_context_completions(Code, Bindings) ->
             %% existing path — classify_receiver/2
             classify_and_complete(Receiver, Prefix, Bindings);
         {expression, ReceiverExpr, Prefix} ->
-            %% new path — delegate to Rust compiler
-            complete_via_type_inference(ReceiverExpr, Prefix, Bindings);
+            %% new path — Erlang chain resolution
+            case resolve_chain_type(ReceiverExpr, Bindings) of
+                {ok, ClassName} -> complete_instance_methods(ClassName, Prefix);
+                undefined       -> []
+            end;
         _ ->
             get_completions(Code)
-    end.
-
-complete_via_type_inference(ReceiverExpr, Prefix, Bindings) ->
-    BindingTypes = extract_binding_types(Bindings),
-    case beamtalk_compiler_port:type_at_cursor(ReceiverExpr, BindingTypes) of
-        {ok, <<"dynamic">>} -> [];
-        {ok, ClassName}     -> complete_instance_methods(ClassName, Prefix);
-        {error, _}          -> []
     end.
 ```
 
 ### Prefix Stripping
 
-The incomplete token at the cursor (the completion prefix) is stripped before sending to the compiler, leaving a syntactically valid expression:
+The incomplete token at the cursor is stripped before chain resolution, leaving a complete send chain:
 
 ```
 User types:  'hello' size cl
              ─────────────── ──
              ReceiverExpr   Prefix
-Sent to Rust: 'hello' size
-Returned:     Integer
-Offered:      clock, collect:, collect:separatedBy:, ...
+Chain:       'hello'  →  size  →  [prefix cl stripped]
+Resolved:    String   →  Integer
+Offered:     clock, collect:, collect:separatedBy:, isZero, max:, min:, ...
 ```
 
-Stripping is whitespace-aware: if the final token is attached (no preceding space), it is removed; if the cursor is immediately after a complete expression with no prefix, `Prefix = ""` and no stripping is needed.
+### Annotation Coverage
 
-### Rust Compiler Changes
-
-A new `CompilerPort` operation `type_at_cursor(source, bindings)` is added:
-
-```rust
-// crates/beamtalk-core/src/semantic_analysis/type_checker.rs (conceptual)
-pub fn infer_expression_type(
-    source: &str,
-    binding_types: HashMap<String, String>,
-) -> InferredType {
-    let ast = parse_expression(source)?;
-    let mut checker = TypeChecker::with_bindings(binding_types);
-    checker.infer_expression(&ast)
-}
-```
-
-The TypeChecker already resolves `'hello' size → Known("Integer")` when `String#size` is registered in the `ClassHierarchy`. The new entry point parses a **single expression** (not a full class definition) and returns the inferred type of the final expression. Binding types from the workspace are injected as `Known(ClassName)` entries in the TypeChecker's environment.
-
-### Degradation
-
-If the compiler port is unavailable, if parsing fails, or if inference returns `dynamic`, the completion engine falls back to the existing single-token behavior. This means expression-level completions silently degrade to empty rather than error — the REPL remains usable.
+The chain resolution breaks silently when a method in the chain has no `-> ClassName` annotation in its signature. Coverage is therefore a function of how many methods in the stdlib and user codebases carry return-type annotations. As part of this work, the built-in method definitions in `generated_builtins.rs` will be audited and annotated where the return type is unambiguous. Approximately half of the ~337 current built-in methods have `return_type: None`; the audit will target those on high-frequency chains (Integer arithmetic, String manipulation, Collection operations) first.
 
 ### REPL Session Example
 
@@ -116,133 +125,150 @@ clock  collect:  collect:separatedBy:  isZero  max:  min:  ...
 bt> #(1 2 3) size <TAB>
 clock  collect:  collect:separatedBy:  isZero  max:  min:  ...
 
-bt> counter <TAB>          % binding — existing path, unchanged
-deposit:  withdraw:  balance  ...
+bt> counter getValue <TAB>       % user-defined class, annotation present
+toUpperCase  reversed  size  ...
 
-bt> 'hello' size unknown_method_name <TAB>
-(no completions — dynamic fallback)
+bt> counter getValue unknownChain <TAB>
+(no completions — annotation absent, chain breaks)
+
+bt> counter <TAB>                % single-token binding — existing path unchanged
+deposit:  withdraw:  balance  ...
 ```
 
 ## Prior Art
 
-**Pharo Smalltalk**: The completion system uses AST-level type hints without evaluation. It relies on method argument naming conventions (`aString`, `anInteger`) for ~36% type coverage, with bytecode-level type reconstruction (without side effects) improving this to ~50-75% precision. Pharo avoids evaluation in completions; type information flows from the compiler's AST and class hierarchy reflection. Beamtalk adopts the same "no evaluation" principle but uses its existing gradual type system rather than convention-based hints.
+**Pharo Smalltalk**: The Pharo completion system uses AST-level type hints without evaluation. The default algorithm extracts type information from method argument naming conventions (`aString`, `anInteger`) for ~36% coverage; heuristics improve this to ~50%. Pharo workspaces also use results of prior evaluations: if you have evaluated `'hello' size` and the result `5` is visible in the workspace, the completion engine can use that runtime result. Beamtalk adopts the same "no evaluation" principle; the chain-inference approach is closer to Pharo's static AST analysis path than to the result-caching path.
 
-**Elixir IEx / ElixirSense**: Completion is entirely static — it uses `@spec` type annotations on compiled module metadata. For chained calls, IEx does not infer intermediate types; it relies on explicit annotations. Beamtalk's approach is more dynamic: the TypeChecker uses the class hierarchy for inference even without explicit return-type annotations on every method.
+**Elixir IEx / ElixirSense**: Completion uses `@spec` type annotations on compiled module metadata. Return types must be explicitly annotated. IEx does not infer intermediate types for chained calls. Beamtalk's approach is equivalent: annotated return types propagate completions; unannotated methods break the chain. The difference is that Erlang/Elixir `@spec` annotations are formal types; Beamtalk's return-type annotations in `method_signatures` are display strings with a project-controlled format.
 
-**Gleam**: No traditional REPL; completion is provided at the language-server level using full static types. Not directly applicable (Gleam has no dynamic dispatch).
+**Gleam**: No traditional REPL; completion provided at language-server level with full static types. Not applicable.
 
-**LSP hover types (existing Beamtalk)**: The `TypeChecker` is already used to power LSP hover type display (ADR 0024, ADR 0025). The `type_at_cursor` operation is a natural extension of this: the same inference engine that tells the LSP "this variable has type Integer" now tells the REPL "the receiver of this completion has type Integer." This reuse preserves a single source of truth.
+**Ruby (Sorbet / RBS / Solargraph)**: Solargraph infers return types through a combination of explicit `@return` yard annotations and lightweight type propagation without evaluation. Coverage is annotation-driven; chained method completions work when each step is annotated. The Beamtalk approach is directly analogous.
+
+**Existing Beamtalk LSP** (ADR 0024, ADR 0025): The `TypeChecker` powers LSP hover and diagnostic completions using the full `ClassHierarchy` built from a compiled module. REPL completion uses a different data source (the live runtime class registry) to serve a different context (interactive single expressions). These are complementary, not competing: the LSP path covers file-level analysis, the runtime path covers live session state including dynamically-defined classes.
 
 ## User Impact
 
-**Newcomer** (Python/JS/Ruby background): Completions "just work" for the natural patterns they would write (`'hello' size <TAB>`, `myList collect:... <TAB>`). They don't need to understand type inference or annotate their code. When completions don't appear (for unannotated/dynamic expressions), the REPL is still fully functional — they just type the whole method name. Error messages are unchanged.
+**Newcomer** (Python/JS/Ruby background): Completions work for common patterns (`'hello' size <TAB>`, `myList size <TAB>`) without any configuration. Chains through unannotated methods silently produce no completions rather than an error — the REPL remains fully functional. The experience improves over time as more stdlib methods are annotated.
 
-**Smalltalk developer**: This matches Pharo/Squeak workspace ergonomics, where completions are available after evaluating expressions or from known types. The inference-without-evaluation constraint is well understood in the Smalltalk world (Pharo uses the same principle). The Smalltalk dev may notice that unannotated methods don't propagate completion — they are incentivised to add return-type annotations, which also improves `:h` documentation output.
+**Smalltalk developer**: Matches workspace ergonomics — completions after message sends feel natural. The annotation requirement is familiar: Pharo completion quality also depends on type hints. The dev is incentivised to annotate method return types, which also improves `:h` documentation output (BT-988 display signatures) and LSP hover types.
 
-**Erlang/BEAM developer**: The OTP Port communication for completion adds a synchronous call per completion request. This is comparable to existing LSP operations. The port is already used for compilation. The degradation path (fall back when port is unavailable) respects OTP fault tolerance principles — the completion system has no hard dependency on the compiler.
+**Erlang/BEAM developer**: Pure in-process Erlang, no IPC dependency. Works with the live runtime class registry, including any classes loaded from Erlang/OTP interop modules. The annotation format (`-> ClassName`) is visible in `:h` output, making the contract inspectable at the REPL.
 
-**Production operator**: Completion is a development-time feature; no production impact. The port communication is bounded in time by an existing timeout mechanism. If the compiler port crashes, completions degrade gracefully with no user-visible error.
+**Production operator**: Completion is a development-time feature; no production impact. The completion path is in-process with no external dependencies, no latency budget concerns, and no new failure modes.
 
-**Tooling developer** (LSP, debugger): The `type_at_cursor` operation is a clean, well-typed RPC. It takes source text and binding types, returns a class name or `"dynamic"`. This is also useful for LSP semantic token colouring and future debugger variable inspection. The Rust side is testable in isolation.
+**Tooling developer** (LSP, debugger): The `return_type_from_signature/1` helper and `walk_chain/2` are small, pure functions. They are independently testable without standing up the full compiler pipeline. The `method_signatures` data is already present in the class registry; no new data plumbing is required.
 
 ## Steelman Analysis
 
-### Option A: Runtime Return-Type Registry (Erlang-side chain inference)
+### Option B: Rust TypeChecker via OTP Port
 
-Compiler emits a machine-readable `method_return_types :: #{selector() => class_name() | dynamic}` map per class. Erlang completion walks the chain using this registry without any IPC.
+Send the expression to the Rust `TypeChecker` via the existing OTP Port. The TypeChecker infers the type at the cursor position and returns it.
 
 | Cohort | Strongest argument |
 |--------|--------------------|
-| **Newcomer** | "Completions work instantly — no port, no latency, no startup dependency" |
-| **Smalltalk purist** | "The runtime is the source of truth at runtime; inference should live there" |
-| **BEAM veteran** | "Pure Erlang. No synchronous port call in the completion hot path. Respects the nothing-shared-by-default BEAM model" |
-| **Operator** | "Zero additional failure modes — completion works even if the compiler port has crashed" |
-| **Language designer** | "Incentivises annotating return types; annotations improve both completion and docs simultaneously" |
+| **Newcomer** | "The REPL knows exactly the same types as the compiler — fewer surprises when LSP hover and completion disagree" |
+| **Smalltalk purist** | "One inference model. The compiler is the source of truth for types; querying it for completions is architecturally correct" |
+| **BEAM veteran** | "The TypeChecker handles unannotated method return types via body analysis — you get completions even for methods that lack explicit annotations" |
+| **Operator** | "Single source of truth reduces the chance of a subtle divergence between what the LSP says a type is and what the REPL completes on" |
+| **Language designer** | "Most coherent long-term: as the TypeChecker improves (inference for generics, union types, protocol conformance), REPL completions improve automatically" |
 
-**Why rejected**: Option A creates a parallel type inference engine in Erlang that will diverge from the Rust `TypeChecker`. When a method's return type cannot be statically annotated (e.g., it depends on an argument type, or it is inherited), the Erlang engine has no way to resolve it. The existing `TypeChecker` already handles these cases via class hierarchy walking. Maintaining two inference systems doubles the surface area for bugs and inconsistencies.
+**Why rejected**: The compiler port process constructs only `ClassHierarchy::with_builtins()`. It has no access to the live runtime class registry. Classes defined by the user in the REPL — the primary use case — are invisible to the TypeChecker in the port context. Fixing this would require either (a) serialising the full class hierarchy into each request (expensive and complex), (b) making the port stateful (contradicts current design), or (c) accepting that REPL-defined classes never get expression-level completions. The BEAM veteran's "body analysis for unannotated methods" point is valid but narrow: it only helps for unannotated stdlib builtins, not for the user's own code. The simpler Erlang-side approach has equivalent or better coverage for every case that actually matters in a REPL session, with dramatically less infrastructure.
 
 ### Option C: Hybrid — Erlang Parses Chain, Compiler Resolves Ambiguity
 
-Fast path: Erlang resolves annotated chains via the runtime registry. Fallback: delegate to Rust compiler via port for unknown types.
+Fast path via Erlang runtime registry; fallback to Rust port for unannotated methods.
 
 | Cohort | Strongest argument |
 |--------|--------------------|
-| **Newcomer** | "Most common cases (annotated methods) are instant; complex cases still work" |
-| **BEAM veteran** | "Fault-tolerant by default: fast path has no external dependencies" |
-| **Operator** | "Two independently observable paths — can trace fast vs slow separately" |
-| **Language designer** | "Pragmatic: commit to the right long-term design (Rust compiler) without blocking on full coverage" |
+| **Newcomer** | "Best of both worlds — common annotated cases are instant, and the compiler fills gaps for unannotated builtins" |
+| **BEAM veteran** | "Fault-tolerant: fast path has no external dependency, slow path degrades gracefully" |
+| **Language designer** | "Preserves optionality — can migrate fully to the compiler path once the ClassHierarchy-in-port problem is solved" |
 
-**Why rejected**: The fast path and fallback path use different inference engines with different coverage. Users experience inconsistent completion quality depending on annotation coverage — annotated methods get completions, unannotated ones silently don't. This creates implicit pressure to annotate *for completion* rather than for correctness, producing annotations that are semantically inaccurate. Option C's maintenance cost (two engines, two test surfaces, a seam between them) is not justified when the Rust TypeChecker can handle the full case.
+**Why rejected**: Option C has all of Option B's architectural gaps (ClassHierarchy unavailability for user-defined classes) in its fallback path, plus the maintenance cost of two code paths. The fast path and fallback produce different results for the same expression depending on annotation coverage — creating inconsistency that is hard to reason about. Option C is the right design *after* the ClassHierarchy-in-port problem is solved; it is premature now.
 
-**Tension points**: BEAM veterans and operators legitimately prefer decoupled completions (Option A/C). The chosen design mitigates this with the degradation path: if the port is down, completions fall back to current behaviour rather than erroring.
+**Tension points**: The BEAM veteran and language designer cohorts make the strongest case for Option B/C. The core tension is "coherence vs. coverage." Option A has better coverage for user-defined classes today; Option B has better architectural coherence for the future. The decision takes coverage, because the REPL is the primary editing surface and user-defined classes are the primary use case.
 
 ## Alternatives Considered
 
 ### Speculative evaluation for pure expressions
 
-Evaluate the receiver expression only when it is statically determined to be "pure" (no sends to actor objects, no I/O primitives). This would catch `#(1 2 3) size` and similar literal-heavy chains.
+Evaluate the receiver expression only when it can be statically determined to be "pure" (no sends to actor objects, no I/O primitives). This would catch `#(1 2 3) size` and similar literal-heavy chains.
 
-Rejected because: the purity analysis is itself a non-trivial static analysis problem. Actor status may not be known statically (a binding could hold either a value object or an actor). The boundary between "safe to evaluate" and "has side effects" is the same problem as full type inference, but with worse failure modes (incorrect evaluation causes visible state mutation). The Rust TypeChecker is strictly safer.
+Rejected because: the purity analysis is itself a non-trivial static analysis problem. Actor status may not be known statically (a binding could hold either a value object or an actor). The boundary between "safe to evaluate" and "has side effects" is the same problem as full type inference, but with worse failure modes. The Erlang chain resolution is strictly safer.
 
-### Parse display signature strings in Erlang
+### Cache prior evaluation results
 
-The `method_signatures` map already stores strings like `"size -> Integer"`. Parse the `-> Type` suffix in Erlang to extract return types.
+After the user evaluates `'hello' size` and sees `5`, cache `{'hello' size', Integer}` and use that for completion the next time the same prefix is typed. This is not speculative evaluation — it reuses results the user already caused.
 
-Rejected because: display signatures are not guaranteed to be present (methods without explicit return-type annotations have no `->` clause), their format is for human display and subject to change, and this is effectively Option A with fragile string parsing bolted on. It also creates an implicit contract between the display format and the inference engine.
+Rejected for this ADR as a primary mechanism because: the cache is stale after bindings change, requires matching against arbitrary expression text (a fuzzy equality problem), and only works for expressions the user has already fully evaluated. It could be a useful complement to chain resolution in a future iteration but does not cover the primary case of typing a new expression for the first time.
 
 ## Consequences
 
 ### Positive
-- Expression-level completions work for chained sends without any user annotation requirement, for methods whose return types are already resolvable by the TypeChecker.
-- Single source of truth: the same inference engine powers LSP hover, diagnostic warnings, and REPL completion.
-- Workspace binding types are propagated into the TypeChecker, enabling completions like `x` (bound to a Counter) followed by a method chain.
-- The `type_at_cursor` operation is reusable for future features (LSP semantic tokens, debugger variable inspection, inline type display).
+- Expression-level completions work for chained sends through annotated methods, including user-defined classes defined in the current REPL session.
+- Pure in-process Erlang: zero IPC latency, zero new failure modes, no port dependency.
+- Completion quality improves incrementally as return-type annotations are added to stdlib methods — both existing sessions and new sessions benefit immediately.
+- No new Rust code required.
+- `return_type_from_signature/1` and `walk_chain/2` are independently testable pure functions.
 
 ### Negative
-- A synchronous port call is added to each expression-level completion request. This adds latency compared to the current in-process single-token completion.
-- Methods without inferred return types (deeply dynamic code, unannotated Erlang interop) produce no expression-level completions.
-- The partial-expression parsing step (stripping the prefix) must handle edge cases: empty prefix, multi-line expressions, cursor mid-token.
+- Chain resolution breaks silently when any method in the chain lacks a `-> ClassName` annotation. The user sees empty completions with no indication of why.
+- The display signature format (`"size -> Integer"`) is now load-bearing for completion, not just for display. A format change requires a coordinated update to the parser.
+- Builtin method return type coverage must be improved as part of this work; that audit is not trivial for ~337 built-in methods.
 
 ### Neutral
-- Return-type annotation coverage directly determines completion quality. This creates organic incentive to annotate methods — a side effect that also improves `:h` documentation output.
-- The existing single-token completion path is unchanged; expression-level completion is additive.
-- The TypeChecker already has test coverage for the inference cases this feature exercises.
+- Return-type annotation coverage directly determines completion quality. This creates organic incentive to annotate method return types — a side effect that also improves `:h` documentation and LSP hover types.
+- The existing single-token completion path is unchanged; chain resolution is additive.
+- The TypeChecker and the runtime chain resolver use the same underlying information (return type annotations) but through different access paths. They may diverge if one is updated without the other. This is a documentation/process concern, not an architectural one.
 
 ## Implementation
 
-### Phase 1: Port operation
+### Phase 0: Prove the core mechanic
 
-Add `type_at_cursor` to the compiler port protocol:
+Before building the full completion path, validate the chain resolution mechanic with a minimal spike:
 
-- **`crates/beamtalk-core/src/port_protocol.rs`** (or equivalent): new `TypeAtCursorRequest` / `TypeAtCursorResponse` variants.
-- **`crates/beamtalk-core/src/semantic_analysis/type_checker.rs`**: new `infer_expression_type(source, bindings)` entry point that parses a single expression and returns `InferredType`.
-- **`runtime/apps/beamtalk_workspace/src/beamtalk_compiler_port.erl`**: new `type_at_cursor/2` function wrapping the port call.
+- Implement `return_type_from_signature/1` in `beamtalk_repl_ops_dev.erl`
+- Manually verify `String#size -> Integer` and `Integer#+ -> Integer` round-trip through signature lookup
+- Confirm `beamtalk_class_registry` exposes a way to query method signatures by selector
 
-### Phase 2: Prefix stripping
+This is a single-day proof of concept that de-risks the approach before the annotation audit.
 
-- **`runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_dev.erl`**: extend `parse_receiver_and_prefix/1` to return `{expression, ReceiverExpr, Prefix}` for multi-token receivers. Strip the trailing incomplete token from `ReceiverExpr` before the port call.
+### Phase 1: Annotation audit and improvement
 
-### Phase 3: Completion integration
+- **`crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs`**: audit all ~337 built-in method entries; add `return_type` for unambiguous cases (Integer arithmetic, String operations, Collection operations, Boolean results)
+- **`stdlib/src/*.bt`**: ensure stdlib method definitions carry `-> ClassName` return-type annotations on key methods
+- Target: high-frequency chains (those appearing in typical REPL sessions) covered before Phase 2
 
-- **`beamtalk_repl_ops_dev.erl`**: add `complete_via_type_inference/3` and wire it into `get_context_completions/2` after the existing single-token path fails to classify.
+### Phase 2: Runtime chain resolution
 
-### Phase 4: Binding type extraction
+- **`runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_dev.erl`**: implement `return_type_from_signature/1`, `tokenise_send_chain/1`, `resolve_chain_type/2`, `walk_chain/2`, `walk_chain_class/2`
+- Extend `parse_receiver_and_prefix/1` to return `{expression, ReceiverExpr, Prefix}` for multi-token receivers
+- Wire chain path into `get_context_completions/2`
 
-- **`beamtalk_repl_ops_dev.erl`**: implement `extract_binding_types/1` to convert workspace bindings (live values) into `#{ClassName => binary()}` using `beamtalk_primitive:class_of/1`.
+### Phase 3: Tests
+
+- Unit tests for `return_type_from_signature/1` (annotated, unannotated, malformed signatures)
+- Unit tests for `walk_chain/2` (single hop, multi-hop, broken chain)
+- E2e REPL completion tests: `'hello' size <TAB>` → Integer methods; `counter getValue <TAB>` → correct methods for return type; `counter unknownChain <TAB>` → empty
 
 ### Affected components
 
 | Component | Change |
 |-----------|--------|
-| Rust compiler (`beamtalk-core`) | New `infer_expression_type` entry point in TypeChecker; new port protocol variant |
-| OTP Port (`beamtalk_compiler_port.erl`) | New `type_at_cursor/2` wrapper |
-| Completion engine (`beamtalk_repl_ops_dev.erl`) | Multi-token receiver path; prefix stripping; binding type extraction |
-| Tests | Unit tests for `infer_expression_type`; e2e REPL completion tests |
+| Rust builtins (`generated_builtins.rs`) | Return-type annotation audit; add `return_type` for ~half of built-in methods |
+| Stdlib (`.bt` files) | Add/verify `-> ClassName` return-type annotations on key methods |
+| Completion engine (`beamtalk_repl_ops_dev.erl`) | Chain resolution path; prefix stripping for multi-token receivers |
+| Tests | Unit tests for chain resolution helpers; e2e REPL completion tests |
+
+## Migration Path
+
+Not applicable — this is additive. The existing single-token completion path is unchanged.
 
 ## References
 
 - Related issues: BT-989
-- Related ADRs: ADR 0022 (embedded compiler via OTP Port), ADR 0024 (static-first IDE tooling), ADR 0025 (gradual typing and protocols)
+- Related ADRs: ADR 0022 (embedded compiler via OTP Port), ADR 0024 (static-first IDE tooling), ADR 0025 (gradual typing and protocols), ADR 0033 (runtime-embedded documentation)
 - Current completion implementation: `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_dev.erl`
-- TypeChecker: `crates/beamtalk-core/src/semantic_analysis/type_checker.rs`
-- Port protocol: `crates/beamtalk-core/src/`
+- Method signature storage: `runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl`
+- Builtin method definitions: `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs`
