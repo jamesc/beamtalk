@@ -337,20 +337,23 @@ pub(crate) fn unparse_method_definition(method: &MethodDefinition) -> Document<'
                 docs.push(Document::Str("  "));
                 docs.push(unparse_comment(trail));
             }
+            let mut body_docs: Vec<Document<'static>> = Vec::new();
             for stmt in stmts {
                 // BT-987: emit an extra blank line before statements that had one in source
                 if stmt.preceding_blank_line {
-                    docs.push(line());
+                    // Use a raw newline for blank lines to avoid trailing whitespace
+                    // from indentation on empty lines.
+                    body_docs.push(Document::Str("\n"));
                 }
-                docs.push(line());
-                docs.extend(unparse_comment_attachment_leading(&stmt.comments));
-                docs.push(Document::Str("  "));
-                docs.push(unparse_expression(&stmt.expression));
+                body_docs.push(line());
+                body_docs.extend(unparse_comment_attachment_leading(&stmt.comments));
+                body_docs.push(unparse_expression(&stmt.expression));
                 if let Some(trail) = &stmt.comments.trailing {
-                    docs.push(Document::Str("  "));
-                    docs.push(unparse_comment(trail));
+                    body_docs.push(Document::Str("  "));
+                    body_docs.push(unparse_comment(trail));
                 }
             }
+            docs.push(nest(2, concat(body_docs)));
         }
     }
 
@@ -1327,15 +1330,8 @@ mod tests {
             span(),
         );
         let output = unparse_method_definition(&method).to_pretty_string();
-        // Leading comment in body forces multi-line
-        assert!(
-            output.contains("// the result"),
-            "expected '// the result' in: {output}"
-        );
-        assert!(
-            output.contains("compute =>"),
-            "expected 'compute =>' in: {output}"
-        );
+        // Leading comment in body forces multi-line, comment indented with body
+        assert_eq!(output, "compute =>\n  // the result\n  x");
     }
 
     // --- Blank line preservation (BT-987) ---
@@ -1376,6 +1372,83 @@ mod tests {
         );
         let output = unparse_method_definition(&method).to_pretty_string();
         assert_eq!(output, "doStuff =>\n  1\n  2");
+    }
+
+    // --- Method body comment indentation ---
+
+    #[test]
+    fn method_body_leading_comment_indented_with_body() {
+        // A single expression with a leading comment forces multi-line.
+        // The comment must be indented at the same level as the expression.
+        let body_stmt = ExpressionStatement {
+            comments: CommentAttachment {
+                leading: vec![Comment::line("do the thing", span())],
+                trailing: None,
+            },
+            expression: Expression::Identifier(Identifier::new("x", span())),
+            preceding_blank_line: false,
+        };
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("compute".into()),
+            Vec::new(),
+            vec![body_stmt],
+            span(),
+        );
+        let output = unparse_method_definition(&method).to_pretty_string();
+        assert_eq!(output, "compute =>\n  // do the thing\n  x");
+    }
+
+    #[test]
+    fn method_body_multiple_leading_comments_indented() {
+        let body_stmt = ExpressionStatement {
+            comments: CommentAttachment {
+                leading: vec![
+                    Comment::line("first comment", span()),
+                    Comment::line("second comment", span()),
+                ],
+                trailing: None,
+            },
+            expression: Expression::Literal(Literal::Integer(42), span()),
+            preceding_blank_line: false,
+        };
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("run".into()),
+            Vec::new(),
+            vec![body_stmt],
+            span(),
+        );
+        let output = unparse_method_definition(&method).to_pretty_string();
+        assert_eq!(
+            output,
+            "run =>\n  // first comment\n  // second comment\n  42"
+        );
+    }
+
+    #[test]
+    fn method_body_blank_line_has_no_trailing_whitespace() {
+        let body = vec![
+            ExpressionStatement::bare(Expression::Literal(Literal::Integer(1), span())),
+            ExpressionStatement {
+                comments: CommentAttachment::default(),
+                expression: Expression::Literal(Literal::Integer(2), span()),
+                preceding_blank_line: true,
+            },
+        ];
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("doStuff".into()),
+            Vec::new(),
+            body,
+            span(),
+        );
+        let output = unparse_method_definition(&method).to_pretty_string();
+        // The blank line between 1 and 2 must be truly empty (no trailing spaces).
+        for (i, line_text) in output.lines().enumerate() {
+            assert_eq!(
+                line_text,
+                line_text.trim_end(),
+                "line {i} has trailing whitespace: {line_text:?}"
+            );
+        }
     }
 
     // --- Round-trip: parse → unparse → parse ---
