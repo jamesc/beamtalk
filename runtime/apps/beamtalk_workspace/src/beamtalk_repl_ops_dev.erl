@@ -38,7 +38,10 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
                 BindingPid = resolve_binding_session(
                     maps:get(<<"session">>, Params, undefined), SessionPid
                 ),
-                Bindings = get_session_bindings(BindingPid),
+                SessionBindings = get_session_bindings(BindingPid),
+                WorkspaceBindings = get_workspace_bindings(),
+                %% Session bindings take priority over workspace globals (e.g. Transcript)
+                Bindings = maps:merge(WorkspaceBindings, SessionBindings),
                 get_context_completions(Code, Bindings);
             false ->
                 get_completions(Code)
@@ -384,8 +387,10 @@ get_methods_for_receiver(Receiver, Bindings) when is_binary(Receiver) ->
 -spec classify_receiver(binary(), map()) -> {class, atom()} | {instance, atom()} | undefined.
 classify_receiver(<<>>, _Bindings) ->
     undefined;
-classify_receiver(<<H, _/binary>> = Receiver, _Bindings) when H >= $A, H =< $Z ->
-    %% Starts with uppercase — treat as a class object; complete class-side methods
+classify_receiver(<<H, _/binary>> = Receiver, Bindings) when H >= $A, H =< $Z ->
+    %% Starts with uppercase — first try class registry, then fall back to bindings.
+    %% The fallback handles uppercase global bindings like `Transcript` that are
+    %% workspace actors, not class names.
     case beamtalk_repl_errors:safe_to_existing_atom(Receiver) of
         {ok, ClassName} ->
             case
@@ -395,8 +400,11 @@ classify_receiver(<<H, _/binary>> = Receiver, _Bindings) when H >= $A, H =< $Z -
                     _:_ -> undefined
                 end
             of
-                undefined -> undefined;
-                _Pid -> {class, ClassName}
+                undefined ->
+                    %% Not a class — check if it's a named binding (e.g. Transcript)
+                    classify_by_binding(ClassName, Bindings);
+                _Pid ->
+                    {class, ClassName}
             end;
         {error, _} ->
             undefined
@@ -420,20 +428,26 @@ classify_receiver(<<$", _/binary>>, _Bindings) ->
         ClassName -> {instance, ClassName}
     end;
 classify_receiver(Receiver, Bindings) ->
-    %% Lowercase identifier — look up in session bindings to find the class
+    %% Lowercase identifier — look up in bindings to find the class
     case beamtalk_repl_errors:safe_to_existing_atom(Receiver) of
-        {ok, VarAtom} ->
-            case maps:find(VarAtom, Bindings) of
-                {ok, #beamtalk_object{class = ClassName}} ->
-                    %% Actor binding: complete instance methods of the actor's class
-                    case maybe_class(ClassName) of
-                        undefined -> undefined;
-                        _ -> {instance, ClassName}
-                    end;
-                _ ->
-                    undefined
+        {ok, VarAtom} -> classify_by_binding(VarAtom, Bindings);
+        {error, _} -> undefined
+    end.
+
+%% @private
+%% @doc Classify a receiver by looking it up in the bindings map.
+%% Uses beamtalk_primitive:class_of/1 as the canonical type classifier,
+%% which handles actors, tagged maps, primitives, symbols, blocks, nil, etc.
+-spec classify_by_binding(atom(), map()) -> {instance, atom()} | undefined.
+classify_by_binding(VarAtom, Bindings) ->
+    case maps:find(VarAtom, Bindings) of
+        {ok, Value} ->
+            ClassName = beamtalk_primitive:class_of(Value),
+            case maybe_class(ClassName) of
+                undefined -> undefined;
+                _ -> {instance, ClassName}
             end;
-        {error, _} ->
+        error ->
             undefined
     end.
 
@@ -485,6 +499,18 @@ get_session_bindings(SessionPid) ->
     try
         {ok, Bindings} = beamtalk_repl_shell:get_bindings(SessionPid),
         Bindings
+    catch
+        _:_ -> #{}
+    end.
+
+%% @private
+%% @doc Get workspace-level global bindings (e.g. Transcript, Beamtalk, Workspace).
+%% Uses get_session_bindings/0 to include singletons as well as bind:as: entries.
+%% Returns empty map if workspace interface is unavailable.
+-spec get_workspace_bindings() -> map().
+get_workspace_bindings() ->
+    try
+        beamtalk_workspace_interface:get_session_bindings()
     catch
         _:_ -> #{}
     end.

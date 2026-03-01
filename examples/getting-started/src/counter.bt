@@ -16,6 +16,14 @@
 ///   > c getValue
 ///   1
 ///
+/// Fire-and-forget with `!` (async cast, returns nil immediately):
+///   > c increment!
+///   nil
+///   > c increment!
+///   nil
+///   > c getValue
+///   3
+///
 /// See examples/repl-tutorial.md for a full beginner's guide
 Actor subclass: Counter
   state: value = 0
