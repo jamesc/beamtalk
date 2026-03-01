@@ -935,6 +935,7 @@ impl Parser {
     /// This method consumes it and parses the primitive name that follows.
     fn parse_primitive(&mut self) -> Expression {
         let start_token = self.advance(); // consume AtPrimitive or AtIntrinsic
+        let is_intrinsic = matches!(start_token.kind(), TokenKind::AtIntrinsic);
         let directive = start_token.kind().to_string();
         let start = start_token.span();
 
@@ -958,7 +959,7 @@ impl Parser {
         }
 
         match self.current_kind() {
-            // Quoted selector: @primitive '+'
+            // Quoted selector: @primitive "+"
             TokenKind::String(name) => {
                 let name = name.clone();
                 let end_token = self.advance();
@@ -966,6 +967,7 @@ impl Parser {
                 Expression::Primitive {
                     name,
                     is_quoted: true,
+                    is_intrinsic,
                     span,
                 }
             }
@@ -977,6 +979,7 @@ impl Parser {
                 Expression::Primitive {
                     name,
                     is_quoted: false,
+                    is_intrinsic,
                     span,
                 }
             }

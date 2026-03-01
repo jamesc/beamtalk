@@ -2603,6 +2603,7 @@ mod tests {
                 body: vec![bare(Expression::Primitive {
                     name: "at:".into(),
                     is_quoted: true,
+                    is_intrinsic: false,
                     span: test_span(),
                 })],
                 return_type: None,
@@ -2663,6 +2664,7 @@ mod tests {
                 body: vec![bare(Expression::Primitive {
                     name: "actorSpawnWith".into(),
                     is_quoted: false,
+                    is_intrinsic: false,
                     span: test_span(),
                 })],
                 return_type: None,

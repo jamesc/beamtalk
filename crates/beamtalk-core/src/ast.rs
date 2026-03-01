@@ -992,8 +992,10 @@ pub enum Expression {
     Primitive {
         /// The primitive name (selector string or intrinsic identifier).
         name: EcoString,
-        /// Whether the name was quoted (`'+'`) vs bare (`basicNew`).
+        /// Whether the name was quoted (`"+"`) vs bare (`basicNew`).
         is_quoted: bool,
+        /// Whether the original source used `@intrinsic` instead of `@primitive`.
+        is_intrinsic: bool,
         /// Source location of the entire `@primitive name` expression.
         span: Span,
     },

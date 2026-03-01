@@ -570,12 +570,20 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
         }
         Expression::ArrayLiteral { elements, .. } => unparse_array_literal(elements),
         Expression::Primitive {
-            name, is_quoted, ..
+            name,
+            is_quoted,
+            is_intrinsic,
+            ..
         } => {
-            if *is_quoted {
-                docvec!["@primitive '", Document::String(name.to_string()), "'"]
+            let directive = if *is_intrinsic {
+                "@intrinsic"
             } else {
-                docvec!["@primitive ", Document::String(name.to_string())]
+                "@primitive"
+            };
+            if *is_quoted {
+                docvec![directive, " \"", Document::String(name.to_string()), "\""]
+            } else {
+                docvec![directive, " ", Document::String(name.to_string())]
             }
         }
         Expression::StringInterpolation { segments, .. } => unparse_string_interpolation(segments),
