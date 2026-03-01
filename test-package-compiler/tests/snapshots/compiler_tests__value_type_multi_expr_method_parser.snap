@@ -100,6 +100,7 @@ Module {
                                     end: 576,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                         ExpressionStatement {
                             comments: CommentAttachment {
@@ -136,6 +137,7 @@ Module {
                                     end: 586,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                     ],
                     return_type: None,
@@ -237,6 +239,7 @@ Module {
                                     end: 688,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                         ExpressionStatement {
                             comments: CommentAttachment {
@@ -273,6 +276,7 @@ Module {
                                     end: 698,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                         ExpressionStatement {
                             comments: CommentAttachment {
@@ -309,6 +313,7 @@ Module {
                                     end: 708,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                     ],
                     return_type: None,

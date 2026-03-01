@@ -81,6 +81,7 @@ Module {
                                     end: 215,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                     ],
                     return_type: None,

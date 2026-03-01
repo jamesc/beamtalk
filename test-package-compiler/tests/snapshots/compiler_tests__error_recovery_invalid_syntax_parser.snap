@@ -75,6 +75,7 @@ Module {
                     end: 186,
                 },
             },
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -90,6 +91,7 @@ Module {
                     end: 188,
                 },
             ),
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -127,6 +129,7 @@ Module {
                     end: 251,
                 },
             },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -142,6 +145,7 @@ Module {
                     },
                 },
             ),
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -164,6 +168,7 @@ Module {
                     end: 365,
                 },
             },
+            preceding_blank_line: true,
         },
     ],
     span: Span {

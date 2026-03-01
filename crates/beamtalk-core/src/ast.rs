@@ -224,6 +224,12 @@ pub struct ExpressionStatement {
     pub comments: CommentAttachment,
     /// The expression.
     pub expression: Expression,
+    /// Whether a blank line preceded this statement in the source (BT-987).
+    ///
+    /// Set by the parser when 2+ newlines appear before the statement.
+    /// The unparser emits an extra blank line before such statements.
+    /// Consecutive blank lines are collapsed to a single one.
+    pub preceding_blank_line: bool,
 }
 
 impl ExpressionStatement {
@@ -233,6 +239,7 @@ impl ExpressionStatement {
         Self {
             comments: CommentAttachment::default(),
             expression,
+            preceding_blank_line: false,
         }
     }
 }
@@ -2128,6 +2135,7 @@ mod tests {
                 trailing: None,
             },
             expression: expr,
+            preceding_blank_line: false,
         };
         assert!(!stmt.comments.is_empty());
         assert_eq!(stmt.comments.leading.len(), 1);

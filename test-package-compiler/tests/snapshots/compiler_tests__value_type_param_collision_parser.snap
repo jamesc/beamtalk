@@ -88,6 +88,7 @@ Module {
                                     end: 789,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                         ExpressionStatement {
                             comments: CommentAttachment {
@@ -124,6 +125,7 @@ Module {
                                     end: 803,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                     ],
                     return_type: None,

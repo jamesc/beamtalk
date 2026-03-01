@@ -641,6 +641,9 @@ impl Parser {
         let mut body = Vec::new();
         while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
             let pos_before = self.current;
+            // BT-987: detect blank lines (2+ newlines) before this statement
+            let has_blank_line =
+                !body.is_empty() && self.current_token().has_preceding_blank_line();
             let mut comments = self.collect_comment_attachment();
             let expr = self.parse_expression();
             // Only collect trailing comment if parse_expression consumed tokens;
@@ -652,6 +655,7 @@ impl Parser {
             body.push(ExpressionStatement {
                 comments,
                 expression: expr,
+                preceding_blank_line: has_blank_line,
             });
 
             // If parse_expression didn't consume any tokens (e.g. nesting

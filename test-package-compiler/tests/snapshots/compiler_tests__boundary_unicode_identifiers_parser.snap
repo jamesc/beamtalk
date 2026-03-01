@@ -70,6 +70,7 @@ Module {
                     },
                 },
             ),
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -83,6 +84,7 @@ Module {
                     end: 328,
                 },
             },
+            preceding_blank_line: false,
         },
     ],
     span: Span {

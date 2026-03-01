@@ -129,6 +129,7 @@ Module {
                                             end: 212,
                                         },
                                     },
+                                    preceding_blank_line: false,
                                 },
                             ],
                             span: Span {
@@ -184,6 +185,7 @@ Module {
                                             end: 230,
                                         },
                                     },
+                                    preceding_blank_line: false,
                                 },
                             ],
                             span: Span {
@@ -199,6 +201,7 @@ Module {
                     end: 231,
                 },
             },
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -352,6 +355,7 @@ Module {
                     end: 308,
                 },
             },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -479,6 +483,7 @@ Module {
                     end: 398,
                 },
             },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -584,6 +589,7 @@ Module {
                                             end: 468,
                                         },
                                     },
+                                    preceding_blank_line: false,
                                 },
                             ],
                             span: Span {
@@ -668,6 +674,7 @@ Module {
                     end: 520,
                 },
             },
+            preceding_blank_line: true,
         },
     ],
     span: Span {

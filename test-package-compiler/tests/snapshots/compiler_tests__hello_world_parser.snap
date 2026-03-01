@@ -79,6 +79,7 @@ Module {
                     end: 165,
                 },
             },
+            preceding_blank_line: false,
         },
     ],
     span: Span {
