@@ -11,32 +11,32 @@
 TestCase subclass: TransactionTest
 
   testDefaultAmount =>
-    self assert: Transaction new getAmount equals: 0
+    self assert: Transaction new amount equals: 0
 
   testDefaultFrom =>
-    self assert: Transaction new getFrom equals: ""
+    self assert: Transaction new from equals: ""
 
   testDefaultTo =>
-    self assert: Transaction new getTo equals: ""
+    self assert: Transaction new to equals: ""
 
   testDefaultStatus =>
-    self assert: Transaction new getStatus equals: "pending"
+    self assert: Transaction new status equals: "pending"
 
   testDefaultTimestampIsNil =>
-    self assert: Transaction new getTimestamp equals: nil
+    self assert: Transaction new timestamp equals: nil
 
   testNewWithAmount =>
     txn := Transaction new: #{#amount => 250}
-    self assert: txn getAmount equals: 250
+    self assert: txn amount equals: 250
 
   testNewWithFromAndTo =>
     txn := Transaction new: #{#from => "Alice", #to => "Bob"}
-    self assert: txn getFrom equals: "Alice"
-    self assert: txn getTo equals: "Bob"
+    self assert: txn from equals: "Alice"
+    self assert: txn to equals: "Bob"
 
   testNewWithStatus =>
     txn := Transaction new: #{#status => "completed"}
-    self assert: txn getStatus equals: "completed"
+    self assert: txn status equals: "completed"
 
   testNewWithAllFields =>
     txn := Transaction new: #{
@@ -45,14 +45,14 @@ TestCase subclass: TransactionTest
       #to => "Bob",
       #status => "completed"
     }
-    self assert: txn getAmount equals: 500;
-         assert: txn getFrom equals: "Alice";
-         assert: txn getTo equals: "Bob";
-         assert: txn getStatus equals: "completed"
+    self assert: txn amount equals: 500;
+         assert: txn from equals: "Alice";
+         assert: txn to equals: "Bob";
+         assert: txn status equals: "completed"
 
   testTwoInstancesAreIndependent =>
     // Value types — no shared mutable state
     txn1 := Transaction new: #{#amount => 100, #from => "Alice"}
     txn2 := Transaction new: #{#amount => 200, #from => "Bob"}
-    self assert: txn1 getAmount equals: 100
-    self assert: txn2 getAmount equals: 200
+    self assert: txn1 amount equals: 100
+    self assert: txn2 amount equals: 200
