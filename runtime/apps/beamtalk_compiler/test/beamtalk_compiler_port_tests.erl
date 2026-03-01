@@ -230,3 +230,47 @@ find_compiler_binary_empty_env_fallback_test() ->
 find_project_root_finds_cargo_toml_test() ->
     Root = beamtalk_compiler_port:find_project_root(),
     ?assert(filelib:is_regular(filename:join(Root, "Cargo.toml"))).
+
+%%% ---------------------------------------------------------------
+%%% class_module_index — package-qualified class references
+%%% ---------------------------------------------------------------
+
+class_module_index_used_for_spawn_expression_test() ->
+    %% When class_module_index maps Counter → bt@getting_started@counter,
+    %% `Counter spawn` must generate code referencing the package-qualified module.
+    with_port(fun(Port) ->
+        Options = #{
+            class_module_index => #{
+                <<"Counter">> => <<"bt@getting_started@counter">>
+            }
+        },
+        {ok, CoreErlang, []} =
+            beamtalk_compiler_port:compile_expression(
+                Port, <<"Counter spawn">>, <<"repl_test">>, [], Options
+            ),
+        ?assert(
+            binary:match(CoreErlang, <<"'bt@getting_started@counter':'spawn'">>) =/= nomatch
+        ),
+        %% Must NOT contain the heuristic fallback module name
+        ?assertEqual(
+            nomatch,
+            binary:match(CoreErlang, <<"'bt@counter':'spawn'">>)
+        )
+    end).
+
+class_module_index_used_for_spawn_with_args_expression_test() ->
+    %% spawnWith: must also respect class_module_index.
+    with_port(fun(Port) ->
+        Options = #{
+            class_module_index => #{
+                <<"Counter">> => <<"bt@getting_started@counter">>
+            }
+        },
+        {ok, CoreErlang, []} =
+            beamtalk_compiler_port:compile_expression(
+                Port, <<"Counter spawnWith: #{ value: 10 }">>, <<"repl_test">>, [], Options
+            ),
+        ?assert(
+            binary:match(CoreErlang, <<"'bt@getting_started@counter':'spawn'">>) =/= nomatch
+        )
+    end).

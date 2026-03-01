@@ -493,6 +493,25 @@ pub fn generate_repl_expression(expression: &Expression, module_name: &str) -> R
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_repl_expressions(expressions: &[Expression], module_name: &str) -> Result<String> {
+    generate_repl_expressions_with_index(expressions, module_name, std::collections::HashMap::new())
+}
+
+/// Generates Core Erlang for multiple REPL expressions with a class module index.
+///
+/// Like [`generate_repl_expressions`] but accepts a `class_module_index` that maps
+/// class names to their compiled module names (e.g. `"Counter"` → `"bt@getting_started@counter"`).
+/// This is needed in workspace/package mode so that `compiled_module_name` resolves
+/// class references correctly instead of falling back to the heuristic prefix.
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+#[allow(clippy::implicit_hasher)] // concrete HashMap matches internal generator field type
+pub fn generate_repl_expressions_with_index(
+    expressions: &[Expression],
+    module_name: &str,
+    class_module_index: std::collections::HashMap<String, String>,
+) -> Result<String> {
     if expressions.is_empty() {
         return Err(CodeGenError::UnsupportedFeature {
             feature: "empty expression list".to_string(),
@@ -500,6 +519,7 @@ pub fn generate_repl_expressions(expressions: &[Expression], module_name: &str) 
         });
     }
     let mut generator = CoreErlangGenerator::new(module_name);
+    generator.class_module_index = class_module_index;
     let doc = generator.generate_repl_module_multi(expressions)?;
     Ok(doc.to_pretty_string())
 }

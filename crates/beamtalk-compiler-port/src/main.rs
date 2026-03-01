@@ -322,6 +322,10 @@ fn partition_diagnostics(
 }
 
 /// Handle a single `compile_expression` request.
+#[expect(
+    clippy::too_many_lines,
+    reason = "expression compilation handles class defs, method defs, and plain expressions with indexes"
+)]
 fn handle_compile_expression(request: &Map) -> Term {
     // Extract required fields
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
@@ -340,6 +344,17 @@ fn handle_compile_expression(request: &Map) -> Term {
     // When an inline class definition inherits from a class loaded via a file, the compiler
     // needs the index to determine whether the parent is a value object or an actor.
     let class_superclass_index = match map_get(request, "class_superclass_index") {
+        None => std::collections::HashMap::new(),
+        Some(term) => match term_to_string_map(term) {
+            Ok(map) => map,
+            Err(e) => return error_response(&[e]),
+        },
+    };
+
+    // Extract optional class module index for resolving package-qualified class references.
+    // Without this, `Counter spawn` in a workspace with package "getting_started" generates
+    // `call 'bt@counter':'spawn'()` instead of `call 'bt@getting_started@counter':'spawn'()`.
+    let class_module_index = match map_get(request, "class_module_index") {
         None => std::collections::HashMap::new(),
         Some(term) => match term_to_string_map(term) {
             Ok(map) => map,
@@ -401,6 +416,7 @@ fn handle_compile_expression(request: &Map) -> Term {
             &module_name,
             &warnings,
             &class_superclass_index,
+            class_module_index,
         );
     }
 
@@ -435,7 +451,11 @@ fn handle_compile_expression(request: &Map) -> Term {
         .iter()
         .map(|s| s.expression.clone())
         .collect();
-    match beamtalk_core::erlang::generate_repl_expressions(&expressions, &module_name) {
+    match beamtalk_core::erlang::generate_repl_expressions_with_index(
+        &expressions,
+        &module_name,
+        class_module_index,
+    ) {
         Ok(code) => ok_response(&code, &warnings),
         Err(e) => error_response(&[format!("Code generation failed: {e}")]),
     }
@@ -446,12 +466,15 @@ fn handle_compile_expression(request: &Map) -> Term {
 /// and returns a `class_definition` response.
 /// BT-885: Also compiles any trailing expressions and includes them in the response.
 /// BT-907: Accepts `class_superclass_index` to resolve cross-file inheritance chains.
+/// Accepts `class_module_index` for package-qualified class references in trailing
+/// expressions and the class body itself.
 fn handle_inline_class_definition(
     module: beamtalk_core::ast::Module,
     source: &str,
     expr_module_name: &str,
     warnings: &[String],
     class_superclass_index: &std::collections::HashMap<String, String>,
+    class_module_index: std::collections::HashMap<String, String>,
 ) -> Term {
     let mut module = module;
     let mut warnings = warnings.to_vec();
@@ -497,7 +520,11 @@ fn handle_inline_class_definition(
             .iter()
             .map(|s| s.expression.clone())
             .collect();
-        match beamtalk_core::erlang::generate_repl_expressions(&trailing_exprs, expr_module_name) {
+        match beamtalk_core::erlang::generate_repl_expressions_with_index(
+            &trailing_exprs,
+            expr_module_name,
+            class_module_index.clone(),
+        ) {
             Ok(code) => Some(code),
             Err(e) => {
                 return error_response(&[format!(
@@ -512,7 +539,8 @@ fn handle_inline_class_definition(
         beamtalk_core::erlang::CodegenOptions::new(&class_module_name)
             .with_workspace_mode(true)
             .with_source(source)
-            .with_class_superclass_index(class_superclass_index.clone()),
+            .with_class_superclass_index(class_superclass_index.clone())
+            .with_class_module_index(class_module_index),
     ) {
         Ok(code) => class_definition_ok_response(
             &code,

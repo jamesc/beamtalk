@@ -200,8 +200,8 @@ eval_loaded_module(ModuleName, Expression, Bindings, RegistryPid, Subscriber, Wa
         try
             execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State)
         catch
-            Class:Reason:_Stacktrace ->
-                CaughtExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
+            Class:Reason:Stacktrace ->
+                CaughtExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace),
                 CaughtBindings = maps:put('_error', CaughtExObj, Bindings),
                 CaughtState = beamtalk_repl_state:set_bindings(CaughtBindings, State),
                 {error, {eval_error, Class, CaughtExObj}, CaughtState}
