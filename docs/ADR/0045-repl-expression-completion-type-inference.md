@@ -23,26 +23,30 @@ The question is: **how does expression-level type inference for completion run, 
 
 ## Decision
 
-Expression-level completion is driven by the **Erlang runtime**, using the existing `method_signatures` and `class_method_signatures` maps stored on each class. The completion engine parses the expression into a chain of message sends, resolves the receiver type, then walks the chain one hop at a time — looking up each send's return type from the class's signature map — until it arrives at the type of the final receiver. The final method lookup against that class produces the completions.
+Expression-level completion is driven by the **Erlang runtime**, using a new structured `method_return_types` map stored on each class alongside the existing `method_signatures` display strings. The completion engine parses the expression into a chain of message sends, resolves the receiver type, then walks the chain one hop at a time — looking up each send's return type directly from the class's return-type map — until it arrives at the type of the final receiver. The final method lookup against that class produces the completions.
 
-This requires two things: the signature maps must contain `-> ClassName` annotations for methods whose return types matter for completion, and a small Erlang function to extract the class name from a display signature string.
+### Return-Type Metadata
 
-### Return-Type Extraction
-
-A project-controlled contract on the display signature format allows straightforward suffix parsing:
+A new field is added to `class_state` in `beamtalk_object_class.erl`, storing machine-readable return types separately from the human-readable display signatures:
 
 ```erlang
-%% Extract return type from a display signature string.
-%% Returns {ok, ClassName} if annotated, or undefined if not.
--spec return_type_from_signature(binary()) -> {ok, atom()} | undefined.
-return_type_from_signature(Sig) ->
-    case binary:split(Sig, <<" -> ">>) of
-        [_Selector, ReturnType] ->
-            {ok, binary_to_atom(ReturnType, utf8)};
-        _ ->
-            undefined
-    end.
+-record(class_state, {
+    %% ... existing fields ...
+    method_signatures         = #{} :: #{selector() => binary()},       %% BT-988: display strings
+    class_method_signatures   = #{} :: #{selector() => binary()},       %% BT-990: display strings
+    method_return_types       = #{} :: #{selector() => atom() | dynamic}, %% BT-989: machine-typed
+    class_method_return_types = #{} :: #{selector() => atom() | dynamic}  %% BT-989: machine-typed
+}).
 ```
+
+The codegen emits both maps in the same pass. `method_return_types` is populated from `MethodDefinition.return_type` — the same source as the display signature `->` suffix — so they are always consistent. When `return_type` is `None`, the selector is absent from the map (not present means `dynamic`):
+
+```erlang
+%% Generated for String class (conceptual):
+method_return_types = #{size => 'Integer', reversed => 'String', ...},
+```
+
+This keeps display strings purely human-readable and gives completion a stable, typed data source with no parsing required.
 
 ### Chain Resolution
 
@@ -68,13 +72,9 @@ resolve_chain_type(Expr, Bindings) ->
 walk_chain(ClassName, []) ->
     {ok, ClassName};
 walk_chain(ClassName, [Selector | Rest]) ->
-    case beamtalk_class_registry:get_method_signature(ClassName, Selector) of
-        {ok, Sig} ->
-            case return_type_from_signature(Sig) of
-                {ok, NextClass} -> walk_chain(NextClass, Rest);
-                undefined       -> undefined   %% chain breaks — annotation missing
-            end;
-        _ -> undefined
+    case beamtalk_class_registry:get_method_return_type(ClassName, Selector) of
+        {ok, NextClass} -> walk_chain(NextClass, Rest);
+        undefined       -> undefined   %% chain breaks — annotation absent
     end.
 ```
 
@@ -139,7 +139,7 @@ deposit:  withdraw:  balance  ...
 
 **Pharo Smalltalk**: The Pharo completion system uses AST-level type hints without evaluation. The default algorithm extracts type information from method argument naming conventions (`aString`, `anInteger`) for ~36% coverage; heuristics improve this to ~50%. Pharo workspaces also use results of prior evaluations: if you have evaluated `'hello' size` and the result `5` is visible in the workspace, the completion engine can use that runtime result. Beamtalk adopts the same "no evaluation" principle; the chain-inference approach is closer to Pharo's static AST analysis path than to the result-caching path.
 
-**Elixir IEx / ElixirSense**: Completion uses `@spec` type annotations on compiled module metadata. Return types must be explicitly annotated. IEx does not infer intermediate types for chained calls. Beamtalk's approach is equivalent: annotated return types propagate completions; unannotated methods break the chain. The difference is that Erlang/Elixir `@spec` annotations are formal types; Beamtalk's return-type annotations in `method_signatures` are display strings with a project-controlled format.
+**Elixir IEx / ElixirSense**: Completion uses `@spec` type annotations on compiled module metadata. Return types must be explicitly annotated; IEx does not infer intermediate types for chained calls. Elixir stores type information separately from documentation strings — `@spec` is a typed contract, `@doc` is a display string. Beamtalk's decision to store `method_return_types` separately from `method_signatures` follows this same principle: display and machine-readable data have different consumers and different stability requirements.
 
 **Gleam**: No traditional REPL; completion provided at language-server level with full static types. Not applicable.
 
@@ -157,7 +157,7 @@ deposit:  withdraw:  balance  ...
 
 **Production operator**: Completion is a development-time feature; no production impact. The completion path is in-process with no external dependencies, no latency budget concerns, and no new failure modes.
 
-**Tooling developer** (LSP, debugger): The `return_type_from_signature/1` helper and `walk_chain/2` are small, pure functions. They are independently testable without standing up the full compiler pipeline. The `method_signatures` data is already present in the class registry; no new data plumbing is required.
+**Tooling developer** (LSP, debugger): The `walk_chain/2` function is a small, pure function over a direct map lookup. Independently testable without standing up the full compiler pipeline. The `method_return_types` map is a clean typed data source — also reusable for future features like inline type hints in the REPL or debugger variable inspection.
 
 ## Steelman Analysis
 
@@ -209,57 +209,60 @@ Rejected for this ADR as a primary mechanism because: the cache is stale after b
 - Expression-level completions work for chained sends through annotated methods, including user-defined classes defined in the current REPL session.
 - Pure in-process Erlang: zero IPC latency, zero new failure modes, no port dependency.
 - Completion quality improves incrementally as return-type annotations are added to stdlib methods — both existing sessions and new sessions benefit immediately.
-- No new Rust code required.
-- `return_type_from_signature/1` and `walk_chain/2` are independently testable pure functions.
+- Display strings (`method_signatures`) remain purely human-readable; the machine-typed `method_return_types` map has a stable, typed contract.
+- `walk_chain/2` is a small, independently testable pure function over a direct map lookup.
 
 ### Negative
-- Chain resolution breaks silently when any method in the chain lacks a `-> ClassName` annotation. The user sees empty completions with no indication of why.
-- The display signature format (`"size -> Integer"`) is now load-bearing for completion, not just for display. A format change requires a coordinated update to the parser.
+- Chain resolution breaks silently when any method in the chain lacks a return-type annotation. The user sees empty completions with no indication of why.
 - Builtin method return type coverage must be improved as part of this work; that audit is not trivial for ~337 built-in methods.
+- Adds two new fields to `class_state` and corresponding codegen output.
 
 ### Neutral
 - Return-type annotation coverage directly determines completion quality. This creates organic incentive to annotate method return types — a side effect that also improves `:h` documentation and LSP hover types.
 - The existing single-token completion path is unchanged; chain resolution is additive.
-- The TypeChecker and the runtime chain resolver use the same underlying information (return type annotations) but through different access paths. They may diverge if one is updated without the other. This is a documentation/process concern, not an architectural one.
+- The TypeChecker (`InferredType`) and the runtime return-type maps both derive from `MethodDefinition.return_type` — the same source — so they cannot diverge as long as the codegen emits both correctly.
 
 ## Implementation
 
 ### Phase 0: Prove the core mechanic
 
-Before building the full completion path, validate the chain resolution mechanic with a minimal spike:
+Before the annotation audit, validate the data pipeline with a minimal spike:
 
-- Implement `return_type_from_signature/1` in `beamtalk_repl_ops_dev.erl`
-- Manually verify `String#size -> Integer` and `Integer#+ -> Integer` round-trip through signature lookup
-- Confirm `beamtalk_class_registry` exposes a way to query method signatures by selector
+- Add `method_return_types` and `class_method_return_types` fields to `class_state` in `beamtalk_object_class.erl`
+- Emit the maps from codegen for one class (e.g., `String`) with a handful of annotated methods
+- Verify `beamtalk_class_registry:get_method_return_type('String', size)` returns `{ok, 'Integer'}`
 
-This is a single-day proof of concept that de-risks the approach before the annotation audit.
+This confirms the codegen → registry → lookup pipeline before investing in the annotation audit.
 
-### Phase 1: Annotation audit and improvement
+### Phase 1: Annotation audit and codegen
 
-- **`crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs`**: audit all ~337 built-in method entries; add `return_type` for unambiguous cases (Integer arithmetic, String operations, Collection operations, Boolean results)
-- **`stdlib/src/*.bt`**: ensure stdlib method definitions carry `-> ClassName` return-type annotations on key methods
-- Target: high-frequency chains (those appearing in typical REPL sessions) covered before Phase 2
+- **`runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl`**: add `method_return_types` and `class_method_return_types` fields to `class_state`
+- **`crates/beamtalk-core/src/codegen/`**: emit both new maps from `MethodDefinition.return_type` in the same codegen pass that emits `method_signatures`; emit `'dynamic'` atom when `return_type` is `None` and the method body is too complex to infer, or omit the key (absence = dynamic)
+- **`crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs`**: audit ~337 built-in method entries; add `return_type` for unambiguous cases (Integer arithmetic, String operations, Collection operations, Boolean predicates)
+- **`stdlib/src/*.bt`**: add `-> ClassName` return-type annotations on key stdlib methods
+- Target: high-frequency chains covered before Phase 2
 
 ### Phase 2: Runtime chain resolution
 
-- **`runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_dev.erl`**: implement `return_type_from_signature/1`, `tokenise_send_chain/1`, `resolve_chain_type/2`, `walk_chain/2`, `walk_chain_class/2`
+- **`runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_dev.erl`**: implement `tokenise_send_chain/1`, `resolve_chain_type/2`, `walk_chain/2`, `walk_chain_class/2`
 - Extend `parse_receiver_and_prefix/1` to return `{expression, ReceiverExpr, Prefix}` for multi-token receivers
 - Wire chain path into `get_context_completions/2`
 
 ### Phase 3: Tests
 
-- Unit tests for `return_type_from_signature/1` (annotated, unannotated, malformed signatures)
-- Unit tests for `walk_chain/2` (single hop, multi-hop, broken chain)
+- Unit tests for `walk_chain/2` (single hop, multi-hop, broken chain, absent annotation)
 - E2e REPL completion tests: `'hello' size <TAB>` → Integer methods; `counter getValue <TAB>` → correct methods for return type; `counter unknownChain <TAB>` → empty
 
 ### Affected components
 
 | Component | Change |
 |-----------|--------|
+| `beamtalk_object_class.erl` | Two new fields on `class_state`: `method_return_types`, `class_method_return_types` |
+| Codegen (Rust, `crates/beamtalk-core/src/codegen/`) | Emit new return-type maps from `MethodDefinition.return_type` |
 | Rust builtins (`generated_builtins.rs`) | Return-type annotation audit; add `return_type` for ~half of built-in methods |
 | Stdlib (`.bt` files) | Add/verify `-> ClassName` return-type annotations on key methods |
 | Completion engine (`beamtalk_repl_ops_dev.erl`) | Chain resolution path; prefix stripping for multi-token receivers |
-| Tests | Unit tests for chain resolution helpers; e2e REPL completion tests |
+| Tests | Unit tests for chain resolution; e2e REPL completion tests |
 
 ## Migration Path
 
