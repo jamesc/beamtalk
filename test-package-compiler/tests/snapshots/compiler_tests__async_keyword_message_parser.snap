@@ -124,6 +124,7 @@ Module {
                                         end: 225,
                                     },
                                 },
+                                preceding_blank_line: false,
                             },
                         ],
                         span: Span {
@@ -137,6 +138,7 @@ Module {
                     end: 227,
                 },
             },
+            preceding_blank_line: false,
         },
     ],
     span: Span {

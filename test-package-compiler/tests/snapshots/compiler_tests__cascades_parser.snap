@@ -120,6 +120,7 @@ Module {
                                         end: 262,
                                     },
                                 },
+                                preceding_blank_line: false,
                             },
                         ],
                         span: Span {
@@ -133,6 +134,7 @@ Module {
                     end: 264,
                 },
             },
+            preceding_blank_line: false,
         },
     ],
     span: Span {

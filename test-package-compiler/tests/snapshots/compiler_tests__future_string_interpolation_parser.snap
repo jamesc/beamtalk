@@ -69,6 +69,7 @@ Module {
                     end: 179,
                 },
             },
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -115,6 +116,7 @@ Module {
                     end: 208,
                 },
             },
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -154,6 +156,7 @@ Module {
                     end: 247,
                 },
             },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -221,6 +224,7 @@ Module {
                     end: 299,
                 },
             },
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -260,6 +264,7 @@ Module {
                     end: 360,
                 },
             },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -290,6 +295,7 @@ Module {
                     end: 380,
                 },
             },
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -347,6 +353,7 @@ Module {
                     end: 423,
                 },
             },
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -399,6 +406,7 @@ Module {
                     end: 525,
                 },
             },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -438,6 +446,7 @@ Module {
                     end: 580,
                 },
             },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -498,6 +507,7 @@ Module {
                     end: 627,
                 },
             },
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -537,6 +547,7 @@ Module {
                     end: 674,
                 },
             },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -601,6 +612,7 @@ Module {
                     end: 706,
                 },
             },
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -661,6 +673,7 @@ Module {
                     end: 770,
                 },
             },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -710,6 +723,7 @@ Module {
                     end: 832,
                 },
             },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -749,6 +763,7 @@ Module {
                     end: 908,
                 },
             },
+            preceding_blank_line: true,
         },
     ],
     span: Span {

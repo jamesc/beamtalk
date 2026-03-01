@@ -59,6 +59,7 @@ Module {
                                     end: 213,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                     ],
                     return_type: None,
@@ -144,6 +145,7 @@ Module {
                     end: 226,
                 },
             },
+            preceding_blank_line: false,
         },
     ],
     span: Span {

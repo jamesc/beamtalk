@@ -142,6 +142,7 @@ Module {
                                     end: 177,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                     ],
                     return_type: Some(
@@ -209,6 +210,7 @@ Module {
                                     end: 205,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                     ],
                     return_type: Some(
@@ -282,6 +284,7 @@ Module {
                                     end: 305,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                     ],
                     return_type: Some(
@@ -335,6 +338,7 @@ Module {
                                     end: 378,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                     ],
                     return_type: None,

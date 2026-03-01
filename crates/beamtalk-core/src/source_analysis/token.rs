@@ -478,6 +478,26 @@ impl Token {
         self.leading_trivia.iter().any(Trivia::contains_newline)
     }
 
+    /// Returns `true` if the leading trivia contains a blank line (2+ newlines).
+    ///
+    /// Used by the parser to preserve author-placed blank lines between
+    /// statements in method and block bodies (BT-987).
+    #[must_use]
+    pub fn has_preceding_blank_line(&self) -> bool {
+        let mut newline_count = 0;
+        for trivia in &self.leading_trivia {
+            for ch in trivia.as_str().chars() {
+                if ch == '\n' {
+                    newline_count += 1;
+                    if newline_count >= 2 {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Returns the indentation level (number of characters after the last
     /// newline in the leading trivia). Returns `None` if there is no leading newline.
     ///
@@ -693,6 +713,58 @@ mod tests {
             vec![],
         );
         assert!(with_newline.has_leading_newline());
+    }
+
+    #[test]
+    fn token_preceding_blank_line_detection() {
+        // No newline → no blank line
+        let no_newline = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(0, 1),
+            vec![Trivia::Whitespace("  ".into())],
+            vec![],
+        );
+        assert!(!no_newline.has_preceding_blank_line());
+
+        // Single newline → no blank line
+        let one_newline = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(0, 1),
+            vec![Trivia::Whitespace("\n  ".into())],
+            vec![],
+        );
+        assert!(!one_newline.has_preceding_blank_line());
+
+        // Two newlines → blank line
+        let two_newlines = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(0, 1),
+            vec![Trivia::Whitespace("\n\n  ".into())],
+            vec![],
+        );
+        assert!(two_newlines.has_preceding_blank_line());
+
+        // Three newlines → still just one blank line (detected as true)
+        let three_newlines = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(0, 1),
+            vec![Trivia::Whitespace("\n\n\n  ".into())],
+            vec![],
+        );
+        assert!(three_newlines.has_preceding_blank_line());
+
+        // Newlines across separate trivia items
+        let split_trivia = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(0, 1),
+            vec![
+                Trivia::Whitespace("\n".into()),
+                Trivia::LineComment("// comment".into()),
+                Trivia::Whitespace("\n  ".into()),
+            ],
+            vec![],
+        );
+        assert!(split_trivia.has_preceding_blank_line());
     }
 
     #[test]

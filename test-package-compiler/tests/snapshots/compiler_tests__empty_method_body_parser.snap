@@ -111,6 +111,7 @@ Module {
                                     end: 331,
                                 },
                             },
+                            preceding_blank_line: false,
                         },
                     ],
                     return_type: None,

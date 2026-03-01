@@ -94,6 +94,10 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
     // Top-level expressions (script / REPL)
     for (i, stmt) in module.expressions.iter().enumerate() {
         if i > 0 {
+            // BT-987: emit an extra blank line if present in source
+            if stmt.preceding_blank_line {
+                docs.push(line());
+            }
             docs.push(line());
         }
         docs.push(unparse_expression_statement(stmt));
@@ -285,6 +289,10 @@ pub(crate) fn unparse_method_definition(method: &MethodDefinition) -> Document<'
                 docs.push(unparse_comment(trail));
             }
             for stmt in stmts {
+                // BT-987: emit an extra blank line before statements that had one in source
+                if stmt.preceding_blank_line {
+                    docs.push(line());
+                }
                 docs.push(line());
                 docs.extend(unparse_comment_attachment_leading(&stmt.comments));
                 docs.push(Document::Str("  "));
@@ -627,6 +635,10 @@ fn unparse_block(block: &Block) -> Document<'static> {
             let mut body_docs: Vec<Document<'static>> = Vec::new();
             for (i, stmt) in stmts.iter().enumerate() {
                 if i > 0 {
+                    // BT-987: emit an extra blank line if present in source
+                    if stmt.preceding_blank_line {
+                        body_docs.push(line());
+                    }
                     body_docs.push(line());
                 }
                 // Leading comments
@@ -1017,6 +1029,7 @@ mod tests {
                 trailing: None,
             },
             expression: Expression::Literal(Literal::Integer(42), span()),
+            preceding_blank_line: false,
         };
         let output = unparse_expression_statement(&stmt).to_pretty_string();
         assert_eq!(output, "// This is 42\n42");
@@ -1030,6 +1043,7 @@ mod tests {
                 trailing: Some(Comment::line("trailing", span())),
             },
             expression: Expression::Literal(Literal::Integer(1), span()),
+            preceding_blank_line: false,
         };
         let output = unparse_expression_statement(&stmt).to_pretty_string();
         assert_eq!(output, "1  // trailing");
@@ -1043,6 +1057,7 @@ mod tests {
                 trailing: Some(Comment::line("after", span())),
             },
             expression: Expression::Literal(Literal::Integer(99), span()),
+            preceding_blank_line: false,
         };
         let output = unparse_expression_statement(&stmt).to_pretty_string();
         assert_eq!(output, "// before\n99  // after");
@@ -1254,6 +1269,7 @@ mod tests {
                 trailing: None,
             },
             expression: Expression::Identifier(Identifier::new("x", span())),
+            preceding_blank_line: false,
         };
         let method = MethodDefinition::new(
             MessageSelector::Unary("compute".into()),
@@ -1271,6 +1287,46 @@ mod tests {
             output.contains("compute =>"),
             "expected 'compute =>' in: {output}"
         );
+    }
+
+    // --- Blank line preservation (BT-987) ---
+
+    #[test]
+    fn method_body_blank_line_preserved() {
+        let body = vec![
+            ExpressionStatement::bare(Expression::Literal(Literal::Integer(1), span())),
+            ExpressionStatement {
+                comments: CommentAttachment::default(),
+                expression: Expression::Literal(Literal::Integer(2), span()),
+                preceding_blank_line: true,
+            },
+            ExpressionStatement::bare(Expression::Literal(Literal::Integer(3), span())),
+        ];
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("doStuff".into()),
+            Vec::new(),
+            body,
+            span(),
+        );
+        let output = unparse_method_definition(&method).to_pretty_string();
+        // Blank line before `2` but not before `3`
+        assert_eq!(output, "doStuff =>\n  1\n\n  2\n  3");
+    }
+
+    #[test]
+    fn method_body_no_blank_lines() {
+        let body = vec![
+            ExpressionStatement::bare(Expression::Literal(Literal::Integer(1), span())),
+            ExpressionStatement::bare(Expression::Literal(Literal::Integer(2), span())),
+        ];
+        let method = MethodDefinition::new(
+            MessageSelector::Unary("doStuff".into()),
+            Vec::new(),
+            body,
+            span(),
+        );
+        let output = unparse_method_definition(&method).to_pretty_string();
+        assert_eq!(output, "doStuff =>\n  1\n  2");
     }
 
     // --- Round-trip: parse → unparse → parse ---
@@ -1429,6 +1485,53 @@ mod tests {
         assert_idempotent(
             "Actor subclass: Counter\n  state: value = 0\n\n  getValue => self.value\n",
         );
+    }
+
+    // --- Blank line round-trip (BT-987) ---
+
+    #[test]
+    fn idempotent_method_body_blank_lines() {
+        assert_idempotent("Object subclass: Foo\n\n  doStuff =>\n    x := 1\n\n    x + 1\n");
+    }
+
+    #[test]
+    fn idempotent_method_body_no_blank_lines() {
+        assert_idempotent("Object subclass: Foo\n\n  doStuff =>\n    x := 1\n    x + 1\n");
+    }
+
+    #[test]
+    fn consecutive_blank_lines_collapsed() {
+        // Multiple blank lines should collapse to a single one
+        let source = "Object subclass: Foo\n\n  doStuff =>\n    x := 1\n\n\n\n    x + 1\n";
+        let pass1 = unparse_module(&parse_source(source));
+        // After formatting, should have a blank line (not 3 blank lines)
+        // The blank line between statements is preserved
+        assert!(
+            pass1.contains("x := 1\n"),
+            "Expected blank line preserved, got:\n{pass1}"
+        );
+        // Count actual blank lines between x := 1 and x + 1
+        let between = pass1
+            .split("x := 1")
+            .nth(1)
+            .unwrap()
+            .split("x + 1")
+            .next()
+            .unwrap();
+        let newline_count = between.chars().filter(|&c| c == '\n').count();
+        // Should have exactly 2 newlines (one for end of `x := 1` line, one blank line)
+        assert_eq!(
+            newline_count, 2,
+            "Expected 2 newlines (= 1 blank line) between statements, got {newline_count} in: {between:?}"
+        );
+        // And it should be idempotent after that
+        let pass2 = unparse_module(&parse_source(&pass1));
+        assert_eq!(pass1, pass2, "Not idempotent after blank line collapse");
+    }
+
+    #[test]
+    fn idempotent_module_level_blank_lines() {
+        assert_idempotent("x := 1\n\ny := 2\n");
     }
 
     // --- Block formatting ---
