@@ -1189,9 +1189,9 @@ context_completions_binding_actor_no_registry_test() ->
     Result = beamtalk_repl_ops_dev:get_context_completions(<<"c in">>, Bindings),
     ?assertEqual([], Result).
 
-context_completions_binding_non_actor_no_completions_test() ->
-    %% Binding with a non-actor value (e.g., integer) returns no method completions
-    Bindings = #{x => 42},
+context_completions_binding_unclassifiable_no_completions_test() ->
+    %% Bindings with values that have no known class (raw atoms, tuples) return empty
+    Bindings = #{x => some_unknown_atom},
     Result = beamtalk_repl_ops_dev:get_context_completions(<<"x ">>, Bindings),
     ?assertEqual([], Result).
 
@@ -1281,6 +1281,22 @@ context_completions_value_type_binding_returns_instance_methods_test() ->
     after
         cleanup_mock_class('TestCompletionClassC', Pid)
     end.
+
+%% BT: Integer binding (e.g. i := 42) returns Integer instance methods
+%% Uses the real Integer class which is always registered in the test environment.
+context_completions_integer_binding_returns_instance_methods_test() ->
+    Bindings = #{i => 42},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"i cl">>, Bindings),
+    %% `class` is inherited from Object; available on every Integer instance
+    ?assert(lists:member(<<"class">>, Result)).
+
+%% BT: String binding (e.g. s := 'hello') returns String instance methods
+%% Uses the real String class which is always registered in the test environment.
+context_completions_string_binding_returns_instance_methods_test() ->
+    Bindings = #{s => <<"hello">>},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"s cl">>, Bindings),
+    %% `class` is inherited from Object; available on every String instance
+    ?assert(lists:member(<<"class">>, Result)).
 
 %% Helper: spawn a mock class gen_server process and register it in the class registry.
 spawn_mock_class(Name, ClassMethods, InstanceMethods) ->
