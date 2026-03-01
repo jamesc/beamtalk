@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-984: BUnit tests for Object>>trace: and Object>>traceCr:
+//
+// Verifies:
+// - Silent no-op when TranscriptStream current is nil
+// - Output is routed when a transcript instance is set as current
+
+TestCase subclass: TraceCrTest
+
+  setUp =>
+    // Ensure current is nil before each test (default in test environment)
+    TranscriptStream current: nil
+    self
+
+  tearDown =>
+    // Restore nil state after each test
+    TranscriptStream current: nil
+    self
+
+  testTraceCrNilSafeWhenNoTranscript =>
+    // When TranscriptStream current is nil, traceCr: should be a no-op (returns nil)
+    TranscriptStream current: nil
+    self assert: (42 traceCr: "hello") equals: nil
+
+  testTraceNilSafeWhenNoTranscript =>
+    // When TranscriptStream current is nil, trace: should be a no-op (returns nil)
+    TranscriptStream current: nil
+    self assert: (42 trace: "hello") equals: nil
+
+  testTraceCrRoutesOutputWhenTranscriptSet =>
+    // When a TranscriptStream is set as current, traceCr: routes output to it
+    ts := TranscriptStream spawn
+    TranscriptStream current: ts
+    42 traceCr: "hello"
+    self assert: (ts recent includes: "hello")
+
+  testTraceRoutesOutputWhenTranscriptSet =>
+    // When a TranscriptStream is set as current, trace: routes output to it
+    ts := TranscriptStream spawn
+    TranscriptStream current: ts
+    42 trace: "world"
+    self assert: (ts recent includes: "world")

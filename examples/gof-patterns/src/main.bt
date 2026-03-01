@@ -10,5 +10,5 @@ Object subclass: Main
     self new run
 
   run =>
-    TranscriptStream current show: "Hello from gang_of_four!"; cr
+    self traceCr: "Hello from gang_of_four!"
     self
