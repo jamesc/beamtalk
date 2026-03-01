@@ -842,36 +842,63 @@ fn unparse_block_parameter(param: &BlockParameter) -> Document<'static> {
 
 // --- Cascade unparsing ---
 
-fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Document<'static> {
-    let mut docs: Vec<Document<'static>> = vec![unparse_expression(receiver)];
-
-    for msg in messages {
-        docs.push(Document::Str("; "));
-        let msg_doc = match &msg.selector {
-            MessageSelector::Unary(name) => Document::String(name.to_string()),
-            MessageSelector::Binary(op) => {
-                let arg = unparse_expression(&msg.arguments[0]);
-                docvec![Document::String(op.to_string()), " ", arg]
-            }
-            MessageSelector::Keyword(parts) => {
-                let mut kw_docs: Vec<Document<'static>> = Vec::new();
-                for (i, part) in parts.iter().enumerate() {
-                    if i > 0 {
-                        kw_docs.push(Document::Str(" "));
-                    }
-                    kw_docs.push(unparse_keyword_part(part));
-                    if i < msg.arguments.len() {
-                        kw_docs.push(Document::Str(" "));
-                        kw_docs.push(unparse_expression(&msg.arguments[i]));
-                    }
+fn unparse_cascade_message(msg: &CascadeMessage) -> Document<'static> {
+    match &msg.selector {
+        MessageSelector::Unary(name) => Document::String(name.to_string()),
+        MessageSelector::Binary(op) => {
+            let arg = unparse_expression(&msg.arguments[0]);
+            docvec![Document::String(op.to_string()), " ", arg]
+        }
+        MessageSelector::Keyword(parts) => {
+            let mut kw_docs: Vec<Document<'static>> = Vec::new();
+            for (i, part) in parts.iter().enumerate() {
+                if i > 0 {
+                    kw_docs.push(Document::Str(" "));
                 }
-                concat(kw_docs)
+                kw_docs.push(unparse_keyword_part(part));
+                if i < msg.arguments.len() {
+                    kw_docs.push(Document::Str(" "));
+                    kw_docs.push(unparse_expression(&msg.arguments[i]));
+                }
             }
-        };
-        docs.push(msg_doc);
+            concat(kw_docs)
+        }
     }
+}
 
-    concat(docs)
+fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Document<'static> {
+    let receiver_doc = unparse_expression(receiver);
+    let msg_docs: Vec<Document<'static>> = messages.iter().map(unparse_cascade_message).collect();
+
+    if messages.len() == 1 {
+        // Single cascade message: always inline
+        docvec![receiver_doc, "; ", msg_docs.into_iter().next().unwrap()]
+    } else {
+        // Multiple cascade messages: try inline, break to one-per-line
+        // Build inline version to measure
+        let mut inline_parts: Vec<Document<'static>> = vec![receiver_doc.clone()];
+        for msg_doc in &msg_docs {
+            inline_parts.push(Document::Str("; "));
+            inline_parts.push(msg_doc.clone());
+        }
+        let inline = concat(inline_parts);
+        let inline_width = inline.to_pretty_string().len();
+
+        if inline_width <= 80 {
+            inline
+        } else {
+            // One message per line: receiver on first line, then ;-separated continuations
+            let mut continuation: Vec<Document<'static>> = Vec::new();
+            for (i, msg_doc) in msg_docs.into_iter().enumerate() {
+                if i > 0 {
+                    continuation.push(Document::Str(";"));
+                }
+                continuation.push(line());
+                continuation.push(msg_doc);
+            }
+            docvec![receiver_doc, ";", nest(2, concat(continuation))]
+        }
+    }
 }
 
 // --- Match unparsing ---
@@ -1698,6 +1725,37 @@ mod tests {
         assert!(
             output.contains("_ -> \"other\"\n"),
             "last arm should not have semicolon: {output}"
+        );
+    }
+
+    #[test]
+    fn cascade_short_stays_inline() {
+        let source = "Actor subclass: A\n  m => self foo; bar; baz";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("self foo; bar; baz"),
+            "short cascade should stay inline: {output}"
+        );
+    }
+
+    #[test]
+    fn cascade_multi_message_one_per_line() {
+        let source = "Actor subclass: A\n  m =>\n    self assert: txn amount equals: 500; assert: txn from equals: \"Alice\"; assert: txn to equals: \"Bob\"";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        // Each cascade message should be on its own line
+        assert!(
+            output.contains("assert: txn amount equals: 500;\n"),
+            "first cascade message should end with semicolon+newline: {output}"
+        );
+        assert!(
+            output.contains("assert: txn from equals: \"Alice\";\n"),
+            "middle cascade message should end with semicolon+newline: {output}"
+        );
+        assert!(
+            output.contains("assert: txn to equals: \"Bob\""),
+            "last cascade message should not have trailing semicolon: {output}"
         );
     }
 
