@@ -33,9 +33,11 @@ Object subclass: SchemeReader
   /// ```
   read: str =>
     chars := str asList
-    pair  := self parseExpr: (self dropWs: chars)
-    rest  := self dropWs: pair last
+    pair := self parseExpr: (self dropWs: chars)
+    rest := self dropWs: pair last
+    
     rest isEmpty ifFalse: [^self error: "Unexpected trailing input"]
+    
     pair first
 
   /// Return true if `ch` is a whitespace character (space, newline, tab, carriage return).
@@ -66,10 +68,12 @@ Object subclass: SchemeReader
   parseExpr: chars =>
     chars isEmpty ifTrue: [^self error: "Unexpected end of input"]
     ch := chars first
+  
     (ch =:= "(") ifTrue: [^self parseListElems: chars rest]
     (ch =:= "#") ifTrue: [^self parseBool: chars rest]
-    ch isDigit        ifTrue: [^self parseNum: chars acc: ""]
-    (ch =:= """")     ifTrue: [^self parseString: chars rest acc: ""]
+    ch isDigit ifTrue: [^self parseNum: chars acc: ""]
+    (ch =:= """") ifTrue: [^self parseString: chars rest acc: ""]
+  
     self parseSym: chars acc: ""
 
   /// Parse list elements after the opening `(` has been consumed.
@@ -77,11 +81,13 @@ Object subclass: SchemeReader
   parseListElems: chars =>
     trimmed := self dropWs: chars
     trimmed isEmpty ifTrue: [^self error: "Missing ')'"]
+
     (trimmed first =:= ")") ifTrue: [^self pairOf: #() rest: trimmed rest]
     headPair := self parseExpr: trimmed
-    head     := headPair first
+    head := headPair first
     tailPair := self parseListElems: (self dropWs: headPair last)
-    tail     := tailPair first
+    tail := tailPair first
+  
     self pairOf: ((#() add: head) ++ tail) rest: tailPair last
 
   /// Parse `#t` or `#f`; `chars` is positioned after the `#`.
@@ -105,7 +111,8 @@ Object subclass: SchemeReader
   /// ```
   parseNum: chars acc: acc =>
     (chars isEmpty or: [self isDelim: chars first]) ifTrue: [
-      ^self pairOf: acc asInteger rest: chars]
+      ^self pairOf: acc asInteger rest: chars
+    ]
     self parseNum: chars rest acc: acc ++ chars first
 
   /// Parse a string literal; `chars` is positioned after the opening `"`.
@@ -117,10 +124,14 @@ Object subclass: SchemeReader
   /// ```
   parseString: chars acc: acc =>
     chars isEmpty ifTrue: [^self error: "Unterminated string literal"]
+    
     (chars first =:= """") ifTrue: [
       (chars rest isEmpty not and: [chars rest first =:= """"]) ifTrue: [
-        ^self parseString: chars rest rest acc: acc ++ """"]
-      ^self pairOf: acc rest: chars rest]
+        ^self parseString: chars rest rest acc: acc ++ """"
+      ]
+      ^self pairOf: acc rest: chars rest
+    ]
+    
     self parseString: chars rest acc: acc ++ chars first
 
   /// Parse a symbol by accumulating non-delimiter characters.
@@ -132,5 +143,7 @@ Object subclass: SchemeReader
   /// ```
   parseSym: chars acc: acc =>
     (chars isEmpty or: [self isDelim: chars first]) ifTrue: [
-      ^self pairOf: (SchemeSymbol withName: acc) rest: chars]
+      ^self pairOf: (SchemeSymbol withName: acc) rest: chars
+    ]
+    
     self parseSym: chars rest acc: acc ++ chars first

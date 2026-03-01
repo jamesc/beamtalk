@@ -56,11 +56,13 @@ Object subclass: SchemeEval
         "cons"  => [:args | (#() add: (args at: 1)) ++ (args at: 2)],
         "list"  => [:args | args],
         "not"   => [:args | (args at: 1) not],
-        "null?" => [:args |
+        "null?" => [:args | 
           v := args at: 1
-          v isNil or: [v class =:= List and: [v isEmpty]]]
+          v isNil or: [v class =:= List and: [v isEmpty]]
+        ]
       },
-      #parent => nil}
+      #parent => nil
+    }
 
   /// Evaluate `expr` in `env` and return the result.
   ///
@@ -78,10 +80,10 @@ Object subclass: SchemeEval
   eval: expr in: env =>
     // Self-evaluating atomic types
     (expr class =:= Integer) ifTrue: [^expr]
-    (expr class =:= True)    ifTrue: [^expr]
-    (expr class =:= False)   ifTrue: [^expr]
-    (expr class =:= String)  ifTrue: [^expr]
-    expr isNil               ifTrue: [^expr]
+    (expr class =:= True) ifTrue: [^expr]
+    (expr class =:= False) ifTrue: [^expr]
+    (expr class =:= String) ifTrue: [^expr]
+    expr isNil ifTrue: [^expr]
 
     // Symbol: look up the name in the environment
     (expr class =:= SchemeSymbol) ifTrue: [
@@ -104,22 +106,28 @@ Object subclass: SchemeEval
       // (define name expr) — bind name in the current environment
       (sym =:= "define") ifTrue: [
         varName := (tail at: 1) name
-        val     := self eval: (tail at: 2) in: env
+        val := self eval: (tail at: 2) in: env
         env define: varName value: val
-        ^nil]
+        ^nil
+      ]
 
       // (lambda (params...) body) — create a closure
       (sym =:= "lambda") ifTrue: [
         params := (tail at: 1) collect: [:p | p name]
-        ^SchemeLambda withParams: params body: (tail at: 2) env: env]
+        ^SchemeLambda withParams: params body: (tail at: 2) env: env
+      ]
 
       // (if test then else?) — conditional branch
       (sym =:= "if") ifTrue: [
         condVal := self eval: (tail at: 1) in: env
-        (condVal == false or: [condVal isNil]) ifTrue: [
-          ^(tail size > 2) ifTrue: [self eval: (tail at: 3) in: env] ifFalse: [nil]
-        ] ifFalse: [
-          ^self eval: (tail at: 2) in: env]]
+        (condVal == false or: [condVal isNil]) 
+          ifTrue: [
+            ^(tail size > 2) 
+              ifTrue: [self eval: (tail at: 3) in: env] 
+              ifFalse: [nil]
+          ] 
+          ifFalse: [^self eval: (tail at: 2) in: env]
+      ]
 
       // (cond (test expr) ... (else expr))
       (sym =:= "cond") ifTrue: [^self evalCond: tail in: env]
@@ -137,7 +145,9 @@ Object subclass: SchemeEval
         params   := binds collect: [:b | (b at: 1) name]
         vals     := binds collect: [:b | self eval: (b at: 2) in: env]
         childEnv := env extend: params values: vals
-        ^self eval: body in: childEnv]]
+        ^self eval: body in: childEnv
+      ]
+    ]
 
     // Function application: evaluate head, evaluate all args, apply
     func     := self eval: head in: env
@@ -159,9 +169,11 @@ Object subclass: SchemeEval
   apply: func args: args in: _env =>
     (func class =:= SchemeLambda) ifTrue: [
       childEnv := func closureEnv extend: func params values: args
-      ^self eval: func body in: childEnv]
+      ^self eval: func body in: childEnv
+    ]
     (func class =:= Block) ifFalse: [
-      ^self error: "Not a procedure: " ++ func printString]
+      ^self error: "Not a procedure: " ++ func printString
+    ]
     // Built-in: block takes the full args list as its single argument
     func value: args
 
@@ -169,20 +181,24 @@ Object subclass: SchemeEval
   /// An `else` clause always matches. Returns `nil` if all tests fail.
   evalCond: clauses in: env =>
     clauses isEmpty ifTrue: [^nil]
+  
     clause := clauses first
-    ((clause first class =:= SchemeSymbol) and: [clause first name =:= "else"]) ifTrue: [
-      ^self eval: clause last in: env]
+    ((clause first class =:= SchemeSymbol) and: [clause first name =:= "else"]) 
+      ifTrue: [^self eval: clause last in: env]
+
     condVal := self eval: clause first in: env
-    (condVal == false or: [condVal isNil]) ifTrue: [
-      self evalCond: clauses rest in: env] ifFalse: [
-      self eval: clause last in: env]
+    (condVal == false or: [condVal isNil]) 
+      ifTrue: [self evalCond: clauses rest in: env] 
+      ifFalse: [self eval: clause last in: env]
 
   /// Evaluate `(and ...)` — return `false` on the first falsy value,
   /// otherwise return the last value.
   evalAnd: exprs in: env =>
     exprs isEmpty ifTrue: [^true]
+
     val := self eval: exprs first in: env
     (val == false or: [val isNil]) ifTrue: [^false]
+  
     exprs size =:= 1 ifTrue: [^val]
     self evalAnd: exprs rest in: env
 
@@ -190,6 +206,8 @@ Object subclass: SchemeEval
   /// or `false` if all expressions are falsy.
   evalOr: exprs in: env =>
     exprs isEmpty ifTrue: [^false]
+
     val := self eval: exprs first in: env
     (val == false or: [val isNil]) ifFalse: [^val]
+  
     self evalOr: exprs rest in: env
