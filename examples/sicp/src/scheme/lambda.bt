@@ -28,4 +28,4 @@ Value subclass: SchemeLambda
   /// SchemeLambda withParams: #("x") body: ast env: env
   /// ```
   class withParams: p body: b env: e =>
-    SchemeLambda params: p body: b closureEnv: e
+    SchemeLambda new: #{#params => p, #body => b, #closureEnv => e}

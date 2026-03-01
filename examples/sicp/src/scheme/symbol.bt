@@ -15,7 +15,7 @@
 /// sym == (SchemeSymbol withName: "lambda")  // => false
 /// ```
 Value subclass: SchemeSymbol
-  state: name = ""
+  state: symName = ""
 
   /// Create a new symbol with the given name string.
   ///
@@ -23,7 +23,15 @@ Value subclass: SchemeSymbol
   /// ```beamtalk
   /// SchemeSymbol withName: "car"   // => a SchemeSymbol
   /// ```
-  class withName: n => SchemeSymbol name: n
+  class withName: n => SchemeSymbol new: #{#symName => n}
+
+  /// Return the symbol name string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (SchemeSymbol withName: "cons") name   // => "cons"
+  /// ```
+  name => self.symName
 
   /// Return the symbol name as a string (same as `name`).
   ///
@@ -31,4 +39,4 @@ Value subclass: SchemeSymbol
   /// ```beamtalk
   /// (SchemeSymbol withName: "cons") printString   // => "cons"
   /// ```
-  printString => self.name
+  printString => self.symName

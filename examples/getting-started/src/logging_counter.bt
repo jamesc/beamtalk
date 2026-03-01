@@ -3,9 +3,8 @@
 
 /// LoggingCounter demonstrates the "super" keyword for calling superclass methods
 ///
-/// This class extends Counter and adds logging functionality.
-/// When increment is called, it logs the action and then delegates
-/// to the superclass implementation using "super".
+/// This class extends Counter and adds logging via `traceCr:` before
+/// delegating to the superclass implementation using "super".
 ///
 /// IMPORTANT: Load counter.bt first to define the Counter class:
 ///   > :load examples/counter.bt
@@ -14,7 +13,6 @@ Counter subclass: LoggingCounter
   
   // Override increment to add logging before delegating to superclass
   // The "super" keyword calls Counter's increment method
-  increment => 
-    // TODO: Add actual logging when we have IO/logging support
-    // For now, just delegate to super
+  increment =>
+    self traceCr: "increment called"
     super increment

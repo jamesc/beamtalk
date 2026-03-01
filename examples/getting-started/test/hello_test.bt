@@ -10,12 +10,26 @@
 
 TestCase subclass: HelloTest
 
+  setUp =>
+    self.ts := TranscriptStream spawn
+    TranscriptStream current: self.ts
+    self
+
+  tearDown =>
+    TranscriptStream current ifNotNil: [:t | t stop]
+    TranscriptStream resetCurrent
+    self
+
   testGreeting =>
-    self assert: Hello new greeting equals: "Hello, World!"
+    // greeting outputs "Hello, World!" via traceCr: and returns self
+    Hello new greeting
+    self assert: (self.ts recent includes: "Hello, World!")
 
   testTwoInstancesHaveSameGreeting =>
-    // Value types have no shared state — both instances return the same greeting
-    self assert: Hello new greeting equals: Hello new greeting
+    // Both instances output the same text
+    Hello new greeting
+    Hello new greeting
+    self assert: (self.ts recent includes: "Hello, World!")
 
   testClassIsHello =>
     // Hello is a value type — class name is the symbol #Hello

@@ -23,6 +23,9 @@ Actor subclass: TranscriptStream
   /// Set the current singleton instance.
   class current: instance: TranscriptStream -> Nil => self.current := instance
 
+  /// Clear the current singleton instance (reset to nil).
+  class resetCurrent -> Nil => self.current := nil
+
   /// Write a value to the transcript.
   ///
   /// ## Examples
