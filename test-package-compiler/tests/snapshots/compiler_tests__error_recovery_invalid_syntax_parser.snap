@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 179,
                             end: 180,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 179,
                             end: 180,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test error recovery: invalid syntax",
+                        content: "Test error recovery: invalid syntax",
                         span: Span {
                             start: 179,
                             end: 180,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Parser should create error nodes and continue",
+                        content: "Parser should create error nodes and continue",
                         span: Span {
                             start: 179,
                             end: 180,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Unexpected token",
+                        content: "Unexpected token",
                         span: Span {
                             start: 179,
                             end: 180,
@@ -95,7 +95,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Missing operand",
+                        content: "Missing operand",
                         span: Span {
                             start: 209,
                             end: 210,
@@ -147,7 +147,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Malformed keyword message (missing part)",
+                        content: "Malformed keyword message (missing part)",
                         span: Span {
                             start: 306,
                             end: 312,

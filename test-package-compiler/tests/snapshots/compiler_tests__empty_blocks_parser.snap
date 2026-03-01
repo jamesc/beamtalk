@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 175,
                             end: 180,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 175,
                             end: 180,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test empty block edge case",
+                        content: "Test empty block edge case",
                         span: Span {
                             start: 175,
                             end: 180,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Blocks with no body or only whitespace",
+                        content: "Blocks with no body or only whitespace",
                         span: Span {
                             start: 175,
                             end: 180,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Empty block - no expressions",
+                        content: "Empty block - no expressions",
                         span: Span {
                             start: 175,
                             end: 180,
@@ -83,7 +83,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Empty block with single space",
+                        content: "Empty block with single space",
                         span: Span {
                             start: 221,
                             end: 235,
@@ -123,7 +123,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Empty block with newlines",
+                        content: "Empty block with newlines",
                         span: Span {
                             start: 273,
                             end: 290,
@@ -163,7 +163,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Empty block used as argument",
+                        content: "Empty block used as argument",
                         span: Span {
                             start: 332,
                             end: 342,

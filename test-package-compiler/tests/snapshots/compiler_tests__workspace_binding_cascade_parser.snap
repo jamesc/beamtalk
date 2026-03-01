@@ -148,7 +148,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " BT-374: Workspace binding cascade dispatch.",
+                        content: "BT-374: Workspace binding cascade dispatch.",
                         span: Span {
                             start: 130,
                             end: 135,
@@ -156,7 +156,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Cascade messages to a workspace binding should use persistent_term PID lookup.",
+                        content: "Cascade messages to a workspace binding should use persistent_term PID lookup.",
                         span: Span {
                             start: 130,
                             end: 135,

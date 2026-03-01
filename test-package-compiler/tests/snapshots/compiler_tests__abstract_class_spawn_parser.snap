@@ -80,7 +80,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 145,
                             end: 153,
@@ -88,7 +88,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 145,
                             end: 153,
@@ -96,7 +96,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test that instantiating an abstract class produces a diagnostic error.",
+                        content: "Test that instantiating an abstract class produces a diagnostic error.",
                         span: Span {
                             start: 145,
                             end: 153,

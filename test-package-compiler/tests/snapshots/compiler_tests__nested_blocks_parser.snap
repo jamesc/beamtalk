@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 158,
                             end: 168,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 158,
                             end: 168,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test nested block closures",
+                        content: "Test nested block closures",
                         span: Span {
                             start: 158,
                             end: 168,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Blocks inside other blocks",
+                        content: "Blocks inside other blocks",
                         span: Span {
                             start: 158,
                             end: 168,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Block returning a block",
+                        content: "Block returning a block",
                         span: Span {
                             start: 158,
                             end: 168,
@@ -245,7 +245,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Deeply nested blocks",
+                        content: "Deeply nested blocks",
                         span: Span {
                             start: 273,
                             end: 285,
@@ -335,7 +335,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Block with nested block in body",
+                        content: "Block with nested block in body",
                         span: Span {
                             start: 334,
                             end: 349,
@@ -504,7 +504,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Multiple nested blocks in arguments",
+                        content: "Multiple nested blocks in arguments",
                         span: Span {
                             start: 447,
                             end: 456,

@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 193,
                             end: 197,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 193,
                             end: 197,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test error recovery: malformed message sends",
+                        content: "Test error recovery: malformed message sends",
                         span: Span {
                             start: 193,
                             end: 197,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Parser should handle incomplete messages",
+                        content: "Parser should handle incomplete messages",
                         span: Span {
                             start: 193,
                             end: 197,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Incomplete keyword message",
+                        content: "Incomplete keyword message",
                         span: Span {
                             start: 193,
                             end: 197,
@@ -96,7 +96,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Missing keyword part",
+                        content: "Missing keyword part",
                         span: Span {
                             start: 231,
                             end: 236,
@@ -160,7 +160,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Extra keyword without argument",
+                        content: "Extra keyword without argument",
                         span: Span {
                             start: 286,
                             end: 292,
@@ -242,7 +242,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Valid code after error",
+                        content: "Valid code after error",
                         span: Span {
                             start: 368,
                             end: 374,

@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 177,
                             end: 185,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 177,
                             end: 185,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test string operations - comprehensive coverage of string messages",
+                        content: "Test string operations - comprehensive coverage of string messages",
                         span: Span {
                             start: 177,
                             end: 185,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ===== String Concatenation =====",
+                        content: "===== String Concatenation =====",
                         span: Span {
                             start: 177,
                             end: 185,
@@ -197,7 +197,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ===== String Length =====",
+                        content: "===== String Length =====",
                         span: Span {
                             start: 286,
                             end: 289,
@@ -247,7 +247,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ===== String Comparison =====",
+                        content: "===== String Comparison =====",
                         span: Span {
                             start: 343,
                             end: 350,
@@ -460,7 +460,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ===== String Case Transformation =====",
+                        content: "===== String Case Transformation =====",
                         span: Span {
                             start: 508,
                             end: 513,
@@ -551,7 +551,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ===== String Trimming =====",
+                        content: "===== String Trimming =====",
                         span: Span {
                             start: 593,
                             end: 599,
@@ -631,7 +631,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ===== String Empty/Non-Empty Checks =====",
+                        content: "===== String Empty/Non-Empty Checks =====",
                         span: Span {
                             start: 684,
                             end: 689,
@@ -752,7 +752,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ===== String Character Access (1-based indexing) =====",
+                        content: "===== String Character Access (1-based indexing) =====",
                         span: Span {
                             start: 813,
                             end: 822,
@@ -879,7 +879,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ===== String Search Operations =====",
+                        content: "===== String Search Operations =====",
                         span: Span {
                             start: 908,
                             end: 913,
@@ -1006,7 +1006,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ===== String Prefix/Suffix Checks =====",
+                        content: "===== String Prefix/Suffix Checks =====",
                         span: Span {
                             start: 1041,
                             end: 1047,
@@ -1133,7 +1133,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ===== String Splitting =====",
+                        content: "===== String Splitting =====",
                         span: Span {
                             start: 1142,
                             end: 1145,
@@ -1231,7 +1231,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ===== String Reverse =====",
+                        content: "===== String Reverse =====",
                         span: Span {
                             start: 1214,
                             end: 1222,

@@ -474,9 +474,9 @@ fn unparse_literal(lit: &Literal) -> Document<'static> {
         Literal::Integer(n) => Document::String(n.to_string()),
         Literal::Float(f) => Document::String(format_float(*f)),
         Literal::String(s) => {
-            // Single-quoted strings; escape internal single quotes as ''
-            let escaped = s.as_str().replace('\'', "''");
-            docvec!["'", Document::String(escaped), "'"]
+            // Double-quoted strings; escape internal double quotes and backslashes
+            let escaped = s.as_str().replace('\\', "\\\\").replace('"', "\\\"");
+            docvec!["\"", Document::String(escaped), "\""]
         }
         Literal::Symbol(s) => {
             // Symbols: #name or #'name with spaces'
@@ -1040,7 +1040,7 @@ mod tests {
     #[test]
     fn string_literal_with_escape() {
         let expr = Expression::Literal(Literal::String("it's".into()), span());
-        assert_eq!(unparse_expression(&expr).to_pretty_string(), "'it''s'");
+        assert_eq!(unparse_expression(&expr).to_pretty_string(), "\"it's\"");
     }
 
     #[test]
@@ -1131,7 +1131,7 @@ mod tests {
         };
         assert_eq!(
             unparse_expression(&expr).to_pretty_string(),
-            "arr at: 1 put: 'x'"
+            "arr at: 1 put: \"x\""
         );
     }
 

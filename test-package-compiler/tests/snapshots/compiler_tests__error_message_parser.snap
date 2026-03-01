@@ -192,7 +192,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 186,
                             end: 191,
@@ -200,7 +200,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 186,
                             end: 191,
@@ -208,7 +208,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test error: message compilation",
+                        content: "Test error: message compilation",
                         span: Span {
                             start: 186,
                             end: 191,
@@ -216,7 +216,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " The error: message should compile to erlang:error({beamtalk_error, Message})",
+                        content: "The error: message should compile to erlang:error({beamtalk_error, Message})",
                         span: Span {
                             start: 186,
                             end: 191,

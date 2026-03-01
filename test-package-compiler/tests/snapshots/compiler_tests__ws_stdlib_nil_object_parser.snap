@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 653,
                             end: 660,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 653,
                             end: 660,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test non-nil objects' nil-testing protocol (inherited from Actor)",
+                        content: "Test non-nil objects' nil-testing protocol (inherited from Actor)",
                         span: Span {
                             start: 653,
                             end: 660,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 653,
                             end: 660,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Basic Testing Methods (Non-Nil Objects)",
+                        content: "Basic Testing Methods (Non-Nil Objects)",
                         span: Span {
                             start: 653,
                             end: 660,
@@ -51,7 +51,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 653,
                             end: 660,
@@ -59,7 +59,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test isNil / notNil on integers",
+                        content: "Test isNil / notNil on integers",
                         span: Span {
                             start: 653,
                             end: 660,
@@ -69,7 +69,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => false",
+                        content: "=> false",
                         span: Span {
                             start: 667,
                             end: 672,
@@ -119,7 +119,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => true",
+                        content: "=> true",
                         span: Span {
                             start: 705,
                             end: 711,
@@ -169,7 +169,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => false (zero is not nil!)",
+                        content: "=> false (zero is not nil!)",
                         span: Span {
                             start: 741,
                             end: 746,
@@ -218,7 +218,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Test isNil / notNil on strings",
+                        content: "Test isNil / notNil on strings",
                         span: Span {
                             start: 820,
                             end: 827,
@@ -228,7 +228,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => false",
+                        content: "=> false",
                         span: Span {
                             start: 839,
                             end: 844,
@@ -278,7 +278,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => true",
+                        content: "=> true",
                         span: Span {
                             start: 878,
                             end: 884,
@@ -328,7 +328,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => false (empty string is not nil!)",
+                        content: "=> false (empty string is not nil!)",
                         span: Span {
                             start: 911,
                             end: 916,
@@ -377,7 +377,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Test isNil / notNil on booleans",
+                        content: "Test isNil / notNil on booleans",
                         span: Span {
                             start: 999,
                             end: 1006,
@@ -387,7 +387,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => false",
+                        content: "=> false",
                         span: Span {
                             start: 1015,
                             end: 1020,
@@ -437,7 +437,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => true",
+                        content: "=> true",
                         span: Span {
                             start: 1054,
                             end: 1060,
@@ -487,7 +487,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => false (false is not nil!)",
+                        content: "=> false (false is not nil!)",
                         span: Span {
                             start: 1093,
                             end: 1098,
@@ -537,7 +537,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => true",
+                        content: "=> true",
                         span: Span {
                             start: 1153,
                             end: 1159,
@@ -586,7 +586,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 1704,
                             end: 1712,
@@ -594,7 +594,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Control Flow Methods (Non-Nil Objects)",
+                        content: "Control Flow Methods (Non-Nil Objects)",
                         span: Span {
                             start: 1704,
                             end: 1712,
@@ -602,7 +602,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 1704,
                             end: 1712,
@@ -610,7 +610,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test ifNil: returns self without evaluating block",
+                        content: "Test ifNil: returns self without evaluating block",
                         span: Span {
                             start: 1704,
                             end: 1712,
@@ -620,7 +620,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => 42",
+                        content: "=> 42",
                         span: Span {
                             start: 1736,
                             end: 1737,
@@ -704,7 +704,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Test ifNotNil: evaluates block with receiver as argument",
+                        content: "Test ifNotNil: evaluates block with receiver as argument",
                         span: Span {
                             start: 1809,
                             end: 1817,
@@ -714,7 +714,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => 43",
+                        content: "=> 43",
                         span: Span {
                             start: 1849,
                             end: 1850,
@@ -827,7 +827,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Test ifNil:ifNotNil: evaluates notNilBlock with receiver",
+                        content: "Test ifNil:ifNotNil: evaluates notNilBlock with receiver",
                         span: Span {
                             start: 1922,
                             end: 1930,
@@ -837,7 +837,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => \"HELLO\"",
+                        content: "=> \"HELLO\"",
                         span: Span {
                             start: 1992,
                             end: 1993,
@@ -973,7 +973,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Test ifNotNil:ifNil: (reversed order) evaluates notNilBlock with receiver",
+                        content: "Test ifNotNil:ifNil: (reversed order) evaluates notNilBlock with receiver",
                         span: Span {
                             start: 2087,
                             end: 2095,
@@ -983,7 +983,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => 20",
+                        content: "=> 20",
                         span: Span {
                             start: 2138,
                             end: 2139,
@@ -1129,7 +1129,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 2675,
                             end: 2683,
@@ -1137,7 +1137,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Edge Cases: Block Receives Receiver",
+                        content: "Edge Cases: Block Receives Receiver",
                         span: Span {
                             start: 2675,
                             end: 2683,
@@ -1145,7 +1145,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 2675,
                             end: 2683,
@@ -1153,7 +1153,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Verify block receives the receiver as argument",
+                        content: "Verify block receives the receiver as argument",
                         span: Span {
                             start: 2675,
                             end: 2683,
@@ -1163,7 +1163,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => 150",
+                        content: "=> 150",
                         span: Span {
                             start: 2713,
                             end: 2714,
@@ -1277,7 +1277,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => 4",
+                        content: "=> 4",
                         span: Span {
                             start: 2771,
                             end: 2772,
@@ -1380,7 +1380,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Multiple operations on the passed value",
+                        content: "Multiple operations on the passed value",
                         span: Span {
                             start: 2826,
                             end: 2834,
@@ -1390,7 +1390,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => 13",
+                        content: "=> 13",
                         span: Span {
                             start: 2867,
                             end: 2868,
@@ -1530,7 +1530,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 3408,
                             end: 3416,
@@ -1538,7 +1538,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Edge Cases: Chaining and Composition",
+                        content: "Edge Cases: Chaining and Composition",
                         span: Span {
                             start: 3408,
                             end: 3416,
@@ -1546,7 +1546,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 3408,
                             end: 3416,
@@ -1554,7 +1554,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Chaining: ifNotNil: result in further computation",
+                        content: "Chaining: ifNotNil: result in further computation",
                         span: Span {
                             start: 3408,
                             end: 3416,
@@ -1564,7 +1564,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => 94",
+                        content: "=> 94",
                         span: Span {
                             start: 3450,
                             end: 3452,
@@ -1704,7 +1704,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Nested ifNotNil: - both evaluate",
+                        content: "Nested ifNotNil: - both evaluate",
                         span: Span {
                             start: 3500,
                             end: 3508,
@@ -1714,7 +1714,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => 15",
+                        content: "=> 15",
                         span: Span {
                             start: 3571,
                             end: 3572,
@@ -1881,7 +1881,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ifNil: on non-nil returns self, can chain",
+                        content: "ifNil: on non-nil returns self, can chain",
                         span: Span {
                             start: 3629,
                             end: 3637,
@@ -1891,7 +1891,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => 150",
+                        content: "=> 150",
                         span: Span {
                             start: 3660,
                             end: 3662,
@@ -2002,7 +2002,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 4190,
                             end: 4198,
@@ -2010,7 +2010,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Edge Cases: Boolean Logic Integration",
+                        content: "Edge Cases: Boolean Logic Integration",
                         span: Span {
                             start: 4190,
                             end: 4198,
@@ -2018,7 +2018,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 4190,
                             end: 4198,
@@ -2026,7 +2026,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Combining notNil with boolean logic",
+                        content: "Combining notNil with boolean logic",
                         span: Span {
                             start: 4190,
                             end: 4198,
@@ -2036,7 +2036,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => true",
+                        content: "=> true",
                         span: Span {
                             start: 4222,
                             end: 4223,
@@ -2132,7 +2132,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => false",
+                        content: "=> false",
                         span: Span {
                             start: 4272,
                             end: 4273,
@@ -2227,7 +2227,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Using notNil result in ifTrue:ifFalse:",
+                        content: "Using notNil result in ifTrue:ifFalse:",
                         span: Span {
                             start: 4330,
                             end: 4338,
@@ -2237,7 +2237,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => \"is not nil\"",
+                        content: "=> \"is not nil\"",
                         span: Span {
                             start: 4394,
                             end: 4395,
@@ -2365,7 +2365,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 4912,
                             end: 4920,
@@ -2373,7 +2373,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Edge Cases: Different Object Types",
+                        content: "Edge Cases: Different Object Types",
                         span: Span {
                             start: 4912,
                             end: 4920,
@@ -2381,7 +2381,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 4912,
                             end: 4920,
@@ -2389,7 +2389,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Blocks are not nil",
+                        content: "Blocks are not nil",
                         span: Span {
                             start: 4912,
                             end: 4920,
@@ -2399,7 +2399,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => false",
+                        content: "=> false",
                         span: Span {
                             start: 4929,
                             end: 4934,
@@ -2466,7 +2466,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => false",
+                        content: "=> false",
                         span: Span {
                             start: 4974,
                             end: 4979,
@@ -2540,7 +2540,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 5547,
                             end: 5555,
@@ -2548,7 +2548,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Edge Cases: ifNil: Should NOT Evaluate Block",
+                        content: "Edge Cases: ifNil: Should NOT Evaluate Block",
                         span: Span {
                             start: 5547,
                             end: 5555,
@@ -2556,7 +2556,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 5547,
                             end: 5555,
@@ -2564,7 +2564,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Verify ifNil: doesn't evaluate by checking return equals receiver",
+                        content: "Verify ifNil: doesn't evaluate by checking return equals receiver",
                         span: Span {
                             start: 5547,
                             end: 5555,
@@ -2574,7 +2574,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => true",
+                        content: "=> true",
                         span: Span {
                             start: 5582,
                             end: 5584,
@@ -2685,7 +2685,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ifNil: with complex block expression (should not evaluate)",
+                        content: "ifNil: with complex block expression (should not evaluate)",
                         span: Span {
                             start: 5660,
                             end: 5668,
@@ -2695,7 +2695,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => 10 (not 7)",
+                        content: "=> 10 (not 7)",
                         span: Span {
                             start: 5692,
                             end: 5693,
@@ -2821,7 +2821,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 6236,
                             end: 6241,
@@ -2829,7 +2829,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Edge Cases: Mixed nil and non-nil in Expressions",
+                        content: "Edge Cases: Mixed nil and non-nil in Expressions",
                         span: Span {
                             start: 6236,
                             end: 6241,
@@ -2837,7 +2837,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 6236,
                             end: 6241,
@@ -2845,7 +2845,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Assign value based on isNil test",
+                        content: "Assign value based on isNil test",
                         span: Span {
                             start: 6236,
                             end: 6241,
@@ -2885,7 +2885,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => 42",
+                        content: "=> 42",
                         span: Span {
                             start: 6299,
                             end: 6300,
@@ -3013,7 +3013,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Use ifNotNil: to safely transform",
+                        content: "Use ifNotNil: to safely transform",
                         span: Span {
                             start: 6349,
                             end: 6355,
@@ -3053,7 +3053,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => 30",
+                        content: "=> 30",
                         span: Span {
                             start: 6402,
                             end: 6403,
@@ -3166,7 +3166,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Compare with nil's behavior (for contrast)",
+                        content: "Compare with nil's behavior (for contrast)",
                         span: Span {
                             start: 6461,
                             end: 6469,
@@ -3176,7 +3176,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => \"nil case\"",
+                        content: "=> \"nil case\"",
                         span: Span {
                             start: 6527,
                             end: 6528,
@@ -3302,7 +3302,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => \"not nil case\"",
+                        content: "=> \"not nil case\"",
                         span: Span {
                             start: 6612,
                             end: 6613,
@@ -3427,7 +3427,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 7148,
                             end: 7156,
@@ -3435,7 +3435,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Edge Cases: Return Value Verification",
+                        content: "Edge Cases: Return Value Verification",
                         span: Span {
                             start: 7148,
                             end: 7156,
@@ -3443,7 +3443,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 7148,
                             end: 7156,
@@ -3451,7 +3451,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ifNotNil: returns block result",
+                        content: "ifNotNil: returns block result",
                         span: Span {
                             start: 7148,
                             end: 7156,
@@ -3461,7 +3461,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => true",
+                        content: "=> true",
                         span: Span {
                             start: 7192,
                             end: 7194,
@@ -3601,7 +3601,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ifNil: returns self unchanged",
+                        content: "ifNil: returns self unchanged",
                         span: Span {
                             start: 7241,
                             end: 7249,
@@ -3611,7 +3611,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " => true",
+                        content: "=> true",
                         span: Span {
                             start: 7274,
                             end: 7277,
@@ -3722,7 +3722,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 7793,
                             end: 7801,
@@ -3730,7 +3730,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Real-World Usage Patterns",
+                        content: "Real-World Usage Patterns",
                         span: Span {
                             start: 7793,
                             end: 7801,
@@ -3738,7 +3738,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " ═══════════════════════════════════════════════════════════════════════",
+                        content: "═══════════════════════════════════════════════════════════════════════",
                         span: Span {
                             start: 7793,
                             end: 7801,
@@ -3746,7 +3746,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Safe access pattern with ifNotNil:",
+                        content: "Safe access pattern with ifNotNil:",
                         span: Span {
                             start: 7793,
                             end: 7801,
@@ -3786,7 +3786,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => \"Hello, Alice!\"",
+                        content: "=> \"Hello, Alice!\"",
                         span: Span {
                             start: 7875,
                             end: 7876,
@@ -3920,7 +3920,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Default value pattern with ifNil:",
+                        content: "Default value pattern with ifNil:",
                         span: Span {
                             start: 7938,
                             end: 7947,
@@ -3960,7 +3960,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => 42",
+                        content: "=> 42",
                         span: Span {
                             start: 7991,
                             end: 7992,
@@ -4044,7 +4044,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Transformation with default pattern",
+                        content: "Transformation with default pattern",
                         span: Span {
                             start: 8043,
                             end: 8054,
@@ -4084,7 +4084,7 @@ Module {
                 leading: [],
                 trailing: Some(
                     Comment {
-                        content: " => 14",
+                        content: "=> 14",
                         span: Span {
                             start: 8115,
                             end: 8116,

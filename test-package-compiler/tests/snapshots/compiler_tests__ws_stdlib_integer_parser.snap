@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 133,
                             end: 136,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 133,
                             end: 136,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test integer arithmetic and operations",
+                        content: "Test integer arithmetic and operations",
                         span: Span {
                             start: 133,
                             end: 136,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Basic arithmetic",
+                        content: "Basic arithmetic",
                         span: Span {
                             start: 133,
                             end: 136,
@@ -248,7 +248,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Integer division and modulo",
+                        content: "Integer division and modulo",
                         span: Span {
                             start: 235,
                             end: 241,
@@ -258,7 +258,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: " 5",
+                        content: "5",
                         span: Span {
                             start: 245,
                             end: 247,
@@ -347,7 +347,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Comparison",
+                        content: "Comparison",
                         span: Span {
                             start: 288,
                             end: 294,
@@ -509,7 +509,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Iteration - times repeat",
+                        content: "Iteration - times repeat",
                         span: Span {
                             start: 370,
                             end: 377,
@@ -645,7 +645,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Range iteration",
+                        content: "Range iteration",
                         span: Span {
                             start: 443,
                             end: 446,
@@ -805,7 +805,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Number tests",
+                        content: "Number tests",
                         span: Span {
                             start: 504,
                             end: 510,
@@ -937,7 +937,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Custom step iteration - positive step (odd numbers)",
+                        content: "Custom step iteration - positive step (odd numbers)",
                         span: Span {
                             start: 615,
                             end: 621,
@@ -1113,7 +1113,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Custom step iteration - negative step (countdown)",
+                        content: "Custom step iteration - negative step (countdown)",
                         span: Span {
                             start: 728,
                             end: 737,

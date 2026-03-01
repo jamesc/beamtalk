@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 154,
                             end: 158,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 154,
                             end: 158,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test boolean control flow with True and False",
+                        content: "Test boolean control flow with True and False",
                         span: Span {
                             start: 154,
                             end: 158,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test ifTrue:ifFalse: with true",
+                        content: "Test ifTrue:ifFalse: with true",
                         span: Span {
                             start: 154,
                             end: 158,
@@ -204,7 +204,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Test ifTrue:ifFalse: with false",
+                        content: "Test ifTrue:ifFalse: with false",
                         span: Span {
                             start: 261,
                             end: 266,
@@ -373,7 +373,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Test logical AND",
+                        content: "Test logical AND",
                         span: Span {
                             start: 354,
                             end: 361,
@@ -610,7 +610,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Test logical OR",
+                        content: "Test logical OR",
                         span: Span {
                             start: 460,
                             end: 467,
@@ -847,7 +847,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Test logical NOT",
+                        content: "Test logical NOT",
                         span: Span {
                             start: 566,
                             end: 573,

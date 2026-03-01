@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 173,
                             end: 178,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 173,
                             end: 178,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test actor spawn compilation",
+                        content: "Test actor spawn compilation",
                         span: Span {
                             start: 173,
                             end: 178,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " The syntax \"Counter spawn\" should compile to gen_server:start_link",
+                        content: "The syntax \"Counter spawn\" should compile to gen_server:start_link",
                         span: Span {
                             start: 173,
                             end: 178,

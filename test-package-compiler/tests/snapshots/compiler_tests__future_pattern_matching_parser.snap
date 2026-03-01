@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 268,
                             end: 274,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 268,
                             end: 274,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test future feature: pattern matching",
+                        content: "Test future feature: pattern matching",
                         span: Span {
                             start: 268,
                             end: 274,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Match expressions with destructuring and guards",
+                        content: "Match expressions with destructuring and guards",
                         span: Span {
                             start: 268,
                             end: 274,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " NOTE: This feature is not yet implemented - test documents expected behavior",
+                        content: "NOTE: This feature is not yet implemented - test documents expected behavior",
                         span: Span {
                             start: 268,
                             end: 274,
@@ -51,7 +51,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Simple value matching",
+                        content: "Simple value matching",
                         span: Span {
                             start: 268,
                             end: 274,

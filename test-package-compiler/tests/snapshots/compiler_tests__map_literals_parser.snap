@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 119,
                             end: 124,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 119,
                             end: 124,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test map literal syntax parsing",
+                        content: "Test map literal syntax parsing",
                         span: Span {
                             start: 119,
                             end: 124,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Empty map",
+                        content: "Empty map",
                         span: Span {
                             start: 119,
                             end: 124,
@@ -72,7 +72,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Map with atom keys",
+                        content: "Map with atom keys",
                         span: Span {
                             start: 155,
                             end: 161,
@@ -158,7 +158,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Map with string keys",
+                        content: "Map with string keys",
                         span: Span {
                             start: 222,
                             end: 228,
@@ -244,7 +244,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Map with integer keys",
+                        content: "Map with integer keys",
                         span: Span {
                             start: 299,
                             end: 308,
@@ -354,7 +354,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Map with mixed key types",
+                        content: "Map with mixed key types",
                         span: Span {
                             start: 386,
                             end: 391,
@@ -464,7 +464,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Nested maps",
+                        content: "Nested maps",
                         span: Span {
                             start: 461,
                             end: 465,
@@ -644,7 +644,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Map with trailing comma",
+                        content: "Map with trailing comma",
                         span: Span {
                             start: 639,
                             end: 651,
@@ -730,7 +730,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Single entry map",
+                        content: "Single entry map",
                         span: Span {
                             start: 697,
                             end: 703,

@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 140,
                             end: 146,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 140,
                             end: 146,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test Dictionary (key-value map) operations",
+                        content: "Test Dictionary (key-value map) operations",
                         span: Span {
                             start: 140,
                             end: 146,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Dictionary creation",
+                        content: "Dictionary creation",
                         span: Span {
                             start: 140,
                             end: 146,
@@ -173,7 +173,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Key access",
+                        content: "Key access",
                         span: Span {
                             start: 226,
                             end: 230,
@@ -300,7 +300,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Safe access with default",
+                        content: "Safe access with default",
                         span: Span {
                             start: 303,
                             end: 308,
@@ -401,7 +401,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Update (returns new dictionary)",
+                        content: "Update (returns new dictionary)",
                         span: Span {
                             start: 388,
                             end: 393,
@@ -485,7 +485,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Add new key",
+                        content: "Add new key",
                         span: Span {
                             start: 437,
                             end: 444,
@@ -569,7 +569,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Size",
+                        content: "Size",
                         span: Span {
                             start: 489,
                             end: 493,
@@ -619,7 +619,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Key test",
+                        content: "Key test",
                         span: Span {
                             start: 522,
                             end: 529,
@@ -746,7 +746,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Remove key",
+                        content: "Remove key",
                         span: Span {
                             start: 609,
                             end: 616,
@@ -814,7 +814,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Get keys and values",
+                        content: "Get keys and values",
                         span: Span {
                             start: 668,
                             end: 672,
@@ -905,7 +905,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Iteration over keys and values",
+                        content: "Iteration over keys and values",
                         span: Span {
                             start: 747,
                             end: 753,
@@ -1071,7 +1071,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Transformation of values",
+                        content: "Transformation of values",
                         span: Span {
                             start: 853,
                             end: 860,
@@ -1232,7 +1232,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Merge two dictionaries",
+                        content: "Merge two dictionaries",
                         span: Span {
                             start: 935,
                             end: 939,

@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 208,
                             end: 215,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 208,
                             end: 215,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test complex cascade scenarios",
+                        content: "Test complex cascade scenarios",
                         span: Span {
                             start: 208,
                             end: 215,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Multiple cascaded messages with different types",
+                        content: "Multiple cascaded messages with different types",
                         span: Span {
                             start: 208,
                             end: 215,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Cascade with unary, binary, and keyword messages",
+                        content: "Cascade with unary, binary, and keyword messages",
                         span: Span {
                             start: 208,
                             end: 215,
@@ -155,7 +155,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Cascade with keyword messages",
+                        content: "Cascade with keyword messages",
                         span: Span {
                             start: 317,
                             end: 323,

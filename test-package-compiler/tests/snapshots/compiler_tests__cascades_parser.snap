@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 208,
                             end: 218,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 208,
                             end: 218,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Test cascade message sends",
+                        content: "Test cascade message sends",
                         span: Span {
                             start: 208,
                             end: 218,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Sends multiple messages to the same receiver",
+                        content: "Sends multiple messages to the same receiver",
                         span: Span {
                             start: 208,
                             end: 218,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Method that uses a cascade - all messages go to counter",
+                        content: "Method that uses a cascade - all messages go to counter",
                         span: Span {
                             start: 208,
                             end: 218,

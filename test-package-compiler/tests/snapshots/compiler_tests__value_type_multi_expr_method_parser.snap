@@ -144,7 +144,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: " Two-expression method: side effect then return value",
+                                content: "Two-expression method: side effect then return value",
                                 span: Span {
                                     start: 535,
                                     end: 548,
@@ -317,7 +317,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: " Three-expression method: multiple side effects then return",
+                                content: "Three-expression method: multiple side effects then return",
                                 span: Span {
                                     start: 654,
                                     end: 665,
@@ -339,7 +339,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: " Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 443,
                             end: 449,
@@ -347,7 +347,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 443,
                             end: 449,
@@ -355,7 +355,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Compiler snapshot test for BT-367: multi-expression value-type method sequencing",
+                        content: "Compiler snapshot test for BT-367: multi-expression value-type method sequencing",
                         span: Span {
                             start: 443,
                             end: 449,
@@ -371,7 +371,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " Verifies that value-type methods with multiple expressions generate",
+                        content: "Verifies that value-type methods with multiple expressions generate",
                         span: Span {
                             start: 443,
                             end: 449,
@@ -379,7 +379,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " correct Core Erlang using `let ... in` to sequence non-last expressions.",
+                        content: "correct Core Erlang using `let ... in` to sequence non-last expressions.",
                         span: Span {
                             start: 443,
                             end: 449,
@@ -387,7 +387,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " The first expression (side-effecting) should be wrapped in a let binding,",
+                        content: "The first expression (side-effecting) should be wrapped in a let binding,",
                         span: Span {
                             start: 443,
                             end: 449,
@@ -395,7 +395,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: " and only the last expression should be returned directly.",
+                        content: "and only the last expression should be returned directly.",
                         span: Span {
                             start: 443,
                             end: 449,
