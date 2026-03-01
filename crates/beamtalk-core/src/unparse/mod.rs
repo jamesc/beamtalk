@@ -352,16 +352,23 @@ fn unparse_method_definition_with_prefix(
         }
         [single] if single.comments.leading.is_empty() => {
             // Single expression with no leading comments — try inline,
-            // break to indented next line if too wide.
+            // break to indented next line if too wide or if body is multi-line.
             let body = unparse_expression(&single.expression);
             let trail_doc = if let Some(trail) = &single.comments.trailing {
                 docvec!["  ", unparse_comment(trail)]
             } else {
                 nil()
             };
-            docs.push(group(docvec![
-                nest(2, docvec![break_("", " "), body, trail_doc]),
-            ]));
+            // If the body renders as multi-line, always break to next line
+            // to avoid half the expression dangling on the signature line.
+            let body_str = body.to_pretty_string();
+            if body_str.contains('\n') {
+                docs.push(nest(2, docvec![line(), body, trail_doc]));
+            } else {
+                docs.push(group(docvec![
+                    nest(2, docvec![break_("", " "), body, trail_doc]),
+                ]));
+            }
         }
         stmts => {
             // Multiple expressions, or single with leading comments — emit on new lines
