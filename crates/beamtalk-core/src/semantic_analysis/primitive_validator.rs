@@ -125,6 +125,7 @@ fn validate_expr(
             name,
             is_quoted,
             span,
+            ..
         } => {
             // Check stdlib restriction
             validate_stdlib_restriction(is_stdlib, options, *span, diagnostics);

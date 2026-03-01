@@ -760,6 +760,7 @@ impl Parser {
 
     /// Parses a single match arm: `pattern -> body` or `pattern when: [guard] -> body`
     fn parse_match_arm(&mut self) -> MatchArm {
+        let comments = self.collect_comment_attachment();
         let pattern = self.parse_pattern();
         let pat_span = pattern.span();
 
@@ -794,11 +795,13 @@ impl Parser {
         let body = self.parse_keyword_message();
         let span = pat_span.merge(body.span());
 
-        if let Some(guard_expr) = guard {
+        let mut arm = if let Some(guard_expr) = guard {
             MatchArm::with_guard(pattern, guard_expr, body, span)
         } else {
             MatchArm::new(pattern, body, span)
-        }
+        };
+        arm.comments = comments;
+        arm
     }
 
     /// Parses a pattern for match arms.
@@ -932,6 +935,7 @@ impl Parser {
     /// This method consumes it and parses the primitive name that follows.
     fn parse_primitive(&mut self) -> Expression {
         let start_token = self.advance(); // consume AtPrimitive or AtIntrinsic
+        let is_intrinsic = matches!(start_token.kind(), TokenKind::AtIntrinsic);
         let directive = start_token.kind().to_string();
         let start = start_token.span();
 
@@ -963,6 +967,7 @@ impl Parser {
                 Expression::Primitive {
                     name,
                     is_quoted: true,
+                    is_intrinsic,
                     span,
                 }
             }
@@ -974,6 +979,7 @@ impl Parser {
                 Expression::Primitive {
                     name,
                     is_quoted: false,
+                    is_intrinsic,
                     span,
                 }
             }

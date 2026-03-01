@@ -2512,6 +2512,7 @@ mod tests {
                 vec![bare(Expression::Primitive {
                     name: "+".into(),
                     is_quoted: true,
+                    is_intrinsic: false,
                     span: span(),
                 })],
                 span(),
@@ -2709,6 +2710,7 @@ mod tests {
                 vec![bare(Expression::Primitive {
                     name: "value".into(),
                     is_quoted: true,
+                    is_intrinsic: false,
                     span: span(),
                 })],
                 TypeAnnotation::Simple(ident("Integer")),

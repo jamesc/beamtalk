@@ -42,6 +42,7 @@ Module {
                             expression: Primitive {
                                 name: "size",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 305,
                                     end: 322,
@@ -62,6 +63,7 @@ Module {
                                     end: 301,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -86,6 +88,7 @@ Module {
                             expression: Primitive {
                                 name: "keys",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 333,
                                     end: 350,
@@ -121,6 +124,7 @@ Module {
                             expression: Primitive {
                                 name: "values",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 363,
                                     end: 382,
@@ -175,6 +179,7 @@ Module {
                             expression: Primitive {
                                 name: "at:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 396,
                                     end: 412,
@@ -246,6 +251,7 @@ Module {
                             expression: Primitive {
                                 name: "at:ifAbsent:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 442,
                                     end: 467,
@@ -317,6 +323,7 @@ Module {
                             expression: Primitive {
                                 name: "at:put:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 492,
                                     end: 512,
@@ -371,6 +378,7 @@ Module {
                             expression: Primitive {
                                 name: "includesKey:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 535,
                                     end: 560,
@@ -425,6 +433,7 @@ Module {
                             expression: Primitive {
                                 name: "removeKey:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 621,
                                     end: 644,
@@ -445,6 +454,7 @@ Module {
                                     end: 613,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -488,6 +498,7 @@ Module {
                             expression: Primitive {
                                 name: "merge:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 663,
                                     end: 682,
@@ -542,6 +553,7 @@ Module {
                             expression: Primitive {
                                 name: "keysAndValuesDo:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 727,
                                     end: 756,
@@ -562,6 +574,7 @@ Module {
                                     end: 717,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -584,6 +597,7 @@ Module {
                             end: 253,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -592,6 +606,7 @@ Module {
                             end: 253,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test Dictionary class compilation as a value type (not gen_server).",
@@ -600,6 +615,7 @@ Module {
                             end: 253,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Dictionary is a sealed Object subclass backed by Erlang maps.",
@@ -608,6 +624,7 @@ Module {
                             end: 253,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "new/0 should return #{} (empty map).",
@@ -616,6 +633,7 @@ Module {
                             end: 253,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -634,4 +652,5 @@ Module {
         end: 756,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }

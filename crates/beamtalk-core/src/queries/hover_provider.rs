@@ -745,6 +745,7 @@ fn find_hover_in_expr(
             name,
             is_quoted,
             span,
+            ..
         } => {
             if offset >= span.start() && offset < span.end() {
                 let display = if *is_quoted {
@@ -1149,6 +1150,7 @@ mod tests {
         let expr = Expression::Primitive {
             name: "erlang_add".into(),
             is_quoted: true,
+            is_intrinsic: false,
             span: Span::new(0, 22),
         };
         let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new());
@@ -1168,6 +1170,7 @@ mod tests {
         let expr = Expression::Primitive {
             name: "size".into(),
             is_quoted: false,
+            is_intrinsic: false,
             span: Span::new(0, 15),
         };
         let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new());

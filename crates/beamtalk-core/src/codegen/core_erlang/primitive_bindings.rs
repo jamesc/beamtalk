@@ -254,6 +254,7 @@ mod tests {
             vec![ExpressionStatement::bare(Expression::Primitive {
                 name: prim_name.into(),
                 is_quoted,
+                is_intrinsic: false,
                 span: span(),
             })],
             span(),

@@ -1388,6 +1388,7 @@ mod tests {
             method_definitions: Vec::new(),
             expressions: vec![],
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
             span: test_span(),
         };
         let result = analyse(&module);
@@ -1774,6 +1775,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -1813,6 +1815,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2121,6 +2124,7 @@ mod tests {
             expressions: vec![bare(spawn_expr)],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
 
         let result = analyse(&module);
@@ -2213,6 +2217,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2285,6 +2290,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2342,6 +2348,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2392,6 +2399,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2445,6 +2453,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2500,6 +2509,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2556,6 +2566,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2592,6 +2603,7 @@ mod tests {
                 body: vec![bare(Expression::Primitive {
                     name: "at:".into(),
                     is_quoted: true,
+                    is_intrinsic: false,
                     span: test_span(),
                 })],
                 return_type: None,
@@ -2613,6 +2625,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
         let warnings: Vec<_> = result
@@ -2651,6 +2664,7 @@ mod tests {
                 body: vec![bare(Expression::Primitive {
                     name: "actorSpawnWith".into(),
                     is_quoted: false,
+                    is_intrinsic: false,
                     span: test_span(),
                 })],
                 return_type: None,
@@ -2672,6 +2686,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
         let warnings: Vec<_> = result
@@ -2730,6 +2745,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2784,6 +2800,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2839,6 +2856,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2897,6 +2915,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -2963,6 +2982,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -3027,6 +3047,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -3078,6 +3099,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -3137,6 +3159,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -3186,6 +3209,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -3261,6 +3285,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -3353,6 +3378,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -3422,6 +3448,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -3489,6 +3516,7 @@ mod tests {
             expressions: vec![],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
         let result = analyse(&module);
 
@@ -3664,6 +3692,7 @@ mod tests {
             expressions: Vec::new(),
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
 
         let result = analyse(&module);
@@ -3701,6 +3730,7 @@ mod tests {
             expressions: vec![bare(interp)],
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
 
         let result = analyse(&module);
@@ -3749,6 +3779,7 @@ mod tests {
             expressions: Vec::new(),
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
 
         let result = analyse(&module);
@@ -3823,6 +3854,7 @@ mod tests {
             expressions: Vec::new(),
             span: test_span(),
             file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
         };
 
         let result = analyse(&module);

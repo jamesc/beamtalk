@@ -17,6 +17,7 @@ Module {
                             end: 197,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -25,6 +26,7 @@ Module {
                             end: 197,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test error recovery: malformed message sends",
@@ -33,6 +35,7 @@ Module {
                             end: 197,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Parser should handle incomplete messages",
@@ -41,6 +44,7 @@ Module {
                             end: 197,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Incomplete keyword message",
@@ -49,6 +53,7 @@ Module {
                             end: 197,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -103,6 +108,7 @@ Module {
                             end: 236,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -168,6 +174,7 @@ Module {
                             end: 292,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -252,6 +259,7 @@ Module {
                             end: 374,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                 ],
                 trailing: None,
@@ -309,6 +317,7 @@ Module {
         end: 383,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
 
 Diagnostics:

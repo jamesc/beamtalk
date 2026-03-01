@@ -105,7 +105,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
         in case _Reg0 of
             <{'error', _RegErr0}> when 'true' -> {'error', _RegErr0}
             <_> when 'true' ->
-                
+
                 let _BuilderState1 = ~{
                     'className' => 'AllowedChild',
                     'superclassRef' => 'Object',
@@ -132,7 +132,7 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
                 in case _Reg1 of
                     <{'error', _RegErr1}> when 'true' -> {'error', _RegErr1}
                     <_> when 'true' ->
-                        
+
                         let _BuilderState2 = ~{
                             'className' => 'Child',
                             'superclassRef' => 'Parent',

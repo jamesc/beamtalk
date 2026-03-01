@@ -617,6 +617,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
         method_definitions: vec![],
         span: Span::new(0, 50),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
 
     // Use a subdirectory-qualified module name (package mode with subdirectories)
@@ -2826,6 +2827,7 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
         })],
         span: Span::new(0, 50),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
 
     // BT-852: Stored closures with field assignments are now allowed via Tier 2 protocol.
@@ -2906,6 +2908,7 @@ fn test_codegen_rejects_stored_closure_with_local_mutation() {
         })],
         span: Span::new(0, 65),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
 
     // BT-852: Stored closures with local mutations are now allowed via Tier 2 protocol.
@@ -2985,6 +2988,7 @@ fn test_class_registration_generation() {
         method_definitions: Vec::new(),
         span: Span::new(0, 50),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
 
     let code =
@@ -3151,6 +3155,7 @@ fn test_multiple_classes_registration() {
         method_definitions: Vec::new(),
         span: Span::new(0, 50),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
 
     let code = generate_module(&module, CodegenOptions::new("multi_actors"))
@@ -3275,6 +3280,7 @@ fn test_multi_class_early_error_short_circuits() {
         method_definitions: Vec::new(),
         span: Span::new(0, 50),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
 
     let code = generate_module(&module, CodegenOptions::new("multi_shadow"))
@@ -3343,6 +3349,7 @@ fn test_three_class_short_circuit_nesting() {
         method_definitions: Vec::new(),
         span: Span::new(0, 60),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
 
     let code = generate_module(&module, CodegenOptions::new("three_classes"))
@@ -3523,6 +3530,7 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
         method_definitions: Vec::new(),
         span: Span::new(0, 5),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
 
     let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
@@ -3571,6 +3579,7 @@ fn test_standalone_class_reference_validates_undefined_classes() {
         method_definitions: Vec::new(),
         span: Span::new(0, 16),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
 
     let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
@@ -3628,6 +3637,7 @@ fn test_is_actor_class_direct_actor_subclass() {
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3658,6 +3668,7 @@ fn test_is_actor_class_object_subclass_is_value_type() {
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3706,6 +3717,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3718,6 +3730,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
     // Build hierarchy from full module so Counter is known
     assert!(CoreErlangGenerator::is_actor_class(&module_lc, &hierarchy));
@@ -3757,6 +3770,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3788,6 +3802,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3823,6 +3838,7 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3857,6 +3873,7 @@ fn test_is_actor_class_root_class_is_value_type() {
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
     let hierarchy = crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
         .0
@@ -3933,6 +3950,7 @@ fn test_generate_with_bindings_compiles_value_type() {
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
 
     let bindings = primitive_bindings::PrimitiveBindingTable::new();
@@ -5291,6 +5309,7 @@ fn make_value_subclass_point() -> Module {
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     }
 }
 
@@ -5472,6 +5491,7 @@ fn test_object_subclass_no_auto_getters() {
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
     let result = generate_module(&module, CodegenOptions::new("bt@point"));
     let code = result.unwrap();
@@ -5532,6 +5552,7 @@ fn test_value_subclass_user_defined_overrides_auto() {
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
     let result = generate_module(&module, CodegenOptions::new("bt@my_val"));
     let code = result.unwrap();
@@ -5567,6 +5588,7 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
     };
     let result = generate_module(&module, CodegenOptions::new("bt@empty"));
     let code = result.unwrap();

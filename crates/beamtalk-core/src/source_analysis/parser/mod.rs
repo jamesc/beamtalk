@@ -671,6 +671,7 @@ impl Parser {
     pub(super) fn collect_comment_attachment(&self) -> CommentAttachment {
         let token_span = self.current_token().span();
         let mut leading = Vec::new();
+        let mut saw_blank_line = false;
         for trivia in self.current_token().leading_trivia() {
             match trivia {
                 super::Trivia::LineComment(text) => {
@@ -682,7 +683,10 @@ impl Parser {
                         .strip_prefix("// ")
                         .or_else(|| s.strip_prefix("//"))
                         .unwrap_or(s);
-                    leading.push(Comment::line(content, token_span));
+                    let mut comment = Comment::line(content, token_span);
+                    comment.preceding_blank_line = saw_blank_line;
+                    leading.push(comment);
+                    saw_blank_line = false;
                 }
                 super::Trivia::BlockComment(text) => {
                     // Strip `/* ` / ` */` delimiters.
@@ -692,10 +696,39 @@ impl Parser {
                         .and_then(|s| s.strip_suffix(" */"))
                         .or_else(|| s.strip_prefix("/*").and_then(|s| s.strip_suffix("*/")))
                         .unwrap_or(s);
-                    leading.push(Comment::block(content, token_span));
+                    let mut comment = Comment::block(content, token_span);
+                    comment.preceding_blank_line = saw_blank_line;
+                    leading.push(comment);
+                    saw_blank_line = false;
                 }
-                // DocComment is handled by collect_doc_comment — skip here.
-                super::Trivia::DocComment(_) | super::Trivia::Whitespace(_) => {}
+                super::Trivia::Whitespace(ws) => {
+                    // Detect blank lines (2+ newlines) in whitespace between comments
+                    if ws.chars().filter(|&c| c == '\n').count() > 1 {
+                        saw_blank_line = true;
+                    }
+                }
+                // DocComment is normally handled by collect_doc_comment for
+                // declarations.  When it wasn't consumed (e.g. before module-level
+                // expressions), preserve it as a regular line comment so the
+                // formatter doesn't drop it.
+                super::Trivia::DocComment(text) => {
+                    if self.unattached_doc_comment_indices.contains(&self.current) {
+                        let s = text.as_str();
+                        let content = s
+                            .strip_prefix("/// ")
+                            .unwrap_or_else(|| s.strip_prefix("///").unwrap_or(s));
+                        // Prefix with "/" so it round-trips as `/// content`
+                        let prefixed = if content.is_empty() {
+                            "/".to_string()
+                        } else {
+                            format!("/ {content}")
+                        };
+                        let mut comment = Comment::line(&prefixed, token_span);
+                        comment.preceding_blank_line = saw_blank_line;
+                        leading.push(comment);
+                        saw_blank_line = false;
+                    }
+                }
             }
         }
         CommentAttachment {
@@ -891,14 +924,17 @@ impl Parser {
             }
         }
 
-        // Empty module edge case: if the file contains only comments and no items,
-        // collect those comments into file_leading_comments.  Non-empty modules carry
-        // their leading comments on the first item (class, method def, or expression).
-        let file_leading_comments =
+        // Collect comments from the EOF token.
+        // - Empty modules: all comments go to file_leading_comments.
+        // - Non-empty modules: leading comments on the first item were already
+        //   collected; any remaining comments on the EOF token are trailing comments
+        //   that appear after the last item in the file.
+        let eof_comments = self.collect_comment_attachment().leading;
+        let (file_leading_comments, file_trailing_comments) =
             if classes.is_empty() && method_definitions.is_empty() && expressions.is_empty() {
-                self.collect_comment_attachment().leading
+                (eof_comments, Vec::new())
             } else {
-                Vec::new()
+                (Vec::new(), eof_comments)
             };
 
         // Get end span
@@ -915,6 +951,7 @@ impl Parser {
             expressions,
             span,
             file_leading_comments,
+            file_trailing_comments,
         }
     }
 

@@ -1504,6 +1504,7 @@ impl CoreErlangGenerator {
                 name,
                 is_quoted,
                 span,
+                ..
             } => self.generate_primitive(name, *is_quoted, *span),
             Expression::Match { value, arms, .. } => self.generate_match(value, arms),
             Expression::StringInterpolation { segments, .. } => {

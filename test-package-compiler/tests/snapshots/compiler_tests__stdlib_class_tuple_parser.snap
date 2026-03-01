@@ -42,6 +42,7 @@ Module {
                             expression: Primitive {
                                 name: "size",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 302,
                                     end: 319,
@@ -62,6 +63,7 @@ Module {
                                     end: 298,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -105,6 +107,7 @@ Module {
                             expression: Primitive {
                                 name: "at:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 335,
                                     end: 351,
@@ -140,6 +143,7 @@ Module {
                             expression: Primitive {
                                 name: "isOk",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 409,
                                     end: 426,
@@ -160,6 +164,7 @@ Module {
                                     end: 405,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -184,6 +189,7 @@ Module {
                             expression: Primitive {
                                 name: "isError",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 440,
                                     end: 460,
@@ -219,6 +225,7 @@ Module {
                             expression: Primitive {
                                 name: "unwrap",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 490,
                                     end: 509,
@@ -239,6 +246,7 @@ Module {
                                     end: 486,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -282,6 +290,7 @@ Module {
                             expression: Primitive {
                                 name: "unwrapOr:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 533,
                                     end: 555,
@@ -336,6 +345,7 @@ Module {
                             expression: Primitive {
                                 name: "unwrapOrElse:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 581,
                                     end: 607,
@@ -371,6 +381,7 @@ Module {
                             expression: Primitive {
                                 name: "asString",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 639,
                                     end: 660,
@@ -391,6 +402,7 @@ Module {
                                     end: 635,
                                 },
                                 kind: Line,
+                                preceding_blank_line: true,
                             },
                         ],
                         trailing: None,
@@ -413,6 +425,7 @@ Module {
                             end: 246,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
@@ -421,6 +434,7 @@ Module {
                             end: 246,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "Test Tuple class compilation as a value type (not gen_server).",
@@ -429,6 +443,7 @@ Module {
                             end: 246,
                         },
                         kind: Line,
+                        preceding_blank_line: true,
                     },
                     Comment {
                         content: "Tuple is a sealed Object subclass backed by Erlang tuples.",
@@ -437,6 +452,7 @@ Module {
                             end: 246,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                     Comment {
                         content: "new/0 should return {} (empty tuple).",
@@ -445,6 +461,7 @@ Module {
                             end: 246,
                         },
                         kind: Line,
+                        preceding_blank_line: false,
                     },
                 ],
                 trailing: None,
@@ -463,4 +480,5 @@ Module {
         end: 660,
     },
     file_leading_comments: [],
+    file_trailing_comments: [],
 }
