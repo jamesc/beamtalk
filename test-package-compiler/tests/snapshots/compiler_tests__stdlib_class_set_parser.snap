@@ -72,6 +72,7 @@ Module {
                             expression: Primitive {
                                 name: "size",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 294,
                                     end: 311,
@@ -117,6 +118,7 @@ Module {
                             expression: Primitive {
                                 name: "isEmpty",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 325,
                                     end: 345,
@@ -171,6 +173,7 @@ Module {
                             expression: Primitive {
                                 name: "includes:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 386,
                                     end: 408,
@@ -235,6 +238,7 @@ Module {
                             expression: Primitive {
                                 name: "add:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 464,
                                     end: 481,
@@ -299,6 +303,7 @@ Module {
                             expression: Primitive {
                                 name: "remove:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 503,
                                     end: 523,
@@ -353,6 +358,7 @@ Module {
                             expression: Primitive {
                                 name: "union:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 581,
                                     end: 600,
@@ -417,6 +423,7 @@ Module {
                             expression: Primitive {
                                 name: "intersection:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 626,
                                     end: 652,
@@ -471,6 +478,7 @@ Module {
                             expression: Primitive {
                                 name: "difference:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 676,
                                     end: 700,
@@ -525,6 +533,7 @@ Module {
                             expression: Primitive {
                                 name: "isSubsetOf:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 741,
                                     end: 765,
@@ -570,6 +579,7 @@ Module {
                             expression: Primitive {
                                 name: "asList",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 795,
                                     end: 814,
@@ -634,6 +644,7 @@ Module {
                             expression: Primitive {
                                 name: "fromList:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 835,
                                     end: 857,
@@ -688,6 +699,7 @@ Module {
                             expression: Primitive {
                                 name: "do:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 889,
                                     end: 905,

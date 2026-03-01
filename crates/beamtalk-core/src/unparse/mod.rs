@@ -196,7 +196,7 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     let superclass = class
         .superclass
         .as_ref()
-        .map_or_else(|| "Object".to_string(), |s| s.name.to_string());
+        .map_or_else(|| "nil".to_string(), |s| s.name.to_string());
 
     let mut modifiers: Vec<Document<'static>> = Vec::new();
     if class.is_abstract {
@@ -621,10 +621,10 @@ fn unparse_literal(lit: &Literal) -> Document<'static> {
         Literal::Integer(n) => Document::String(n.to_string()),
         Literal::Float(f) => Document::String(format_float(*f)),
         Literal::String(s) => {
-            // Double-quoted strings; escape internal double quotes using
-            // doubled-delimiter ("") per Beamtalk spec (not backslash).
-            let escaped = s.as_str().replace('"', "\"\"");
-            docvec!["\"", Document::String(escaped), "\""]
+            // The lexer unescapes doubled delimiters ("") to bare " in the AST,
+            // but preserves backslash escapes (\" stays as \"). We need to
+            // re-escape any bare " that isn't already preceded by \.
+            docvec!["\"", Document::String(escape_string_quotes(s)), "\""]
         }
         Literal::Symbol(s) => {
             // Symbols: #name or #'name with spaces'
@@ -659,6 +659,30 @@ fn format_float(f: f64) -> String {
     } else {
         format!("{f}.0")
     }
+}
+
+/// Escape bare `"` characters in a string that aren't already backslash-escaped.
+/// The lexer unescapes doubled delimiters (`""` → `"`) but preserves backslash
+/// escapes (`\"` stays as `\"`). We re-escape bare quotes using `\"`.
+fn escape_string_quotes(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            // Backslash escape sequence — preserve as-is
+            result.push('\\');
+            if let Some(next) = chars.next() {
+                result.push(next);
+            }
+        } else if c == '"' {
+            // Bare quote — re-escape it
+            result.push('\\');
+            result.push('"');
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 /// Returns true if a symbol name needs quoting.
@@ -1053,29 +1077,23 @@ fn unparse_map_literal(pairs: &[MapPair]) -> Document<'static> {
         return Document::Str("#{}");
     }
     let pair_docs: Vec<Document<'static>> = pairs.iter().map(unparse_map_pair).collect();
-    if pairs.len() == 1 {
-        // Single pair: try inline, break if too wide
-        let joined = join_docs(pair_docs, ", ");
-        group(docvec![
-            "#{",
-            nest(2, docvec![break_("", ""), joined]),
-            break_("", ""),
-            "}",
-        ])
-    } else {
-        // Multiple pairs: one per line
-        let mut body = Vec::new();
-        for (i, pair_doc) in pair_docs.into_iter().enumerate() {
-            if i > 0 {
-                body.push(Document::Str(","));
-                body.push(line());
-            } else {
-                body.push(line());
-            }
-            body.push(pair_doc);
+    // Try inline first (#{a => 1, b => 2}), break to one-per-line if too wide
+    let mut body = Vec::new();
+    for (i, pair_doc) in pair_docs.into_iter().enumerate() {
+        if i > 0 {
+            body.push(Document::Str(","));
+            body.push(break_("", " "));
+        } else {
+            body.push(break_("", ""));
         }
-        docvec!["#{", nest(2, concat(body)), line(), "}"]
+        body.push(pair_doc);
     }
+    group(docvec![
+        "#{",
+        nest(2, concat(body)),
+        break_("", ""),
+        "}",
+    ])
 }
 
 fn unparse_map_pair(pair: &MapPair) -> Document<'static> {
@@ -1119,9 +1137,8 @@ fn unparse_string_interpolation(segments: &[StringSegment]) -> Document<'static>
     for seg in segments {
         match seg {
             StringSegment::Literal(s) => {
-                // Escape double-quotes in literal segments
-                let escaped = s.as_str().replace('"', "\\\"");
-                inner.push(Document::String(escaped));
+                // Literal segments may contain bare " from doubled-delimiter unescaping.
+                inner.push(Document::String(escape_string_quotes(s)));
             }
             StringSegment::Interpolation(expr) => {
                 inner.push(Document::Str("{"));
@@ -1410,11 +1427,11 @@ mod tests {
 
     #[test]
     fn string_literal_with_embedded_double_quotes() {
-        // Beamtalk uses doubled-delimiter ("") not backslash for escaping
+        // Bare " in the AST (from doubled-delimiter unescaping) gets re-escaped as \"
         let expr = Expression::Literal(Literal::String("say \"hello\"".into()), span());
         assert_eq!(
             unparse_expression(&expr).to_pretty_string(),
-            "\"say \"\"hello\"\"\""
+            "\"say \\\"hello\\\"\""
         );
     }
 

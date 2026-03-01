@@ -280,6 +280,7 @@ Module {
                             expression: Primitive {
                                 name: "distanceTo:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 281,
                                     end: 305,
@@ -335,6 +336,7 @@ Module {
                             expression: Primitive {
                                 name: "printString",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 354,
                                     end: 378,

@@ -304,7 +304,7 @@ impl Document<'_> {
         // Strip trailing whitespace from every line.
         let trimmed: String = output
             .split('\n')
-            .map(|line| line.trim_end())
+            .map(str::trim_end)
             .collect::<Vec<_>>()
             .join("\n");
         trimmed

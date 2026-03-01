@@ -42,6 +42,7 @@ Module {
                             expression: Primitive {
                                 name: "size",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 305,
                                     end: 322,
@@ -87,6 +88,7 @@ Module {
                             expression: Primitive {
                                 name: "keys",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 333,
                                     end: 350,
@@ -122,6 +124,7 @@ Module {
                             expression: Primitive {
                                 name: "values",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 363,
                                     end: 382,
@@ -176,6 +179,7 @@ Module {
                             expression: Primitive {
                                 name: "at:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 396,
                                     end: 412,
@@ -247,6 +251,7 @@ Module {
                             expression: Primitive {
                                 name: "at:ifAbsent:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 442,
                                     end: 467,
@@ -318,6 +323,7 @@ Module {
                             expression: Primitive {
                                 name: "at:put:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 492,
                                     end: 512,
@@ -372,6 +378,7 @@ Module {
                             expression: Primitive {
                                 name: "includesKey:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 535,
                                     end: 560,
@@ -426,6 +433,7 @@ Module {
                             expression: Primitive {
                                 name: "removeKey:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 621,
                                     end: 644,
@@ -490,6 +498,7 @@ Module {
                             expression: Primitive {
                                 name: "merge:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 663,
                                     end: 682,
@@ -544,6 +553,7 @@ Module {
                             expression: Primitive {
                                 name: "keysAndValuesDo:",
                                 is_quoted: true,
+                                is_intrinsic: false,
                                 span: Span {
                                     start: 727,
                                     end: 756,

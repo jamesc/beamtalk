@@ -42,6 +42,7 @@ Module {
                             expression: Primitive {
                                 name: "blockValue",
                                 is_quoted: false,
+                                is_intrinsic: true,
                                 span: Span {
                                     start: 241,
                                     end: 262,
@@ -77,6 +78,7 @@ Module {
                             expression: Primitive {
                                 name: "size",
                                 is_quoted: true,
+                                is_intrinsic: true,
                                 span: Span {
                                     start: 273,
                                     end: 290,
