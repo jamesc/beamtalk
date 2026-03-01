@@ -34,19 +34,24 @@ A new field is added to `class_state` in `beamtalk_object_class.erl`, storing ma
     %% ... existing fields ...
     method_signatures         = #{} :: #{selector() => binary()},       %% BT-988: display strings
     class_method_signatures   = #{} :: #{selector() => binary()},       %% BT-990: display strings
-    method_return_types       = #{} :: #{selector() => atom() | dynamic}, %% BT-989: machine-typed
-    class_method_return_types = #{} :: #{selector() => atom() | dynamic}  %% BT-989: machine-typed
+    method_return_types       = #{} :: #{selector() => atom()},         %% BT-989: machine-typed
+    class_method_return_types = #{} :: #{selector() => atom()}           %% BT-989: machine-typed
 }).
 ```
 
-The codegen emits both maps in the same pass. `method_return_types` is populated from `MethodDefinition.return_type` — the same source as the display signature `->` suffix — so they are always consistent. When `return_type` is `None`, the selector is absent from the map (not present means `dynamic`):
+The codegen emits both maps in the same pass. `method_return_types` is populated from `MethodDefinition.return_type` — the same source as the display signature `->` suffix — so they are always consistent. Only `TypeAnnotation::Simple` annotations produce return-type entries (e.g., `-> Integer` maps to `size => 'Integer'`). Union types (`Integer | False`), generic types (`List<Integer>`), and singleton types (`#north`) are omitted — the chain resolution treats them as dynamic. This is an acceptable initial limitation because the vast majority of method return types are simple class names; complex types can be supported in a future iteration if warranted.
+
+When `return_type` is `None` or non-Simple, the selector is absent from the map (absence = dynamic):
 
 ```erlang
 %% Generated for String class (conceptual):
 method_return_types = #{size => 'Integer', reversed => 'String', ...},
+%% Note: detect:ifNone: (union return type) and format: (generic) are absent
 ```
 
 This keeps display strings purely human-readable and gives completion a stable, typed data source with no parsing required.
+
+The `method_return_types` map must be threaded through all mutation paths: `apply_class_info/2` (class redefinition in REPL) and `put_method/3` (dynamic method addition/removal). `put_method/3` already removes stale entries from `method_signatures`; it must do the same for `method_return_types`.
 
 ### Chain Resolution
 
@@ -72,11 +77,24 @@ resolve_chain_type(Expr, Bindings) ->
 walk_chain(ClassName, []) ->
     {ok, ClassName};
 walk_chain(ClassName, [Selector | Rest]) ->
+    %% Walks superclass chain to find the method, same as dispatch
     case beamtalk_class_registry:get_method_return_type(ClassName, Selector) of
         {ok, NextClass} -> walk_chain(NextClass, Rest);
-        undefined       -> undefined   %% chain breaks — annotation absent
+        undefined       -> undefined   %% chain breaks — annotation absent or non-Simple
+    end.
+
+%% Class-side chain: first hop uses class_method_return_types,
+%% then transitions to instance-side walk_chain for subsequent sends.
+walk_chain_class(ClassName, []) ->
+    {ok, ClassName};
+walk_chain_class(ClassName, [Selector | Rest]) ->
+    case beamtalk_class_registry:get_class_method_return_type(ClassName, Selector) of
+        {ok, NextClass} -> walk_chain(NextClass, Rest);  %% transition to instance-side
+        undefined       -> undefined
     end.
 ```
+
+The return-type lookup (`get_method_return_type/2`) must walk the superclass chain, analogous to how `beamtalk_method_resolver` resolves method dispatch. A method defined on `Integer` must be findable when the receiver type is `SmallInteger`. This can reuse the existing hierarchy-walking infrastructure.
 
 ### Completion Engine Changes
 
@@ -111,6 +129,19 @@ Chain:       'hello'  →  size  →  [prefix cl stripped]
 Resolved:    String   →  Integer
 Offered:     clock, collect:, collect:separatedBy:, isZero, max:, min:, ...
 ```
+
+### Send Chain Scope
+
+Chain resolution initially supports **unary send chains** — sequences of unary (zero-argument) messages separated by whitespace. This covers the common patterns: `'hello' size cl<TAB>`, `counter getValue to<TAB>`, `#(1 2 3) size is<TAB>`.
+
+**Not in initial scope:**
+- **Keyword sends mid-chain:** `myList inject: 0 into: [...] si<TAB>` — reconstructing `inject:into:` as a single selector from space-separated tokens requires bracket matching and keyword-arg parsing. This is a significant parsing problem deferred to a follow-up.
+- **Parenthesised subexpressions:** `(myList size) cl<TAB>` — requires paren matching.
+- **Method references:** `(Counter >> #increment) s<TAB>` — requires understanding `>>` return type.
+
+These are genuine limitations. The `tokenise_send_chain/1` function returns `error` for any expression it cannot parse as a simple unary chain, and the completion engine falls back to the existing single-token path (which also produces no completions for these cases, so there is no regression).
+
+Keyword sends as the *final* message (the completion target) work naturally because the prefix is stripped before chain resolution. Keyword sends as *intermediate* messages in the chain are the hard case and a natural follow-up issue.
 
 ### Annotation Coverage
 
@@ -173,7 +204,7 @@ Send the expression to the Rust `TypeChecker` via the existing OTP Port. The Typ
 | **Operator** | "Single source of truth reduces the chance of a subtle divergence between what the LSP says a type is and what the REPL completes on" |
 | **Language designer** | "Most coherent long-term: as the TypeChecker improves (inference for generics, union types, protocol conformance), REPL completions improve automatically" |
 
-**Why rejected**: The compiler port process constructs only `ClassHierarchy::with_builtins()`. It has no access to the live runtime class registry. Classes defined by the user in the REPL — the primary use case — are invisible to the TypeChecker in the port context. Fixing this would require either (a) serialising the full class hierarchy into each request (expensive and complex), (b) making the port stateful (contradicts current design), or (c) accepting that REPL-defined classes never get expression-level completions. The BEAM veteran's "body analysis for unannotated methods" point is valid but narrow: it only helps for unannotated stdlib builtins, not for the user's own code. The simpler Erlang-side approach has equivalent or better coverage for every case that actually matters in a REPL session, with dramatically less infrastructure.
+**Why rejected**: The compiler port process constructs only `ClassHierarchy::with_builtins()`. It has no access to the live runtime class registry. Classes defined by the user in the REPL — the primary use case — are invisible to the TypeChecker in the port context. Fixing this would require either (a) serialising the full class hierarchy into each request (expensive and complex), (b) making the port stateful (contradicts current design), or (c) accepting that REPL-defined classes never get expression-level completions. The BEAM veteran's "body analysis for unannotated methods" point is genuinely strong — the TypeChecker can infer return types from method bodies for *any* code it can see, not just builtins. But the port cannot see REPL-defined classes at all, so body analysis is unavailable precisely where the REPL user needs it most. The Erlang-side approach has better coverage for REPL-defined classes and equivalent coverage for builtins (both depend on annotations), with dramatically less infrastructure.
 
 ### Option C: Hybrid — Erlang Parses Chain, Compiler Resolves Ambiguity
 
@@ -182,10 +213,12 @@ Fast path via Erlang runtime registry; fallback to Rust port for unannotated met
 | Cohort | Strongest argument |
 |--------|--------------------|
 | **Newcomer** | "Best of both worlds — common annotated cases are instant, and the compiler fills gaps for unannotated builtins" |
+| **Smalltalk purist** | "This mirrors how Pharo actually works — a fast heuristic covers most completions, the compiler can be consulted for harder cases. Pragmatic Smalltalk tradition" |
 | **BEAM veteran** | "Fault-tolerant: fast path has no external dependency, slow path degrades gracefully" |
+| **Operator** | "Two paths with a clear fallback boundary are easier to reason about operationally than a single path with silent degradation — you know *which* path failed" |
 | **Language designer** | "Preserves optionality — can migrate fully to the compiler path once the ClassHierarchy-in-port problem is solved" |
 
-**Why rejected**: Option C has all of Option B's architectural gaps (ClassHierarchy unavailability for user-defined classes) in its fallback path, plus the maintenance cost of two code paths. The fast path and fallback produce different results for the same expression depending on annotation coverage — creating inconsistency that is hard to reason about. Option C is the right design *after* the ClassHierarchy-in-port problem is solved; it is premature now.
+**Why rejected**: Option C has all of Option B's architectural gaps (ClassHierarchy unavailability for user-defined classes) in its fallback path, plus the maintenance cost of two code paths. The fast path and fallback produce different results for the same expression depending on annotation coverage — creating inconsistency that is hard to reason about. The Operator's point about clear fallback boundaries is fair, but the boundary is "annotated vs. unannotated builtins" which is invisible to the user — not a meaningful operational distinction. Option C is the right design *after* the ClassHierarchy-in-port problem is solved; it is premature now.
 
 **Tension points**: The BEAM veteran and language designer cohorts make the strongest case for Option B/C. The core tension is "coherence vs. coverage." Option A has better coverage for user-defined classes today; Option B has better architectural coherence for the future. The decision takes coverage, because the REPL is the primary editing surface and user-defined classes are the primary use case.
 
@@ -257,8 +290,9 @@ This confirms the codegen → registry → lookup pipeline before investing in t
 
 | Component | Change |
 |-----------|--------|
-| `beamtalk_object_class.erl` | Two new fields on `class_state`: `method_return_types`, `class_method_return_types` |
-| Codegen (Rust, `crates/beamtalk-core/src/codegen/`) | Emit new return-type maps from `MethodDefinition.return_type` |
+| `beamtalk_object_class.erl` | Two new fields on `class_state`; thread through `apply_class_info/2` and `put_method/3` |
+| `beamtalk_class_registry.erl` | New `get_method_return_type/2` and `get_class_method_return_type/2` with superclass chain walking |
+| Codegen (Rust, `crates/beamtalk-core/src/codegen/`) | Emit new return-type maps from `MethodDefinition.return_type` (Simple annotations only) |
 | Rust builtins (`generated_builtins.rs`) | Return-type annotation audit; add `return_type` for ~half of built-in methods |
 | Stdlib (`.bt` files) | Add/verify `-> ClassName` return-type annotations on key methods |
 | Completion engine (`beamtalk_repl_ops_dev.erl`) | Chain resolution path; prefix stripping for multi-token receivers |
