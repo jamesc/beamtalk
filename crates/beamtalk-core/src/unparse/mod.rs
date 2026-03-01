@@ -318,10 +318,18 @@ fn unparse_method_definition_with_prefix(
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // Non-doc leading comments
+    let has_leading_comments = !method.comments.leading.is_empty();
     docs.extend(unparse_comment_attachment_leading(&method.comments));
 
     // Doc comment — emit `///` for empty lines (no trailing space)
+    // If there were leading comments before the doc comment, preserve a blank line
+    // between them (e.g. section separators like `// --- Queries ---`).
     if let Some(doc) = &method.doc_comment {
+        if has_leading_comments {
+            // Extra line() for blank line; trailing whitespace is acceptable here
+            // since the outer nest(2, ...) controls indentation.
+            docs.push(line());
+        }
         for line_text in doc.lines() {
             if line_text.is_empty() {
                 docs.push(Document::Str("///"));
