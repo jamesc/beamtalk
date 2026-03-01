@@ -123,7 +123,7 @@ get_context_completions(Code, Bindings) ->
 
 The incomplete token at the cursor is stripped before chain resolution, leaving a complete send chain:
 
-```
+```text
 User types:  "hello" size cl
              ─────────────── ──
              ReceiverExpr   Prefix
@@ -158,7 +158,7 @@ For **user-defined methods**, body inference handles many cases automatically. E
 
 ### REPL Session Example
 
-```
+```text
 bt> "hello" size <TAB>
 clock  collect:  collect:separatedBy:  isZero  max:  min:  ...
 
