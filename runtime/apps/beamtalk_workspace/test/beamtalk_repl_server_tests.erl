@@ -1189,11 +1189,19 @@ context_completions_binding_actor_no_registry_test() ->
     Result = beamtalk_repl_ops_dev:get_context_completions(<<"c in">>, Bindings),
     ?assertEqual([], Result).
 
-context_completions_binding_unclassifiable_no_completions_test() ->
-    %% Bindings with values that have no known class (raw atoms, tuples) return empty
-    Bindings = #{x => some_unknown_atom},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"x ">>, Bindings),
-    ?assertEqual([], Result).
+context_completions_binding_reference_returns_object_methods_test() ->
+    %% All values are now classifiable via class_of/1.
+    %% Even Erlang references inherit Object methods like `class`, `inspect`.
+    Bindings = #{x => make_ref()},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"x cl">>, Bindings),
+    ?assert(lists:member(<<"class">>, Result)).
+
+%% BT: Symbol binding (atom value) now correctly returns Symbol instance methods
+context_completions_symbol_binding_returns_instance_methods_test() ->
+    Bindings = #{x => some_atom},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"x cl">>, Bindings),
+    %% `class` is inherited from Object; available on Symbol instances
+    ?assert(lists:member(<<"class">>, Result)).
 
 context_completions_with_bindings_empty_line_test() ->
     %% Empty line with bindings returns empty
@@ -1297,6 +1305,63 @@ context_completions_string_binding_returns_instance_methods_test() ->
     Result = beamtalk_repl_ops_dev:get_context_completions(<<"s cl">>, Bindings),
     %% `class` is inherited from Object; available on every String instance
     ?assert(lists:member(<<"class">>, Result)).
+
+%% BT: nil binding returns UndefinedObject instance methods
+context_completions_nil_binding_returns_instance_methods_test() ->
+    Bindings = #{n => nil},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"n cl">>, Bindings),
+    %% `class` is inherited from Object; available on UndefinedObject instances
+    ?assert(lists:member(<<"class">>, Result)).
+
+%% BT: true binding returns True instance methods (not Boolean — Boolean is abstract)
+context_completions_true_binding_returns_instance_methods_test() ->
+    Bindings = #{t => true},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"t cl">>, Bindings),
+    %% `class` is inherited from Object; available on True instances
+    ?assert(lists:member(<<"class">>, Result)).
+
+%% BT: false binding returns False instance methods (not Boolean — Boolean is abstract)
+context_completions_false_binding_returns_instance_methods_test() ->
+    Bindings = #{f => false},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"f cl">>, Bindings),
+    %% `class` is inherited from Object; available on False instances
+    ?assert(lists:member(<<"class">>, Result)).
+
+%% BT: Float binding (e.g. f := 3.14) returns Float instance methods
+context_completions_float_binding_returns_instance_methods_test() ->
+    Bindings = #{f => 3.14},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"f cl">>, Bindings),
+    ?assert(lists:member(<<"class">>, Result)).
+
+%% BT: List binding (e.g. l := #(1 2 3)) returns List instance methods
+context_completions_list_binding_returns_instance_methods_test() ->
+    Bindings = #{l => [1, 2, 3]},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"l cl">>, Bindings),
+    ?assert(lists:member(<<"class">>, Result)).
+
+%% BT: Block/closure binding returns Block instance methods
+context_completions_block_binding_returns_instance_methods_test() ->
+    Bindings = #{b => fun() -> ok end},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"b cl">>, Bindings),
+    ?assert(lists:member(<<"class">>, Result)).
+
+%% BT: Unbound variable (not in bindings map) returns empty
+context_completions_unbound_variable_returns_empty_test() ->
+    Bindings = #{other => 42},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"x ">>, Bindings),
+    ?assertEqual([], Result).
+
+%% BT: String literal receiver (e.g. "hello" up) returns String instance methods
+context_completions_string_literal_receiver_test() ->
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"\"hello\" cl">>),
+    ?assert(lists:member(<<"class">>, Result)).
+
+%% BT: Non-existent atom receiver returns empty (safe_to_existing_atom fails)
+context_completions_nonexistent_atom_receiver_returns_empty_test() ->
+    Result = beamtalk_repl_ops_dev:get_context_completions(
+        <<"thisAtomDoesNotExistInTheVM ">>, #{}
+    ),
+    ?assertEqual([], Result).
 
 %% Helper: spawn a mock class gen_server process and register it in the class registry.
 spawn_mock_class(Name, ClassMethods, InstanceMethods) ->

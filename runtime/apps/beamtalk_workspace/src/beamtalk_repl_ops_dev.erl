@@ -436,51 +436,19 @@ classify_receiver(Receiver, Bindings) ->
 
 %% @private
 %% @doc Classify a receiver by looking it up in the bindings map.
-%% Handles actor objects, value-type tagged maps, and Erlang primitive values.
+%% Uses beamtalk_primitive:class_of/1 as the canonical type classifier,
+%% which handles actors, tagged maps, primitives, symbols, blocks, nil, etc.
 -spec classify_by_binding(atom(), map()) -> {instance, atom()} | undefined.
 classify_by_binding(VarAtom, Bindings) ->
     case maps:find(VarAtom, Bindings) of
-        {ok, #beamtalk_object{class = ClassName}} ->
-            %% Actor binding (spawn/spawnWith:): complete instance methods
+        {ok, Value} ->
+            ClassName = beamtalk_primitive:class_of(Value),
             case maybe_class(ClassName) of
                 undefined -> undefined;
                 _ -> {instance, ClassName}
             end;
-        {ok, Value} when is_map(Value) ->
-            %% Value-type binding (new/new:): tagged maps carry '$beamtalk_class'
-            case beamtalk_tagged_map:class_of(Value) of
-                undefined ->
-                    undefined;
-                ClassName ->
-                    case maybe_class(ClassName) of
-                        undefined -> undefined;
-                        _ -> {instance, ClassName}
-                    end
-            end;
-        {ok, Value} ->
-            %% Primitive Erlang values: integers, floats, strings, booleans, lists
-            classify_primitive(Value);
-        _ ->
+        error ->
             undefined
-    end.
-
-%% @private
-%% @doc Map a primitive Erlang value to a Beamtalk class for method completion.
--spec classify_primitive(term()) -> {instance, atom()} | undefined.
-classify_primitive(V) when is_integer(V) -> maybe_instance('Integer');
-classify_primitive(V) when is_float(V) -> maybe_instance('Float');
-classify_primitive(V) when is_binary(V) -> maybe_instance('String');
-classify_primitive(V) when is_list(V) -> maybe_instance('List');
-classify_primitive(true) -> maybe_instance('Boolean');
-classify_primitive(false) -> maybe_instance('Boolean');
-classify_primitive(_) -> undefined.
-
-%% @private
--spec maybe_instance(atom()) -> {instance, atom()} | undefined.
-maybe_instance(ClassName) ->
-    case maybe_class(ClassName) of
-        undefined -> undefined;
-        _ -> {instance, ClassName}
     end.
 
 %% @private
