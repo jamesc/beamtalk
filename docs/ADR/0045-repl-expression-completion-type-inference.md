@@ -1,7 +1,7 @@
 # ADR 0045: REPL Expression-Level Completion via Gradual Type Inference
 
 ## Status
-Proposed 2026-03-01
+Accepted 2026-03-01
 
 ## Context
 
