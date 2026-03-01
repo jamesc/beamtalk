@@ -393,11 +393,15 @@ version_default_value_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
+                %% Load the app so application:get_key/2 resolves the vsn
+                _ = application:load(beamtalk_runtime),
                 {ok, Pid} = beamtalk_interface:start_link(),
                 Version = gen_server:call(Pid, {version, []}),
 
-                %% Default version should match app vsn (0.1.0)
-                ?assertEqual(<<"0.1.0">>, Version),
+                %% Default version comes from OTP app vsn when available,
+                %% otherwise falls back to <<"unknown">>
+                {ok, AppVsn} = application:get_key(beamtalk_runtime, vsn),
+                ?assertEqual(list_to_binary(AppVsn), Version),
 
                 gen_server:stop(Pid)
             end)

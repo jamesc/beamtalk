@@ -129,6 +129,33 @@ build-examples: build-stdlib
     @cargo run --bin beamtalk --quiet -- build examples/
     @echo "✅ Examples build complete"
 
+# Run tests for every example package that has a test/ directory
+[unix]
+test-examples: build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🧪 Testing examples..."
+    failed=0
+    passed=0
+    for dir in examples/*/; do
+        name=$(basename "$dir")
+        if [ ! -d "${dir}test" ]; then
+            continue
+        fi
+        echo "  Testing ${name}..."
+        if (cd "${dir}" && cargo run --bin beamtalk --quiet -- test 2>&1); then
+            passed=$((passed + 1))
+        else
+            echo "❌ ${name} tests failed"
+            failed=$((failed + 1))
+        fi
+    done
+    if [ "$failed" -gt 0 ]; then
+        echo "❌ ${failed} example(s) failed, ${passed} passed"
+        exit 1
+    fi
+    echo "✅ All example tests passed (${passed} packages)"
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format
 # ═══════════════════════════════════════════════════════════════════════════
@@ -810,10 +837,9 @@ dist-vscode-platform target:
     cd editors/vscode
     npm ci --quiet
     npm run compile
-    mkdir -p ../../dist
-    npx --yes @vscode/vsce package --target "{{target}}" --out "../../dist/beamtalk-{{target}}.vsix"
+    npx --yes @vscode/vsce package --target "{{target}}" --out "../../beamtalk-{{target}}.vsix"
     rm -rf bin
-    echo "✅ VS Code extension: dist/beamtalk-{{target}}.vsix"
+    echo "✅ VS Code extension: beamtalk-{{target}}.vsix"
 
 # Usage: just dist-vscode-platform win32-x64
 # Build VS Code extension for a specific platform target
@@ -823,10 +849,9 @@ dist-vscode-platform target:
     if (!(Get-Command npm -ErrorAction SilentlyContinue)) { Write-Error "npm not found"; exit 1 }
     $binName = if ("{{target}}" -like "win32-*") { "beamtalk-lsp.exe" } else { "beamtalk-lsp" }; $lspBin = "target\release\$binName"; if (!(Test-Path $lspBin)) { $lspBin = "target\x86_64-pc-windows-msvc\release\$binName" }; if (!(Test-Path $lspBin)) { Write-Error "LSP binary not found — run: cargo build --release --bin beamtalk-lsp"; exit 1 }; New-Item -ItemType Directory -Force -Path editors\vscode\bin | Out-Null; Copy-Item $lspBin "editors\vscode\bin\$binName"; Write-Host "   Bundled $binName"
     Push-Location editors\vscode; try { npm install --quiet; if ($LASTEXITCODE -ne 0) { throw "npm install failed" }; npm run compile; if ($LASTEXITCODE -ne 0) { throw "npm run compile failed" } } finally { Pop-Location }
-    New-Item -ItemType Directory -Force -Path dist | Out-Null
-    Push-Location editors\vscode; try { npx --yes @vscode/vsce package --target "{{target}}" --out "..\..\dist\beamtalk-{{target}}.vsix"; if ($LASTEXITCODE -ne 0) { throw "vsce package failed" } } finally { Pop-Location }
+    Push-Location editors\vscode; try { npx --yes @vscode/vsce package --target "{{target}}" --out "..\..\beamtalk-{{target}}.vsix"; if ($LASTEXITCODE -ne 0) { throw "vsce package failed" } } finally { Pop-Location }
     Remove-Item -Recurse -Force editors\vscode\bin -ErrorAction SilentlyContinue
-    @echo "✅ VS Code extension: dist/beamtalk-{{target}}.vsix"
+    @echo "✅ VS Code extension: beamtalk-{{target}}.vsix"
 
 # Unix-only: depends on Unix-only install and dist-vscode recipes
 # Create a distributable install in dist/
@@ -840,7 +865,7 @@ dist: build-release build-stdlib
     just dist-vscode
     echo "✅ Distribution ready in dist/"
     echo "   Run: dist/bin/beamtalk repl"
-    echo "   VS Code extension: dist/beamtalk-*.vsix"
+    echo "   VS Code extension: beamtalk-*.vsix"
 
 # Create a distributable install in dist/ (Windows)
 [windows]
@@ -857,7 +882,7 @@ dist: build-release build-stdlib
     just dist-vscode
     @echo "✅ Distribution ready in dist/"
     @echo "   Run: dist\bin\beamtalk.exe repl"
-    @echo "   VS Code extension: dist\beamtalk-*.vsix"
+    @echo "   VS Code extension: beamtalk-*.vsix"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Documentation

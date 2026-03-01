@@ -217,9 +217,9 @@ beamtalk_version_test() ->
     %% Call Beamtalk version
     Version = beamtalk_stdlib:dispatch(version, [], 'Beamtalk'),
 
-    %% Should return a binary version string
+    %% Should return a non-empty binary version string
     ?assert(is_binary(Version)),
-    ?assertEqual(<<"0.1.0">>, Version).
+    ?assert(byte_size(Version) > 0).
 
 beamtalk_has_method_test() ->
     %% Check has_method for known methods

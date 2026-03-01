@@ -157,7 +157,7 @@ handle(<<"describe">>, _Params, Msg, _SessionPid) ->
         case application:get_key(beamtalk_workspace, vsn) of
             {ok, Vsn} when is_list(Vsn) -> list_to_binary(Vsn);
             {ok, Vsn} when is_binary(Vsn) -> Vsn;
-            _ -> <<"0.1.0">>
+            _ -> <<"unknown">>
         end,
     Versions = #{
         <<"protocol">> => <<"1.0">>,
