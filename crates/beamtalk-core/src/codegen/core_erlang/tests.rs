@@ -5627,8 +5627,8 @@ fn test_repl_expression_spawn_without_index_uses_heuristic() {
         .map(|s| s.expression.clone())
         .collect();
 
-    let code = generate_repl_expressions(&expressions, "repl_test_mod")
-        .expect("codegen should work");
+    let code =
+        generate_repl_expressions(&expressions, "repl_test_mod").expect("codegen should work");
 
     assert!(
         code.contains("'bt@counter':'spawn'"),

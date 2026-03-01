@@ -77,8 +77,7 @@
 pub use crate::codegen::core_erlang::{
     CodeGenError, CodegenOptions, GeneratedModule, Result, generate, generate_module,
     generate_module_with_warnings, generate_repl_expression, generate_repl_expressions,
-    generate_repl_expressions_with_index,
-    generate_test_expression, primitive_bindings,
+    generate_repl_expressions_with_index, generate_test_expression, primitive_bindings,
 };
 // Re-export Diagnostic so callers can inspect GeneratedModule::warnings
 pub use crate::source_analysis::Diagnostic;
