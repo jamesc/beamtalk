@@ -897,8 +897,29 @@ fn unparse_map_literal(pairs: &[MapPair]) -> Document<'static> {
         return Document::Str("#{}");
     }
     let pair_docs: Vec<Document<'static>> = pairs.iter().map(unparse_map_pair).collect();
-    let joined = join_docs(pair_docs, ", ");
-    docvec!["#{", joined, "}"]
+    if pairs.len() == 1 {
+        // Single pair: try inline, break if too wide
+        let joined = join_docs(pair_docs, ", ");
+        group(docvec![
+            "#{",
+            nest(2, docvec![break_("", ""), joined]),
+            break_("", ""),
+            "}",
+        ])
+    } else {
+        // Multiple pairs: one per line
+        let mut body = Vec::new();
+        for (i, pair_doc) in pair_docs.into_iter().enumerate() {
+            if i > 0 {
+                body.push(Document::Str(","));
+                body.push(line());
+            } else {
+                body.push(line());
+            }
+            body.push(pair_doc);
+        }
+        docvec!["#{", nest(2, concat(body)), line(), "}"]
+    }
 }
 
 fn unparse_map_pair(pair: &MapPair) -> Document<'static> {
