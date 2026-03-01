@@ -77,6 +77,8 @@
     fields = [] :: [atom()],
     class_state = #{} :: map(),
     method_source = #{} :: #{selector() => binary()},
+    %% BT-988: Method display signatures for :help command
+    method_signatures = #{} :: #{selector() => binary()},
     %% ADR 0033: Runtime-embedded documentation
     doc = none :: binary() | none,
     method_docs = #{} :: #{selector() => binary()}
@@ -281,6 +283,7 @@ init({ClassName, ClassInfo}) ->
         fields = maps:get(fields, ClassInfo, []),
         class_state = maps:get(class_state, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
+        method_signatures = maps:get(method_signatures, ClassInfo, #{}),
         doc = maps:get(doc, ClassInfo, none),
         method_docs = maps:get(method_docs, ClassInfo, #{})
     },
@@ -334,8 +337,12 @@ handle_call(module_name, _From, #class_state{module = Module} = State) ->
 handle_call(
     {method, Selector},
     _From,
-    #class_state{instance_methods = Methods, method_source = Source, method_docs = MethodDocs} =
-        State
+    #class_state{
+        instance_methods = Methods,
+        method_source = Source,
+        method_signatures = Signatures,
+        method_docs = MethodDocs
+    } = State
 ) ->
     Result =
         case maps:find(Selector, Methods) of
@@ -344,6 +351,7 @@ handle_call(
                     '$beamtalk_class' => 'CompiledMethod',
                     '__selector__' => Selector,
                     '__source__' => maps:get(Selector, Source, <<"">>),
+                    '__signature__' => maps:get(Selector, Signatures, nil),
                     '__method_info__' => MethodInfo,
                     '__doc__' => maps:get(Selector, MethodDocs, nil)
                 };
@@ -356,9 +364,12 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     MethodInfo = #{block => Fun, arity => Arity},
     %% ADR 0032 Phase 1: No flattened table to rebuild or invalidate.
     %% Dispatch finds the new method via chain walk on the next call.
+    %% BT-988: Remove stale display signature — dynamically-defined methods
+    %% have no AST, so the fallback to selector atom is correct.
     NewState = State#class_state{
         instance_methods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
-        method_source = maps:put(Selector, Source, State#class_state.method_source)
+        method_source = maps:put(Selector, Source, State#class_state.method_source),
+        method_signatures = maps:remove(Selector, State#class_state.method_signatures)
     },
     {reply, ok, NewState};
 %% BT-572: Update class metadata after redefinition (hot reload).
@@ -497,6 +508,9 @@ apply_class_info(State, ClassInfo) ->
         class_methods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
         fields = maps:get(fields, ClassInfo, State#class_state.fields),
         method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
+        method_signatures = maps:get(
+            method_signatures, ClassInfo, State#class_state.method_signatures
+        ),
         is_constructible = maps:get(is_constructible, ClassInfo, undefined),
         doc = maps:get(doc, ClassInfo, State#class_state.doc),
         method_docs = maps:get(method_docs, ClassInfo, State#class_state.method_docs)

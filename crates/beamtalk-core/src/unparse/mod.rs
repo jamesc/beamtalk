@@ -66,6 +66,55 @@ pub fn unparse_class(class: &ClassDefinition) -> String {
     unparse_class_definition(class).to_pretty_string()
 }
 
+/// Unparses a method signature for help display (BT-988).
+///
+/// Renders `selector params -> ReturnType` without `sealed` prefix or ` =>` suffix.
+/// Used by codegen to embed display signatures in `methodSignatures` maps.
+#[must_use]
+pub fn unparse_method_display_signature(method: &MethodDefinition) -> String {
+    unparse_method_display_signature_doc(method).to_pretty_string()
+}
+
+/// Builds a [`Document`] for a method display signature (no `sealed`, no ` =>`).
+fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'static> {
+    let sig = match &method.selector {
+        MessageSelector::Unary(name) => Document::String(name.to_string()),
+        MessageSelector::Binary(op) => {
+            let param = &method.parameters[0];
+            docvec![
+                Document::String(op.to_string()),
+                " ",
+                Document::String(param.name.name.to_string()),
+                unparse_type_annotation_opt(param.type_annotation.as_ref()),
+            ]
+        }
+        MessageSelector::Keyword(parts) => {
+            let mut sig_docs: Vec<Document<'static>> = Vec::new();
+            for (i, part) in parts.iter().enumerate() {
+                if i > 0 {
+                    sig_docs.push(Document::Str(" "));
+                }
+                sig_docs.push(unparse_keyword_part(part));
+                if i < method.parameters.len() {
+                    sig_docs.push(Document::Str(" "));
+                    let param = &method.parameters[i];
+                    sig_docs.push(Document::String(param.name.name.to_string()));
+                    sig_docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
+                }
+            }
+            concat(sig_docs)
+        }
+    };
+
+    let return_type = if let Some(ret) = &method.return_type {
+        docvec![" -> ", unparse_type_annotation(ret)]
+    } else {
+        nil()
+    };
+
+    docvec![sig, return_type]
+}
+
 // --- Document builders (pub(crate) for testing) ---
 
 /// Builds a [`Document`] for a [`Module`].

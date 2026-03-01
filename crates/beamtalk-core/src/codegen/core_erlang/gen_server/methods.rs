@@ -15,6 +15,7 @@ use crate::ast::{
     MethodKind, Module,
 };
 use crate::docvec;
+use crate::unparse::unparse_method_display_signature;
 
 impl CoreErlangGenerator {
     /// Generates dispatch case clauses for all methods in a class definition.
@@ -1179,6 +1180,23 @@ impl CoreErlangGenerator {
             }
             let method_source_doc = Document::Vec(method_source_docs);
 
+            // BT-988: Method display signatures for :help command
+            let mut method_sig_docs: Vec<Document<'static>> = Vec::new();
+            for (method_idx, method) in instance_methods.iter().enumerate() {
+                if method_idx > 0 {
+                    method_sig_docs.push(Document::Str(", "));
+                }
+                let sig_str = unparse_method_display_signature(method);
+                let binary = Self::binary_string_literal(&sig_str);
+                method_sig_docs.push(docvec![
+                    "'",
+                    Document::String(method.selector.name().to_string()),
+                    "' => ",
+                    Document::String(binary),
+                ]);
+            }
+            let method_sigs_doc = Document::Vec(method_sig_docs);
+
             // BT-412: Class variable initial values
             let mut class_var_parts: Vec<Document<'static>> = Vec::new();
             for (cv_idx, cv) in class.class_variables.iter().enumerate() {
@@ -1278,6 +1296,10 @@ impl CoreErlangGenerator {
                         line(),
                         "'methodSource' => ~{",
                         method_source_doc,
+                        "}~,",
+                        line(),
+                        "'methodSignatures' => ~{",
+                        method_sigs_doc,
                         "}~,",
                         line(),
                         "'classState' => ~{",
