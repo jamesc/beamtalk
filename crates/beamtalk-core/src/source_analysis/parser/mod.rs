@@ -707,8 +707,28 @@ impl Parser {
                         saw_blank_line = true;
                     }
                 }
-                // DocComment is handled by collect_doc_comment — skip here.
-                super::Trivia::DocComment(_) => {}
+                // DocComment is normally handled by collect_doc_comment for
+                // declarations.  When it wasn't consumed (e.g. before module-level
+                // expressions), preserve it as a regular line comment so the
+                // formatter doesn't drop it.
+                super::Trivia::DocComment(text) => {
+                    if self.unattached_doc_comment_indices.contains(&self.current) {
+                        let s = text.as_str();
+                        let content = s
+                            .strip_prefix("/// ")
+                            .unwrap_or_else(|| s.strip_prefix("///").unwrap_or(s));
+                        // Prefix with "/" so it round-trips as `/// content`
+                        let prefixed = if content.is_empty() {
+                            "/".to_string()
+                        } else {
+                            format!("/ {content}")
+                        };
+                        let mut comment = Comment::line(&prefixed, token_span);
+                        comment.preceding_blank_line = saw_blank_line;
+                        leading.push(comment);
+                        saw_blank_line = false;
+                    }
+                }
             }
         }
         CommentAttachment {
