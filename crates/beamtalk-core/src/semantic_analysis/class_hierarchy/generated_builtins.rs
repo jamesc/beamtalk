@@ -234,6 +234,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "doc".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "doc:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "setDocForMethod:to:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None, None] },
+                MethodInfo { selector: "docForMethod:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "isBehaviour".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "isMeta".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "isMetaclass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Behaviour".into(), is_sealed: true, return_type: None, param_types: vec![] },
