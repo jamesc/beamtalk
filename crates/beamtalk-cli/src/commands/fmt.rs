@@ -11,7 +11,10 @@
 //!
 //! `beamtalk fmt-check <path>...` performs the same parse/unparse pass but
 //! prints a unified diff for every file that would change and exits non-zero
-//! if any files need reformatting. No files are modified.
+//! if any files need reformatting or could not be verified. No files are
+//! modified.
+
+use std::collections::HashSet;
 
 use crate::commands::build::collect_source_files_from_dir;
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
@@ -24,9 +27,11 @@ use similar::TextDiff;
 ///
 /// When `check_only` is `true` the command prints a unified diff for every
 /// file that is not already formatted and exits non-zero if any files would
-/// change. When `check_only` is `false` the command writes formatted output
-/// back to each file that has changed.
+/// change or could not be verified (e.g. due to parse errors). When
+/// `check_only` is `false` the command writes formatted output back to each
+/// file that has changed; files with parse errors are skipped with a warning.
 pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
+    let mut seen = HashSet::new();
     let mut source_files = Vec::new();
 
     for path in paths {
@@ -34,12 +39,18 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
 
         if source_path.is_file() {
             if source_path.extension() == Some("bt") {
-                source_files.push(source_path);
+                if seen.insert(source_path.clone()) {
+                    source_files.push(source_path);
+                }
             } else {
                 miette::bail!("File '{}' is not a .bt source file", path);
             }
         } else if source_path.is_dir() {
-            source_files.extend(collect_source_files_from_dir(&source_path)?);
+            for file in collect_source_files_from_dir(&source_path)? {
+                if seen.insert(file.clone()) {
+                    source_files.push(file);
+                }
+            }
         } else {
             miette::bail!("Path '{}' does not exist", path);
         }
@@ -50,6 +61,7 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
     }
 
     let mut changed_files: Vec<Utf8PathBuf> = Vec::new();
+    let mut skipped_files: Vec<Utf8PathBuf> = Vec::new();
 
     for file in &source_files {
         let original = std::fs::read_to_string(file.as_std_path())
@@ -64,6 +76,7 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
         let has_errors = diags.iter().any(|d| d.severity == Severity::Error);
         if has_errors {
             eprintln!("warning: skipping '{file}' (has parse errors)");
+            skipped_files.push(file.clone());
             continue;
         }
 
@@ -91,10 +104,23 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
         }
     }
 
-    if check_only && !changed_files.is_empty() {
-        let count = changed_files.len();
-        let plural = if count == 1 { "" } else { "s" };
-        miette::bail!("{count} file{plural} would be reformatted");
+    if check_only {
+        let mut parts: Vec<String> = Vec::new();
+        if !changed_files.is_empty() {
+            let count = changed_files.len();
+            let plural = if count == 1 { "" } else { "s" };
+            parts.push(format!("{count} file{plural} would be reformatted"));
+        }
+        if !skipped_files.is_empty() {
+            let count = skipped_files.len();
+            let plural = if count == 1 { "" } else { "s" };
+            parts.push(format!(
+                "{count} file{plural} could not be checked (parse errors)"
+            ));
+        }
+        if !parts.is_empty() {
+            miette::bail!("{}", parts.join("; "));
+        }
     }
 
     Ok(())
@@ -216,6 +242,44 @@ mod tests {
         assert!(
             msg.contains("file"),
             "error message must mention 'file'; got: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn fmt_deduplicates_overlapping_paths() {
+        // Passing the same path twice must not format the file twice.
+        let source = "x := 42\n";
+        let (_dir, path) = write_temp_bt(source);
+        run_fmt_single(path.as_str(), false).expect("fmt");
+        let canonical = std::fs::read_to_string(path.as_std_path()).expect("read");
+
+        // Non-canonical version: appended blank line.
+        let non_canonical = format!("{canonical}\n");
+        let (_dir2, path2) = write_temp_bt(&non_canonical);
+        let path_str = path2.as_str().to_string();
+
+        // Pass the same path twice.
+        let result = run_fmt(&[path_str.clone(), path_str], true);
+        // The error message should say 1 file (not 2).
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("1 file"),
+            "duplicate path should count as 1 file; got: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn fmt_check_exits_nonzero_on_parse_error() {
+        // A file with a parse error must cause fmt-check to exit non-zero.
+        // The error message should mention "could not be checked".
+        let bad_source = "@@@invalid beamtalk source@@@\n";
+        let (_dir, path) = write_temp_bt(bad_source);
+        let result = run_fmt_single(path.as_str(), true);
+        let err = result.unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("could not be checked"),
+            "fmt-check must fail on parse errors; got: {msg:?}"
         );
     }
 }

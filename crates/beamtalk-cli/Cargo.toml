@@ -58,7 +58,6 @@ similar.workspace = true
 
 [dev-dependencies]
 serial_test = "3"
-tempfile = "3.14"
 
 [lints]
 workspace = true
