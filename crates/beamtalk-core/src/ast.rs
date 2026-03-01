@@ -1331,6 +1331,8 @@ pub struct MatchArm {
     pub guard: Option<Expression>,
     /// The expression to evaluate if the pattern matches.
     pub body: Expression,
+    /// Comments attached to this match arm.
+    pub comments: CommentAttachment,
     /// Source location of this match arm.
     pub span: Span,
 }
@@ -1343,6 +1345,7 @@ impl MatchArm {
             pattern,
             guard: None,
             body,
+            comments: CommentAttachment::default(),
             span,
         }
     }
@@ -1354,6 +1357,7 @@ impl MatchArm {
             pattern,
             guard: Some(guard),
             body,
+            comments: CommentAttachment::default(),
             span,
         }
     }

@@ -537,7 +537,15 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             arguments,
             is_cast,
             ..
-        } => unparse_message_send(receiver, selector, arguments, *is_cast),
+        } => {
+            // Flatten ++ chains for width-aware line breaking
+            if matches!(selector, MessageSelector::Binary(op) if op.as_str() == "++") && !*is_cast {
+                if let Some(doc) = unparse_concat_chain(expr) {
+                    return doc;
+                }
+            }
+            unparse_message_send(receiver, selector, arguments, *is_cast)
+        }
         Expression::Block(block) => unparse_block(block),
         Expression::Assignment { target, value, .. } => {
             docvec![
@@ -590,8 +598,9 @@ fn unparse_literal(lit: &Literal) -> Document<'static> {
         Literal::Integer(n) => Document::String(n.to_string()),
         Literal::Float(f) => Document::String(format_float(*f)),
         Literal::String(s) => {
-            // Double-quoted strings; escape internal double quotes and backslashes
-            let escaped = s.as_str().replace('\\', "\\\\").replace('"', "\\\"");
+            // Double-quoted strings; escape internal double quotes using
+            // doubled-delimiter ("") per Beamtalk spec (not backslash).
+            let escaped = s.as_str().replace('"', "\"\"");
             docvec!["\"", Document::String(escaped), "\""]
         }
         Literal::Symbol(s) => {
@@ -680,6 +689,68 @@ fn unparse_message_send(
     };
 
     docvec![msg, cast_suffix]
+}
+
+// --- String concatenation chain (++) ---
+
+/// Flattens a `++` chain from the nested AST into a list of segments,
+/// then formats as all-inline or all-broken (one segment per line).
+///
+/// ```text
+/// // Inline (fits):
+/// "hello " ++ name ++ "!"
+///
+/// // Broken (doesn't fit):
+/// "Arity mismatch: expected "
+///   ++ params size printString
+///   ++ ", got "
+///   ++ vals size printString
+/// ```
+fn unparse_concat_chain(expr: &Expression) -> Option<Document<'static>> {
+    let mut segments = Vec::new();
+    collect_concat_segments(expr, &mut segments);
+    if segments.len() < 2 {
+        return None;
+    }
+
+    // Build the inline version to measure width
+    let seg_docs: Vec<Document<'static>> = segments.iter().map(|s| unparse_expression(s)).collect();
+    let inline = join_docs(seg_docs.clone(), " ++ ");
+    let inline_width = inline.to_pretty_string().len();
+
+    if inline_width <= 80 {
+        Some(inline)
+    } else {
+        // One segment per line, continuation lines start with "++ "
+        let mut docs: Vec<Document<'static>> = vec![seg_docs[0].clone()];
+        for seg_doc in &seg_docs[1..] {
+            docs.push(line());
+            docs.push(docvec!["++ ", seg_doc.clone()]);
+        }
+        Some(docvec![
+            seg_docs[0].clone(),
+            nest(2, concat(docs[1..].to_vec()))
+        ])
+    }
+}
+
+/// Walks left-nested `++` binary sends and collects the leaf expressions.
+fn collect_concat_segments<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+    if let Expression::MessageSend {
+        receiver,
+        selector: MessageSelector::Binary(op),
+        arguments,
+        is_cast: false,
+        ..
+    } = expr
+    {
+        if op.as_str() == "++" && arguments.len() == 1 {
+            collect_concat_segments(receiver, out);
+            out.push(&arguments[0]);
+            return;
+        }
+    }
+    out.push(expr);
 }
 
 // --- Block unparsing ---
@@ -807,11 +878,50 @@ fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Docume
 
 fn unparse_match(value: &Expression, arms: &[MatchArm]) -> Document<'static> {
     let arm_docs: Vec<Document<'static>> = arms.iter().map(unparse_match_arm).collect();
-    let joined = join_docs(arm_docs, "; ");
-    docvec![unparse_expression(value), " match: [", joined, "]"]
+    if arm_docs.len() <= 1 {
+        // Single arm: try inline, break if too wide
+        let joined = join_docs(arm_docs, "; ");
+        group(docvec![unparse_expression(value), " match: [", joined, "]"])
+    } else {
+        // Multiple arms: one per line
+        let mut body: Vec<Document<'static>> = Vec::new();
+        for (i, (arm, arm_doc)) in arms.iter().zip(arm_docs).enumerate() {
+            // Preserve blank line before arms that had one in source
+            // (skip for first arm — the opening bracket provides separation)
+            let has_blank = i > 0
+                && arm
+                    .comments
+                    .leading
+                    .first()
+                    .is_some_and(|c| c.preceding_blank_line);
+            if has_blank {
+                body.push(Document::Str("\n"));
+            }
+            body.push(line());
+            body.push(arm_doc);
+            if i < arms.len() - 1 {
+                body.push(Document::Str(";"));
+            }
+        }
+        docvec![
+            unparse_expression(value),
+            " match: [",
+            nest(2, concat(body)),
+            line(),
+            "]"
+        ]
+    }
 }
 
 fn unparse_match_arm(arm: &MatchArm) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = Vec::new();
+
+    // Leading comments (e.g. `// (quote expr) — return unevaluated`)
+    let leading = unparse_comment_attachment_leading(&arm.comments);
+    if !leading.is_empty() {
+        docs.extend(leading);
+    }
+
     let pat = unparse_pattern(&arm.pattern);
     let guard = if let Some(g) = &arm.guard {
         docvec![" when: ", unparse_expression(g)]
@@ -819,7 +929,8 @@ fn unparse_match_arm(arm: &MatchArm) -> Document<'static> {
         nil()
     };
     let body = unparse_expression(&arm.body);
-    docvec![pat, guard, " -> ", body]
+    docs.push(docvec![pat, guard, " -> ", body]);
+    concat(docs)
 }
 
 fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
@@ -1253,6 +1364,16 @@ mod tests {
     }
 
     #[test]
+    fn string_literal_with_embedded_double_quotes() {
+        // Beamtalk uses doubled-delimiter ("") not backslash for escaping
+        let expr = Expression::Literal(Literal::String("say \"hello\"".into()), span());
+        assert_eq!(
+            unparse_expression(&expr).to_pretty_string(),
+            "\"say \"\"hello\"\"\""
+        );
+    }
+
+    #[test]
     fn symbol_literal_simple() {
         let expr = Expression::Literal(Literal::Symbol("ok".into()), span());
         assert_eq!(unparse_expression(&expr).to_pretty_string(), "#ok");
@@ -1543,6 +1664,40 @@ mod tests {
         assert!(
             output.contains("// trailing comment 2"),
             "missing trailing comment 2 in: {output}"
+        );
+    }
+
+    // --- Match expression formatting ---
+
+    #[test]
+    fn match_single_arm_inline() {
+        let source = "Actor subclass: A\n  m => x match: [1 -> \"one\"]";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("x match: [1 -> \"one\"]"),
+            "single arm should be inline: {output}"
+        );
+    }
+
+    #[test]
+    fn match_multi_arm_one_per_line() {
+        let source =
+            "Actor subclass: A\n  m => x match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        // Each arm should be on its own line, indented inside the brackets
+        assert!(
+            output.contains("x match: [\n"),
+            "multi-arm match should break after opening bracket: {output}"
+        );
+        assert!(
+            output.contains("1 -> \"one\";\n"),
+            "first arm should end with semicolon: {output}"
+        );
+        assert!(
+            output.contains("_ -> \"other\"\n"),
+            "last arm should not have semicolon: {output}"
         );
     }
 

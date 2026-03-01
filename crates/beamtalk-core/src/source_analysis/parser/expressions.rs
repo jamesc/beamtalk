@@ -760,6 +760,7 @@ impl Parser {
 
     /// Parses a single match arm: `pattern -> body` or `pattern when: [guard] -> body`
     fn parse_match_arm(&mut self) -> MatchArm {
+        let comments = self.collect_comment_attachment();
         let pattern = self.parse_pattern();
         let pat_span = pattern.span();
 
@@ -794,11 +795,13 @@ impl Parser {
         let body = self.parse_keyword_message();
         let span = pat_span.merge(body.span());
 
-        if let Some(guard_expr) = guard {
+        let mut arm = if let Some(guard_expr) = guard {
             MatchArm::with_guard(pattern, guard_expr, body, span)
         } else {
             MatchArm::new(pattern, body, span)
-        }
+        };
+        arm.comments = comments;
+        arm
     }
 
     /// Parses a pattern for match arms.

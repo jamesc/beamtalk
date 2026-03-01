@@ -402,7 +402,7 @@ impl Parser {
     fn parse_state_declaration(&mut self) -> Option<StateDeclaration> {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
-        let comments = self.collect_comment_attachment();
+        let mut comments = self.collect_comment_attachment();
 
         // Consume `state:`
         if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:") {
@@ -455,6 +455,9 @@ impl Parser {
             None
         };
 
+        // Collect trailing end-of-line comment (e.g. `state: x = 0  // comment`)
+        comments.trailing = self.collect_trailing_comment();
+
         let end = default_value
             .as_ref()
             .map(Expression::span)
@@ -482,7 +485,7 @@ impl Parser {
     fn parse_classvar_declaration(&mut self) -> Option<StateDeclaration> {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
-        let comments = self.collect_comment_attachment();
+        let mut comments = self.collect_comment_attachment();
 
         // Consume `classState:`
         if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classState:") {
@@ -523,6 +526,9 @@ impl Parser {
         } else {
             None
         };
+
+        // Collect trailing end-of-line comment (e.g. `classState: x = 0  // comment`)
+        comments.trailing = self.collect_trailing_comment();
 
         let end = default_value
             .as_ref()
