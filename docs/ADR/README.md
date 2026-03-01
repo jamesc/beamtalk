@@ -71,6 +71,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0042](0042-immutable-value-objects-actor-mutable-state.md) | Immutable Value Objects and Actor-Only Mutable State | Accepted | 2026-02-26 |
 | [0043](0043-sync-by-default-actor-messaging.md) | Sync-by-Default Actor Messaging | Accepted | 2026-02-26 |
 | [0044](0044-comments-as-first-class-ast-nodes.md) | Comments as First-Class AST Nodes | Accepted | 2026-02-28 |
+| [0045](0045-repl-expression-completion-type-inference.md) | REPL Expression-Level Completion via Gradual Type Inference | Accepted | 2026-03-01 |
 
 ## Creating New ADRs
 
