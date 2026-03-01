@@ -318,16 +318,12 @@ fn unparse_method_definition_with_prefix(
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // Non-doc leading comments
-    let has_leading_comments = !method.comments.leading.is_empty();
     docs.extend(unparse_comment_attachment_leading(&method.comments));
 
     // Doc comment — emit `///` for empty lines (no trailing space)
-    // If there were leading comments before the doc comment, preserve a blank line
-    // between them (e.g. section separators like `// --- Queries ---`).
     if let Some(doc) = &method.doc_comment {
-        if has_leading_comments {
-            // Extra line() for blank line; trailing whitespace is acceptable here
-            // since the outer nest(2, ...) controls indentation.
+        // Blank line between leading comments and doc comment (e.g. section separators)
+        if !method.comments.leading.is_empty() {
             docs.push(line());
         }
         for line_text in doc.lines() {
@@ -336,8 +332,8 @@ fn unparse_method_definition_with_prefix(
             } else {
                 docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
             }
-            docs.push(line());
         }
+        docs.push(line());
     }
 
     // Optional prefix (e.g. "class ") then method signature
@@ -375,7 +371,7 @@ fn unparse_method_definition_with_prefix(
                 if stmt.preceding_blank_line {
                     // Use a raw newline for blank lines to avoid trailing whitespace
                     // from indentation on empty lines.
-                    body_docs.push(Document::Str("\n"));
+                    body_docs.push(line());
                 }
                 body_docs.push(line());
                 body_docs.extend(unparse_comment_attachment_leading(&stmt.comments));
@@ -933,7 +929,7 @@ fn unparse_match(value: &Expression, arms: &[MatchArm]) -> Document<'static> {
                     .first()
                     .is_some_and(|c| c.preceding_blank_line);
             if has_blank {
-                body.push(Document::Str("\n"));
+                body.push(line());
             }
             body.push(line());
             body.push(arm_doc);
