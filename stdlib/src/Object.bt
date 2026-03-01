@@ -224,7 +224,9 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 trace: "value: "
   /// ```
-  trace: aValue => TranscriptStream current ifNotNil: [:t | t show: aValue]
+  trace: aValue =>
+    TranscriptStream current ifNotNil: [:t | t show: aValue]
+    self
 
   /// Send aValue to the current transcript followed by a newline.
   ///
@@ -234,7 +236,9 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 traceCr: "hello world"
   /// ```
-  traceCr: aValue => TranscriptStream current ifNotNil: [:t | t show: aValue; cr]
+  traceCr: aValue =>
+    TranscriptStream current ifNotNil: [:t | t show: aValue; cr]
+    self
 
   /// Raise an error with the given message.
   ///

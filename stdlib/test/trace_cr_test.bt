@@ -11,25 +11,25 @@ TestCase subclass: TraceCrTest
 
   setUp =>
     // Ensure current is nil before each test (default in test environment)
-    TranscriptStream current: nil
+    TranscriptStream resetCurrent
     self
 
   tearDown =>
     // Stop per-test transcript actor when one was set
     TranscriptStream current ifNotNil: [:t | t stop]
     // Restore nil state after each test
-    TranscriptStream current: nil
+    TranscriptStream resetCurrent
     self
 
   testTraceCrNilSafeWhenNoTranscript =>
-    // When TranscriptStream current is nil, traceCr: should be a no-op (returns nil)
-    TranscriptStream current: nil
-    self assert: (42 traceCr: "hello") equals: nil
+    // When TranscriptStream current is nil, traceCr: is a no-op and returns self
+    TranscriptStream resetCurrent
+    self assert: (42 traceCr: "hello") equals: 42
 
   testTraceNilSafeWhenNoTranscript =>
-    // When TranscriptStream current is nil, trace: should be a no-op (returns nil)
-    TranscriptStream current: nil
-    self assert: (42 trace: "hello") equals: nil
+    // When TranscriptStream current is nil, trace: is a no-op and returns self
+    TranscriptStream resetCurrent
+    self assert: (42 trace: "hello") equals: 42
 
   testTraceCrRoutesOutputWhenTranscriptSet =>
     // When a TranscriptStream is set as current, traceCr: routes output to it

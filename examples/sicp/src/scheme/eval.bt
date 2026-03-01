@@ -77,11 +77,7 @@ Object subclass: SchemeEval
   /// ```
   eval: expr in: env =>
     // Self-evaluating atomic types
-    (expr class =:= Integer) ifTrue: [^expr]
-    (expr class =:= True)    ifTrue: [^expr]
-    (expr class =:= False)   ifTrue: [^expr]
-    (expr class =:= String)  ifTrue: [^expr]
-    expr isNil               ifTrue: [^expr]
+    (expr isNil or: [#(Integer, True, False, String) includes: expr class]) ifTrue: [^expr]
 
     // Symbol: look up the name in the environment
     (expr class =:= SchemeSymbol) ifTrue: [
@@ -122,7 +118,7 @@ Object subclass: SchemeEval
       // (if test then else?) — conditional branch
       "if" -> [
         condVal := self eval: (tail at: 1) in: env
-        isFalsy := condVal == false or: [condVal isNil]
+        isFalsy := self isFalsy: condVal
         isFalsy ifTrue: [
           (tail size > 2) ifTrue: [self eval: (tail at: 3) in: env] ifFalse: [nil]] ifFalse: [
           self eval: (tail at: 2) in: env]] value;
@@ -164,7 +160,7 @@ Object subclass: SchemeEval
   ///
   /// ## Examples
   /// ```beamtalk
-  /// ev apply: [:a | (a at: 1) + (a at: 2)] args: #(3 4) in: env   // => 7
+  /// ev apply: [:a | (a at: 1) + (a at: 2)] args: #(3, 4) in: env   // => 7
   /// ```
   apply: func args: args in: _env =>
     (func class =:= SchemeLambda) ifTrue: [
@@ -175,6 +171,10 @@ Object subclass: SchemeEval
     // Built-in: block takes the full args list as its single argument
     func value: args
 
+  /// Return true if `val` is Scheme-falsy (i.e. `false` or `nil`).
+  isFalsy: val =>
+    val == false or: [val isNil]
+
   /// Evaluate `cond` clauses in order; return the first truthy branch.
   /// An `else` clause always matches. Returns `nil` if all tests fail.
   evalCond: clauses in: env =>
@@ -183,7 +183,7 @@ Object subclass: SchemeEval
     ((clause first class =:= SchemeSymbol) and: [clause first name =:= "else"]) ifTrue: [
       ^self eval: clause last in: env]
     condVal := self eval: clause first in: env
-    (condVal == false or: [condVal isNil]) ifTrue: [
+    (self isFalsy: condVal) ifTrue: [
       self evalCond: clauses rest in: env] ifFalse: [
       self eval: clause last in: env]
 
@@ -192,7 +192,7 @@ Object subclass: SchemeEval
   evalAnd: exprs in: env =>
     exprs isEmpty ifTrue: [^true]
     val := self eval: exprs first in: env
-    (val == false or: [val isNil]) ifTrue: [^false]
+    (self isFalsy: val) ifTrue: [^false]
     exprs size =:= 1 ifTrue: [^val]
     self evalAnd: exprs rest in: env
 
@@ -201,5 +201,5 @@ Object subclass: SchemeEval
   evalOr: exprs in: env =>
     exprs isEmpty ifTrue: [^false]
     val := self eval: exprs first in: env
-    (val == false or: [val isNil]) ifFalse: [^val]
+    (self isFalsy: val) ifFalse: [^val]
     self evalOr: exprs rest in: env

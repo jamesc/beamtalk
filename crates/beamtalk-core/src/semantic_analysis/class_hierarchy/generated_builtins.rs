@@ -1532,6 +1532,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false, return_type: Some("TranscriptStream".into()), param_types: vec![] },
                 MethodInfo { selector: "current:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("TranscriptStream".into())] },
+                MethodInfo { selector: "resetCurrent".into(), arity: 0, kind: MethodKind::Primary, defined_in: "TranscriptStream".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![] },
             ],
             class_variables: vec!["current".into()],
         },

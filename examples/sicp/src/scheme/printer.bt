@@ -14,7 +14,7 @@
 /// printer print: true        // => "#t"
 /// printer print: false       // => "#f"
 /// printer print: nil         // => "()"
-/// printer print: #(1 2 3)    // => "(1 2 3)"
+/// printer print: #(1, 2, 3)    // => "(1 2 3)"
 /// ```
 Object subclass: SchemePrinter
 
@@ -46,7 +46,7 @@ Object subclass: SchemePrinter
   /// ## Examples
   /// ```beamtalk
   /// SchemePrinter new printList: #()        // => "()"
-  /// SchemePrinter new printList: #(1 2 3)   // => "(1 2 3)"
+  /// SchemePrinter new printList: #(1, 2, 3)   // => "(1 2 3)"
   /// ```
   printList: lst =>
     lst isEmpty ifTrue: [^"()"]

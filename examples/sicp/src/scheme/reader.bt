@@ -40,7 +40,7 @@ Object subclass: SchemeReader
 
   /// Return true if `ch` is a whitespace character (space, newline, tab, carriage return).
   isWs: ch =>
-    (ch =:= " ") or: [(ch =:= "\n") or: [(ch =:= "\t") or: [ch =:= "\r"]]]
+    #(" ", "\n", "\t", "\r") includes: ch
 
   /// Drop leading whitespace characters from a char list.
   dropWs: chars =>
@@ -54,7 +54,7 @@ Object subclass: SchemeReader
 
   /// Return true if `ch` is a token delimiter (whitespace, `(`, or `)`).
   isDelim: ch =>
-    (self isWs: ch) or: [(ch =:= "(") or: [ch =:= ")"]]
+    (self isWs: ch) or: [#("(", ")") includes: ch]
 
   /// Dispatch to the appropriate sub-parser based on the leading character.
   ///
@@ -113,7 +113,7 @@ Object subclass: SchemeReader
   ///
   /// ## Examples
   /// ```beamtalk
-  /// SchemeReader new read: '"hello"'     // => "hello"
+  /// SchemeReader new read: """hello"""     // => "hello"
   /// ```
   parseString: chars acc: acc =>
     chars isEmpty ifTrue: [^self error: "Unterminated string literal"]
