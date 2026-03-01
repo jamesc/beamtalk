@@ -351,13 +351,17 @@ fn unparse_method_definition_with_prefix(
             }
         }
         [single] if single.comments.leading.is_empty() => {
-            // Single expression with no leading comments — emit inline
-            docs.push(Document::Str(" "));
-            docs.push(unparse_expression(&single.expression));
-            if let Some(trail) = &single.comments.trailing {
-                docs.push(Document::Str("  "));
-                docs.push(unparse_comment(trail));
-            }
+            // Single expression with no leading comments — try inline,
+            // break to indented next line if too wide.
+            let body = unparse_expression(&single.expression);
+            let trail_doc = if let Some(trail) = &single.comments.trailing {
+                docvec!["  ", unparse_comment(trail)]
+            } else {
+                nil()
+            };
+            docs.push(group(docvec![
+                nest(2, docvec![break_("", " "), body, trail_doc]),
+            ]));
         }
         stmts => {
             // Multiple expressions, or single with leading comments — emit on new lines
