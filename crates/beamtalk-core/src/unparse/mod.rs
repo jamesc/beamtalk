@@ -113,10 +113,14 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&class.comments));
 
-    // Doc comment
+    // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &class.doc_comment {
         for line_text in doc.lines() {
-            docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            if line_text.is_empty() {
+                docs.push(Document::Str("///"));
+            } else {
+                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            }
             docs.push(line());
         }
     }
@@ -172,18 +176,17 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         docs.push(line());
     }
 
-    // Instance methods
+    // Instance methods — the line() is placed INSIDE nest(2, ...) so it renders
+    // at indent=2, giving the leading comment and method signature their correct
+    // 2-space indentation.  A leading comment's trailing line() also runs at
+    // indent=2, so the signature is never shifted to column 0.
     for method in &class.methods {
-        docs.push(line());
-        docs.push(Document::Str("  "));
-        docs.push(unparse_method_definition(method));
+        docs.push(nest(2, docvec![line(), unparse_method_definition(method)]));
     }
 
     // Class-side methods
     for method in &class.class_methods {
-        docs.push(line());
-        docs.push(Document::Str("  class "));
-        docs.push(unparse_method_definition(method));
+        docs.push(nest(2, docvec![line(), "class ", unparse_method_definition(method)]));
     }
 
     concat(docs)
@@ -220,10 +223,14 @@ pub(crate) fn unparse_method_definition(method: &MethodDefinition) -> Document<'
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&method.comments));
 
-    // Doc comment
+    // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &method.doc_comment {
         for line_text in doc.lines() {
-            docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            if line_text.is_empty() {
+                docs.push(Document::Str("///"));
+            } else {
+                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            }
             docs.push(line());
         }
     }
@@ -341,10 +348,14 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&state.comments));
 
-    // Doc comment
+    // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &state.doc_comment {
         for line_text in doc.lines() {
-            docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            if line_text.is_empty() {
+                docs.push(Document::Str("///"));
+            } else {
+                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+            }
             docs.push(line());
         }
     }
