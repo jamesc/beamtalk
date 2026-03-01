@@ -1083,7 +1083,7 @@ mod tests {
     }
 
     #[test]
-    fn lex_string_doubled_delimiter_single_quote() {
+    fn lex_string_doubled_delimiter_double_quote() {
         // Beamtalk `""""` = opening-", doubled "" escape, closing-" → String containing `"`
         assert_eq!(lex_kinds("\"\"\"\""), vec![TokenKind::String("\"".into())]);
     }

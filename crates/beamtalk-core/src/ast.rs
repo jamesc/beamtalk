@@ -981,13 +981,13 @@ pub enum Expression {
         span: Span,
     },
 
-    /// A primitive pragma (`@primitive 'selector'` or `@primitive intrinsicName`).
+    /// A primitive pragma (`@primitive "selector"` or `@primitive intrinsicName`).
     ///
     /// Declares that a method body delegates to a runtime primitive or
     /// structural intrinsic. Only valid inside method bodies in stdlib code
     /// (see ADR 0007).
     ///
-    /// Example: `+ other => @primitive '+'`
+    /// Example: `+ other => @primitive "+"`
     /// Example: `new => @primitive basicNew`
     Primitive {
         /// The primitive name (selector string or intrinsic identifier).
@@ -1085,10 +1085,10 @@ pub enum Literal {
     /// Examples: `3.14`, `1.5e10`, `2.0e-5`
     Float(f64),
 
-    /// A string literal (single-quoted in source).
+    /// A string literal (double-quoted in source).
     ///
-    /// Example: `'hello, world'`
-    /// Escapes: `''` for a single quote
+    /// Example: `"hello, world"`
+    /// Escapes: `""` for an embedded double quote
     String(EcoString),
 
     /// A symbol literal (compile-time constant).

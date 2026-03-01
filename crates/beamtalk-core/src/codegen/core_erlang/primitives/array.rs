@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Maps `@primitive 'selector'` annotations for the `Array` class to
+//! Maps `@primitive "selector"` annotations for the `Array` class to
 //! calls on `beamtalk_array_ops`. Arrays are backed by Erlang's `array`
 //! module and stored as tagged maps:
 //!   `#{'$beamtalk_class' => 'Array', 'data' => ErlangArray}`

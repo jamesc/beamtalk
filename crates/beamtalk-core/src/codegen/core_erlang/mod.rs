@@ -1858,7 +1858,7 @@ impl CoreErlangGenerator {
 
     /// Generates code for an `@primitive` expression (ADR 0007 Phase 3).
     ///
-    /// For **selector-based** primitives (quoted, e.g., `@primitive '+'`), generates
+    /// For **selector-based** primitives (quoted, e.g., `@primitive "+"`), generates
     /// direct Erlang BIF calls when a known implementation exists. This makes the
     /// compiled stdlib module self-sufficient — no delegation to hand-written
     /// Erlang dispatch modules.
@@ -1866,7 +1866,7 @@ impl CoreErlangGenerator {
     /// Falls back to a `does_not_understand` error for selectors with no known
     /// BIF implementation.
     ///
-    /// For **structural intrinsics** (unquoted, e.g., `@primitive blockValue`),
+    /// For **structural intrinsics** (bare, e.g., `@primitive blockValue`),
     /// these are handled at the call site by `dispatch_codegen`, not here.
     /// The method body for structural intrinsics is never directly called.
     fn generate_primitive(
@@ -1881,7 +1881,7 @@ impl CoreErlangGenerator {
             .map(|id| id.class_name().to_string())
             .ok_or_else(|| {
                 CodeGenError::Internal(format!(
-                    "@primitive '{name}' used outside of a class context"
+                    "@primitive \"{name}\" used outside of a class context"
                 ))
             })?;
 
@@ -1914,7 +1914,7 @@ impl CoreErlangGenerator {
             if !known.contains(&runtime_module) {
                 self.add_codegen_warning(Diagnostic::warning(
                     format!(
-                        "@primitive '{name}' references module '{runtime_module}' which has not been compiled — ensure the class is included in the stdlib build"
+                        "@primitive \"{name}\" references module '{runtime_module}' which has not been compiled — ensure the class is included in the stdlib build"
                     ),
                     span,
                 ));

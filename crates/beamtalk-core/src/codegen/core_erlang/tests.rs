@@ -5177,7 +5177,7 @@ sealed Object subclass: Foo
 
 #[test]
 fn test_bt938_warning_when_module_absent_from_bindings() {
-    // Foo has @primitive 'doIt' but the binding table only knows about Bar.
+    // Foo has @primitive "doIt" but the binding table only knows about Bar.
     // bt@stdlib@foo is NOT in the known set → diagnostic warning expected.
     let src = "
 sealed Object subclass: Foo
