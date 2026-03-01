@@ -183,7 +183,7 @@ pub enum MutationKind {
 /// assert_eq!(result.diagnostics.len(), 0);
 /// ```
 pub fn analyse(module: &Module) -> AnalysisResult {
-    analyse_full(module, &[], false)
+    analyse_full(module, &[], false, false)
 }
 
 /// Analyse a module with pre-defined variables (for REPL context).
@@ -197,7 +197,7 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// services. Pre-defining known variables is essential for REPL contexts where
 /// users build up state incrementally across multiple evaluations.
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
-    analyse_full(module, known_vars, false)
+    analyse_full(module, known_vars, false, false)
 }
 
 /// Analyse a module with compiler options controlling stdlib-specific behaviour.
@@ -205,11 +205,21 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
 /// When `stdlib_mode` is true, built-in classes are permitted to subclass sealed
 /// classes (BT-791). This should only be set when compiling stdlib sources.
 pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -> AnalysisResult {
-    analyse_full(module, &[], options.stdlib_mode)
+    analyse_full(
+        module,
+        &[],
+        options.stdlib_mode,
+        options.skip_module_expression_lint,
+    )
 }
 
 /// Internal: full analysis with all knobs.
-fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> AnalysisResult {
+fn analyse_full(
+    module: &Module,
+    known_vars: &[&str],
+    stdlib_mode: bool,
+    skip_module_expression_lint: bool,
+) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
     // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
@@ -280,8 +290,14 @@ fn analyse_full(module: &Module, known_vars: &[&str], stdlib_mode: bool) -> Anal
     // BT-955: Warn on literal boolean conditions (always true / always false)
     validators::check_literal_boolean_condition(module, &mut result.diagnostics);
 
-    // BT-951: Lint on effect-free statements (suppressed during normal compile)
-    validators::check_effect_free_statements(module, &mut result.diagnostics);
+    // BT-951/BT-979: Lint on effect-free statements (suppressed during normal compile).
+    // Module-level expressions are checked by default; set skip_module_expression_lint
+    // to opt out (bootstrap-test compilation uses this).
+    validators::check_effect_free_statements(
+        module,
+        &mut result.diagnostics,
+        skip_module_expression_lint,
+    );
 
     // Phase 6: Module-level validation (BT-349)
     let module_diags = module_validator::validate_single_class(module);

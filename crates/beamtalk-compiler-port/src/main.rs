@@ -382,6 +382,8 @@ fn handle_compile_expression(request: &Map) -> Term {
                 d.severity,
                 beamtalk_core::source_analysis::Severity::Warning
                     | beamtalk_core::source_analysis::Severity::Hint
+                    // BT-979: Include lint warnings so REPL users see effect-free statement hints.
+                    | beamtalk_core::source_analysis::Severity::Lint
             )
         })
         .map(|d| d.message.to_string())
@@ -556,6 +558,7 @@ fn handle_compile(request: &Map) -> Term {
         allow_primitives: false,
         workspace_mode,
         suppress_warnings: false,
+        ..Default::default()
     };
     let primitive_diags =
         beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(

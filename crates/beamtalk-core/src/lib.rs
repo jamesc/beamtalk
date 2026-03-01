@@ -63,4 +63,12 @@ pub struct CompilerOptions {
     /// When true, suppress warning diagnostics during compilation.
     /// Useful for test fixtures that intentionally trigger warnings.
     pub suppress_warnings: bool,
+
+    /// BT-979: When true, skip the effect-free lint check on `module.expressions`.
+    ///
+    /// Set this for bootstrap-test compilation, where top-level expressions are
+    /// intentional test assertions (paired with `// =>` comments) rather than
+    /// accidentally discarded values. Defaults to false so the REPL and normal
+    /// `beamtalk build` / `beamtalk lint` paths all get the check.
+    pub skip_module_expression_lint: bool,
 }
