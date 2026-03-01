@@ -478,19 +478,24 @@ impl Token {
         self.leading_trivia.iter().any(Trivia::contains_newline)
     }
 
-    /// Returns `true` if the leading trivia contains a blank line (2+ newlines).
+    /// Returns `true` if the leading trivia contains a blank line (2+ newlines
+    /// within a single whitespace trivia item).
     ///
+    /// Only whitespace trivia is considered — newlines split across a comment
+    /// boundary (e.g. `\n // comment \n`) do NOT count as a blank line.
     /// Used by the parser to preserve author-placed blank lines between
     /// statements in method and block bodies (BT-987).
     #[must_use]
     pub fn has_preceding_blank_line(&self) -> bool {
-        let mut newline_count = 0;
         for trivia in &self.leading_trivia {
-            for ch in trivia.as_str().chars() {
-                if ch == '\n' {
-                    newline_count += 1;
-                    if newline_count >= 2 {
-                        return true;
+            if let Trivia::Whitespace(s) = trivia {
+                let mut newline_count = 0;
+                for ch in s.as_str().chars() {
+                    if ch == '\n' {
+                        newline_count += 1;
+                        if newline_count >= 2 {
+                            return true;
+                        }
                     }
                 }
             }
@@ -753,7 +758,7 @@ mod tests {
         );
         assert!(three_newlines.has_preceding_blank_line());
 
-        // Newlines across separate trivia items
+        // Newlines across separate trivia items (split by comment) → NOT a blank line
         let split_trivia = Token::with_trivia(
             TokenKind::Identifier("x".into()),
             Span::new(0, 1),
@@ -764,7 +769,20 @@ mod tests {
             ],
             vec![],
         );
-        assert!(split_trivia.has_preceding_blank_line());
+        assert!(!split_trivia.has_preceding_blank_line());
+
+        // Blank line BEFORE a comment → IS a blank line
+        let blank_then_comment = Token::with_trivia(
+            TokenKind::Identifier("x".into()),
+            Span::new(0, 1),
+            vec![
+                Trivia::Whitespace("\n\n".into()),
+                Trivia::LineComment("// comment".into()),
+                Trivia::Whitespace("\n  ".into()),
+            ],
+            vec![],
+        );
+        assert!(blank_then_comment.has_preceding_blank_line());
     }
 
     #[test]

@@ -222,7 +222,7 @@ Module {
                     end: 315,
                 },
             },
-            preceding_blank_line: true,
+            preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {

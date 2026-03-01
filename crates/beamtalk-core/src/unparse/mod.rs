@@ -1504,12 +1504,6 @@ mod tests {
         // Multiple blank lines should collapse to a single one
         let source = "Object subclass: Foo\n\n  doStuff =>\n    x := 1\n\n\n\n    x + 1\n";
         let pass1 = unparse_module(&parse_source(source));
-        // After formatting, should have a blank line (not 3 blank lines)
-        // The blank line between statements is preserved
-        assert!(
-            pass1.contains("x := 1\n"),
-            "Expected blank line preserved, got:\n{pass1}"
-        );
         // Count actual blank lines between x := 1 and x + 1
         let between = pass1
             .split("x := 1")
