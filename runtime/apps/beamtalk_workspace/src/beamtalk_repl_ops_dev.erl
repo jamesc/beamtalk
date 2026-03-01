@@ -520,10 +520,7 @@ get_session_bindings(SessionPid) ->
 -spec get_workspace_bindings() -> map().
 get_workspace_bindings() ->
     try
-        case beamtalk_workspace_interface:get_session_bindings() of
-            Bindings when is_map(Bindings) -> Bindings;
-            _ -> #{}
-        end
+        beamtalk_workspace_interface:get_session_bindings()
     catch
         _:_ -> #{}
     end.
