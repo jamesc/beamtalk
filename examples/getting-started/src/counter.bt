@@ -22,7 +22,7 @@
 ///   > c increment!
 ///   nil
 ///   > c getValue
-///   4
+///   3
 ///
 /// See examples/repl-tutorial.md for a full beginner's guide
 Actor subclass: Counter
