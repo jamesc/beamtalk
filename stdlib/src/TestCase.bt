@@ -15,7 +15,6 @@
 ///   testIncrement =>
 ///     self assert: (self.counter getValue await) equals: 1
 /// ```
-
 Object subclass: TestCase
 
   /// Prepare the test fixture. Called before each test method.

@@ -50,6 +50,8 @@
 //! assert_eq!(module.expressions.len(), 1);
 //! ```
 
+use std::collections::HashSet;
+
 use crate::ast::{Comment, CommentAttachment, Expression, ExpressionStatement, Module};
 #[cfg(test)]
 use crate::ast::{CommentKind, Literal, MessageSelector};
@@ -179,6 +181,22 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
 pub fn parse(tokens: Vec<Token>) -> (Module, Vec<Diagnostic>) {
     let mut parser = Parser::new(tokens);
     let module = parser.parse_module();
+
+    // Warn for any doc comments that appeared before non-declaration tokens:
+    // collect_doc_comment() was never called for those tokens, so their indices
+    // remain in `unattached_doc_comment_indices` after parsing.
+    let mut remaining: Vec<usize> = parser.unattached_doc_comment_indices.into_iter().collect();
+    remaining.sort_unstable(); // stable diagnostic order
+    for idx in remaining {
+        if let Some(token) = parser.tokens.get(idx) {
+            parser.diagnostics.push(Diagnostic::warning(
+                "doc comment not attached to any declaration \
+                 (/// only attaches to class, method, or state declarations)",
+                token.span(),
+            ));
+        }
+    }
+
     (module, parser.diagnostics)
 }
 
@@ -452,11 +470,29 @@ pub(super) struct Parser {
     pub(super) in_class_body: bool,
     /// Current expression nesting depth (guards against stack overflow).
     nesting_depth: usize,
+    /// Indices of tokens whose leading trivia contains at least one `DocComment`.
+    ///
+    /// Pre-scanned in `Parser::new`. Entries are removed as doc comments are
+    /// successfully attached to declarations or warned about during
+    /// `collect_doc_comment`. Any indices remaining after `parse_module`
+    /// represent doc comments before non-declaration tokens, and a warning is
+    /// emitted for each.
+    unattached_doc_comment_indices: HashSet<usize>,
 }
 
 impl Parser {
     /// Creates a new parser for the given tokens.
     fn new(tokens: Vec<Token>) -> Self {
+        // Pre-scan: record indices of tokens that have DocComment trivia.
+        // These are tracked so that doc comments never visited by
+        // `collect_doc_comment` (e.g. before non-declaration expressions)
+        // can still be warned about after parsing completes.
+        let unattached_doc_comment_indices = tokens
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.leading_trivia().iter().any(Trivia::is_doc_comment))
+            .map(|(i, _)| i)
+            .collect();
         Self {
             tokens,
             current: 0,
@@ -464,6 +500,7 @@ impl Parser {
             in_method_body: false,
             in_class_body: false,
             nesting_depth: 0,
+            unattached_doc_comment_indices,
         }
     }
 
@@ -554,9 +591,21 @@ impl Parser {
     /// A regular comment (`//`) or blank line between doc lines resets
     /// the collection, so only the last consecutive block of `///` lines
     /// is returned.
-    pub(super) fn collect_doc_comment(&self) -> Option<String> {
-        let mut lines = Vec::new();
-        for trivia in self.current_token().leading_trivia() {
+    ///
+    /// When doc comment lines are found and then discarded because a blank
+    /// line or a regular `//` comment breaks the attachment, a
+    /// [`Severity::Warning`] diagnostic is emitted immediately.
+    pub(super) fn collect_doc_comment(&mut self) -> Option<String> {
+        // Clone leading trivia to release the shared borrow of `self` so we
+        // can push to `self.diagnostics` inside the loop.
+        let leading_trivia = self.current_token().leading_trivia().to_vec();
+        let current_span = self.current_token().span();
+        let current_idx = self.current;
+
+        let mut lines: Vec<String> = Vec::new();
+        let mut had_unattached = false;
+
+        for trivia in &leading_trivia {
             match trivia {
                 super::Trivia::DocComment(text) => {
                     let text = text.as_str();
@@ -569,15 +618,38 @@ impl Parser {
                 super::Trivia::Whitespace(ws) => {
                     // A blank line (>1 newline) breaks consecutive doc comments
                     if ws.chars().filter(|&c| c == '\n').count() > 1 {
+                        if !lines.is_empty() {
+                            had_unattached = true;
+                        }
                         lines.clear();
                     }
                 }
-                _ => lines.clear(), // non-doc comment resets collection
+                _ => {
+                    // A non-doc-comment (e.g. `//`) resets collection
+                    if !lines.is_empty() {
+                        had_unattached = true;
+                    }
+                    lines.clear();
+                }
             }
         }
+
+        if had_unattached {
+            self.diagnostics.push(Diagnostic::warning(
+                "doc comment not attached to any declaration \
+                 (blank line or // comment breaks attachment)",
+                current_span,
+            ));
+            // Remove from pre-scan set so the post-parse sweep does not
+            // emit a second warning for the same token.
+            self.unattached_doc_comment_indices.remove(&current_idx);
+        }
+
         if lines.is_empty() {
             None
         } else {
+            // Successfully attached — remove from the pre-scan set.
+            self.unattached_doc_comment_indices.remove(&current_idx);
             Some(lines.join("\n"))
         }
     }
@@ -594,8 +666,8 @@ impl Parser {
     /// # Ordering dependency
     ///
     /// `collect_doc_comment()` must run first, then `collect_comment_attachment()`
-    /// on the same leading trivia.  Both methods are `&self` / immutable reads,
-    /// so no token is consumed between the two calls.
+    /// on the same leading trivia.  Neither method consumes any tokens, so the
+    /// current token is the same for both calls.
     pub(super) fn collect_comment_attachment(&self) -> CommentAttachment {
         let token_span = self.current_token().span();
         let mut leading = Vec::new();
@@ -3553,19 +3625,33 @@ Actor subclass: Counter
 
     #[test]
     fn parse_doc_comment_resets_on_regular_comment() {
-        let module = parse_ok(
+        // A `//` comment between `///` and the declaration orphans the first
+        // `///` block.  We now emit a warning for it.
+        let tokens = lex_with_eof(
             "/// Orphaned doc comment.
 // Regular comment interrupts.
 /// Actual class doc.
 Actor subclass: Counter
   increment => 1",
         );
+        let (module, diagnostics) = parse(tokens);
 
         assert_eq!(module.classes.len(), 1);
-        // Only the last consecutive block should be collected
+        // Only the last consecutive block should be collected.
         assert_eq!(
             module.classes[0].doc_comment.as_deref(),
             Some("Actual class doc.")
+        );
+        // The orphaned `///` block must produce exactly one warning.
+        let warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].message.contains("not attached"),
+            "unexpected warning message: {}",
+            warnings[0].message,
         );
     }
 
@@ -3587,20 +3673,89 @@ abstract Actor subclass: Collection
 
     #[test]
     fn parse_doc_comment_blank_line_resets() {
-        let module = parse_ok(
+        // A blank line between `///` and the declaration orphans the first
+        // `///` block.  We now emit a warning for it.
+        let tokens = lex_with_eof(
             "/// Orphaned doc comment.
 
 /// Actual class doc.
 Actor subclass: Counter
   increment => 1",
         );
+        let (module, diagnostics) = parse(tokens);
 
         assert_eq!(module.classes.len(), 1);
-        // Blank line separates the two doc blocks; only the last is attached
+        // Blank line separates the two doc blocks; only the last is attached.
         assert_eq!(
             module.classes[0].doc_comment.as_deref(),
             Some("Actual class doc.")
         );
+        // The orphaned `///` block must produce exactly one warning.
+        let warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].message.contains("not attached"),
+            "unexpected warning message: {}",
+            warnings[0].message,
+        );
+    }
+
+    // ── BT-980: unattached doc comment warnings ──────────────────────────────
+
+    #[test]
+    fn unattached_doc_comment_blank_line_before_class_emits_warning() {
+        // `///` + blank line + class definition must produce a warning.
+        let tokens = lex_with_eof(
+            "/// This comment is separated by a blank line.
+
+Object subclass: Foo
+  size => 0",
+        );
+        let (_module, diagnostics) = parse(tokens);
+        let warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one warning, got: {diagnostics:?}"
+        );
+        assert!(warnings[0].message.contains("not attached"));
+    }
+
+    #[test]
+    fn attached_doc_comment_no_blank_line_no_warning() {
+        // `///` immediately before class definition must NOT produce a warning.
+        let module = parse_ok(
+            "/// This comment is attached.
+Object subclass: Foo
+  size => 0",
+        );
+        assert_eq!(
+            module.classes[0].doc_comment.as_deref(),
+            Some("This comment is attached.")
+        );
+    }
+
+    #[test]
+    fn unattached_doc_comment_before_expression_emits_warning() {
+        // `///` before a non-declaration expression must produce a warning.
+        let tokens = lex_with_eof("/// Orphan before assignment.\nx := 42");
+        let (_module, diagnostics) = parse(tokens);
+        let warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one warning, got: {diagnostics:?}"
+        );
+        assert!(warnings[0].message.contains("not attached"));
     }
 
     #[test]

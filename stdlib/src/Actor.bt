@@ -14,7 +14,6 @@
 ///   increment => self.count := self.count + 1
 ///   count => self.count
 /// ```
-
 Object subclass: Actor
   /// Spawn a new actor process with default state.
   ///
