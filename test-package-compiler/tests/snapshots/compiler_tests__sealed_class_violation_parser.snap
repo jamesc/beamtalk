@@ -90,7 +90,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 179,
                             end: 186,
@@ -98,7 +98,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 179,
                             end: 186,
@@ -106,7 +106,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test that subclassing a sealed class produces a diagnostic error.",
+                        content: "Test that subclassing a sealed class produces a diagnostic error.",
                         span: Span {
                             start: 179,
                             end: 186,
@@ -114,7 +114,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Integer is a built-in sealed class.",
+                        content: "Integer is a built-in sealed class.",
                         span: Span {
                             start: 179,
                             end: 186,

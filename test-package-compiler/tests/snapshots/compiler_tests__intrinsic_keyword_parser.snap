@@ -102,7 +102,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 204,
                             end: 210,
@@ -110,7 +110,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 204,
                             end: 210,
@@ -118,7 +118,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test that @intrinsic produces identical codegen to @primitive (BT-484).",
+                        content: "Test that @intrinsic produces identical codegen to @primitive (BT-484).",
                         span: Span {
                             start: 204,
                             end: 210,
@@ -126,7 +126,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Both keywords map to Expression::Primitive in the AST.",
+                        content: "Both keywords map to Expression::Primitive in the AST.",
                         span: Span {
                             start: 204,
                             end: 210,

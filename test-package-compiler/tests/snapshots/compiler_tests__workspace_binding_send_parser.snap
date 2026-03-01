@@ -102,7 +102,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// BT-374: Workspace binding dispatch via persistent_term.",
+                        content: "BT-374: Workspace binding dispatch via persistent_term.",
                         span: Span {
                             start: 148,
                             end: 153,
@@ -110,7 +110,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Transcript is a workspace binding — generates persistent_term lookup + actor send.",
+                        content: "Transcript is a workspace binding — generates persistent_term lookup + actor send.",
                         span: Span {
                             start: 148,
                             end: 153,

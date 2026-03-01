@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 171,
                             end: 177,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 171,
                             end: 177,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test blocks with no arguments",
+                        content: "Test blocks with no arguments",
                         span: Span {
                             start: 171,
                             end: 177,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Empty parameter list is valid",
+                        content: "Empty parameter list is valid",
                         span: Span {
                             start: 171,
                             end: 177,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Simple block with no arguments",
+                        content: "Simple block with no arguments",
                         span: Span {
                             start: 171,
                             end: 177,
@@ -140,7 +140,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Block with no args that accesses outer scope",
+                        content: "Block with no args that accesses outer scope",
                         span: Span {
                             start: 259,
                             end: 264,
@@ -288,7 +288,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Block with no args as control structure condition",
+                        content: "Block with no args as control structure condition",
                         span: Span {
                             start: 383,
                             end: 392,
@@ -462,7 +462,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Multiple blocks with no args",
+                        content: "Multiple blocks with no args",
                         span: Span {
                             start: 489,
                             end: 495,

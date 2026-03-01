@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 155,
                             end: 156,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 155,
                             end: 156,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test whitespace handling",
+                        content: "Test whitespace handling",
                         span: Span {
                             start: 155,
                             end: 156,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Whitespace should not affect parsing",
+                        content: "Whitespace should not affect parsing",
                         span: Span {
                             start: 155,
                             end: 156,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Extra spaces",
+                        content: "Extra spaces",
                         span: Span {
                             start: 155,
                             end: 156,
@@ -103,7 +103,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Tabs and spaces mixed",
+                        content: "Tabs and spaces mixed",
                         span: Span {
                             start: 202,
                             end: 203,
@@ -163,7 +163,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Multiple newlines",
+                        content: "Multiple newlines",
                         span: Span {
                             start: 238,
                             end: 244,
@@ -223,7 +223,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Trailing whitespace (simulated)",
+                        content: "Trailing whitespace (simulated)",
                         span: Span {
                             start: 291,
                             end: 292,
@@ -262,7 +262,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Leading whitespace",
+                        content: "Leading whitespace",
                         span: Span {
                             start: 330,
                             end: 342,
@@ -301,7 +301,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Whitespace in message sends",
+                        content: "Whitespace in message sends",
                         span: Span {
                             start: 381,
                             end: 387,

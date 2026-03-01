@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 268,
                             end: 278,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 268,
                             end: 278,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test all unary operators/messages for compilation verification",
+                        content: "Test all unary operators/messages for compilation verification",
                         span: Span {
                             start: 268,
                             end: 278,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Comprehensive coverage of unary operations supported in Core Erlang codegen",
+                        content: "Comprehensive coverage of unary operations supported in Core Erlang codegen",
                         span: Span {
                             start: 268,
                             end: 278,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// ===== Integer Unary Operations =====",
+                        content: "===== Integer Unary Operations =====",
                         span: Span {
                             start: 268,
                             end: 278,
@@ -51,7 +51,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Negation",
+                        content: "Negation",
                         span: Span {
                             start: 268,
                             end: 278,
@@ -61,7 +61,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: "// Should generate: call \"erlang\":\"-\"(0, 5)",
+                        content: "Should generate: call \"erlang\":\"-\"(0, 5)",
                         span: Span {
                             start: 284,
                             end: 291,
@@ -110,7 +110,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Absolute value",
+                        content: "Absolute value",
                         span: Span {
                             start: 356,
                             end: 364,
@@ -120,7 +120,7 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: "// Should generate case expression for abs",
+                        content: "Should generate case expression for abs",
                         span: Span {
                             start: 374,
                             end: 377,
@@ -175,7 +175,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Zero test",
+                        content: "Zero test",
                         span: Span {
                             start: 436,
                             end: 443,
@@ -266,7 +266,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Even/Odd tests",
+                        content: "Even/Odd tests",
                         span: Span {
                             start: 496,
                             end: 505,
@@ -357,7 +357,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// ===== Boolean Unary Operations =====",
+                        content: "===== Boolean Unary Operations =====",
                         span: Span {
                             start: 594,
                             end: 601,
@@ -365,7 +365,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Logical NOT",
+                        content: "Logical NOT",
                         span: Span {
                             start: 594,
                             end: 601,
@@ -456,7 +456,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// ===== Complex Unary Expressions =====",
+                        content: "===== Complex Unary Expressions =====",
                         span: Span {
                             start: 704,
                             end: 711,
@@ -464,7 +464,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Chained unary messages",
+                        content: "Chained unary messages",
                         span: Span {
                             start: 704,
                             end: 711,
@@ -525,7 +525,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Unary in conditional with defined variable",
+                        content: "Unary in conditional with defined variable",
                         span: Span {
                             start: 776,
                             end: 783,
@@ -690,7 +690,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Unary with block parameter",
+                        content: "Unary with block parameter",
                         span: Span {
                             start: 878,
                             end: 888,

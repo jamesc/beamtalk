@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 224,
                             end: 225,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 224,
                             end: 225,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test boundary condition: mixed error scenarios",
+                        content: "Test boundary condition: mixed error scenarios",
                         span: Span {
                             start: 224,
                             end: 225,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Multiple errors in single expressions and compound statements",
+                        content: "Multiple errors in single expressions and compound statements",
                         span: Span {
                             start: 224,
                             end: 225,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Multiple syntax errors in one line",
+                        content: "Multiple syntax errors in one line",
                         span: Span {
                             start: 224,
                             end: 225,
@@ -114,7 +114,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Unterminated string followed by valid code",
+                        content: "Unterminated string followed by valid code",
                         span: Span {
                             start: 287,
                             end: 290,
@@ -212,7 +212,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Valid code after multiple errors should still parse",
+                        content: "Valid code after multiple errors should still parse",
                         span: Span {
                             start: 722,
                             end: 738,

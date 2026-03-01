@@ -76,6 +76,9 @@ tokio-tungstenite = "0.28"
 # Process management (ADR 0027 — Windows PID discovery)
 sysinfo = "0.38"
 
+# Diff generation (for beamtalk fmt-check unified diff output)
+similar = "2"
+
 # Testing
 insta = { version = "1", features = ["yaml"] }
 proptest = "1"

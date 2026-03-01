@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 138,
                             end: 144,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 138,
                             end: 144,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test Set (unique elements) operations",
+                        content: "Test Set (unique elements) operations",
                         span: Span {
                             start: 138,
                             end: 144,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Set creation from list",
+                        content: "Set creation from list",
                         span: Span {
                             start: 138,
                             end: 144,

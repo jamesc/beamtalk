@@ -55,7 +55,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Access",
+                                content: "Access",
                                 span: Span {
                                     start: 297,
                                     end: 301,
@@ -431,7 +431,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Mutation (returns new dictionary)",
+                                content: "Mutation (returns new dictionary)",
                                 span: Span {
                                     start: 603,
                                     end: 613,
@@ -546,7 +546,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Iteration",
+                                content: "Iteration",
                                 span: Span {
                                     start: 701,
                                     end: 717,
@@ -568,7 +568,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 247,
                             end: 253,
@@ -576,7 +576,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 247,
                             end: 253,
@@ -584,7 +584,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test Dictionary class compilation as a value type (not gen_server).",
+                        content: "Test Dictionary class compilation as a value type (not gen_server).",
                         span: Span {
                             start: 247,
                             end: 253,
@@ -592,7 +592,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Dictionary is a sealed Object subclass backed by Erlang maps.",
+                        content: "Dictionary is a sealed Object subclass backed by Erlang maps.",
                         span: Span {
                             start: 247,
                             end: 253,
@@ -600,7 +600,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// new/0 should return #{} (empty map).",
+                        content: "new/0 should return #{} (empty map).",
                         span: Span {
                             start: 247,
                             end: 253,

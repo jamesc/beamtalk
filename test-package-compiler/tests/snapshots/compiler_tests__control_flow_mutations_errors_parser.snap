@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 258,
                             end: 265,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 258,
                             end: 265,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test error cases: stored closures should NOT allow mutations",
+                        content: "Test error cases: stored closures should NOT allow mutations",
                         span: Span {
                             start: 258,
                             end: 265,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Per BT-90 design: only literal blocks in control flow positions can mutate",
+                        content: "Per BT-90 design: only literal blocks in control flow positions can mutate",
                         span: Span {
                             start: 258,
                             end: 265,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// ERROR: Field Assignment in Stored Closure",
+                        content: "ERROR: Field Assignment in Stored Closure",
                         span: Span {
                             start: 258,
                             end: 265,

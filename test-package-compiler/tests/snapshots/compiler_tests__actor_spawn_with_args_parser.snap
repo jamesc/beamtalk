@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 368,
                             end: 373,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 368,
                             end: 373,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test actor spawn with initialization arguments",
+                        content: "Test actor spawn with initialization arguments",
                         span: Span {
                             start: 368,
                             end: 373,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Counter spawnWith: passes initialization arguments to init/1",
+                        content: "Counter spawnWith: passes initialization arguments to init/1",
                         span: Span {
                             start: 368,
                             end: 373,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// which merges them with default field values.",
+                        content: "which merges them with default field values.",
                         span: Span {
                             start: 368,
                             end: 373,
@@ -51,7 +51,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "//",
+                        content: "",
                         span: Span {
                             start: 368,
                             end: 373,
@@ -59,7 +59,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Once map literals are supported, use:",
+                        content: "Once map literals are supported, use:",
                         span: Span {
                             start: 368,
                             end: 373,
@@ -67,7 +67,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "//   counter := Counter spawnWith: #{value => 10}",
+                        content: "  counter := Counter spawnWith: #{value => 10}",
                         span: Span {
                             start: 368,
                             end: 373,
@@ -75,7 +75,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "//",
+                        content: "",
                         span: Span {
                             start: 368,
                             end: 373,
@@ -83,7 +83,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// For now, test with a simple value:",
+                        content: "For now, test with a simple value:",
                         span: Span {
                             start: 368,
                             end: 373,
@@ -231,7 +231,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Spawn with default values (value = 0)",
+                        content: "Spawn with default values (value = 0)",
                         span: Span {
                             start: 469,
                             end: 477,

@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 125,
                             end: 129,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 125,
                             end: 129,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Simple whileTrue test with local variable mutation",
+                        content: "Simple whileTrue test with local variable mutation",
                         span: Span {
                             start: 125,
                             end: 129,
@@ -254,7 +254,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Test without module-level field",
+                        content: "Test without module-level field",
                         span: Span {
                             start: 250,
                             end: 259,
@@ -481,7 +481,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Test mutating a block parameter (BT-142 PR review fix)",
+                        content: "Test mutating a block parameter (BT-142 PR review fix)",
                         span: Span {
                             start: 383,
                             end: 397,
@@ -762,7 +762,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Test whileFalse with block parameter mutation (BT-142 PR review fix)",
+                        content: "Test whileFalse with block parameter mutation (BT-142 PR review fix)",
                         span: Span {
                             start: 579,
                             end: 603,
@@ -1043,7 +1043,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Test timesRepeat: with mutation (BT-143)",
+                        content: "Test timesRepeat: with mutation (BT-143)",
                         span: Span {
                             start: 759,
                             end: 774,
@@ -1232,7 +1232,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Test timesRepeat: with block parameter mutation (BT-143)",
+                        content: "Test timesRepeat: with block parameter mutation (BT-143)",
                         span: Span {
                             start: 920,
                             end: 945,
@@ -1475,7 +1475,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Test to:do: with mutation (BT-143)",
+                        content: "Test to:do: with mutation (BT-143)",
                         span: Span {
                             start: 1089,
                             end: 1097,
@@ -1688,7 +1688,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Test to:do: with block parameter mutation (BT-143)",
+                        content: "Test to:do: with block parameter mutation (BT-143)",
                         span: Span {
                             start: 1232,
                             end: 1250,

@@ -201,6 +201,18 @@ fmt-erlang:
     rebar3 fmt -w
     @echo "✅ Erlang code formatted"
 
+# Format all Beamtalk source files
+fmt-beamtalk:
+    @echo "✨ Formatting Beamtalk source files..."
+    @cargo run --bin beamtalk --quiet -- fmt stdlib/ tests/
+    @echo "✅ Beamtalk source files formatted"
+
+# Check Beamtalk source file formatting
+fmt-check-beamtalk:
+    @echo "📋 Checking Beamtalk source formatting..."
+    @cargo run --bin beamtalk --quiet -- fmt-check stdlib/ tests/
+    @echo "✅ Beamtalk formatting check passed"
+
 # Run Dialyzer on Erlang runtime
 [working-directory: 'runtime']
 dialyzer:

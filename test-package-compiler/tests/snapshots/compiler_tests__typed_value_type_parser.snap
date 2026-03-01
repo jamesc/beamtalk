@@ -160,7 +160,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Typed unary methods",
+                                content: "Typed unary methods",
                                 span: Span {
                                     start: 152,
                                     end: 156,
@@ -300,7 +300,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Typed keyword method",
+                                content: "Typed keyword method",
                                 span: Span {
                                     start: 235,
                                     end: 246,
@@ -343,7 +343,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [
                             Comment {
-                                content: "// Untyped method (no spec)",
+                                content: "Untyped method (no spec)",
                                 span: Span {
                                     start: 339,
                                     end: 350,
@@ -365,7 +365,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Typed value type methods for spec generation",
+                        content: "Typed value type methods for spec generation",
                         span: Span {
                             start: 48,
                             end: 54,

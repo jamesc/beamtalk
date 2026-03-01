@@ -11,7 +11,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Copyright 2026 James Casey",
+                        content: "Copyright 2026 James Casey",
                         span: Span {
                             start: 243,
                             end: 250,
@@ -19,7 +19,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// SPDX-License-Identifier: Apache-2.0",
+                        content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
                             start: 243,
                             end: 250,
@@ -27,7 +27,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Test @expect directive parsing — BT-782",
+                        content: "Test @expect directive parsing — BT-782",
                         span: Span {
                             start: 243,
                             end: 250,
@@ -35,7 +35,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// Verifies that @expect produces ExpectDirective AST nodes",
+                        content: "Verifies that @expect produces ExpectDirective AST nodes",
                         span: Span {
                             start: 243,
                             end: 250,
@@ -43,7 +43,7 @@ Module {
                         kind: Line,
                     },
                     Comment {
-                        content: "// @expect dnu — suppress a DNU hint on the following expression",
+                        content: "@expect dnu — suppress a DNU hint on the following expression",
                         span: Span {
                             start: 243,
                             end: 250,
@@ -91,7 +91,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// @expect type — suppress type mismatch warnings",
+                        content: "@expect type — suppress type mismatch warnings",
                         span: Span {
                             start: 326,
                             end: 333,
@@ -149,7 +149,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// @expect unused — suppress unused variable warnings",
+                        content: "@expect unused — suppress unused variable warnings",
                         span: Span {
                             start: 409,
                             end: 416,
@@ -201,7 +201,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// @expect all — suppress any diagnostic",
+                        content: "@expect all — suppress any diagnostic",
                         span: Span {
                             start: 482,
                             end: 489,
@@ -238,7 +238,7 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "// Multiple consecutive @expect directives stack on the same expression",
+                        content: "Multiple consecutive @expect directives stack on the same expression",
                         span: Span {
                             start: 587,
                             end: 594,
