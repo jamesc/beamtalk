@@ -268,7 +268,10 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         }
         docs.push(nest(
             2,
-            docvec![line(), "class ", unparse_method_definition(method)],
+            docvec![
+                line(),
+                unparse_method_definition_with_prefix(method, Document::Str("class "))
+            ],
         ));
     }
 
@@ -301,6 +304,17 @@ pub(crate) fn unparse_standalone_method_definition(
 ///    line; multi-expression bodies or bodies with leading comments go on new lines.
 #[must_use]
 pub(crate) fn unparse_method_definition(method: &MethodDefinition) -> Document<'static> {
+    unparse_method_definition_with_prefix(method, nil())
+}
+
+/// Builds a method definition document with an optional prefix before the signature.
+///
+/// The prefix (e.g. `"class "`) is inserted between the comments/doc-comment and the
+/// method signature, so that `class` appears on the signature line, not before the comments.
+fn unparse_method_definition_with_prefix(
+    method: &MethodDefinition,
+    prefix: Document<'static>,
+) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // Non-doc leading comments
@@ -318,7 +332,8 @@ pub(crate) fn unparse_method_definition(method: &MethodDefinition) -> Document<'
         }
     }
 
-    // Method signature
+    // Optional prefix (e.g. "class ") then method signature
+    docs.push(prefix);
     docs.push(unparse_method_signature(method));
 
     // Body — single expression with no leading comments goes on the same line;
@@ -1469,6 +1484,21 @@ mod tests {
                 "line {i} has trailing whitespace: {line_text:?}"
             );
         }
+    }
+
+    // --- Class-side method prefix placement ---
+
+    #[test]
+    fn class_method_doc_comment_before_class_keyword() {
+        // The `class` keyword must appear on the signature line, not before the doc comment.
+        let source = "Object subclass: Foo\n  /// Doc for bar\n  class bar => 1\n";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        // Doc comment should come first, then "class bar =>"
+        assert!(
+            output.contains("/// Doc for bar\n  class bar => 1"),
+            "expected doc comment before 'class' keyword in: {output}"
+        );
     }
 
     // --- File trailing comments ---
