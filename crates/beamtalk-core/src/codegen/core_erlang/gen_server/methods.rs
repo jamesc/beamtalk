@@ -1197,6 +1197,28 @@ impl CoreErlangGenerator {
             }
             let method_sigs_doc = Document::Vec(method_sig_docs);
 
+            // BT-990: Class-side method display signatures for :help command
+            let mut class_method_sig_docs: Vec<Document<'static>> = Vec::new();
+            for (method_idx, method) in class
+                .class_methods
+                .iter()
+                .filter(|m| m.kind == MethodKind::Primary)
+                .enumerate()
+            {
+                if method_idx > 0 {
+                    class_method_sig_docs.push(Document::Str(", "));
+                }
+                let sig_str = unparse_method_display_signature(method);
+                let binary = Self::binary_string_literal(&sig_str);
+                class_method_sig_docs.push(docvec![
+                    "'",
+                    Document::String(method.selector.name().to_string()),
+                    "' => ",
+                    Document::String(binary),
+                ]);
+            }
+            let class_method_sigs_doc = Document::Vec(class_method_sig_docs);
+
             // BT-412: Class variable initial values
             let mut class_var_parts: Vec<Document<'static>> = Vec::new();
             for (cv_idx, cv) in class.class_variables.iter().enumerate() {
@@ -1300,6 +1322,10 @@ impl CoreErlangGenerator {
                         line(),
                         "'methodSignatures' => ~{",
                         method_sigs_doc,
+                        "}~,",
+                        line(),
+                        "'classMethodSignatures' => ~{",
+                        class_method_sigs_doc,
                         "}~,",
                         line(),
                         "'classState' => ~{",

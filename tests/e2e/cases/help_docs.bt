@@ -40,3 +40,10 @@
 // :help Metaclass with unknown method — should show error (BT-618)
 :help Metaclass nonExistentMethod
 // => ERROR: Metaclass does not understand nonExistentMethod
+
+// BT-990: Class-side method signatures in :help
+// @load tests/e2e/fixtures/class_method_help_fixture.bt
+
+// :help with a user-defined class method should show typed signature
+:help HelpTestWidget create:
+// => == HelpTestWidget >> create: ==_create: name: String -> HelpTestWidget_

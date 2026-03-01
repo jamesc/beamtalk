@@ -79,6 +79,8 @@
     method_source = #{} :: #{selector() => binary()},
     %% BT-988: Method display signatures for :help command
     method_signatures = #{} :: #{selector() => binary()},
+    %% BT-990: Class-side method display signatures for :help command
+    class_method_signatures = #{} :: #{selector() => binary()},
     %% ADR 0033: Runtime-embedded documentation
     doc = none :: binary() | none,
     method_docs = #{} :: #{selector() => binary()}
@@ -284,6 +286,7 @@ init({ClassName, ClassInfo}) ->
         class_state = maps:get(class_state, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
         method_signatures = maps:get(method_signatures, ClassInfo, #{}),
+        class_method_signatures = maps:get(class_method_signatures, ClassInfo, #{}),
         doc = maps:get(doc, ClassInfo, none),
         method_docs = maps:get(method_docs, ClassInfo, #{})
     },
@@ -354,6 +357,30 @@ handle_call(
                     '__signature__' => maps:get(Selector, Signatures, nil),
                     '__method_info__' => MethodInfo,
                     '__doc__' => maps:get(Selector, MethodDocs, nil)
+                };
+            error ->
+                nil
+        end,
+    {reply, Result, State};
+%% BT-990: Return CompiledMethod-like map for class-side methods.
+handle_call(
+    {class_method, Selector},
+    _From,
+    #class_state{
+        class_methods = ClassMethods,
+        class_method_signatures = ClassMethodSigs
+    } = State
+) ->
+    Result =
+        case maps:find(Selector, ClassMethods) of
+            {ok, MethodInfo} ->
+                #{
+                    '$beamtalk_class' => 'CompiledMethod',
+                    '__selector__' => Selector,
+                    '__source__' => <<"">>,
+                    '__signature__' => maps:get(Selector, ClassMethodSigs, nil),
+                    '__method_info__' => MethodInfo,
+                    '__doc__' => nil
                 };
             error ->
                 nil
@@ -510,6 +537,9 @@ apply_class_info(State, ClassInfo) ->
         method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
         method_signatures = maps:get(
             method_signatures, ClassInfo, State#class_state.method_signatures
+        ),
+        class_method_signatures = maps:get(
+            class_method_signatures, ClassInfo, State#class_state.class_method_signatures
         ),
         is_constructible = maps:get(is_constructible, ClassInfo, undefined),
         doc = maps:get(doc, ClassInfo, State#class_state.doc),

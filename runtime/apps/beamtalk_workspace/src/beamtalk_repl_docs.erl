@@ -125,10 +125,33 @@ format_method_doc(ClassName, SelectorBin) ->
                         %% Use >> to walk hierarchy and get CompiledMethod
                         case beamtalk_method_resolver:resolve(ClassPid, SelectorAtom) of
                             nil ->
-                                {error, {method_not_found, ClassName, SelectorBin}};
+                                %% BT-990: Try class-side method before giving up
+                                case
+                                    gen_server:call(
+                                        ClassPid,
+                                        {class_method, SelectorAtom},
+                                        5000
+                                    )
+                                of
+                                    nil ->
+                                        {error, {method_not_found, ClassName, SelectorBin}};
+                                    ClassMethodObj when is_map(ClassMethodObj) ->
+                                        DocInfo = method_doc_info(
+                                            ClassMethodObj, SelectorAtom
+                                        ),
+                                        Output = format_method_output(
+                                            ClassName,
+                                            SelectorBin,
+                                            ClassName,
+                                            DocInfo
+                                        ),
+                                        {ok, Output}
+                                end;
                             MethodObj when is_map(MethodObj) ->
                                 %% Find which class defines this method
-                                DefiningClass = find_defining_class(ClassPid, SelectorAtom),
+                                DefiningClass = find_defining_class(
+                                    ClassPid, SelectorAtom
+                                ),
                                 %% Extract doc, signature, and sealed from CompiledMethod
                                 DocInfo = method_doc_info(MethodObj, SelectorAtom),
                                 Output = format_method_output(

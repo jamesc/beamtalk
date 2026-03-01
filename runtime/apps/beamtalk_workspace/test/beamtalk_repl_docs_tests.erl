@@ -306,6 +306,21 @@ format_method_output_unary_with_return_type_test() ->
     ?assert(binary:match(Result, <<"size -> Integer">>) =/= nomatch).
 
 %%====================================================================
+%% BT-990: Class method signature in format_method_output
+%%====================================================================
+
+format_method_output_class_method_with_signature_test() ->
+    %% Class methods should display their typed signature (not bare selector)
+    Result = beamtalk_repl_docs:format_method_output(
+        'MyWidget',
+        <<"create:">>,
+        'MyWidget',
+        {<<"create: name: String -> MyWidget">>, none, false}
+    ),
+    ?assert(binary:match(Result, <<"== MyWidget >> create: ==">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"create: name: String -> MyWidget">>) =/= nomatch).
+
+%%====================================================================
 %% Metaclass documentation tests (BT-618)
 %%====================================================================
 
