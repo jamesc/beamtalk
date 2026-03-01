@@ -32,10 +32,10 @@ Object subclass: SchemePrinter
   /// ```
   print: val =>
     val isNil ifTrue: [^"()"]
-    (val class =:= True) ifTrue: [^"#t"]
-    (val class =:= False) ifTrue: [^"#f"]
-    (val class =:= Integer) ifTrue: [^val printString]
-    (val class =:= String) ifTrue: [^"""" ++ val ++ """"]
+    (val class =:= True)         ifTrue: [^"#t"]
+    (val class =:= False)        ifTrue: [^"#f"]
+    (val class =:= Integer)      ifTrue: [^val printString]
+    (val class =:= String)       ifTrue: [^"""" ++ val ++ """"]
     (val class =:= SchemeSymbol) ifTrue: [^val name]
     (val class =:= SchemeLambda) ifTrue: [^"#<lambda>"]
     (val class =:= List) ifTrue: [^self printList: val]
