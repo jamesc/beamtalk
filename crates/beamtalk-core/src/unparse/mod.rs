@@ -186,7 +186,10 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
 
     // Class-side methods
     for method in &class.class_methods {
-        docs.push(nest(2, docvec![line(), "class ", unparse_method_definition(method)]));
+        docs.push(nest(
+            2,
+            docvec![line(), "class ", unparse_method_definition(method)],
+        ));
     }
 
     concat(docs)
