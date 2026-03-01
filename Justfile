@@ -129,6 +129,33 @@ build-examples: build-stdlib
     @cargo run --bin beamtalk --quiet -- build examples/
     @echo "✅ Examples build complete"
 
+# Run tests for every example package that has a test/ directory
+[unix]
+test-examples: build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🧪 Testing examples..."
+    failed=0
+    passed=0
+    for dir in examples/*/; do
+        name=$(basename "$dir")
+        if [ ! -d "${dir}test" ]; then
+            continue
+        fi
+        echo "  Testing ${name}..."
+        if (cd "${dir}" && cargo run --bin beamtalk --quiet -- test 2>&1); then
+            passed=$((passed + 1))
+        else
+            echo "❌ ${name} tests failed"
+            failed=$((failed + 1))
+        fi
+    done
+    if [ "$failed" -gt 0 ]; then
+        echo "❌ ${failed} example(s) failed, ${passed} passed"
+        exit 1
+    fi
+    echo "✅ All example tests passed (${passed} packages)"
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format
 # ═══════════════════════════════════════════════════════════════════════════
