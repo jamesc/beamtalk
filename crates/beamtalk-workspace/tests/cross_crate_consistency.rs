@@ -19,6 +19,7 @@ use std::fs;
 #[test]
 fn test_workspace_id_matches_cli_algorithm() {
     use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
 
     // Use temp_dir which exists on all platforms.
     let path = std::env::temp_dir();
@@ -28,7 +29,13 @@ fn test_workspace_id_matches_cli_algorithm() {
     let mut hasher = Sha256::new();
     hasher.update(path_str.as_bytes());
     let result = hasher.finalize();
-    let cli_id = format!("{result:x}")[..12].to_string();
+    // Build 12 hex chars from the first 6 bytes (avoids str byte-slicing).
+    let cli_id = result[..6]
+        .iter()
+        .fold(String::with_capacity(12), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        });
 
     let shared_id = generate_workspace_id(&path).unwrap();
     assert_eq!(
