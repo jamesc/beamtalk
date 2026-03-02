@@ -1475,6 +1475,13 @@ impl CoreErlangGenerator {
             .map(|m| m.selector.to_erlang_atom())
             .collect();
 
+        // BT-996: Populate auto-generated keyword constructor selector for Value subclass: classes.
+        // This allows `ClassName slot: value` inside a class method to route to the correct
+        // class-side constructor instead of falling through to the instance-side getter.
+        self.class_slot_constructor_selector =
+            crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class)
+                .and_then(|auto| auto.keyword_constructor);
+
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         for method in &class.class_methods {
@@ -1543,6 +1550,7 @@ impl CoreErlangGenerator {
         }
         self.class_var_names.clear();
         self.class_method_selectors.clear();
+        self.class_slot_constructor_selector = None;
         Ok(Document::Vec(docs))
     }
 

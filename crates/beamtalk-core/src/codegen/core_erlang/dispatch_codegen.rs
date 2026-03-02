@@ -699,6 +699,33 @@ impl CoreErlangGenerator {
             self.last_open_scope_result = Some(result);
             return Ok(doc);
         }
+        // BT-996: Auto-generated keyword constructor for Value subclass: classes.
+        // `ClassName slot: value` inside a class method routes here when the selector
+        // matches the auto-generated slot keyword constructor (e.g. `symName:` → `class_symName:/3`).
+        // The constructor returns a plain map (not a `class_var_result` tuple), so no
+        // class-var threading boilerplate is needed.
+        if self
+            .class_slot_constructor_selector
+            .as_deref()
+            .is_some_and(|kw| kw == selector_atom)
+        {
+            let module = self.module_name.clone();
+            let cv = self.current_class_var();
+            let args_doc = self.capture_argument_list_doc(arguments)?;
+            let comma = if arguments.is_empty() { "" } else { ", " };
+            let doc = docvec![
+                "call '",
+                Document::String(module),
+                "':'class_",
+                Document::String(selector_atom),
+                "'(ClassSelf, ",
+                Document::String(cv),
+                comma,
+                args_doc,
+                ")"
+            ];
+            return Ok(doc);
+        }
         // BT-893: Instantiation selectors (new, new:, spawn, spawnWith:) must bypass
         // gen_server to avoid deadlock — route through class_self_new/class_self_spawn.
         //

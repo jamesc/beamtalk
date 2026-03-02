@@ -753,6 +753,11 @@ pub(super) struct CoreErlangGenerator {
     /// BT-412: Selector names of class methods in the current class.
     /// Used to route self-sends to class method functions vs module exports.
     class_method_selectors: std::collections::HashSet<String>,
+    /// BT-996: Auto-generated keyword constructor selector for Value subclass: classes.
+    /// E.g. `"symName:"` for a single-slot class, `"x:y:"` for two slots.
+    /// Set during class method codegen to route `ClassName slot: value` to the correct
+    /// class-side constructor instead of the instance-side getter.
+    class_slot_constructor_selector: Option<String>,
     /// BT-412: State version counter for class variable threading.
     class_var_version: usize,
     /// BT-412: Whether class variables were mutated in the current method.
@@ -828,6 +833,7 @@ impl CoreErlangGenerator {
             in_class_method: false,
             class_var_names: std::collections::HashSet::new(),
             class_method_selectors: std::collections::HashSet::new(),
+            class_slot_constructor_selector: None,
             class_var_version: 0,
             class_var_mutated: false,
             last_open_scope_result: None,
@@ -861,6 +867,7 @@ impl CoreErlangGenerator {
             in_class_method: false,
             class_var_names: std::collections::HashSet::new(),
             class_method_selectors: std::collections::HashSet::new(),
+            class_slot_constructor_selector: None,
             class_var_version: 0,
             class_var_mutated: false,
             last_open_scope_result: None,
