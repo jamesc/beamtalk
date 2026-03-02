@@ -108,7 +108,7 @@ isMeta => false       // now overridable; Behaviour is abstract anyway
 A user attempting to override a `@primitive`/`@intrinsic`-backed method continues
 to receive a compiler diagnostic:
 
-```
+```text
 error: cannot override method `respondsTo:` — it is implemented as a primitive in `Object`
   --> src/MyClass.bt:5:3
    |
