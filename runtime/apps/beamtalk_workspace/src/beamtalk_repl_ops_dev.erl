@@ -22,7 +22,8 @@
     walk_chain/2,
     walk_chain_class/2,
     make_class_not_found_error/1,
-    base_protocol_response/1
+    base_protocol_response/1,
+    list_class_methods_for_ws/1
 ]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -150,6 +151,12 @@ handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
                     )
             end
     end;
+handle(<<"methods">>, Params, Msg, _SessionPid) ->
+    %% BT-1026: Return instance and class-side methods for a loaded class.
+    ClassBin = maps:get(<<"class">>, Params, <<>>),
+    Methods = list_class_methods_for_ws(ClassBin),
+    Base = base_protocol_response(Msg),
+    jsx:encode(Base#{<<"methods">> => Methods, <<"status">> => [<<"done">>]});
 handle(<<"test">>, Params, Msg, _SessionPid) ->
     ClassName = maps:get(<<"class">>, Params, undefined),
     run_test_op(ClassName, Msg);
@@ -845,10 +852,48 @@ describe_ops() ->
         },
         <<"unload">> => #{<<"params">> => [<<"module">>]},
         <<"health">> => #{<<"params">> => []},
+        <<"methods">> => #{<<"params">> => [<<"class">>]},
         <<"show-codegen">> => #{<<"params">> => [<<"code">>]},
         <<"describe">> => #{<<"params">> => []},
         <<"shutdown">> => #{<<"params">> => [<<"cookie">>]}
     }.
+
+%% @doc Return a list of method descriptors for a class by name (BT-1026).
+%%
+%% Collects local instance methods and local class-side methods for the named
+%% class. Returns an empty list if the class name is unknown or not loaded.
+%% Each entry is a map with <<"name">>, <<"selector">>, and <<"side">> keys.
+-spec list_class_methods_for_ws(binary()) -> [map()].
+list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
+        {error, badarg} ->
+            [];
+        {ok, ClassName} ->
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                undefined ->
+                    [];
+                Pid ->
+                    InstanceSelectors = lists:sort(beamtalk_object_class:methods(Pid)),
+                    ClassSelectors = lists:sort(beamtalk_object_class:local_class_methods(Pid)),
+                    InstanceEntries = [
+                        #{
+                            <<"name">> => atom_to_binary(S, utf8),
+                            <<"selector">> => atom_to_binary(S, utf8),
+                            <<"side">> => <<"instance">>
+                        }
+                     || S <- InstanceSelectors
+                    ],
+                    ClassEntries = [
+                        #{
+                            <<"name">> => atom_to_binary(S, utf8),
+                            <<"selector">> => atom_to_binary(S, utf8),
+                            <<"side">> => <<"class">>
+                        }
+                     || S <- ClassSelectors
+                    ],
+                    InstanceEntries ++ ClassEntries
+            end
+    end.
 
 %% @private
 -spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.

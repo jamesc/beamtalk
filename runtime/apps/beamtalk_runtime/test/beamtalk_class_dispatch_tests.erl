@@ -22,13 +22,8 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
-%% Selector used in tests.  The corresponding `class_` atom MUST exist in the
-%% atom table before `class_method_fun_name/1` calls `list_to_existing_atom/1`.
-%% Declaring it as a literal here ensures it is loaded with this module.
+%% Selector used in tests.
 -define(TEST_SELECTOR, bt999_dispatch_test_method).
-%% This literal ensures `class_bt999_dispatch_test_method` is compiled into this
-%% module and therefore present in the atom table when the module is loaded.
--define(TEST_CLASS_FUN, class_bt999_dispatch_test_method).
 
 %%% ============================================================================
 %%% Setup / Teardown
@@ -40,13 +35,6 @@ setup() ->
         _ -> ok
     end,
     beamtalk_class_registry:ensure_hierarchy_table(),
-    %% Materialise selector and its class method version into atom table.
-    %% The -define puts class_bt999_dispatch_test_method in the atom table,
-    %% but we also need to explicitly create it via list_to_atom for the
-    %% runtime string conversion in class_method_fun_name/1.
-    _ = ?TEST_SELECTOR,
-    _ = ?TEST_CLASS_FUN,
-    _ = list_to_atom("class_" ++ atom_to_list(?TEST_SELECTOR)),
     [].
 
 teardown(Pids) ->

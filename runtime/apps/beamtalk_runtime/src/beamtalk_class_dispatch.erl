@@ -396,10 +396,18 @@ superclass_from_ets(ClassName) ->
 
 %% @doc Convert a class method selector to its module function name.
 %% Class methods are generated with a 'class_' prefix, e.g.
-%% `class defaultValue => 42` becomes `class_defaultValue/1`.
+%% `class defaultValue => 42` becomes `class_defaultValue/2`.
+%% (Zero-arg selector: arity 0 + ClassSelf + ClassVars => arity 2.)
+%%
+%% Uses list_to_atom rather than list_to_existing_atom because the class_
+%% prefixed atom may not yet be in the atom table (e.g. when the module is
+%% not loaded or the method is absent).  Atom exhaustion is not a concern:
+%% selectors are bound atoms from user programs, so the class_ versions are
+%% equally bounded.  If the resulting function does not exist in the module,
+%% erlang:apply will raise undef, which invoke_class_method already handles.
 -spec class_method_fun_name(selector()) -> atom().
 class_method_fun_name(Selector) ->
-    list_to_existing_atom("class_" ++ atom_to_list(Selector)).
+    list_to_atom("class_" ++ atom_to_list(Selector)).
 
 %% @doc Check if a class method selector is a test execution command.
 %% BT-440: These selectors need special handling to avoid gen_server deadlock.
