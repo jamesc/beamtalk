@@ -5875,3 +5875,30 @@ Counter >> getValue => value
         "method_return_types should contain inferred Integer for standalone getValue. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_bt1005_untyped_param_does_not_shadow_state_field_type() {
+    // BT-1005: An untyped parameter with the same name as a state field must NOT
+    // cause the method's return type to be inferred as the state field's type.
+    // The untyped param should be Dynamic, so the method's inferred return type
+    // is also Dynamic and no writeback annotation is emitted.
+    let src = "
+Actor subclass: Counter
+  state: value: Integer = 0
+  add: value => value
+";
+    // `add: value` has an untyped param named `value` that shadows the `value`
+    // state field. The return type should be Dynamic (not Integer).
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("counter"))
+        .expect("codegen should succeed")
+        .code;
+
+    // `add:` must NOT appear in method_return_types with Integer inferred from
+    // the state field — it should be absent (Dynamic = no entry).
+    assert!(
+        !code.contains("'add:' => 'Integer'"),
+        "Untyped param `value` must not be mis-inferred as state field Integer. Got:\n{code}"
+    );
+}

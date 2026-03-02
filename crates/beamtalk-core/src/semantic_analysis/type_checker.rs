@@ -290,13 +290,18 @@ impl TypeChecker {
 
     /// Sets parameter types in the type environment from annotations.
     ///
-    /// Only `Simple` type annotations are wired in. Union types and other complex
-    /// annotations are left as `Dynamic` — full union type support is Phase 3.
+    /// All parameters are always registered. Typed (`Simple`) parameters are
+    /// registered as `Known`; untyped parameters are registered as `Dynamic`.
+    /// Registering untyped params is necessary to prevent the bare-identifier
+    /// state-field fallback in `infer_expr` from mis-inferring an untyped param
+    /// as `self.<field>` when the parameter name shadows a state field name.
     fn set_param_types(env: &mut TypeEnv, parameters: &[crate::ast::ParameterDefinition]) {
         for param in parameters {
-            if let Some(TypeAnnotation::Simple(type_id)) = &param.type_annotation {
-                env.set(&param.name.name, InferredType::Known(type_id.name.clone()));
-            }
+            let ty = match &param.type_annotation {
+                Some(TypeAnnotation::Simple(type_id)) => InferredType::Known(type_id.name.clone()),
+                _ => InferredType::Dynamic, // preserve parameter shadowing of state fields
+            };
+            env.set(&param.name.name, ty);
         }
     }
 

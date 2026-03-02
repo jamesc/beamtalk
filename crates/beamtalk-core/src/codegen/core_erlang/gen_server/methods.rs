@@ -1238,12 +1238,12 @@ impl CoreErlangGenerator {
                     ]);
                 }
             }
-            // BT-1005: Include standalone instance methods for this class
-            for standalone in module
-                .method_definitions
-                .iter()
-                .filter(|m| m.class_name.name == class.name.name && !m.is_class_method)
-            {
+            // BT-1005: Include standalone instance methods for this class (Primary only).
+            for standalone in module.method_definitions.iter().filter(|m| {
+                m.class_name.name == class.name.name
+                    && !m.is_class_method
+                    && m.method.kind == MethodKind::Primary
+            }) {
                 if let Some(TypeAnnotation::Simple(id)) = &standalone.method.return_type {
                     if !method_return_type_docs.is_empty() {
                         method_return_type_docs.push(Document::Str(", "));
@@ -1279,12 +1279,12 @@ impl CoreErlangGenerator {
                     ]);
                 }
             }
-            // BT-1005: Include standalone class methods for this class
-            for standalone in module
-                .method_definitions
-                .iter()
-                .filter(|m| m.class_name.name == class.name.name && m.is_class_method)
-            {
+            // BT-1005: Include standalone class methods for this class (Primary only).
+            for standalone in module.method_definitions.iter().filter(|m| {
+                m.class_name.name == class.name.name
+                    && m.is_class_method
+                    && m.method.kind == MethodKind::Primary
+            }) {
                 if let Some(TypeAnnotation::Simple(id)) = &standalone.method.return_type {
                     if !class_method_return_type_docs.is_empty() {
                         class_method_return_type_docs.push(Document::Str(", "));
