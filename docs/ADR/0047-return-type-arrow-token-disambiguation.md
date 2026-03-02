@@ -52,6 +52,12 @@ and the grammar keyword that introduces class-side method definitions. The parse
 resolves `sealed class ->` as "sealed class-side binary method `->` with argument
 `Metaclass`" rather than "sealed instance method `class` returning `Metaclass`".
 
+This ambiguity is Beamtalk-specific. In Smalltalk, `class` is never a modifier
+keyword — `(MyClass class) >> #myMethod` is a plain message send (`class` returns
+the metaclass object; `>>` defines a method on it). Beamtalk's `class` modifier is
+a syntactic convenience that collapses this two-step reflective pattern into a single
+declaration, and that convenience is the source of the collision.
+
 ### Current workarounds
 
 Both methods are left unannotated (`return_type: None` in `generated_builtins.rs`),
@@ -145,7 +151,12 @@ No separator token that could double as a method selector.
 
 **Pharo/Squeak:** No return type annotations in the core language. Type annotations
 are layered via pragmas (`<return: #Integer>`) or external tools — avoids the
-grammar problem entirely at the cost of out-of-band syntax.
+grammar problem entirely at the cost of out-of-band syntax. Notably, Pharo has no
+`class` modifier keyword: class-side methods are defined by sending `class` to the
+class object to navigate to its metaclass (`(MyClass class) >> #myMethod`), then
+defining a method on that metaclass via `>>`. `class` has one meaning throughout —
+a unary message returning the receiver's metaclass. The Ambiguity 2 collision is
+absent because Smalltalk has no modifier syntax at all.
 
 **Swift:** Uses `->` for return types. Operator overloading exists but `->` is not
 overloadable — reserved entirely for the type position.
