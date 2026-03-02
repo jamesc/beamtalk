@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use beamtalk_cli::repl_startup::BeamPaths;
+use beamtalk_cli::repl_startup::{BeamPaths, beam_pa_args};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -606,7 +606,8 @@ fn build_detached_node_command(
         ("-sname", node_name.to_string())
     };
 
-    let mut args = vec![
+    // Build the initial (non-path) args: detach flags, node name, cookie file.
+    let initial_args = vec![
         // On Windows, don't use -detached - it doesn't work reliably from Rust spawn
         // Instead, we'll use CREATE_NO_WINDOW flag to prevent console popup
         #[cfg(not(windows))]
@@ -617,42 +618,28 @@ fn build_detached_node_command(
         // Cookie via args file instead of -setcookie (BT-726: not visible in ps)
         "-args_file".to_string(),
         path_to_erlang_arg(cookie_args_file),
-        "-pa".to_string(),
-        path_to_erlang_arg(&beam_paths.runtime_ebin),
-        "-pa".to_string(),
-        path_to_erlang_arg(&beam_paths.workspace_ebin),
-        "-pa".to_string(),
-        path_to_erlang_arg(&beam_paths.jsx_ebin),
-        "-pa".to_string(),
-        path_to_erlang_arg(&beam_paths.compiler_ebin),
-        "-pa".to_string(),
-        path_to_erlang_arg(&beam_paths.stdlib_ebin),
-        "-pa".to_string(),
-        path_to_erlang_arg(&beam_paths.cowboy_ebin),
-        "-pa".to_string(),
-        path_to_erlang_arg(&beam_paths.cowlib_ebin),
-        "-pa".to_string(),
-        path_to_erlang_arg(&beam_paths.ranch_ebin),
     ];
+
+    let mut cmd = Command::new("erl");
+
+    // Add initial args, then BEAM code paths via the canonical beam_pa_args helper
+    // (same ordering as the foreground REPL startup).
+    cmd.args(&initial_args).args(beam_pa_args(beam_paths));
 
     // Add extra code paths (e.g. package ebin from auto-compile)
     for path in extra_code_paths {
-        args.push("-pa".to_string());
-        args.push(path_to_erlang_arg(path));
+        cmd.arg("-pa").arg(path_to_erlang_arg(path));
     }
 
     // Add TLS distribution args if configured (ADR 0020 Phase 2)
     if let Some(conf_path) = ssl_dist_optfile {
-        args.push("-proto_dist".to_string());
-        args.push("inet_tls".to_string());
-        args.push("-ssl_dist_optfile".to_string());
-        args.push(path_to_erlang_arg(conf_path));
+        cmd.arg("-proto_dist")
+            .arg("inet_tls")
+            .arg("-ssl_dist_optfile")
+            .arg(path_to_erlang_arg(conf_path));
     }
 
-    args.push("-eval".to_string());
-    args.push(eval_cmd.to_string());
-
-    let mut cmd = Command::new("erl");
+    cmd.arg("-eval").arg(eval_cmd);
 
     // Security: clear inherited environment, then allowlist only required vars (BT-726).
     // Prevents leaking AWS_*, DATABASE_URL, SSH_AUTH_SOCK, etc.
@@ -692,8 +679,7 @@ fn build_detached_node_command(
         }
     }
 
-    cmd.args(&args)
-        .current_dir(project_root)
+    cmd.current_dir(project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
