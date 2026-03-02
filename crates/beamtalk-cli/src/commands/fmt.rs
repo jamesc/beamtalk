@@ -9,6 +9,11 @@
 //! writes the formatted output back in-place. Files that are already formatted
 //! are left unchanged.
 //!
+//! `.btscript` files use **identity formatting**: only parse errors are
+//! reported; the file content is never rewritten. This preserves the
+//! `// => X` assertion comments that the btscript test runner expects on
+//! separate lines directly after each expression.
+//!
 //! `beamtalk fmt-check <path>...` performs the same parse/unparse pass but
 //! prints a unified diff for every file that would change and exits non-zero
 //! if any files need reformatting or could not be verified. No files are
@@ -16,7 +21,7 @@
 
 use std::collections::HashSet;
 
-use crate::commands::build::collect_source_files_from_dir;
+use crate::commands::build::collect_formattable_files_from_dir;
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_core::unparse::unparse_module;
 use camino::Utf8PathBuf;
@@ -38,15 +43,15 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
         let source_path = Utf8PathBuf::from(path);
 
         if source_path.is_file() {
-            if source_path.extension() == Some("bt") {
+            if matches!(source_path.extension(), Some("bt" | "btscript")) {
                 if seen.insert(source_path.clone()) {
                     source_files.push(source_path);
                 }
             } else {
-                miette::bail!("File '{}' is not a .bt source file", path);
+                miette::bail!("File '{}' is not a .bt or .btscript source file", path);
             }
         } else if source_path.is_dir() {
-            for file in collect_source_files_from_dir(&source_path)? {
+            for file in collect_formattable_files_from_dir(&source_path)? {
                 if seen.insert(file.clone()) {
                     source_files.push(file);
                 }
@@ -57,7 +62,7 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
     }
 
     if source_files.is_empty() {
-        miette::bail!("No .bt source files found");
+        miette::bail!("No .bt or .btscript source files found");
     }
 
     let mut changed_files: Vec<Utf8PathBuf> = Vec::new();
@@ -77,6 +82,14 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
         if has_errors {
             eprintln!("warning: skipping '{file}' (has parse errors)");
             skipped_files.push(file.clone());
+            continue;
+        }
+
+        // .btscript files use identity formatting — the `// => X` assertion
+        // comments must remain on separate lines for the btscript test runner
+        // (BT-1016). We only verify that the file parses without errors above;
+        // if it's valid, leave the file unchanged without running the unparser.
+        if file.extension() == Some("btscript") {
             continue;
         }
 
@@ -146,6 +159,16 @@ mod tests {
     fn write_temp_bt(content: &str) -> (tempfile::TempDir, Utf8PathBuf) {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("test.bt");
+        let mut f = std::fs::File::create(&path).expect("create temp file");
+        f.write_all(content.as_bytes()).expect("write temp file");
+        let utf8_path = Utf8PathBuf::from_path_buf(path).expect("utf8 path");
+        (dir, utf8_path)
+    }
+
+    /// Write `content` to a temp `.btscript` file and return (dir, path).
+    fn write_temp_btscript(content: &str) -> (tempfile::TempDir, Utf8PathBuf) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("test.btscript");
         let mut f = std::fs::File::create(&path).expect("create temp file");
         f.write_all(content.as_bytes()).expect("write temp file");
         let utf8_path = Utf8PathBuf::from_path_buf(path).expect("utf8 path");
@@ -280,6 +303,92 @@ mod tests {
         assert!(
             msg.contains("could not be checked"),
             "fmt-check must fail on parse errors; got: {msg:?}"
+        );
+    }
+
+    // --- .btscript file support (BT-1016) ---
+
+    #[test]
+    fn fmt_accepts_btscript_file() {
+        // beamtalk fmt must accept .btscript files without rejecting them.
+        let source = "3 + 4\n// => 7\n";
+        let (_dir, path) = write_temp_btscript(source);
+        let result = run_fmt_single(path.as_str(), false);
+        assert!(
+            result.is_ok(),
+            "fmt must accept .btscript files; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn fmt_rejects_non_bt_btscript_file() {
+        // A .txt file must still be rejected with a helpful error.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("test.txt");
+        std::fs::write(&path, "hello\n").expect("write");
+        let utf8_path = Utf8PathBuf::from_path_buf(path).expect("utf8 path");
+        let result = run_fmt_single(utf8_path.as_str(), false);
+        assert!(result.is_err(), "fmt must reject .txt files");
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains(".bt") || msg.contains("btscript"),
+            "error must mention .bt/.btscript; got: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn fmt_btscript_assertion_comments_preserved_idempotent() {
+        // .btscript files use identity formatting — the file is never rewritten,
+        // only checked for parse errors. Both passes must leave the file unchanged
+        // and pass1 must equal the original source (BT-1016).
+        let source = "3 + 4\n// => 7\n\n10 - 3\n// => 7\n";
+        let (_dir, path) = write_temp_btscript(source);
+
+        // Format once — file must not change (identity formatting).
+        run_fmt_single(path.as_str(), false).expect("fmt pass 1");
+        let pass1 = std::fs::read_to_string(path.as_std_path()).expect("read pass1");
+        assert_eq!(
+            pass1, source,
+            "first fmt pass must not change .btscript file content"
+        );
+
+        // Format again — must also not change.
+        let (_dir2, path2) = write_temp_btscript(&pass1);
+        run_fmt_single(path2.as_str(), false).expect("fmt pass 2");
+        let pass2 = std::fs::read_to_string(path2.as_std_path()).expect("read pass2");
+        assert_eq!(
+            pass1, pass2,
+            "formatter must be idempotent on .btscript files"
+        );
+        assert!(
+            pass1.contains("3 + 4\n// => 7"),
+            "assertion comment must remain directly after expression (no extra blank line); got: {pass1:?}"
+        );
+    }
+
+    #[test]
+    fn fmt_btscript_directory_scan_includes_btscript_files() {
+        // When pointing fmt at a directory, .btscript files must be included in
+        // the scan. To make inclusion observable: give the .btscript file a parse
+        // error and run fmt-check — if .btscript files are scanned, fmt-check
+        // must report a "could not be checked" failure; if they are silently
+        // ignored, fmt-check would succeed (false pass).
+        let dir = tempfile::tempdir().expect("temp dir");
+        let bt_path = dir.path().join("foo.bt");
+        let btscript_path = dir.path().join("bar.btscript");
+        // Valid .bt file — must not affect the outcome.
+        std::fs::write(&bt_path, "x := 1\n").expect("write bt");
+        // Intentionally invalid .btscript — triggers a parse error if scanned.
+        std::fs::write(&btscript_path, "@@@invalid syntax@@@\n").expect("write btscript");
+
+        let dir_str = Utf8PathBuf::from_path_buf(dir.path().to_path_buf())
+            .expect("utf8 path")
+            .to_string();
+        let result = run_fmt(&[dir_str], true);
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("could not be checked"),
+            "fmt-check must report parse error from .btscript file; got: {err_msg:?}"
         );
     }
 }
