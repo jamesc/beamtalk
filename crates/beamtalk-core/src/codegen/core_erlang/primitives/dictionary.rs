@@ -57,10 +57,10 @@ pub(crate) fn generate_dictionary_bif(
             let p0 = params.first().map_or("_Other", String::as_str);
             Some(docvec!["call 'maps':'merge'(Self, ", p0.to_string(), ")"])
         }
-        "keysAndValuesDo:" => {
+        "doWithKey:" => {
             let p0 = params.first().map_or("_Block", String::as_str);
             Some(docvec![
-                "call 'beamtalk_map_ops':'keys_and_values_do'(Self, ",
+                "call 'beamtalk_map_ops':'do_with_key'(Self, ",
                 p0.to_string(),
                 ")",
             ])
@@ -84,8 +84,6 @@ pub(crate) fn generate_dictionary_bif(
         "printString" => Some(Document::Str(
             "call 'beamtalk_map_ops':'print_string'(Self)",
         )),
-        // Streaming (BT-514)
-        "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
         _ => None,
     }
 }

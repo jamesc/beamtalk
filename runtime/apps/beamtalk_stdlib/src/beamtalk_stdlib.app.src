@@ -8,7 +8,6 @@
         {classes, [
             {'bt@stdlib@actor', 'Actor', 'Object'},
             {'bt@stdlib@array', 'Array', 'Collection'},
-            {'bt@stdlib@association', 'Association', 'Value'},
             {'bt@stdlib@beamerror', 'BEAMError', 'Error'},
             {'bt@stdlib@beamtalk_interface', 'BeamtalkInterface', 'Actor'},
             {'bt@stdlib@behaviour', 'Behaviour', 'Object'},

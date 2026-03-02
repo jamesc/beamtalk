@@ -193,14 +193,6 @@ ProtoObject subclass: Object
   sealed perform: selector: Symbol withArguments: args: List =>
     @intrinsic dynamicSendWithArgs
 
-  /// Create an Association (key-value pair) with the receiver as key.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// #name -> "Alice"
-  /// ```
-  -> value => @primitive "->"
-
   /// Raise an error indicating this method must be overridden by a subclass.
   ///
   /// ## Examples

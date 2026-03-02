@@ -6,7 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! Contains BIF generators for smaller primitive classes:
-//! `File`, `Exception`, `Symbol`, `Tuple`, `Object`, `Association`, `Set`,
+//! `File`, `Exception`, `Symbol`, `Tuple`, `Object`, `Set`,
 //! `CompiledMethod`, `TestCase`, `TestRunner`, `TestResult`, `Stream`,
 //! `StackFrame`, `JSON`, `Future`, `FileHandle`.
 
@@ -211,39 +211,14 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
     }
 }
 
-/// Object primitive implementations (BT-335).
+/// Object primitive implementations.
 ///
 /// Object is the root class — methods here are inherited by all objects.
-pub(crate) fn generate_object_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    match selector {
-        // Association creation: `self -> value` creates an Association tagged map
-        "->" => {
-            let p0 = params.first()?;
-            Some(docvec![
-                "~{'$beamtalk_class' => 'Association', 'key' => Self, 'value' => ",
-                p0.clone(),
-                "}~",
-            ])
-        }
-        _ => None,
-    }
-}
-
-/// Association primitive implementations (BT-335).
-///
-/// Associations are key-value pairs represented as tagged maps.
-pub(crate) fn generate_association_bif(
-    selector: &str,
+pub(crate) fn generate_object_bif(
+    _selector: &str,
     _params: &[String],
 ) -> Option<Document<'static>> {
-    match selector {
-        "key" => Some(Document::Str("call 'maps':'get'('key', Self)")),
-        "value" => Some(Document::Str("call 'maps':'get'('value', Self)")),
-        "asString" => Some(Document::Str(
-            "call 'beamtalk_association':'format_string'(Self)",
-        )),
-        _ => None,
-    }
+    None
 }
 
 /// Set primitive implementations (BT-73).

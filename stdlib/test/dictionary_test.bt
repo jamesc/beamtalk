@@ -62,17 +62,28 @@ TestCase subclass: DictionaryTest
     self assert: (d1 merge: d2) equals: #{#a => 1, #b => 20, #c => 3}
     self assert: ((#{#a => 1} merge: #{#a => 99}) at: #a) equals: 99
 
-  testKeysandvaluesdo =>
+  testDowithkey =>
     // Returns nil
-    self assert: (#{#a => 1} keysAndValuesDo: [:k :v | nil]) equals: nil
+    self assert: (#{#a => 1} doWithKey: [:k :v | nil]) equals: nil
     // Works for empty dictionary
-    self assert: (#{} keysAndValuesDo: [:k :v | nil]) equals: nil
+    self assert: (#{} doWithKey: [:k :v | nil]) equals: nil
     // Works for multi-entry dictionary
     self assert: (#{
       #a => 1,
       #b => 2
-    } keysAndValuesDo: [:k :v | nil]) equals: nil
+    } doWithKey: [:k :v | nil]) equals: nil
     // Block receives correct key (#a) and value (99) — raises if wrong values passed
+    self assert: (#{#a => 99} doWithKey: [:k :v |
+      (k =:= #a) ifFalse: [k error: "unexpected key"]
+      (v =:= 99) ifFalse: [v error: "unexpected value"]
+    ]) equals: nil
+
+  testKeysandvaluesdo =>
+    // keysAndValuesDo: delegates to doWithKey:
+    self assert: (#{#a => 1} keysAndValuesDo: [:k :v | nil]) equals: nil
+    // Works for empty dictionary
+    self assert: (#{} keysAndValuesDo: [:k :v | nil]) equals: nil
+    // Block receives correct key and value
     self assert: (#{#a => 99} keysAndValuesDo: [:k :v |
       (k =:= #a) ifFalse: [k error: "unexpected key"]
       (v =:= 99) ifFalse: [v error: "unexpected value"]

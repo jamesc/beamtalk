@@ -5,7 +5,7 @@
 ///
 /// Value types are lightweight, immutable objects that are passed by value
 /// rather than by reference. Examples include `Integer`, `String`, `Exception`,
-/// `Point`, `Association`, and other stdlib types.
+/// `Point`, and other stdlib types.
 ///
 /// ## Key Characteristics
 ///

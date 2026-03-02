@@ -1112,14 +1112,16 @@ Stream from: 1                     // 1, 2, 3, 4, ...
 // Infinite stream with custom step function
 Stream from: 1 by: [:n | n * 2]   // 1, 2, 4, 8, ...
 
-// Stream from a collection (List, String, Set, Dictionary)
+// Stream from a collection (List, String, Set)
 Stream on: #(1, 2, 3)             // wraps collection lazily
 
 // Collection shorthand — any collection responds to `stream`
 #(1, 2, 3) stream                  // same as Stream on: #(1, 2, 3)
 "hello" stream                     // Stream over characters
-#{#a => 1} stream                  // Stream over Associations
 (Set new add: 1) stream            // Stream over set elements
+
+// Dictionary iteration — use doWithKey: instead of stream
+#{#a => 1} doWithKey: [:k :v | Transcript show: k]
 
 // File streaming — lazy, constant memory
 File lines: "data.csv"            // Stream of lines

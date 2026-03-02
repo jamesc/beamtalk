@@ -134,10 +134,6 @@ pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
         // `Counter >> #increment` returns CompiledMethod object
         ">>" => Some(BindingPower::left_assoc(5)),
 
-        // Association creation (BT-335)
-        // `#name -> 'James'` creates an Association key-value pair
-        "->" => Some(BindingPower::left_assoc(8)),
-
         // Equality (ADR 0002: Erlang comparison operators)
         // `=:=` strict equality, `=/=` strict inequality
         // `/=` loose inequality, `==` loose equality

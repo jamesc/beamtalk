@@ -60,7 +60,6 @@ pub fn generate_primitive_bif(
         "List" => list::generate_list_bif(selector, params),
         "Dictionary" => dictionary::generate_dictionary_bif(selector, params),
         "Object" => misc::generate_object_bif(selector, params),
-        "Association" => misc::generate_association_bif(selector, params),
         "Set" => misc::generate_set_bif(selector, params),
         "CompiledMethod" => misc::generate_compiled_method_bif(selector, params),
         "Character" => character::generate_character_bif(selector, params),
