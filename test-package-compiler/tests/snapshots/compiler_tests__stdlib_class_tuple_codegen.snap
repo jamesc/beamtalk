@@ -148,7 +148,7 @@ call 'beamtalk_tuple_ops':'as_string'(Self)
         in _Reg0
 
     of RegResult -> RegResult
-    catch <CatchType, CatchError, CatchStack> -> 'ok'
+    catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 
 
 '__beamtalk_meta'/0 = fun () ->

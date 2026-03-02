@@ -241,6 +241,6 @@ module 'typed_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/
         in _Reg0
 
     of RegResult -> RegResult
-    catch <CatchType, CatchError, CatchStack> -> 'ok'
+    catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 
 end

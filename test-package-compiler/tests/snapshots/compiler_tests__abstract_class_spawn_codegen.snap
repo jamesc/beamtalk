@@ -153,6 +153,6 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
         in _Reg0
 
     of RegResult -> RegResult
-    catch <CatchType, CatchError, CatchStack> -> 'ok'
+    catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
 
 end
