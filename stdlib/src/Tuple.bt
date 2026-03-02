@@ -75,9 +75,7 @@ sealed typed Collection subclass: Tuple
     ] ifFalse: [
       self isError ifTrue: [
         self error: "Called unwrap on error tuple: {self at: 2}"
-      ] ifFalse: [
-        self error: "unwrap requires an ok or error result tuple"
-      ]
+      ] ifFalse: [self error: "unwrap requires an ok or error result tuple"]
     ]
 
   /// Extract the value from an `{'ok', Value}` tuple, or return `default` on error.
