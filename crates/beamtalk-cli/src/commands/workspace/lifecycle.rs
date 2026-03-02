@@ -10,6 +10,8 @@ use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use beamtalk_cli::repl_startup::BeamPaths;
+
 use miette::{IntoDiagnostic, Result, miette};
 use serde::Serialize;
 
@@ -77,16 +79,12 @@ pub fn create_workspace(
 
 /// Get or start a workspace node for the current directory.
 /// Returns (`NodeInfo`, bool) where bool indicates if a new node was started.
-#[allow(clippy::too_many_arguments)] // delegates to start_detached_node with same params
+#[allow(clippy::too_many_arguments)] // workspace startup requires many independent parameters
 pub fn get_or_start_workspace(
     project_path: &Path,
     workspace_name: Option<&str>,
     port: u16,
-    runtime_beam_dir: &Path,
-    repl_beam_dir: &Path,
-    jsx_beam_dir: &Path,
-    compiler_beam_dir: &Path,
-    stdlib_beam_dir: &Path,
+    beam_paths: &BeamPaths,
     extra_code_paths: &[PathBuf],
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
@@ -128,11 +126,7 @@ pub fn get_or_start_workspace(
     let node_info = start_detached_node(
         &workspace_id,
         port,
-        runtime_beam_dir,
-        repl_beam_dir,
-        jsx_beam_dir,
-        compiler_beam_dir,
-        stdlib_beam_dir,
+        beam_paths,
         extra_code_paths,
         auto_cleanup,
         max_idle_seconds,

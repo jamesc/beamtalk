@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use beamtalk_cli::repl_startup::BeamPaths;
+
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
@@ -220,16 +222,12 @@ pub fn tcp_send_shutdown(host: &str, port: u16, cookie: &str) -> Result<()> {
 
 /// Start a detached BEAM node for a workspace.
 /// Returns the `NodeInfo` for the started node.
-#[allow(clippy::too_many_arguments)] // BEAM node requires separate beam dirs per OTP app
+#[allow(clippy::too_many_arguments)] // workspace node startup requires many independent parameters
 #[allow(clippy::too_many_lines)] // eval command construction is necessarily verbose
 pub fn start_detached_node(
     workspace_id: &str,
     port: u16,
-    runtime_beam_dir: &Path,
-    repl_beam_dir: &Path,
-    jsx_beam_dir: &Path,
-    compiler_beam_dir: &Path,
-    stdlib_beam_dir: &Path,
+    beam_paths: &BeamPaths,
     extra_code_paths: &[PathBuf],
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
@@ -329,11 +327,7 @@ pub fn start_detached_node(
     let mut cmd = build_detached_node_command(
         &node_name,
         &cookie_args_file,
-        runtime_beam_dir,
-        repl_beam_dir,
-        jsx_beam_dir,
-        compiler_beam_dir,
-        stdlib_beam_dir,
+        beam_paths,
         extra_code_paths,
         &eval_cmd,
         &project_path,
@@ -596,15 +590,11 @@ fn write_cookie_args_file(workspace_id: &str, cookie: &str) -> Result<PathBuf> {
 ///   cookie is not visible in `ps aux` / `/proc/{pid}/cmdline`.
 /// - **Umask**: Set to 0077 on Unix so workspace files are owner-only.
 /// - **setsid**: Creates a new session on Unix for proper daemon detachment.
-#[allow(clippy::too_many_arguments)] // mirrors start_detached_node params for testability
+#[allow(clippy::too_many_lines)] // BEAM node command construction is necessarily verbose
 fn build_detached_node_command(
     node_name: &str,
     cookie_args_file: &Path,
-    runtime_beam_dir: &Path,
-    repl_beam_dir: &Path,
-    jsx_beam_dir: &Path,
-    compiler_beam_dir: &Path,
-    stdlib_beam_dir: &Path,
+    beam_paths: &BeamPaths,
     extra_code_paths: &[PathBuf],
     eval_cmd: &str,
     project_root: &Path,
@@ -628,15 +618,21 @@ fn build_detached_node_command(
         "-args_file".to_string(),
         path_to_erlang_arg(cookie_args_file),
         "-pa".to_string(),
-        path_to_erlang_arg(runtime_beam_dir),
+        path_to_erlang_arg(&beam_paths.runtime_ebin),
         "-pa".to_string(),
-        path_to_erlang_arg(repl_beam_dir),
+        path_to_erlang_arg(&beam_paths.workspace_ebin),
         "-pa".to_string(),
-        path_to_erlang_arg(jsx_beam_dir),
+        path_to_erlang_arg(&beam_paths.jsx_ebin),
         "-pa".to_string(),
-        path_to_erlang_arg(compiler_beam_dir),
+        path_to_erlang_arg(&beam_paths.compiler_ebin),
         "-pa".to_string(),
-        path_to_erlang_arg(stdlib_beam_dir),
+        path_to_erlang_arg(&beam_paths.stdlib_ebin),
+        "-pa".to_string(),
+        path_to_erlang_arg(&beam_paths.cowboy_ebin),
+        "-pa".to_string(),
+        path_to_erlang_arg(&beam_paths.cowlib_ebin),
+        "-pa".to_string(),
+        path_to_erlang_arg(&beam_paths.ranch_ebin),
     ];
 
     // Add extra code paths (e.g. package ebin from auto-compile)
@@ -916,14 +912,20 @@ mod tests {
         let tmp = std::env::temp_dir();
         let cookie_file = tmp.join("test_cookie_args");
         let beam_dir = tmp.join("test_beam");
+        let paths = beamtalk_cli::repl_startup::BeamPaths {
+            runtime_ebin: beam_dir.clone(),
+            workspace_ebin: beam_dir.clone(),
+            compiler_ebin: beam_dir.clone(),
+            jsx_ebin: beam_dir.clone(),
+            cowboy_ebin: beam_dir.clone(),
+            cowlib_ebin: beam_dir.clone(),
+            ranch_ebin: beam_dir.clone(),
+            stdlib_ebin: beam_dir.clone(),
+        };
         build_detached_node_command(
             "test_node@localhost",
             &cookie_file,
-            &beam_dir,
-            &beam_dir,
-            &beam_dir,
-            &beam_dir,
-            &beam_dir,
+            &paths,
             &[],
             "ok.",
             &tmp,
