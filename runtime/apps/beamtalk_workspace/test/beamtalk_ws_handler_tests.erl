@@ -98,6 +98,7 @@ multiple_subscribers_all_receive_class_loaded_test() ->
     try
         Sub1 = spawn(fun() ->
             beamtalk_class_events:subscribe(),
+            sys:get_state(ServerPid),
             Self ! sub1_subscribed,
             receive
                 {class_loaded, ClassName} -> Self ! {sub1_got, ClassName}
@@ -107,6 +108,7 @@ multiple_subscribers_all_receive_class_loaded_test() ->
         end),
         Sub2 = spawn(fun() ->
             beamtalk_class_events:subscribe(),
+            sys:get_state(ServerPid),
             Self ! sub2_subscribed,
             receive
                 {class_loaded, ClassName} -> Self ! {sub2_got, ClassName}
@@ -158,6 +160,7 @@ dead_subscriber_auto_removed_test() ->
     try
         SubPid = spawn(fun() ->
             beamtalk_class_events:subscribe(),
+            sys:get_state(ServerPid),
             Self ! subscribed,
             receive
                 stop -> ok
@@ -169,9 +172,17 @@ dead_subscriber_auto_removed_test() ->
         end,
         sys:get_state(ServerPid),
 
+        Ref = erlang:monitor(process, SubPid),
         exit(SubPid, kill),
-        timer:sleep(50),
-        sys:get_state(ServerPid),
+        receive
+            {'DOWN', Ref, process, SubPid, killed} -> ok
+        after 500 ->
+            ?assert(false)
+        end,
+        %% sys:get_state/1 serializes with the server, guaranteeing the DOWN
+        %% message has been processed and the subscriber removed.
+        {state, Subscribers} = sys:get_state(ServerPid),
+        ?assertNot(maps:is_key(SubPid, Subscribers)),
 
         %% Server should still be alive and functional after dead subscriber removed
         ?assert(is_process_alive(ServerPid)),
