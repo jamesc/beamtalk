@@ -98,7 +98,7 @@ fn test_cases_dir() -> PathBuf {
 /// Session name used for E2E test isolation.
 const E2E_SESSION_NAME: &str = "e2e-test";
 
-/// A test case parsed from a `.bt` file.
+/// A test case parsed from a `.btscript` file.
 #[derive(Debug)]
 struct TestCase {
     /// The expression to evaluate.
@@ -146,7 +146,7 @@ fn collect_continuation_lines(lines: &[&str], i: &mut usize, expression_lines: &
     }
 }
 
-/// Parse test cases from a `.bt` file.
+/// Parse test cases from a `.btscript` file.
 ///
 /// Test format:
 /// ```text
