@@ -81,7 +81,8 @@ pub fn unparse_method_display_signature(method: &MethodDefinition) -> String {
 /// Runs the full pipeline: lex → parse → error-check → unparse → ensure
 /// trailing newline. Returns `None` if the source has any `Severity::Error`
 /// diagnostic (formatting a broken file could corrupt it). Otherwise returns
-/// the formatted string with a guaranteed trailing newline.
+/// the formatted string, which is either empty or ends with a trailing
+/// newline.
 ///
 /// This function is idempotent: formatting an already-formatted string
 /// produces the same output.
