@@ -206,11 +206,18 @@ impl ReplClient {
     }
 
     /// Send a complete operation.
-    pub async fn complete(&self, code: &str) -> Result<ReplResponse, String> {
+    ///
+    /// `cursor` is the byte offset into `code` at which completion is requested.
+    /// Passing `code.len()` (end of input) is the standard default. The REPL
+    /// uses the presence of the `cursor` field to enable chain completion
+    /// (e.g. `"hello" size` → Integer methods); omitting it falls back to
+    /// bare-prefix completion only.
+    pub async fn complete(&self, code: &str, cursor: usize) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "complete",
             "id": next_msg_id(),
-            "code": code
+            "code": code,
+            "cursor": cursor
         });
         self.send(&request).await
     }
@@ -780,9 +787,27 @@ mod tests {
     async fn test_complete() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
-        let resp = client.complete("Integer ").await.unwrap();
+        let code = "Integer ";
+        let resp = client.complete(code, code.len()).await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.completions.is_some(), "should return completions list");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_complete_chain() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+        // Chain completion: "hello" size → should resolve to Integer methods
+        let code = "\"hello\" size ";
+        let resp = client.complete(code, code.len()).await.unwrap();
+        assert!(!resp.is_error());
+        let completions = resp.completions.unwrap_or_default();
+        assert!(
+            completions.iter().any(|c| c == "abs"),
+            "chain completions should include Integer method 'abs': {completions:?}"
+        );
         Ok(())
     }
 

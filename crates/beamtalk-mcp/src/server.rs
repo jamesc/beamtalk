@@ -55,6 +55,12 @@ pub struct CompleteParams {
     /// Partial input to complete.
     #[schemars(description = "Partial beamtalk input to get completions for")]
     pub code: String,
+    /// Cursor position (byte offset). Defaults to end of `code` if absent.
+    /// When present, enables chain completion (e.g. `\"hello\" size` → Integer methods).
+    #[schemars(
+        description = "Cursor position as byte offset into code. Omit to use end of input."
+    )]
+    pub cursor: Option<usize>,
 }
 
 /// Parameters for the `load_file` MCP tool.
@@ -174,9 +180,10 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<CompleteParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let cursor = params.cursor.unwrap_or(params.code.len());
         let response = self
             .client
-            .complete(&params.code)
+            .complete(&params.code, cursor)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
