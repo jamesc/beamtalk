@@ -238,14 +238,49 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                 Result ->
                     {reply, {ok, Result}, ClassVars}
             catch
-                Class:Error:ST ->
+                error:undef:ST ->
+                    case is_dispatch_undef(DefiningModule, FunName, ST) of
+                        {true, module_not_loaded} ->
+                            Hint = iolist_to_binary(
+                                io_lib:format(
+                                    "Class '~s' is not registered — the module '~s' may have failed to load",
+                                    [ClassName, DefiningModule]
+                                )
+                            ),
+                            Error = beamtalk_error:new(class_not_found, ClassName, Selector, Hint),
+                            {reply, {error, Error}, ClassVars};
+                        {true, method_not_found} ->
+                            Hint = iolist_to_binary(
+                                io_lib:format(
+                                    "Class method '~s' not found on '~s' (arity mismatch or undefined selector)",
+                                    [Selector, ClassName]
+                                )
+                            ),
+                            Error = beamtalk_error:new(
+                                does_not_understand, ClassName, Selector, Hint
+                            ),
+                            {reply, {error, Error}, ClassVars};
+                        false ->
+                            %% undef was raised inside the method body, not at dispatch.
+                            ?LOG_ERROR(
+                                "Class method ~p:~p raised undef internally: ~p",
+                                [ClassName, Selector, ST],
+                                #{
+                                    class => ClassName,
+                                    selector => Selector,
+                                    stacktrace => ST
+                                }
+                            ),
+                            {reply, {error, undef}, ClassVars}
+                    end;
+                ErrClass:Error:ST ->
                     ?LOG_ERROR(
                         "Class method ~p:~p failed: ~p:~p",
-                        [ClassName, Selector, Class, Error],
+                        [ClassName, Selector, ErrClass, Error],
                         #{
                             class => ClassName,
                             selector => Selector,
-                            error_class => Class,
+                            error_class => ErrClass,
                             error => Error,
                             stacktrace => ST
                         }
@@ -391,6 +426,29 @@ handle_async_dispatch({Selector, Args, FuturePid}, ClassName, InstanceMethods, S
     ok;
 handle_async_dispatch(_Msg, _ClassName, _InstanceMethods, _Superclass, _Module) ->
     ok.
+
+%% @private
+%% @doc Classify an `undef` error as either a dispatch-level failure or one
+%% raised from inside the method body.
+%%
+%% When `erlang:apply(Module, Fun, Args)` is called and Module:Fun/Arity does
+%% not exist, the top stacktrace frame is `{Module, Fun, ActualArgs, []}`.
+%% If the undef originated from code inside the method, the top frame belongs
+%% to some other module/function.
+%%
+%% Returns:
+%%   `{true, module_not_loaded}` — Module is not loaded; class failed to load.
+%%   `{true, method_not_found}`  — Module is loaded but Fun/Arity is not exported.
+%%   `false`                     — undef was raised from inside the method body.
+-spec is_dispatch_undef(atom(), atom(), list()) ->
+    {true, module_not_loaded | method_not_found} | false.
+is_dispatch_undef(Module, FunName, [{Module, FunName, _, _} | _]) ->
+    case code:is_loaded(Module) of
+        false -> {true, module_not_loaded};
+        _ -> {true, method_not_found}
+    end;
+is_dispatch_undef(_Module, _FunName, _ST) ->
+    false.
 
 %%% ============================================================================
 %%% Internal Functions — BT-893 (Self-Instantiation)
