@@ -195,10 +195,7 @@ impl Parser {
                             Some(TokenKind::Identifier(name)) if name == "class" => {
                                 // Check it's not `class => ...` or `class -> Type => ...`
                                 // (method named "class", possibly with a return type annotation)
-                                let is_class_as_method_name =
-                                    matches!(self.peek_at(offset + 1), Some(TokenKind::FatArrow))
-                                        || self.is_return_type_then_fat_arrow(offset + 1);
-                                if !is_class_as_method_name {
+                                if !self.is_fat_arrow_or_return_type(offset + 1) {
                                     found = true;
                                 }
                                 break;
@@ -249,9 +246,7 @@ impl Parser {
             } else if name == "class" {
                 // Only treat as modifier if next token is not `=>` or `-> Type =>`
                 // (i.e., not a method named "class", possibly with a return type)
-                if matches!(self.peek_at(offset + 1), Some(TokenKind::FatArrow))
-                    || self.is_return_type_then_fat_arrow(offset + 1)
-                {
+                if self.is_fat_arrow_or_return_type(offset + 1) {
                     break;
                 }
                 offset += 1;
@@ -288,6 +283,16 @@ impl Parser {
             Some(TokenKind::Keyword(_)) => self.is_keyword_method_at(offset),
             _ => false,
         }
+    }
+
+    /// Checks if the token at `offset` starts a `=>` or `-> Type =>` pattern.
+    ///
+    /// Used to detect `class` as a method name (not a modifier) at three sites:
+    /// `is_class_method` in `parse_class_body`, `is_at_method_definition`, and
+    /// `parse_method_definition`.
+    fn is_fat_arrow_or_return_type(&self, offset: usize) -> bool {
+        matches!(self.peek_at(offset), Some(TokenKind::FatArrow))
+            || self.is_return_type_then_fat_arrow(offset)
     }
 
     /// Checks if there's a `-> Type =>` or `-> Type | Type =>` pattern at the given offset.
@@ -620,9 +625,7 @@ impl Parser {
                 "class" => {
                     // Only treat as modifier if next token is not `=>` or `-> Type =>`
                     // (otherwise it's a method named `class`, possibly with a return type)
-                    if matches!(self.peek_at(1), Some(TokenKind::FatArrow))
-                        || self.is_return_type_then_fat_arrow(1)
-                    {
+                    if self.is_fat_arrow_or_return_type(1) {
                         break;
                     }
                     _is_class_method = true;

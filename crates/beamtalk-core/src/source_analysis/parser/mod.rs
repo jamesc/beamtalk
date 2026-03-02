@@ -2480,16 +2480,17 @@ mod tests {
         let method = &class.methods[0];
         assert_eq!(method.selector.name(), "class");
         assert!(method.parameters.is_empty(), "unary method has no params");
-        assert!(
-            method.return_type.is_some(),
-            "should have return type annotation"
-        );
+        match method.return_type.as_ref() {
+            Some(crate::ast::TypeAnnotation::Simple(id)) => assert_eq!(id.name, "Metaclass"),
+            other => panic!("expected return type Metaclass, got: {other:?}"),
+        }
         assert!(method.is_sealed);
     }
 
     #[test]
     fn parse_sealed_method_named_class_with_return_type() {
-        // Ensure `sealed class -> Type =>` also works (modifier before method name)
+        // Ensure a method named `class -> Type` and a `class`-side keyword method
+        // (`class withValue:`) can coexist in the same class body.
         let module = parse_ok(
             "Object subclass: Foo
   sealed class -> Metaclass => @primitive classClass
