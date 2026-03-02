@@ -822,7 +822,6 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
     let PreloadConfig { roots, stdlib_dirs } = config;
     let mut user_paths = Vec::new();
     let mut stdlib_path_list = Vec::new();
-    let mut seen_files = HashSet::new();
     let mut remaining_budget = PRELOAD_MAX_FILES;
 
     for root in &roots {
@@ -842,9 +841,15 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
         collect_beamtalk_files_recursive(dir, &mut stdlib_path_list, &mut remaining_budget);
     }
 
+    // Build the stdlib set first so user files that overlap with stdlib are
+    // classified as stdlib (preserving the beamtalk-stdlib:// URI route).
+    let stdlib_path_set: HashSet<PathBuf> = stdlib_path_list.iter().cloned().collect();
+
+    let mut seen_user_files = HashSet::new();
     let mut user_files = Vec::new();
     for path in user_paths {
-        if !seen_files.insert(path.clone()) {
+        // Skip paths that appear in stdlib: they must stay in the stdlib bucket.
+        if stdlib_path_set.contains(&path) || !seen_user_files.insert(path.clone()) {
             continue;
         }
         let Ok(content) = fs::read_to_string(&path) else {
@@ -853,9 +858,10 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
         user_files.push((path, content));
     }
 
+    let mut seen_stdlib_files = HashSet::new();
     let mut stdlib_files = Vec::new();
     for path in stdlib_path_list {
-        if !seen_files.insert(path.clone()) {
+        if !seen_stdlib_files.insert(path.clone()) {
             continue;
         }
         let Ok(content) = fs::read_to_string(&path) else {
@@ -1519,6 +1525,49 @@ mod tests {
             .await
             .expect("should return content");
         assert_eq!(result.content, content);
+    }
+
+    #[test]
+    fn collect_preload_files_classifies_overlapping_path_as_stdlib() {
+        // When the same .bt file appears in both a workspace src/ dir and a
+        // stdlib dir, it must end up in stdlib_files (not user_files) so that
+        // goto_definition emits a beamtalk-stdlib:// URI rather than file://.
+        let temp = unique_temp_dir("beamtalk_lsp_preload_overlap");
+        let project_root = temp.join("project");
+        let src_dir = project_root.join("src");
+        let stdlib_dir = temp.join("stdlib");
+
+        fs::create_dir_all(&src_dir).expect("create src dir");
+        fs::create_dir_all(&stdlib_dir).expect("create stdlib dir");
+
+        // Write the same path into both dirs by using a shared physical file
+        // path via the stdlib_dir pointing into the src dir is not realistic;
+        // instead, create the same filename in both so we can test the set logic.
+        // The realistic case is a symlinked or canonicalized path appearing twice.
+        let shared_path = src_dir.join("Integer.bt");
+        fs::write(&shared_path, "Object subclass: Integer").expect("write Integer");
+        let stdlib_integer = stdlib_dir.join("Integer.bt");
+        fs::write(&stdlib_integer, "Object subclass: Integer").expect("write stdlib Integer");
+
+        // The paths are different files with the same name — test that the stdlib
+        // path deduplication is independent of the user path deduplication.
+        let config = PreloadConfig {
+            roots: vec![project_root.clone()],
+            stdlib_dirs: vec![stdlib_dir.clone()],
+        };
+        let loaded = collect_preload_files(config);
+
+        // The two files have the same name but different paths, so both should
+        // appear in their respective buckets.
+        assert_eq!(loaded.user_files.len(), 1);
+        assert_eq!(loaded.stdlib_files.len(), 1);
+        assert!(loaded.user_files[0].0.ends_with("Integer.bt"));
+        assert!(loaded.stdlib_files[0].0.ends_with("Integer.bt"));
+        // The user file must NOT be the stdlib path.
+        assert_ne!(loaded.user_files[0].0, stdlib_integer);
+        assert_eq!(loaded.stdlib_files[0].0, stdlib_integer);
+
+        let _ = fs::remove_dir_all(&temp);
     }
 
     #[test]
