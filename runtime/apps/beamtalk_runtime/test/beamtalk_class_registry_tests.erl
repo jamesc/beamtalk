@@ -276,6 +276,97 @@ all_classes_test() ->
     ?assert(is_list(Result)).
 
 %%% ============================================================================
+%%% get_method_return_type / get_class_method_return_type tests (BT-1002)
+%%% ============================================================================
+
+get_method_return_type_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pg_started(),
+            beamtalk_class_registry:ensure_hierarchy_table(),
+            Saved = ets:tab2list(beamtalk_class_hierarchy),
+            ets:delete_all_objects(beamtalk_class_hierarchy),
+            %% Create a simple hierarchy: Child -> Parent -> Object
+            {ok, ObjPid} = beamtalk_object_class:start('TestObject1002', #{
+                superclass => none,
+                method_return_types => #{getValue => 'Integer'}
+            }),
+            ets:insert(beamtalk_class_hierarchy, {'TestObject1002', none}),
+            {ok, ParentPid} = beamtalk_object_class:start('TestParent1002', #{
+                superclass => 'TestObject1002',
+                method_return_types => #{name => 'String'},
+                class_method_return_types => #{'from:' => 'TestParent1002'}
+            }),
+            ets:insert(beamtalk_class_hierarchy, {'TestParent1002', 'TestObject1002'}),
+            {ok, ChildPid} = beamtalk_object_class:start('TestChild1002', #{
+                superclass => 'TestParent1002',
+                method_return_types => #{size => 'Integer'}
+            }),
+            ets:insert(beamtalk_class_hierarchy, {'TestChild1002', 'TestParent1002'}),
+            {Saved, [ObjPid, ParentPid, ChildPid]}
+        end,
+        fun({Saved, Pids}) ->
+            lists:foreach(
+                fun(Pid) ->
+                    catch gen_server:stop(Pid)
+                end,
+                Pids
+            ),
+            ets:delete_all_objects(beamtalk_class_hierarchy),
+            ets:insert(beamtalk_class_hierarchy, Saved)
+        end,
+        [
+            {"local hit", fun() ->
+                ?assertEqual(
+                    {ok, 'Integer'},
+                    beamtalk_class_registry:get_method_return_type('TestChild1002', size)
+                )
+            end},
+            {"superclass chain hit", fun() ->
+                ?assertEqual(
+                    {ok, 'String'},
+                    beamtalk_class_registry:get_method_return_type('TestChild1002', name)
+                )
+            end},
+            {"grandparent chain hit", fun() ->
+                ?assertEqual(
+                    {ok, 'Integer'},
+                    beamtalk_class_registry:get_method_return_type('TestChild1002', getValue)
+                )
+            end},
+            {"not found anywhere", fun() ->
+                ?assertEqual(
+                    {error, not_found},
+                    beamtalk_class_registry:get_method_return_type('TestChild1002', unknown)
+                )
+            end},
+            {"none class", fun() ->
+                ?assertEqual(
+                    {error, not_found},
+                    beamtalk_class_registry:get_method_return_type(none, size)
+                )
+            end},
+            {"unknown class", fun() ->
+                ?assertEqual(
+                    {error, not_found},
+                    beamtalk_class_registry:get_method_return_type('NoSuchClass1002', size)
+                )
+            end},
+            {"class method chain hit", fun() ->
+                ?assertEqual(
+                    {ok, 'TestParent1002'},
+                    beamtalk_class_registry:get_class_method_return_type('TestChild1002', 'from:')
+                )
+            end},
+            {"class method not found", fun() ->
+                ?assertEqual(
+                    {error, not_found},
+                    beamtalk_class_registry:get_class_method_return_type('TestChild1002', unknown)
+                )
+            end}
+        ]}.
+
+%%% ============================================================================
 %%% ADR 0032 Phase 1: invalidate_subclass_flattened_tables removed
 %%% ============================================================================
 %% The rebuild broadcast (invalidate_subclass_flattened_tables) was removed in

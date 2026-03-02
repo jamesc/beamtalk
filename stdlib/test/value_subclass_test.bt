@@ -5,6 +5,10 @@
 // Exercises: getters, with*: functional setters, keyword constructor, new, new:
 // BT-924: Reflection tests — fieldAt: reads slots, fieldNames returns slot names,
 //         fieldAt:put: raises immutable_value
+// BT-996: Class method using ClassName slot: value routes to keyword constructor
+//
+// Fixtures: stdlib/test/fixtures/value_point.bt (ValuePoint)
+//           stdlib/test/fixtures/tagged_value.bt (TaggedValue — BT-996)
 
 TestCase subclass: ValueSubclassTest
 
@@ -73,3 +77,13 @@ TestCase subclass: ValueSubclassTest
   testFieldAtPutRaisesImmutableValue =>
     p := ValuePoint x: 1 y: 2
     self should: [p fieldAt: #x put: 99] raise: #immutable_value
+
+  // BT-996: `ClassName slot: value` inside a class method must route to the class-side
+  // keyword constructor, not the instance getter. Without the fix this caused {badmap}.
+  testClassMethodSlotSendRoutesToConstructor =>
+    v := TaggedValue fromTag: "hello"
+    self assert: v tag equals: "hello"
+
+  testClassMethodSlotSendClassIsCorrect =>
+    v := TaggedValue fromTag: "world"
+    self assert: v class equals: TaggedValue

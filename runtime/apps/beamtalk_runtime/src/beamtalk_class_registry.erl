@@ -43,7 +43,9 @@
     class_object_tag/1,
     is_class_object/1,
     is_class_name/1,
-    class_display_name/1
+    class_display_name/1,
+    get_method_return_type/2,
+    get_class_method_return_type/2
 ]).
 
 -type class_name() :: atom().
@@ -355,4 +357,89 @@ class_display_name(ClassName) when is_atom(ClassName) ->
     case Size >= 0 andalso binary:part(ClassBin, Size, 6) =:= <<" class">> of
         true -> binary:part(ClassBin, 0, Size);
         false -> ClassBin
+    end.
+
+%%====================================================================
+%% Return-Type Lookup (BT-1002 / ADR 0045)
+%%====================================================================
+
+%% @doc Look up the return type for an instance method, walking the superclass chain.
+%%
+%% Returns `{ok, TypeAtom}` if the method has a Simple return-type annotation anywhere
+%% in the hierarchy, or `{error, not_found}` if none is found.
+%%
+%% Absence means "dynamic" — the REPL should not rely on a specific type.
+%% Chain walking follows the same superclass order as method dispatch.
+-spec get_method_return_type(atom(), atom()) -> {ok, atom()} | {error, not_found}.
+get_method_return_type(none, _Selector) ->
+    {error, not_found};
+get_method_return_type(ClassName, Selector) ->
+    case whereis_class(ClassName) of
+        undefined ->
+            {error, not_found};
+        Pid ->
+            Result =
+                try
+                    gen_server:call(Pid, {get_method_return_type, Selector}, 5000)
+                catch
+                    exit:{timeout, _} -> not_found;
+                    exit:{noproc, _} -> not_found;
+                    exit:{normal, _} -> not_found;
+                    exit:{shutdown, _} -> not_found;
+                    exit:{{shutdown, _}, _} -> not_found
+                end,
+            case Result of
+                {ok, _} = Found ->
+                    Found;
+                not_found ->
+                    %% Walk to superclass using the ETS hierarchy table.
+                    case ets:info(beamtalk_class_hierarchy) of
+                        undefined ->
+                            {error, not_found};
+                        _ ->
+                            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
+                                [{_, Super}] -> get_method_return_type(Super, Selector);
+                                [] -> {error, not_found}
+                            end
+                    end
+            end
+    end.
+
+%% @doc Look up the return type for a class-side method, walking the superclass chain.
+%%
+%% Same semantics as `get_method_return_type/2` but consults `class_method_return_types`.
+-spec get_class_method_return_type(atom(), atom()) -> {ok, atom()} | {error, not_found}.
+get_class_method_return_type(none, _Selector) ->
+    {error, not_found};
+get_class_method_return_type(ClassName, Selector) ->
+    case whereis_class(ClassName) of
+        undefined ->
+            {error, not_found};
+        Pid ->
+            Result =
+                try
+                    gen_server:call(Pid, {get_class_method_return_type, Selector}, 5000)
+                catch
+                    exit:{timeout, _} -> not_found;
+                    exit:{noproc, _} -> not_found;
+                    exit:{normal, _} -> not_found;
+                    exit:{shutdown, _} -> not_found;
+                    exit:{{shutdown, _}, _} -> not_found
+                end,
+            case Result of
+                {ok, _} = Found ->
+                    Found;
+                not_found ->
+                    case ets:info(beamtalk_class_hierarchy) of
+                        undefined ->
+                            {error, not_found};
+                        _ ->
+                            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
+                                [{_, Super}] ->
+                                    get_class_method_return_type(Super, Selector);
+                                [] ->
+                                    {error, not_found}
+                            end
+                    end
+            end
     end.

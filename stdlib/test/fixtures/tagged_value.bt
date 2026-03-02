@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TaggedValue — BT-996 fixture: single-slot Value subclass whose factory method
+// uses `ClassName slot: value` syntax inside a class method body.
+//
+// This exercises the BT-996 bug fix: `TaggedValue tag: t` inside `class fromTag:` must
+// dispatch to the class-side keyword constructor `class_tag:/3`, not the instance getter.
+
+Value subclass: TaggedValue
+  state: tag = ""
+
+  class fromTag: t => TaggedValue tag: t

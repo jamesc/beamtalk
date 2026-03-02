@@ -3080,6 +3080,12 @@ fn test_class_registration_generation() {
 
     // Check function returns ok
     assert!(code.contains("'ok'"), "Should return 'ok'. Got:\n{code}");
+
+    // BT-998: catch clause must re-raise, not silently swallow errors
+    assert!(
+        code.contains("catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)"),
+        "register_class/0 catch clause must re-raise via primop 'raw_raise' (BT-998). Got:\n{code}"
+    );
 }
 
 #[test]
@@ -5600,6 +5606,99 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
     assert!(
         !has_keyword_ctor,
         "No keyword constructor should be generated for empty Value subclass. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
+    // BT-996: `ClassName slot: value` inside a class method of the same class must
+    // route to the auto-generated class-side keyword constructor, not the instance getter.
+    //
+    // Equivalent Beamtalk:
+    //   Value subclass: SchemeSymbol
+    //     state: symName = ""
+    //     class withName: n => SchemeSymbol symName: n
+    //
+    // The generated `class_withName:/3` body should call `class_symName:` (constructor),
+    // NOT `symName` (instance getter).
+    let class = ClassDefinition {
+        name: Identifier::new("SchemeSymbol", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Value", Span::new(0, 0))),
+        class_kind: ClassKind::Value,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        state: vec![StateDeclaration {
+            name: Identifier::new("symName", Span::new(0, 0)),
+            type_annotation: None,
+            default_value: Some(Expression::Literal(
+                Literal::String("".into()),
+                Span::new(0, 0),
+            )),
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: Span::new(0, 0),
+        }],
+        methods: vec![],
+        class_methods: vec![MethodDefinition {
+            selector: MessageSelector::Keyword(vec![KeywordPart::new(
+                "withName:",
+                Span::new(0, 0),
+            )]),
+            parameters: vec![ParameterDefinition::new(Identifier::new(
+                "n",
+                Span::new(0, 0),
+            ))],
+            body: vec![bare(Expression::MessageSend {
+                receiver: Box::new(Expression::ClassReference {
+                    name: Identifier::new("SchemeSymbol", Span::new(0, 0)),
+                    span: Span::new(0, 0),
+                }),
+                selector: MessageSelector::Keyword(vec![KeywordPart::new(
+                    "symName:",
+                    Span::new(0, 0),
+                )]),
+                arguments: vec![Expression::Identifier(Identifier::new(
+                    "n",
+                    Span::new(0, 0),
+                ))],
+                is_cast: false,
+                span: Span::new(0, 0),
+            })],
+            return_type: None,
+            is_sealed: false,
+            kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: Span::new(0, 0),
+        }],
+        class_variables: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: Span::new(0, 0),
+    };
+    let module = Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+    let result = generate_module(&module, CodegenOptions::new("bt@scheme_symbol"));
+    let code = result.unwrap();
+
+    // Must call the class-side keyword constructor from within class_withName:
+    assert!(
+        code.contains("call 'bt@scheme_symbol':'class_symName:'(ClassSelf, ClassVars,"),
+        "class_withName: should dispatch to class_symName: constructor. Got:\n{code}"
+    );
+    // The class_withName: body must not call the instance getter (symName/1) passing n as self.
+    // (Note: `symName` legitimately appears in dispatch/3 for the instance getter arm — correct.)
+    assert!(
+        !code.contains("call 'bt@scheme_symbol':'symName'(ClassSelf")
+            && !code.contains("call 'bt@scheme_symbol':'symName'(_n"),
+        "class_withName: body must not call instance getter symName/1. Got:\n{code}"
     );
 }
 

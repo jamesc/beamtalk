@@ -12,7 +12,7 @@ use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
     Block, ClassDefinition, ClassKind, Expression, Literal, MessageSelector, MethodDefinition,
-    MethodKind, Module,
+    MethodKind, Module, TypeAnnotation,
 };
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
@@ -985,9 +985,9 @@ impl CoreErlangGenerator {
     /// This routes all compiled class registration through the `ClassBuilder`
     /// protocol, which handles both first registration and hot reload.
     ///
-    /// The function is defensive — if `beamtalk_class_builder` is not available
-    /// (e.g., during early module loading), the try/catch returns `ok` to allow
-    /// the module to load.
+    /// If `beamtalk_class_builder:register/1` raises, the exception is re-raised
+    /// via `primop 'raw_raise'` so the BEAM `-on_load` mechanism reports a visible
+    /// load failure rather than silently succeeding with an unregistered class (BT-998).
     ///
     /// # Generated Code
     ///
@@ -1007,7 +1007,9 @@ impl CoreErlangGenerator {
     ///             <{'error', _Err0}> when 'true' -> {'error', _Err0}
     ///         end
     ///         in _Reg0
-    ///     catch <_,_,_> -> 'ok'
+    ///     of RegResult -> RegResult
+    ///     catch <CatchType, CatchError, CatchStack> ->
+    ///         primop 'raw_raise'(CatchType, CatchError, CatchStack)
     /// ```
     #[allow(clippy::too_many_lines)] // builds class metadata map with methods, fields, and source
     pub(in crate::codegen::core_erlang) fn generate_register_class(
@@ -1219,6 +1221,47 @@ impl CoreErlangGenerator {
             }
             let class_method_sigs_doc = Document::Vec(class_method_sig_docs);
 
+            // BT-1002 / ADR 0045: Instance method return-type map (Simple annotations only).
+            // Selectors with None or non-Simple return type are omitted (absence = dynamic).
+            let mut method_return_type_docs: Vec<Document<'static>> = Vec::new();
+            for method in &instance_methods {
+                if let Some(TypeAnnotation::Simple(id)) = &method.return_type {
+                    if !method_return_type_docs.is_empty() {
+                        method_return_type_docs.push(Document::Str(", "));
+                    }
+                    method_return_type_docs.push(docvec![
+                        "'",
+                        Document::String(method.selector.name().to_string()),
+                        "' => '",
+                        Document::String(id.name.to_string()),
+                        "'"
+                    ]);
+                }
+            }
+            let method_return_types_doc = Document::Vec(method_return_type_docs);
+
+            // BT-1002 / ADR 0045: Class-side method return-type map (Simple annotations only).
+            let mut class_method_return_type_docs: Vec<Document<'static>> = Vec::new();
+            for method in class
+                .class_methods
+                .iter()
+                .filter(|m| m.kind == MethodKind::Primary)
+            {
+                if let Some(TypeAnnotation::Simple(id)) = &method.return_type {
+                    if !class_method_return_type_docs.is_empty() {
+                        class_method_return_type_docs.push(Document::Str(", "));
+                    }
+                    class_method_return_type_docs.push(docvec![
+                        "'",
+                        Document::String(method.selector.name().to_string()),
+                        "' => '",
+                        Document::String(id.name.to_string()),
+                        "'"
+                    ]);
+                }
+            }
+            let class_method_return_types_doc = Document::Vec(class_method_return_type_docs);
+
             // BT-412: Class variable initial values
             let mut class_var_parts: Vec<Document<'static>> = Vec::new();
             for (cv_idx, cv) in class.class_variables.iter().enumerate() {
@@ -1328,6 +1371,14 @@ impl CoreErlangGenerator {
                         class_method_sigs_doc,
                         "}~,",
                         line(),
+                        "'methodReturnTypes' => ~{",
+                        method_return_types_doc,
+                        "}~,",
+                        line(),
+                        "'classMethodReturnTypes' => ~{",
+                        class_method_return_types_doc,
+                        "}~,",
+                        line(),
                         "'classState' => ~{",
                         class_vars_doc,
                         "}~,",
@@ -1430,7 +1481,7 @@ impl CoreErlangGenerator {
                     line(),
                     "of RegResult -> RegResult",
                     line(),
-                    "catch <CatchType, CatchError, CatchStack> -> 'ok'",
+                    "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
                 ]
             ),
             "\n\n",
@@ -1474,6 +1525,13 @@ impl CoreErlangGenerator {
             .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| m.selector.to_erlang_atom())
             .collect();
+
+        // BT-996: Populate auto-generated keyword constructor selector for Value subclass: classes.
+        // This allows `ClassName slot: value` inside a class method to route to the correct
+        // class-side constructor instead of falling through to the instance-side getter.
+        self.class_slot_constructor_selector =
+            crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class)
+                .and_then(|auto| auto.keyword_constructor);
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
@@ -1543,6 +1601,7 @@ impl CoreErlangGenerator {
         }
         self.class_var_names.clear();
         self.class_method_selectors.clear();
+        self.class_slot_constructor_selector = None;
         Ok(Document::Vec(docs))
     }
 
