@@ -57,7 +57,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// counter stop   // => ok
   /// ```
-  sealed stop => @primitive "actorStop"
+  sealed stop -> Nil => @primitive "actorStop"
 
   /// Forcefully kill this actor (exit(Pid, kill)).
   ///
@@ -67,7 +67,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// counter kill   // => ok
   /// ```
-  sealed kill => @primitive "actorKill"
+  sealed kill -> Nil => @primitive "actorKill"
 
   /// Check if this actor's process is still alive.
   ///

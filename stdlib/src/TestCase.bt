@@ -96,3 +96,19 @@ Object subclass: TestCase
   /// self fail: "This branch should not be reached"
   /// ```
   fail: message: String -> Nil => @primitive "fail:"
+
+  /// Run all test methods in this class and print a summary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// CounterTest runAll     // prints results to transcript
+  /// ```
+  class runAll -> TestResult => @primitive "runAll"
+
+  /// Run the named test method in this class and print a summary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// CounterTest run: #testIncrement
+  /// ```
+  class run: testName -> TestResult => @primitive "run:"
