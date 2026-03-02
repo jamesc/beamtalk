@@ -5,60 +5,38 @@
 //!
 //! **DDD Context:** Language Service / Interactive Development
 //!
-//! Mirrors the logic in `beamtalk-cli` for workspace ID generation
-//! and port file reading.
+//! Delegates workspace ID generation and file I/O to `beamtalk-workspace`.
 
-use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Generate a workspace ID from a project path (SHA256 hex, first 12 chars).
-pub fn generate_workspace_id(path: &Path) -> String {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let mut hasher = Sha256::new();
-    hasher.update(canonical.to_string_lossy().as_bytes());
-    let result = hasher.finalize();
-    hex_encode(&result[..6])
-}
-
-/// Get the workspaces directory: `~/.beamtalk/workspaces/`.
-fn workspaces_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".beamtalk").join("workspaces"))
-}
-
-/// Get the directory for a specific workspace.
 ///
-/// Validates the workspace ID to prevent path traversal attacks.
-fn workspace_dir(workspace_id: &str) -> Option<PathBuf> {
-    // Reject path traversal components
-    if workspace_id.contains('/')
-        || workspace_id.contains('\\')
-        || workspace_id.contains("..")
-        || workspace_id.is_empty()
-    {
-        return None;
-    }
-    workspaces_dir().map(|d| d.join(workspace_id))
+/// Returns `None` if the path cannot be canonicalized or contains non-UTF-8 bytes.
+pub fn generate_workspace_id(path: &Path) -> Option<String> {
+    beamtalk_workspace::generate_workspace_id(path)
+        .inspect_err(|err| {
+            tracing::warn!(
+                "Failed to generate workspace ID for {}: {err}",
+                path.display()
+            );
+        })
+        .ok()
 }
 
 /// Read the port file for a workspace.
 /// Port file format (BT-611): `PORT\nNONCE` (two lines). Only the port is returned.
 pub fn read_port_file(workspace_id: &str) -> Option<u16> {
-    let port_file = workspace_dir(workspace_id)?.join("port");
-    let content = std::fs::read_to_string(port_file).ok()?;
-    // Parse only the first line (port number); second line is nonce for stale detection
-    content.lines().next()?.trim().parse().ok()
+    beamtalk_workspace::read_port_file(workspace_id)
+        .ok()
+        .flatten()
+        .map(|(port, _nonce)| port)
 }
 
 /// Read the cookie file for a workspace.
 pub fn read_cookie_file(workspace_id: &str) -> Option<String> {
-    let cookie_file = workspace_dir(workspace_id)?.join("cookie");
-    let content = std::fs::read_to_string(cookie_file).ok()?;
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
+    beamtalk_workspace::read_cookie_file(workspace_id)
+        .ok()
+        .flatten()
 }
 
 /// Discover the REPL port and cookie for the current directory.
@@ -70,7 +48,7 @@ pub fn discover_port_and_cookie(workspace_id: Option<&str>) -> Option<(u16, Stri
         id.to_string()
     } else {
         let cwd = std::env::current_dir().ok()?;
-        generate_workspace_id(&cwd)
+        generate_workspace_id(&cwd)?
     };
     let port = read_port_file(&id)?;
     let cookie = read_cookie_file(&id)?;
@@ -111,41 +89,22 @@ pub fn parse_workspace_id(stdout: &str) -> Option<String> {
 ///
 /// Scans `~/.beamtalk/workspaces/` for directories with port files.
 pub fn discover_any_port_and_cookie() -> Option<(u16, String)> {
-    let dir = workspaces_dir()?;
+    let dir = beamtalk_workspace::workspaces_base_dir().ok()?;
     let entries = std::fs::read_dir(dir).ok()?;
 
     for entry in entries.flatten() {
         let is_dir = entry.file_type().is_ok_and(|ft| ft.is_dir());
         if is_dir {
-            let port_file = entry.path().join("port");
-            if let Ok(content) = std::fs::read_to_string(port_file) {
-                // Parse only the first line (port); second line is nonce (BT-611)
-                if let Some(port) = content
-                    .lines()
-                    .next()
-                    .and_then(|line| line.trim().parse::<u16>().ok())
-                {
-                    let cookie = std::fs::read_to_string(entry.path().join("cookie"))
-                        .ok()
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())?;
+            let workspace_id = entry.file_name();
+            let workspace_id = workspace_id.to_string_lossy();
+            if let Some(port) = read_port_file(&workspace_id) {
+                if let Some(cookie) = read_cookie_file(&workspace_id) {
                     return Some((port, cookie));
                 }
             }
         }
     }
     None
-}
-
-/// Encode a byte slice as a lowercase hexadecimal string.
-fn hex_encode(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    bytes
-        .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        })
 }
 
 #[cfg(test)]
@@ -155,16 +114,16 @@ mod tests {
 
     #[test]
     fn test_generate_workspace_id_deterministic() {
-        let path = Path::new("/tmp/test-beamtalk-workspace");
-        let id1 = generate_workspace_id(path);
-        let id2 = generate_workspace_id(path);
+        let path = std::env::temp_dir();
+        let id1 = generate_workspace_id(&path).unwrap();
+        let id2 = generate_workspace_id(&path).unwrap();
         assert_eq!(id1, id2, "Same path should produce same workspace ID");
     }
 
     #[test]
     fn test_generate_workspace_id_length() {
-        let path = Path::new("/tmp/test-beamtalk-workspace");
-        let id = generate_workspace_id(path);
+        let path = std::env::temp_dir();
+        let id = generate_workspace_id(&path).unwrap();
         assert_eq!(
             id.len(),
             12,
@@ -174,8 +133,8 @@ mod tests {
 
     #[test]
     fn test_generate_workspace_id_hex_format() {
-        let path = Path::new("/tmp/test-beamtalk-workspace");
-        let id = generate_workspace_id(path);
+        let path = std::env::temp_dir();
+        let id = generate_workspace_id(&path).unwrap();
         assert!(
             id.chars().all(|c| c.is_ascii_hexdigit()),
             "Workspace ID should be all hex digits, got: {id}"
@@ -184,17 +143,13 @@ mod tests {
 
     #[test]
     fn test_different_paths_produce_different_ids() {
-        let id1 = generate_workspace_id(Path::new("/tmp/project-a"));
-        let id2 = generate_workspace_id(Path::new("/tmp/project-b"));
-        assert_ne!(id1, id2, "Different paths should produce different IDs");
-    }
-
-    #[test]
-    fn test_hex_encode() {
-        assert_eq!(hex_encode(&[0x00]), "00");
-        assert_eq!(hex_encode(&[0xff]), "ff");
-        assert_eq!(hex_encode(&[0xde, 0xad, 0xbe, 0xef]), "deadbeef");
-        assert_eq!(hex_encode(&[]), "");
+        let temp = std::env::temp_dir();
+        let cwd = std::env::current_dir().unwrap();
+        if temp != cwd {
+            let id1 = generate_workspace_id(&temp).unwrap();
+            let id2 = generate_workspace_id(&cwd).unwrap();
+            assert_ne!(id1, id2, "Different paths should produce different IDs");
+        }
     }
 
     #[test]
@@ -206,7 +161,9 @@ mod tests {
     #[test]
     fn test_read_port_file_valid() {
         let workspace_id = format!("test_mcp_{}", std::process::id());
-        let dir = workspaces_dir().unwrap().join(&workspace_id);
+        let dir = beamtalk_workspace::workspaces_base_dir()
+            .unwrap()
+            .join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("port"), "9876\nnonce123").unwrap();
 
@@ -220,7 +177,9 @@ mod tests {
     #[test]
     fn test_read_port_file_two_line_format() {
         let workspace_id = format!("test_mcp_twoln_{}", std::process::id());
-        let dir = workspaces_dir().unwrap().join(&workspace_id);
+        let dir = beamtalk_workspace::workspaces_base_dir()
+            .unwrap()
+            .join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
         // BT-727: port file has PORT\nNONCE format; reader must parse only first line
         fs::write(dir.join("port"), "9876\nabc123nonce\n").unwrap();
@@ -235,7 +194,9 @@ mod tests {
     #[test]
     fn test_read_port_file_invalid_content() {
         let workspace_id = format!("test_mcp_invalid_{}", std::process::id());
-        let dir = workspaces_dir().unwrap().join(&workspace_id);
+        let dir = beamtalk_workspace::workspaces_base_dir()
+            .unwrap()
+            .join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("port"), "not_a_number\n").unwrap();
 
@@ -249,7 +210,9 @@ mod tests {
     #[test]
     fn test_read_port_file_empty() {
         let workspace_id = format!("test_mcp_empty_{}", std::process::id());
-        let dir = workspaces_dir().unwrap().join(&workspace_id);
+        let dir = beamtalk_workspace::workspaces_base_dir()
+            .unwrap()
+            .join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("port"), "").unwrap();
 
@@ -263,7 +226,9 @@ mod tests {
     #[test]
     fn test_discover_port_with_explicit_id() {
         let workspace_id = format!("test_mcp_discover_{}", std::process::id());
-        let dir = workspaces_dir().unwrap().join(&workspace_id);
+        let dir = beamtalk_workspace::workspaces_base_dir()
+            .unwrap()
+            .join(&workspace_id);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("port"), "5555\nnonce456").unwrap();
         fs::write(dir.join("cookie"), "testcookie").unwrap();
@@ -283,17 +248,17 @@ mod tests {
 
     #[test]
     fn test_workspace_dir_rejects_path_traversal() {
-        assert_eq!(workspace_dir("../etc"), None);
-        assert_eq!(workspace_dir(".."), None);
-        assert_eq!(workspace_dir("foo/bar"), None);
-        assert_eq!(workspace_dir("foo\\bar"), None);
-        assert_eq!(workspace_dir(""), None);
+        assert!(beamtalk_workspace::workspace_dir("../etc").is_err());
+        assert!(beamtalk_workspace::workspace_dir("..").is_err());
+        assert!(beamtalk_workspace::workspace_dir("foo/bar").is_err());
+        assert!(beamtalk_workspace::workspace_dir("foo\\bar").is_err());
+        assert!(beamtalk_workspace::workspace_dir("").is_err());
     }
 
     #[test]
     fn test_workspace_dir_accepts_valid_ids() {
-        let dir = workspace_dir("abc123def456");
-        assert!(dir.is_some());
+        let dir = beamtalk_workspace::workspace_dir("abc123def456");
+        assert!(dir.is_ok());
         assert!(dir.unwrap().ends_with("abc123def456"));
     }
 

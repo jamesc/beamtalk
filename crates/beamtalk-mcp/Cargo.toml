@@ -32,11 +32,8 @@ serde_json.workspace = true
 # CLI
 clap.workspace = true
 
-# System directories (workspace discovery)
-dirs.workspace = true
-
-# Cryptography (workspace ID generation)
-sha2.workspace = true
+# Shared workspace utilities (ID generation, port/cookie file I/O)
+beamtalk-workspace.workspace = true
 
 # Logging
 tracing.workspace = true

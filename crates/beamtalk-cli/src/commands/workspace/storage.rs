@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 use fs2::FileExt;
 use miette::{IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 /// Workspace metadata stored in ~/.beamtalk/workspaces/{id}/metadata.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,17 +69,7 @@ impl NodeInfo {
 /// Generate a workspace ID from a project path.
 /// Uses SHA256 hash of the absolute path.
 pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
-    let absolute = project_path.canonicalize().into_diagnostic()?;
-    let path_str = absolute
-        .to_str()
-        .ok_or_else(|| miette!("Project path contains invalid UTF-8: {:?}", absolute))?;
-
-    let mut hasher = Sha256::new();
-    hasher.update(path_str.as_bytes());
-    let result = hasher.finalize();
-
-    // Use first 12 hex chars for readability
-    Ok(format!("{result:x}")[..12].to_string())
+    beamtalk_workspace::generate_workspace_id(project_path)
 }
 
 /// Validate a user-provided workspace name.
@@ -118,13 +107,12 @@ pub fn workspace_id_for(project_path: &Path, workspace_name: Option<&str>) -> Re
 
 /// Get the base directory for all workspaces (`~/.beamtalk/workspaces/`).
 pub(super) fn workspaces_base_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| miette!("Could not determine home directory"))?;
-    Ok(home.join(".beamtalk").join("workspaces"))
+    beamtalk_workspace::workspaces_base_dir()
 }
 
 /// Get the workspace directory for a given ID.
 pub fn workspace_dir(workspace_id: &str) -> Result<PathBuf> {
-    Ok(workspaces_base_dir()?.join(workspace_id))
+    beamtalk_workspace::workspace_dir(workspace_id)
 }
 
 /// Check if a workspace exists.
@@ -233,28 +221,7 @@ pub fn save_node_info(workspace_id: &str, info: &NodeInfo) -> Result<()> {
 /// Port file format (BT-611): `PORT\nNONCE` (two lines).
 /// Returns `None` if the file doesn't exist or can't be parsed.
 pub(super) fn read_port_file(workspace_id: &str) -> Result<Option<(u16, Option<String>)>> {
-    let port_file_path = workspace_dir(workspace_id)?.join("port");
-
-    if !port_file_path.exists() {
-        return Ok(None);
-    }
-
-    let content = fs::read_to_string(&port_file_path).into_diagnostic()?;
-    let mut lines = content.lines();
-    if let Some(port_line) = lines.next() {
-        if let Ok(port) = port_line.trim().parse::<u16>() {
-            let nonce = lines
-                .next()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
-            Ok(Some((port, nonce)))
-        } else {
-            tracing::warn!("Invalid port file content: {content:?}");
-            Ok(None)
-        }
-    } else {
-        Ok(None)
-    }
+    beamtalk_workspace::read_port_file(workspace_id)
 }
 
 /// Read process start time from `/proc/{pid}/stat` (field 22 per proc(5)).

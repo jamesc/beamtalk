@@ -17,6 +17,7 @@ repository = "https://github.com/jamesc/beamtalk"
 [workspace.dependencies]
 # Workspace crates
 beamtalk-core = { path = "crates/beamtalk-core" }
+beamtalk-workspace = { path = "crates/beamtalk-workspace" }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
