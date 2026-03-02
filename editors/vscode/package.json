@@ -71,7 +71,8 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run bundle",
+    "bundle": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
@@ -87,6 +88,7 @@
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.82.0",
     "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.25.0",
     "typescript": "^5.0.0"
   }
 }
