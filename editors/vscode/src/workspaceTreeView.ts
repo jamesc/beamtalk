@@ -105,7 +105,7 @@ export class WorkspaceTreeDataProvider
   private classes: ClassInfo[] = [];
   private disposed = false;
 
-  /** Cached inspect results keyed by "actor:<pid>" or "binding:<name>". */
+  /** Cached inspect results keyed by "actor:<pid>". */
   private readonly inspectCache = new Map<string, Record<string, unknown>>();
 
   private readonly disposeHandlers: Array<() => void> = [];
@@ -227,9 +227,9 @@ export class WorkspaceTreeDataProvider
   }
 
   async getChildren(element?: WorkspaceNode): Promise<WorkspaceNode[]> {
-    // Root level
+    // Root level: show stale data while reconnecting so users don't lose context
     if (!element) {
-      return this.connectionState === "connected" ? [CONNECTED_ROOT] : [DISCONNECTED_ROOT];
+      return this.connectionState !== "disconnected" ? [CONNECTED_ROOT] : [DISCONNECTED_ROOT];
     }
 
     switch (element.kind) {
@@ -257,11 +257,14 @@ export class WorkspaceTreeDataProvider
         if (cached) {
           return this._inspectFields(cached, cacheKey);
         }
-        if (!this.client || this.connectionState !== "connected") {
+        const activeClient = this.client;
+        if (!activeClient || this.connectionState !== "connected") {
           return [];
         }
         try {
-          const state = await this.client.inspect(element.info.pid);
+          const state = await activeClient.inspect(element.info.pid);
+          // Guard: client may have changed while inspect was in-flight
+          if (this.client !== activeClient) return [];
           this.inspectCache.set(cacheKey, state);
           return this._inspectFields(state, cacheKey);
         } catch {
@@ -278,19 +281,23 @@ export class WorkspaceTreeDataProvider
 
   private _connectedRootItem(): vscode.TreeItem {
     const item = new vscode.TreeItem("Workspace", vscode.TreeItemCollapsibleState.Expanded);
-    item.description = "● Connected";
-    item.iconPath = new vscode.ThemeIcon(
-      "circle-filled",
-      new vscode.ThemeColor("testing.iconPassed")
-    );
+    if (this.connectionState === "reconnecting") {
+      item.description = "◌ Reconnecting…";
+      item.iconPath = new vscode.ThemeIcon("circle-outline");
+    } else {
+      item.description = "● Connected";
+      item.iconPath = new vscode.ThemeIcon(
+        "circle-filled",
+        new vscode.ThemeColor("testing.iconPassed")
+      );
+    }
     item.contextValue = "connected-root";
     return item;
   }
 
   private _disconnectedRootItem(): vscode.TreeItem {
     const item = new vscode.TreeItem("Workspace", vscode.TreeItemCollapsibleState.None);
-    item.description =
-      this.connectionState === "reconnecting" ? "◌ Reconnecting…" : "○ Disconnected";
+    item.description = "○ Disconnected";
     item.iconPath = new vscode.ThemeIcon("circle-outline");
     item.contextValue = "disconnected-root";
     return item;
@@ -300,9 +307,7 @@ export class WorkspaceTreeDataProvider
     const count = Object.keys(this.bindings).length;
     const item = new vscode.TreeItem(
       "Bindings",
-      count > 0
-        ? vscode.TreeItemCollapsibleState.Expanded
-        : vscode.TreeItemCollapsibleState.Collapsed
+      count > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None
     );
     item.description = count > 0 ? `(${count})` : "";
     item.iconPath = new vscode.ThemeIcon("symbol-variable");
@@ -314,9 +319,7 @@ export class WorkspaceTreeDataProvider
     const count = this.actors.length;
     const item = new vscode.TreeItem(
       "Actors",
-      count > 0
-        ? vscode.TreeItemCollapsibleState.Expanded
-        : vscode.TreeItemCollapsibleState.Collapsed
+      count > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None
     );
     item.description = count > 0 ? `(${count} running)` : "(none)";
     item.iconPath = new vscode.ThemeIcon("pulse");
@@ -356,7 +359,7 @@ export class WorkspaceTreeDataProvider
     item.tooltip = new vscode.MarkdownString(
       `**Actor** \`${node.info.class}\`\n\nPID: \`${node.info.pid}\`${
         node.info.spawned_at
-          ? `\n\nSpawned: ${new Date(node.info.spawned_at).toLocaleTimeString()}`
+          ? `\n\nSpawned: ${new Date(node.info.spawned_at * 1000).toLocaleTimeString()}`
           : ""
       }`
     );
@@ -473,11 +476,16 @@ export class WorkspaceTreeDataProvider
       // Use a generation counter to discard stale responses when multiple
       // class-loaded events arrive in quick succession.
       const gen = ++this.classFetchGeneration;
-      void client.classes().then((classes) => {
-        if (this.client !== client || this.classFetchGeneration !== gen) return;
-        this.classes = classes;
-        this._onDidChangeTreeData.fire(CLASSES_SECTION);
-      });
+      void client
+        .classes()
+        .then((classes) => {
+          if (this.client !== client || this.classFetchGeneration !== gen) return;
+          this.classes = classes;
+          this._onDidChangeTreeData.fire(CLASSES_SECTION);
+        })
+        .catch(() => {
+          // Transient failure: next class-loaded event will retry.
+        });
     }
   }
 }
