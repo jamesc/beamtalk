@@ -751,11 +751,19 @@ install PREFIX="/usr/local": build-release build-stdlib
         install -m 644 "${STDLIB_SRC}"/*.app "${PREFIX}/lib/beamtalk/lib/beamtalk_stdlib/ebin/"
     fi
 
+    # Stdlib sources for LSP/tooling navigation
+    STDLIB_SOURCE_SRC="stdlib/src"
+    if [ -d "${STDLIB_SOURCE_SRC}" ] && compgen -G "${STDLIB_SOURCE_SRC}/*.bt" > /dev/null; then
+        install -d "${PREFIX}/share/beamtalk/stdlib/src"
+        install -m 644 "${STDLIB_SOURCE_SRC}"/*.bt "${PREFIX}/share/beamtalk/stdlib/src/"
+    fi
+
     echo "✅ Installed beamtalk to ${PREFIX}"
     echo "   Binary:  ${PREFIX}/bin/beamtalk"
     echo "   LSP:     ${PREFIX}/bin/beamtalk-lsp"
     echo "   MCP:     ${PREFIX}/bin/beamtalk-mcp"
     echo "   Runtime: ${PREFIX}/lib/beamtalk/lib/"
+    echo "   Sources: ${PREFIX}/share/beamtalk/stdlib/src/"
 
 # Unix-only: uses rm -f/-rf
 # Uninstall beamtalk from PREFIX (default: /usr/local)
@@ -767,6 +775,7 @@ uninstall PREFIX="/usr/local":
     echo "🗑️  Uninstalling beamtalk from ${PREFIX}..."
     rm -f "${PREFIX}/bin/beamtalk" "${PREFIX}/bin/beamtalk-compiler-port" "${PREFIX}/bin/beamtalk-lsp" "${PREFIX}/bin/beamtalk-mcp"
     rm -rf "${PREFIX}/lib/beamtalk"
+    rm -rf "${PREFIX}/share/beamtalk"
     echo "✅ Uninstalled beamtalk from ${PREFIX}"
 
 # Unix-only: uses uname for platform detection
@@ -878,6 +887,7 @@ dist: build-release build-stdlib
     Copy-Item target/release/beamtalk-mcp.exe dist/bin/
     foreach ($app in @('beamtalk_runtime','beamtalk_workspace','beamtalk_compiler','jsx','cowboy','cowlib','ranch')) { $src = "runtime/_build/default/lib/$app/ebin"; if (!(Test-Path "$src/*.beam")) { Write-Error "No .beam files in $src"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$src/*.beam" "dist/lib/beamtalk/lib/$app/ebin/"; Copy-Item "$src/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction SilentlyContinue }
     $stdlib = "runtime/apps/beamtalk_stdlib/ebin"; if (!(Test-Path "$stdlib/*.beam")) { Write-Error "No stdlib .beam files"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin" | Out-Null; Copy-Item "$stdlib/*.beam" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/"; Copy-Item "$stdlib/*.app" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/" -ErrorAction SilentlyContinue
+    if (Test-Path "stdlib/src/*.bt") { New-Item -ItemType Directory -Force -Path "dist/share/beamtalk/stdlib/src" | Out-Null; Copy-Item "stdlib/src/*.bt" "dist/share/beamtalk/stdlib/src/" }
     just dist-vscode
     @echo "✅ Distribution ready in dist/"
     @echo "   Run: dist\bin\beamtalk.exe repl"
