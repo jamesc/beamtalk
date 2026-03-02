@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** CLI / Test System
 //!
-//! Compiles `.bt` test files with `// =>` assertions into `EUnit` test modules.
+//! Compiles `.btscript` test files with `// =>` assertions into `EUnit` test modules.
 //! Each expression is compiled through the normal pipeline, then wrapped in
 //! an `EUnit` test that calls the compiled eval function and asserts the result.
 //!
@@ -53,7 +53,7 @@ struct ParsedTestFile {
     warnings: Vec<String>,
 }
 
-/// Parse test cases from a `.bt` file.
+/// Parse test cases from a `.btscript` file.
 ///
 /// Extracts `// =>` assertion pairs and `// @load` directives.
 fn parse_test_file(content: &str) -> ParsedTestFile {
@@ -403,7 +403,7 @@ struct CompiledTestFile {
 
 /// Run stdlib tests.
 ///
-/// Finds all `.bt` files in the given path (file or directory), parses
+/// Finds all `.btscript` files in the given path (file or directory), parses
 /// `// =>` assertions, compiles expressions to Core Erlang, generates
 /// `EUnit` wrappers, and runs all tests in a single BEAM process.
 #[instrument(skip_all)]
@@ -415,10 +415,10 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
         miette::bail!("Test path '{}' not found", test_path);
     }
 
-    // Find all .bt test files
+    // Find all .btscript test files
     let test_files = find_test_files(&test_path)?;
     if test_files.is_empty() {
-        println!("No .bt test files found in '{test_path}'");
+        println!("No .btscript test files found in '{test_path}'");
         return Ok(());
     }
 
@@ -575,7 +575,7 @@ struct CompilationResult {
     fixture_modules: Vec<String>,
 }
 
-/// Compile a single `.bt` test file into Core Erlang modules + `EUnit` wrapper.
+/// Compile a single `.btscript` test file into Core Erlang modules + `EUnit` wrapper.
 ///
 /// Does NOT execute — just produces files ready for batch compilation and execution.
 fn compile_single_test_file(
@@ -958,11 +958,14 @@ fn parse_eunit_output(
     }
 }
 
-/// Find `.bt` test files from a path (file or directory).
+/// Find `.btscript` test files from a path (file or directory).
 fn find_test_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    // If path is a single .bt file, return it directly
-    if path.extension() == Some("bt") && path.is_file() {
-        return Ok(vec![path.to_owned()]);
+    // If a single file path is provided, require .btscript extension.
+    if path.is_file() {
+        if path.extension() == Some("btscript") {
+            return Ok(vec![path.to_owned()]);
+        }
+        miette::bail!("Expected a .btscript test file, got '{path}'");
     }
 
     let mut files = Vec::new();
@@ -975,7 +978,7 @@ fn find_test_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
         let path = Utf8PathBuf::from_path_buf(entry.path())
             .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", path))?;
 
-        if path.extension() == Some("bt") {
+        if path.is_file() && path.extension() == Some("btscript") {
             files.push(path);
         }
     }
@@ -1246,5 +1249,52 @@ mod tests {
         assert_eq!(parsed.cases.len(), 0);
         assert_eq!(parsed.warnings.len(), 1);
         assert!(parsed.warnings[0].contains("missing error kind"));
+    }
+
+    #[test]
+    fn test_find_test_files_discovers_btscript_only() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dir_path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).expect("utf8 temp dir");
+
+        // Create files with various extensions
+        std::fs::write(dir.path().join("arithmetic.btscript"), "1+1\n// => 2\n")
+            .expect("write btscript");
+        std::fs::write(dir.path().join("counter.bt"), "Object subclass: C\n").expect("write bt");
+        std::fs::write(dir.path().join("notes.txt"), "not a test").expect("write txt");
+
+        let files = find_test_files(&dir_path).expect("find_test_files");
+        assert_eq!(files.len(), 1, "should find only .btscript files");
+        assert!(
+            files[0].as_str().ends_with("arithmetic.btscript"),
+            "found: {:?}",
+            files[0]
+        );
+    }
+
+    #[test]
+    fn test_find_test_files_single_btscript_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file_path = dir.path().join("test.btscript");
+        std::fs::write(&file_path, "1+1\n// => 2\n").expect("write");
+        let utf8_path = Utf8PathBuf::from_path_buf(file_path).expect("utf8");
+
+        let files = find_test_files(&utf8_path).expect("find_test_files");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0], utf8_path);
+    }
+
+    #[test]
+    fn test_find_test_files_rejects_single_bt_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file_path = dir.path().join("module.bt");
+        std::fs::write(&file_path, "Object subclass: Foo\n").expect("write");
+        let utf8_path = Utf8PathBuf::from_path_buf(file_path).expect("utf8");
+
+        let result = find_test_files(&utf8_path);
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("Expected a .btscript test file"),
+            "should give clear error for .bt file, got: {err}"
+        );
     }
 }

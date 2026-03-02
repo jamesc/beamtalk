@@ -1,7 +1,7 @@
 {
   "name": "beamtalk",
   "displayName": "Beamtalk",
-  "description": "Language support for Beamtalk (.bt files)",
+  "description": "Language support for Beamtalk (.bt and .btscript files)",
   "version": "0.1.0",
   "publisher": "beamtalk",
   "license": "Apache-2.0",
@@ -31,7 +31,8 @@
           "beamtalk"
         ],
         "extensions": [
-          ".bt"
+          ".bt",
+          ".btscript"
         ],
         "configuration": "./language-configuration.json"
       }

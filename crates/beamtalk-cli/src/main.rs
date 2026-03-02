@@ -192,7 +192,7 @@ enum Command {
 
     /// Run compiled stdlib tests (ADR 0014 Phase 1)
     TestStdlib {
-        /// File or directory containing .bt test files
+        /// File or directory containing .btscript test files
         #[arg(default_value = "bootstrap-test")]
         path: String,
 
