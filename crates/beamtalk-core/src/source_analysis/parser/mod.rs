@@ -2461,6 +2461,50 @@ mod tests {
     }
 
     #[test]
+    fn parse_method_named_class_with_return_type() {
+        // BT-1031: `class -> Type =>` must be parsed as a method named `class`
+        // with a return type annotation, not as a class-side binary method `->`.
+        let module = parse_ok(
+            "Object subclass: Class
+  sealed class -> Metaclass => @primitive classClass",
+        );
+
+        let class = &module.classes[0];
+        assert_eq!(
+            class.methods.len(),
+            1,
+            "should be an instance method, not class method"
+        );
+        assert_eq!(class.class_methods.len(), 0);
+
+        let method = &class.methods[0];
+        assert_eq!(method.selector.name(), "class");
+        assert!(method.parameters.is_empty(), "unary method has no params");
+        assert!(
+            method.return_type.is_some(),
+            "should have return type annotation"
+        );
+        assert!(method.is_sealed);
+    }
+
+    #[test]
+    fn parse_sealed_method_named_class_with_return_type() {
+        // Ensure `sealed class -> Type =>` also works (modifier before method name)
+        let module = parse_ok(
+            "Object subclass: Foo
+  sealed class -> Metaclass => @primitive classClass
+  sealed class withValue: v => self new",
+        );
+
+        let class = &module.classes[0];
+        // `class` is an instance method; `withValue:` is a class-side method
+        assert_eq!(class.methods.len(), 1);
+        assert_eq!(class.methods[0].selector.name(), "class");
+        assert_eq!(class.class_methods.len(), 1);
+        assert_eq!(class.class_methods[0].selector.name(), "withValue:");
+    }
+
+    #[test]
     fn parse_state_with_type_annotation() {
         let module = parse_ok(
             "Actor subclass: Person
