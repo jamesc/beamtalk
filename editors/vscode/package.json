@@ -32,6 +32,11 @@
           "id": "beamtalk.workspaceExplorer",
           "name": "Workspace Explorer",
           "icon": "./images/workspace.svg"
+        },
+        {
+          "id": "beamtalk.transcript",
+          "name": "Transcript",
+          "type": "webview"
         }
       ]
     },
@@ -39,6 +44,11 @@
       {
         "command": "beamtalk.restartServer",
         "title": "Beamtalk: Restart Language Server"
+      },
+      {
+        "command": "beamtalk.clearTranscript",
+        "title": "Clear Transcript",
+        "icon": "$(clear-all)"
       },
       {
         "command": "beamtalk.refreshWorkspace",
@@ -66,6 +76,11 @@
         {
           "command": "beamtalk.refreshWorkspace",
           "when": "view == beamtalk.workspaceExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "beamtalk.clearTranscript",
+          "when": "view == beamtalk.transcript",
           "group": "navigation"
         }
       ],

@@ -11,12 +11,14 @@ import {
   RevealOutputChannelOn,
   type ServerOptions,
 } from "vscode-languageclient/node";
+import { TranscriptViewProvider } from "./transcriptView";
 import { WorkspaceTreeDataProvider } from "./workspaceTreeView";
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.LogOutputChannel | undefined;
 let traceOutputChannel: vscode.LogOutputChannel | undefined;
 let workspaceTreeProvider: WorkspaceTreeDataProvider | undefined;
+let transcriptViewProvider: TranscriptViewProvider | undefined;
 
 type ResolvedServerPath = {
   serverPath: string;
@@ -283,6 +285,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.window.registerTreeDataProvider("beamtalk.workspaceExplorer", workspaceTreeProvider)
   );
 
+  // ─── Transcript View (BT-1024) ─────────────────────────────────────────────
+
+  transcriptViewProvider = new TranscriptViewProvider();
+  context.subscriptions.push(transcriptViewProvider);
+
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      TranscriptViewProvider.viewType,
+      transcriptViewProvider
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.clearTranscript", () => {
+      transcriptViewProvider?.clear();
+    })
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.refreshWorkspace", () => {
       void workspaceTreeProvider?.refresh();
@@ -317,11 +337,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): Thenable<void> | undefined {
   const stop = client?.stop();
-  // workspaceTreeProvider is disposed via context.subscriptions; dispose() is
-  // idempotent so no double-dispose risk, but we detach the client first to
-  // ensure no late push events fire into the disposed emitter.
+  // Providers are disposed via context.subscriptions; dispose() is idempotent
+  // so no double-dispose risk, but we detach the client first to ensure no
+  // late push events fire into disposed providers.
   workspaceTreeProvider?.setClient(null);
   workspaceTreeProvider = undefined;
+  transcriptViewProvider?.setClient(null);
+  transcriptViewProvider = undefined;
   outputChannel?.dispose();
   traceOutputChannel?.dispose();
   outputChannel = undefined;
