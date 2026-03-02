@@ -327,51 +327,45 @@ fn beam_eval_cmd(
 /// Read the OS-assigned REPL port from the BEAM child's stdout.
 ///
 /// The BEAM node prints `BEAMTALK_PORT:<port>` on stdout after binding.
-/// Blocks until the announcement is received or the timeout elapses.
-/// Panics if the timeout expires (indicates BEAM failed to start).
+/// Blocks until the announcement is received or `repl_timeout()` elapses.
+/// After discovering the port, the reader thread **continues draining stdout**
+/// for the lifetime of the BEAM process so the pipe never fills and stalls the
+/// node. When `E2E_DEBUG` is set, all stdout lines are echoed to stderr.
+/// Panics (after killing the child) if the timeout expires.
 fn read_port_from_beam(child: &mut Child) -> u16 {
     let stdout = child.stdout.take().expect("stdout must be piped");
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::channel::<u16>();
+    let debug_output = env::var("E2E_DEBUG").is_ok();
 
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    if tx.send(line).is_err() {
-                        break; // receiver dropped (timeout)
+        let mut port_sent = false;
+        // Always drain every line to prevent the pipe buffer from filling and
+        // stalling the BEAM node after the port has been discovered.
+        for line in reader.lines().map_while(Result::ok) {
+            if debug_output {
+                eprintln!("E2E BEAM: {line}");
+            }
+            if !port_sent {
+                if let Some(port_str) = line.strip_prefix("BEAMTALK_PORT:") {
+                    if let Ok(port) = port_str.trim().parse::<u16>() {
+                        let _ = tx.send(port); // receiver may have already timed out; keep draining
+                        port_sent = true;
                     }
                 }
-                Err(_) => break,
             }
         }
     });
 
-    // Cover-instrumented BEAM starts much slower; use a generous timeout.
-    let timeout_secs: u64 = if env::var("E2E_COVER").is_ok() {
-        120
-    } else {
-        30
-    };
-    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
-
-    loop {
-        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        if remaining.is_zero() {
-            break;
-        }
-        match rx.recv_timeout(remaining) {
-            Ok(line) => {
-                if let Some(port_str) = line.strip_prefix("BEAMTALK_PORT:") {
-                    if let Ok(port) = port_str.trim().parse::<u16>() {
-                        return port;
-                    }
-                }
-            }
-            Err(_) => break,
-        }
+    // Use repl_timeout() so startup and read timeouts stay consistent (120s
+    // for cover mode, 30s otherwise).
+    if let Ok(port) = rx.recv_timeout(repl_timeout()) {
+        return port;
     }
 
+    // Timeout: kill the child to avoid leaving an orphaned erl process.
+    let _ = child.kill();
+    let _ = child.wait();
     panic!("E2E: Timed out waiting for BEAM node to report its port (BEAMTALK_PORT line not seen)");
 }
 
