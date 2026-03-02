@@ -87,7 +87,7 @@ Object subclass: TestCase
   /// ```beamtalk
   /// CounterTest runAll     // prints results to transcript
   /// ```
-  class runAll -> TestResult => @primitive "runAll"
+  class runAll -> String => @primitive "runAll"
 
   /// Run the named test method in this class and print a summary.
   ///
@@ -95,4 +95,4 @@ Object subclass: TestCase
   /// ```beamtalk
   /// CounterTest run: #testIncrement
   /// ```
-  class run: testName -> TestResult => @primitive "run:"
+  class run: testName -> String => @primitive "run:"

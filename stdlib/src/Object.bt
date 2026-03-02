@@ -134,7 +134,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 yourself            // => 42
   /// ```
-  sealed yourself -> Object => self
+  sealed yourself => self
 
   /// Return a hash value for the receiver.
   ///
