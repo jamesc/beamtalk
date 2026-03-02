@@ -714,9 +714,12 @@ impl CoreErlangGenerator {
             let args_doc = self.capture_argument_list_doc(arguments)?;
             let comma = if arguments.is_empty() { "" } else { ", " };
             let doc = docvec![
-                Document::String(format!(
-                    "call '{module}':'class_{selector_atom}'(ClassSelf, {cv}"
-                )),
+                "call '",
+                Document::String(module),
+                "':'class_",
+                Document::String(selector_atom),
+                "'(ClassSelf, ",
+                Document::String(cv),
                 comma,
                 args_doc,
                 ")"
