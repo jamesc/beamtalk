@@ -1444,12 +1444,14 @@ walk_chain_single_hop_found_test() ->
     end.
 
 walk_chain_broken_chain_test() ->
-    %% Selector not in return types → undefined
+    %% Selector not in return types → mock returns {error, not_found} → undefined.
+    %% Uses 'size' (a known atom) so tokenise_send_chain can convert it; the mock
+    %% has no return type for it, so the registry returns {error, not_found}.
     Pid = spawn_mock_class_with_return_types('WalkChainTestB', #{}, #{}),
     try
         ?assertEqual(
             undefined,
-            beamtalk_repl_ops_dev:walk_chain('WalkChainTestB', [unknownMethod])
+            beamtalk_repl_ops_dev:walk_chain('WalkChainTestB', [size])
         )
     after
         cleanup_mock_class('WalkChainTestB', Pid)
@@ -1642,7 +1644,7 @@ mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes) ->
             Reply =
                 case maps:find(Selector, InstanceReturnTypes) of
                     {ok, ReturnType} -> {ok, ReturnType};
-                    error -> not_found
+                    error -> {error, not_found}
                 end,
             gen_server:reply(From, Reply),
             mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes);
@@ -1650,7 +1652,7 @@ mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes) ->
             Reply =
                 case maps:find(Selector, ClassReturnTypes) of
                     {ok, ReturnType} -> {ok, ReturnType};
-                    error -> not_found
+                    error -> {error, not_found}
                 end,
             gen_server:reply(From, Reply),
             mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes);
