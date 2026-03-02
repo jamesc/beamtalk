@@ -7,6 +7,7 @@
 
 use clap::{ArgAction, Parser, Subcommand};
 use miette::Result;
+use std::path::PathBuf;
 
 /// BEAM bytecode compiler integration (Core Erlang → `.beam`).
 pub mod beam_compiler;
@@ -282,12 +283,31 @@ fn main() {
     }
 }
 
+/// Returns the installation prefix by walking up from the running binary:
+/// `{sysroot}/bin/beamtalk` → `{sysroot}`.
+fn compute_sysroot() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            exe.parent()
+                .and_then(|bin| bin.parent())
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| PathBuf::from("/usr/local"))
+}
+
 /// CLI entry point: parse arguments and dispatch to the appropriate subcommand.
 #[expect(
     clippy::too_many_lines,
     reason = "top-level dispatch — each arm is a one-liner"
 )]
 fn run() -> Result<()> {
+    // Handle --print-sysroot before clap parsing: like --version it requires no subcommand.
+    if std::env::args().any(|arg| arg == "--print-sysroot") {
+        println!("{}", compute_sysroot().display());
+        return Ok(());
+    }
+
     let cli = Cli::parse();
 
     // Initialize tracing when explicitly requested.

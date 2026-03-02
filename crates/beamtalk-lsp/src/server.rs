@@ -541,12 +541,25 @@ fn configured_stdlib_source_dir(params: &InitializeParams) -> Option<String> {
         .map(ToString::to_string)
 }
 
+/// Returns the stdlib source directory auto-discovered from the LSP binary's sysroot.
+///
+/// Derives sysroot as `parent(parent(current_exe()))` — the same convention used
+/// by `beamtalk --print-sysroot` — then looks for `share/beamtalk/stdlib/src/`
+/// under that prefix.
+fn sysroot_stdlib_source_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let sysroot = exe.parent()?.parent()?;
+    let candidate = sysroot.join("share/beamtalk/stdlib/src");
+    canonicalize_existing_dir(&candidate)
+}
+
 fn configured_stdlib_source_dirs(
     configured: Option<&str>,
     project_roots: &[PathBuf],
 ) -> Vec<PathBuf> {
     let Some(configured) = configured else {
-        return Vec::new();
+        // No explicit config — fall back to sysroot auto-discovery.
+        return sysroot_stdlib_source_dir().into_iter().collect();
     };
 
     let configured_path = PathBuf::from(configured);
@@ -1071,5 +1084,23 @@ mod tests {
         let note = stdlib_hover_policy_note(&service, &markdown);
         assert!(note.is_some());
         assert!(note.unwrap().contains("Integer"));
+    }
+
+    #[test]
+    fn configured_stdlib_falls_back_to_sysroot_when_none() {
+        // When no explicit stdlibSourceDir is configured, the function should
+        // attempt sysroot discovery instead of returning empty.  In test
+        // environment the sysroot path won't exist, so the result is still
+        // empty — but we verify the code path doesn't panic.
+        let dirs = configured_stdlib_source_dirs(None, &[PathBuf::from("/tmp/project")]);
+        // May be empty (sysroot stdlib dir doesn't exist in test env) — just
+        // confirm it returns without error.
+        let _ = dirs;
+    }
+
+    #[test]
+    fn sysroot_stdlib_source_dir_returns_none_when_dir_missing() {
+        // current_exe sysroot won't have share/beamtalk/stdlib/src/ in tests
+        assert!(sysroot_stdlib_source_dir().is_none());
     }
 }
