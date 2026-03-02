@@ -66,20 +66,28 @@ const READINESS_PROBE_DELAY_MS: u64 = 200;
 
 /// Maximum number of TCP readiness probe attempts.
 ///
-/// The port file is written only *after* `cowboy:start_clear` succeeds, so by
-/// the time Rust reads the port and calls `wait_for_tcp_ready` the TCP port is
-/// already open. A small retry count (with `READINESS_READ_TIMEOUT_MS` per
-/// attempt) is sufficient; retries exist only for transient connect errors.
-const READINESS_PROBE_MAX_RETRIES: usize = 10;
+/// Two failure modes drive this constant:
+///
+/// 1. **ECONNREFUSED window**: rarely, a brief window exists where the port file
+///    has been written but TCP connections still fail (e.g. during supervisor
+///    restart or OS scheduler jitter on a loaded CI runner). Each ECONNREFUSED
+///    returns immediately, costing only the 200 ms sleep per retry.
+///    100 × 200 ms = 20 s budget for this window.
+///
+/// 2. **Slow auth**: once connected, `ProtocolClient::connect` performs a full
+///    WebSocket auth exchange. This is covered by `READINESS_READ_TIMEOUT_MS`
+///    below; with a 10 s per-attempt timeout, auth succeeds on the first attempt
+///    and these retries are not consumed.
+const READINESS_PROBE_MAX_RETRIES: usize = 100;
 
 /// TCP read timeout for the WebSocket auth handshake during readiness probing.
 ///
 /// `ProtocolClient::connect` performs a full WebSocket auth exchange before
 /// returning. On a heavily-loaded CI runner (12 sequential BEAM nodes), the
 /// BEAM VM can take > 500ms to respond to the HTTP upgrade or send the
-/// `auth-required` message — causing every probe to time out even though the
-/// port IS open. 10 s gives ample headroom while keeping the total worst-case
-/// budget bounded (10 retries × 10 s read timeout = ~100 s).
+/// `auth-required` message — causing every probe attempt to time out even
+/// though the port IS open. 10 s gives ample headroom; once the port is open
+/// auth completes on the first attempt and the retry budget is not consumed.
 const READINESS_READ_TIMEOUT_MS: u64 = 10_000;
 
 /// TCP connect timeout for exit probe in milliseconds.
