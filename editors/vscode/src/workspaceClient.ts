@@ -68,6 +68,7 @@ export type WebSocketFactory = (url: string, callbacks: WebSocketCallbacks) => I
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const RECONNECT_JITTER_MS = 500;
+const REQUEST_TIMEOUT_MS = 30_000;
 
 // ─── WorkspaceClient ─────────────────────────────────────────────────────────
 
@@ -95,6 +96,7 @@ export class WorkspaceClient {
   private ws: IWebSocket | null = null;
   private sessionId: string | null = null;
   private disposed = false;
+  private authFailed = false;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connectionState: ConnectionState = "disconnected";
@@ -134,8 +136,11 @@ export class WorkspaceClient {
 
     const portContent = fs.readFileSync(path.join(wsDir, "port"), "utf8");
     const portStr = portContent.trim().split(/\r?\n/)[0];
-    const port = parseInt(portStr, 10);
-    if (Number.isNaN(port) || port < 1 || port > 65535) {
+    if (!/^\d+$/.test(portStr)) {
+      throw new Error(`Invalid port in ${path.join(wsDir, "port")}: ${JSON.stringify(portStr)}`);
+    }
+    const port = Number(portStr);
+    if (port < 1 || port > 65535) {
       throw new Error(`Invalid port in ${path.join(wsDir, "port")}: ${JSON.stringify(portStr)}`);
     }
 
@@ -170,7 +175,11 @@ export class WorkspaceClient {
 
   // ─── Op wrappers ─────────────────────────────────────────────────────────
 
-  /** List variable bindings for a session. */
+  /**
+   * List variable bindings for this connection's session.
+   * The `sessionId` is sent as a correlation field in the request;
+   * the server always returns bindings for this WebSocket's own session.
+   */
   async bindings(sessionId: string): Promise<BindingsMap> {
     const resp = (await this._request({ op: "bindings", session: sessionId })) as {
       bindings?: BindingsMap;
@@ -270,7 +279,7 @@ export class WorkspaceClient {
           this.ws = null;
           this.sessionId = null;
           this._rejectAllPending(new Error(`WebSocket closed: code=${code} reason=${reason}`));
-          if (!this.disposed) {
+          if (!this.disposed && !this.authFailed) {
             this._setConnectionState("reconnecting");
             this._scheduleReconnect();
           } else {
@@ -314,8 +323,9 @@ export class WorkspaceClient {
       return;
     }
 
-    // Auth failure
+    // Auth failure — terminal, do not reconnect (cookie won't change)
     if (msg.type === "auth_error") {
+      this.authFailed = true;
       this._rejectAllPending(new Error(`Auth error: ${String(msg.message ?? "unknown")}`));
       this.ws?.close();
       return;
@@ -403,10 +413,26 @@ export class WorkspaceClient {
         return;
       }
       const id = `wsc-${++this.msgCounter}`;
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(
+          new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms: op=${String(params.op)}`)
+        );
+      }, REQUEST_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve(value: unknown) {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject(err: Error) {
+          clearTimeout(timer);
+          reject(err);
+        },
+      });
       try {
         this.ws.send(JSON.stringify({ id, ...params }));
       } catch (err) {
+        clearTimeout(timer);
         this.pending.delete(id);
         reject(err instanceof Error ? err : new Error(String(err)));
       }
@@ -414,7 +440,7 @@ export class WorkspaceClient {
   }
 
   private _scheduleReconnect(): void {
-    if (this.disposed) {
+    if (this.disposed || this.reconnectTimer !== null) {
       return;
     }
     const delay = Math.min(
@@ -484,11 +510,17 @@ function defaultWsFactory(url: string, callbacks: WebSocketCallbacks): IWebSocke
     callbacks.onClose(code, reason.toString("utf8"));
   });
   socket.on("message", (data: WsModule.RawData) => {
-    const text = Buffer.isBuffer(data)
-      ? data.toString("utf8")
-      : typeof data === "string"
-        ? data
-        : Buffer.from(data as ArrayBuffer).toString("utf8");
+    let text: string;
+    if (typeof data === "string") {
+      text = data;
+    } else if (Buffer.isBuffer(data)) {
+      text = data.toString("utf8");
+    } else if (Array.isArray(data)) {
+      // ws can deliver Buffer[] when multiple frames arrive together
+      text = Buffer.concat(data).toString("utf8");
+    } else {
+      text = Buffer.from(data as ArrayBuffer).toString("utf8");
+    }
     callbacks.onMessage(text);
   });
   socket.on("error", (err: Error) => {
