@@ -81,6 +81,9 @@ TestCase subclass: CollectionsTest
     // --- zip: ---
     zipped := #(1, 2, 3) zip: #(4, 5, 6)
     self assert: zipped size equals: 3
+    pair := zipped first
+    self assert: pair first equals: 1
+    self assert: pair last equals: 4
     // --- groupBy: ---
     grouped := #(1, 2, 3, 4, 5, 6) groupBy: [:x | x isEven]
     self assert: grouped size equals: 2

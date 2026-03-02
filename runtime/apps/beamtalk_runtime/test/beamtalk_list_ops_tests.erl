@@ -425,23 +425,11 @@ sort_with_non_list_test() ->
 
 zip_equal_test() ->
     Result = beamtalk_list_ops:zip([a, b], [1, 2]),
-    ?assertEqual(
-        [
-            #{<<"key">> => a, <<"value">> => 1},
-            #{<<"key">> => b, <<"value">> => 2}
-        ],
-        Result
-    ).
+    ?assertEqual([[a, 1], [b, 2]], Result).
 
 zip_unequal_test() ->
     Result = beamtalk_list_ops:zip([a, b, c], [1, 2]),
-    ?assertEqual(
-        [
-            #{<<"key">> => a, <<"value">> => 1},
-            #{<<"key">> => b, <<"value">> => 2}
-        ],
-        Result
-    ).
+    ?assertEqual([[a, 1], [b, 2]], Result).
 
 zip_empty_test() ->
     ?assertEqual([], beamtalk_list_ops:zip([], [1, 2])).
