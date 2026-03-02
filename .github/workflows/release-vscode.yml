@@ -92,7 +92,7 @@ jobs:
         shell: bash
 
       - name: Upload LSP binary
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: lsp-${{ matrix.vsce-target }}
           path: target/${{ matrix.rust-target }}/release/beamtalk-lsp${{ matrix.os == 'windows-latest' && '.exe' || '' }}
@@ -137,7 +137,7 @@ jobs:
           rm -rf bin
 
       - name: Upload VSIX
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: vsix-${{ matrix.vsce-target }}
           path: beamtalk-${{ matrix.vsce-target }}.vsix
