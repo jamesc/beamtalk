@@ -99,9 +99,6 @@ pub type MethodReturnKey = (EcoString, EcoString, bool);
 
 /// Infers return types for all unannotated methods in a module.
 ///
-/// This function walks all instance methods and class methods in the module,
-/// infers the type of each method body, and returns a map of inferred types.
-///
 /// Only returns `InferredType::Known(class_name)` results. `Dynamic` types are
 /// omitted from the map (absence = dynamic, no annotation written back).
 ///
@@ -114,92 +111,8 @@ pub fn infer_method_return_types(
     hierarchy: &ClassHierarchy,
 ) -> HashMap<MethodReturnKey, EcoString> {
     let mut checker = TypeChecker::new();
-    let mut result = HashMap::new();
-
-    for class in &module.classes {
-        let is_abstract = class.is_abstract || hierarchy.is_abstract(&class.name.name);
-
-        for method in &class.methods {
-            if method.return_type.is_some() {
-                continue;
-            }
-            if method
-                .body
-                .iter()
-                .any(|s| matches!(s.expression, crate::ast::Expression::Primitive { .. }))
-            {
-                continue;
-            }
-            let mut env = TypeEnv::new();
-            env.set("self", InferredType::Known(class.name.name.clone()));
-            TypeChecker::set_param_types(&mut env, &method.parameters);
-            let body_type = checker.infer_stmts(&method.body, hierarchy, &mut env, is_abstract);
-            if let InferredType::Known(ref inferred) = body_type {
-                result.insert(
-                    (class.name.name.clone(), method.selector.name(), false),
-                    inferred.clone(),
-                );
-            }
-        }
-
-        for method in &class.class_methods {
-            if method.return_type.is_some() {
-                continue;
-            }
-            if method
-                .body
-                .iter()
-                .any(|s| matches!(s.expression, crate::ast::Expression::Primitive { .. }))
-            {
-                continue;
-            }
-            let mut env = TypeEnv::new();
-            env.in_class_method = true;
-            env.set("self", InferredType::Known(class.name.name.clone()));
-            TypeChecker::set_param_types(&mut env, &method.parameters);
-            let body_type = checker.infer_stmts(&method.body, hierarchy, &mut env, is_abstract);
-            if let InferredType::Known(ref inferred) = body_type {
-                result.insert(
-                    (class.name.name.clone(), method.selector.name(), true),
-                    inferred.clone(),
-                );
-            }
-        }
-    }
-
-    // Standalone (Tonel-style) method definitions: `Counter >> getValue => ...`
-    for standalone in &module.method_definitions {
-        let method = &standalone.method;
-        if method.return_type.is_some() {
-            continue;
-        }
-        if method
-            .body
-            .iter()
-            .any(|s| matches!(s.expression, crate::ast::Expression::Primitive { .. }))
-        {
-            continue;
-        }
-        let class_name = &standalone.class_name.name;
-        let is_abstract = hierarchy.is_abstract(class_name);
-        let mut env = TypeEnv::new();
-        env.in_class_method = standalone.is_class_method;
-        env.set("self", InferredType::Known(class_name.clone()));
-        TypeChecker::set_param_types(&mut env, &method.parameters);
-        let body_type = checker.infer_stmts(&method.body, hierarchy, &mut env, is_abstract);
-        if let InferredType::Known(ref inferred) = body_type {
-            result.insert(
-                (
-                    class_name.clone(),
-                    method.selector.name(),
-                    standalone.is_class_method,
-                ),
-                inferred.clone(),
-            );
-        }
-    }
-
-    result
+    checker.check_module(module, hierarchy);
+    checker.take_method_return_types()
 }
 
 /// Type checking domain service.
@@ -215,6 +128,7 @@ pub fn infer_method_return_types(
 pub struct TypeChecker {
     diagnostics: Vec<Diagnostic>,
     type_map: TypeMap,
+    method_return_types: HashMap<MethodReturnKey, EcoString>,
 }
 
 impl TypeChecker {
@@ -224,6 +138,7 @@ impl TypeChecker {
         Self {
             diagnostics: Vec::new(),
             type_map: TypeMap::new(),
+            method_return_types: HashMap::new(),
         }
     }
 
@@ -253,6 +168,19 @@ impl TypeChecker {
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
                 }
+                if method.return_type.is_none()
+                    && !method
+                        .body
+                        .iter()
+                        .any(|s| matches!(s.expression, Expression::Primitive { .. }))
+                {
+                    if let InferredType::Known(ref inferred) = body_type {
+                        self.method_return_types.insert(
+                            (class.name.name.clone(), method.selector.name(), false),
+                            inferred.clone(),
+                        );
+                    }
+                }
             }
             for method in &class.class_methods {
                 let mut method_env = TypeEnv::new();
@@ -265,6 +193,19 @@ impl TypeChecker {
                 self.check_no_self_in_params(method, &class.name.name);
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
+                }
+                if method.return_type.is_none()
+                    && !method
+                        .body
+                        .iter()
+                        .any(|s| matches!(s.expression, Expression::Primitive { .. }))
+                {
+                    if let InferredType::Known(ref inferred) = body_type {
+                        self.method_return_types.insert(
+                            (class.name.name.clone(), method.selector.name(), true),
+                            inferred.clone(),
+                        );
+                    }
                 }
             }
 
@@ -288,6 +229,24 @@ impl TypeChecker {
             );
             self.check_return_type(&standalone.method, &body_type, class_name, hierarchy);
             self.check_no_self_in_params(&standalone.method, class_name);
+            if standalone.method.return_type.is_none()
+                && !standalone
+                    .method
+                    .body
+                    .iter()
+                    .any(|s| matches!(s.expression, Expression::Primitive { .. }))
+            {
+                if let InferredType::Known(ref inferred) = body_type {
+                    self.method_return_types.insert(
+                        (
+                            class_name.clone(),
+                            standalone.method.selector.name(),
+                            standalone.is_class_method,
+                        ),
+                        inferred.clone(),
+                    );
+                }
+            }
         }
     }
 
@@ -1307,6 +1266,17 @@ impl TypeChecker {
     /// Takes ownership of the type map, leaving an empty map.
     pub fn take_type_map(&mut self) -> TypeMap {
         std::mem::take(&mut self.type_map)
+    }
+
+    /// Returns a reference to the method return types collected during checking.
+    #[must_use]
+    pub fn method_return_types(&self) -> &HashMap<MethodReturnKey, EcoString> {
+        &self.method_return_types
+    }
+
+    /// Takes ownership of the method return types map, leaving an empty map.
+    pub fn take_method_return_types(&mut self) -> HashMap<MethodReturnKey, EcoString> {
+        std::mem::take(&mut self.method_return_types)
     }
 }
 
