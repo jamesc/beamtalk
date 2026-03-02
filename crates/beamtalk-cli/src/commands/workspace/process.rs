@@ -66,17 +66,21 @@ const READINESS_PROBE_DELAY_MS: u64 = 200;
 
 /// Maximum number of TCP readiness probe attempts.
 ///
-/// When the port is not yet bound, `connect()` returns ECONNREFUSED immediately,
-/// so the real budget is RETRIES × `DELAY_MS` (not RETRIES × `connect_timeout`).
-/// 300 × 200ms = 60s budget for the BEAM node to start listening.
-///
-/// 60s is needed because CI runners can be heavily loaded immediately after the
-/// workspace integration tests run (which start/stop 12 BEAM nodes), slowing
-/// workspace startup enough to exceed the previous 30s budget.
-const READINESS_PROBE_MAX_RETRIES: usize = 300;
+/// The port file is written only *after* `cowboy:start_clear` succeeds, so by
+/// the time Rust reads the port and calls `wait_for_tcp_ready` the TCP port is
+/// already open. A small retry count (with `READINESS_READ_TIMEOUT_MS` per
+/// attempt) is sufficient; retries exist only for transient connect errors.
+const READINESS_PROBE_MAX_RETRIES: usize = 10;
 
-/// TCP read timeout for readiness probe in milliseconds.
-const READINESS_READ_TIMEOUT_MS: u64 = 500;
+/// TCP read timeout for the WebSocket auth handshake during readiness probing.
+///
+/// `ProtocolClient::connect` performs a full WebSocket auth exchange before
+/// returning. On a heavily-loaded CI runner (12 sequential BEAM nodes), the
+/// BEAM VM can take > 500ms to respond to the HTTP upgrade or send the
+/// `auth-required` message — causing every probe to time out even though the
+/// port IS open. 10 s gives ample headroom while keeping the total worst-case
+/// budget bounded (10 retries × 10 s read timeout = ~100 s).
+const READINESS_READ_TIMEOUT_MS: u64 = 10_000;
 
 /// TCP connect timeout for exit probe in milliseconds.
 const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
