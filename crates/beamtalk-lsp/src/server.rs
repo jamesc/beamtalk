@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 use beamtalk_core::language_service::{
     CompletionKind, DocumentSymbolKind, LanguageService, Position as BtPosition,
     SimpleLanguageService,
@@ -46,6 +48,26 @@ struct PreloadConfig {
     stdlib_dirs: Vec<PathBuf>,
 }
 
+#[derive(Default)]
+struct PreloadedFiles {
+    user_files: Vec<(PathBuf, String)>,
+    stdlib_files: Vec<(PathBuf, String)>,
+}
+
+/// Params for the `beamtalk-lsp/fetchContent` custom request.
+#[derive(Deserialize)]
+pub struct FetchContentParams {
+    /// A `beamtalk-stdlib:///ClassName.bt` URI identifying the file to fetch.
+    pub uri: String,
+}
+
+/// Response for the `beamtalk-lsp/fetchContent` custom request.
+#[derive(Debug, Serialize)]
+pub struct FetchContentResult {
+    /// The source content of the requested file.
+    pub content: String,
+}
+
 /// LSP backend wrapping `SimpleLanguageService`.
 pub struct Backend {
     /// LSP client handle for sending notifications and responses.
@@ -58,6 +80,8 @@ pub struct Backend {
     diagnostic_generation: Mutex<HashMap<Url, u64>>,
     /// Deferred preload config captured at initialize and consumed after handshake.
     preload_config: Mutex<Option<PreloadConfig>>,
+    /// Paths of stdlib files loaded during preload; used to emit `beamtalk-stdlib://` URIs.
+    stdlib_paths: Mutex<HashSet<Utf8PathBuf>>,
 }
 
 impl Backend {
@@ -69,6 +93,7 @@ impl Backend {
             versions: Mutex::new(HashMap::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
             preload_config: Mutex::new(None),
+            stdlib_paths: Mutex::new(HashSet::new()),
         }
     }
 
@@ -79,17 +104,91 @@ impl Backend {
     }
 
     async fn preload_workspace_source_files(&self, config: PreloadConfig) {
-        let loaded_files = tokio::task::spawn_blocking(move || collect_preload_files(config))
+        let loaded = tokio::task::spawn_blocking(move || collect_preload_files(config))
             .await
             .unwrap_or_default();
 
+        // Register stdlib paths before indexing so they are available immediately.
+        let stdlib_utf8: Vec<Utf8PathBuf> = loaded
+            .stdlib_files
+            .iter()
+            .filter_map(|(p, _)| Utf8PathBuf::from_path_buf(p.clone()).ok())
+            .collect();
+        {
+            let mut stdlib_paths = self
+                .stdlib_paths
+                .lock()
+                .expect("stdlib_paths lock poisoned");
+            for path in &stdlib_utf8 {
+                stdlib_paths.insert(path.clone());
+            }
+        }
+
         let mut svc = self.service.lock().expect("service lock poisoned");
-        for (path, content) in loaded_files {
+        for (path, content) in loaded.user_files.into_iter().chain(loaded.stdlib_files) {
             let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
                 continue;
             };
             svc.update_file(utf8_path, content);
         }
+    }
+
+    /// Handles the `beamtalk-lsp/fetchContent` custom request.
+    ///
+    /// Returns the source content for a `beamtalk-stdlib:///ClassName.bt` virtual URI.
+    /// Responds with an error if the URI scheme is unsupported or the file is not available.
+    #[expect(
+        clippy::unused_async,
+        reason = "tower-lsp custom_method requires async fn signature"
+    )]
+    pub async fn fetch_content(
+        &self,
+        params: FetchContentParams,
+    ) -> tower_lsp::jsonrpc::Result<FetchContentResult> {
+        let uri = Url::parse(&params.uri).map_err(|_| {
+            tower_lsp::jsonrpc::Error::invalid_params(format!("invalid URI: {}", params.uri))
+        })?;
+
+        if uri.scheme() != "beamtalk-stdlib" {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
+                "unsupported URI scheme: {}",
+                uri.scheme()
+            )));
+        }
+
+        let filename = uri.path().trim_start_matches('/').to_string();
+
+        let matching_path = {
+            let stdlib_paths = self
+                .stdlib_paths
+                .lock()
+                .expect("stdlib_paths lock poisoned");
+            stdlib_paths
+                .iter()
+                .find(|p| p.file_name() == Some(filename.as_str()))
+                .cloned()
+        };
+
+        let Some(path) = matching_path else {
+            return Err(tower_lsp::jsonrpc::Error {
+                code: tower_lsp::jsonrpc::ErrorCode::ServerError(-32_001),
+                message: format!("stdlib source not available: {filename}").into(),
+                data: None,
+            });
+        };
+
+        let content = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            svc.file_source(&path)
+        };
+
+        content
+            .map(|c| FetchContentResult { content: c })
+            .ok_or_else(|| tower_lsp::jsonrpc::Error {
+                code: tower_lsp::jsonrpc::ErrorCode::ServerError(-32_001),
+                message: format!("stdlib source not available: {filename}").into(),
+                data: None,
+            })
     }
 
     /// Publishes diagnostics for a file after every change.
@@ -410,6 +509,9 @@ impl LanguageServer for Backend {
     }
 
     /// Navigates to the definition of the symbol at the cursor.
+    ///
+    /// Returns a `beamtalk-stdlib:///ClassName.bt` virtual URI for stdlib definitions,
+    /// or a `file://` URI for user-defined symbols.
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
@@ -419,19 +521,37 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let svc = self.service.lock().expect("service lock poisoned");
-        let Some(source) = svc.file_source(&path) else {
-            return Ok(None);
+        // Hold svc lock only for the definition lookup; release before checking stdlib_paths.
+        let resolved = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let Some(source) = svc.file_source(&path) else {
+                return Ok(None);
+            };
+            let pos = to_bt_position(params.text_document_position_params.position, &source);
+            let location = svc.goto_definition(&path, pos);
+            location.and_then(|loc| {
+                let target_source = svc.file_source(&loc.file)?;
+                let range = span_to_range(loc.span, &target_source);
+                Some((loc.file.clone(), range))
+            })
         };
-        let pos = to_bt_position(params.text_document_position_params.position, &source);
-        let location = svc.goto_definition(&path, pos);
 
-        Ok(location.and_then(|loc| {
-            let target_source = svc.file_source(&loc.file)?;
-            let range = span_to_range(loc.span, &target_source);
+        Ok(resolved.and_then(|(file, range)| {
+            let is_stdlib = {
+                let stdlib_paths = self
+                    .stdlib_paths
+                    .lock()
+                    .expect("stdlib_paths lock poisoned");
+                stdlib_paths.contains(&file)
+            };
+            let target_uri = if is_stdlib {
+                path_to_stdlib_uri(&file)?
+            } else {
+                path_to_uri(&file)?
+            };
             Some(GotoDefinitionResponse::Scalar(
                 tower_lsp::lsp_types::Location {
-                    uri: path_to_uri(&loc.file)?,
+                    uri: target_uri,
                     range,
                 },
             ))
@@ -600,9 +720,10 @@ fn path_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
     roots.iter().any(|root| path.starts_with(root))
 }
 
-fn collect_preload_files(config: PreloadConfig) -> Vec<(PathBuf, String)> {
+fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
     let PreloadConfig { roots, stdlib_dirs } = config;
-    let mut files_to_index = Vec::new();
+    let mut user_paths = Vec::new();
+    let mut stdlib_path_list = Vec::new();
     let mut seen_files = HashSet::new();
     let mut remaining_budget = PRELOAD_MAX_FILES;
 
@@ -612,7 +733,7 @@ fn collect_preload_files(config: PreloadConfig) -> Vec<(PathBuf, String)> {
         }
         let src_dir = root.join("src");
         if src_dir.is_dir() {
-            collect_beamtalk_files_recursive(&src_dir, &mut files_to_index, &mut remaining_budget);
+            collect_beamtalk_files_recursive(&src_dir, &mut user_paths, &mut remaining_budget);
         }
     }
 
@@ -620,21 +741,35 @@ fn collect_preload_files(config: PreloadConfig) -> Vec<(PathBuf, String)> {
         if remaining_budget == 0 {
             break;
         }
-        collect_beamtalk_files_recursive(dir, &mut files_to_index, &mut remaining_budget);
+        collect_beamtalk_files_recursive(dir, &mut stdlib_path_list, &mut remaining_budget);
     }
 
-    let mut loaded_files = Vec::new();
-    for path in files_to_index {
+    let mut user_files = Vec::new();
+    for path in user_paths {
         if !seen_files.insert(path.clone()) {
             continue;
         }
         let Ok(content) = fs::read_to_string(&path) else {
             continue;
         };
-        loaded_files.push((path, content));
+        user_files.push((path, content));
     }
 
-    loaded_files
+    let mut stdlib_files = Vec::new();
+    for path in stdlib_path_list {
+        if !seen_files.insert(path.clone()) {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        stdlib_files.push((path, content));
+    }
+
+    PreloadedFiles {
+        user_files,
+        stdlib_files,
+    }
 }
 
 fn is_beamtalk_file(path: &Path) -> bool {
@@ -793,6 +928,12 @@ fn path_to_uri(path: &Utf8PathBuf) -> Option<Url> {
     } else {
         Url::from_file_path(path.as_str()).ok()
     }
+}
+
+/// Converts a stdlib file path to a `beamtalk-stdlib:///ClassName.bt` virtual URI.
+fn path_to_stdlib_uri(path: &Utf8PathBuf) -> Option<Url> {
+    let filename = path.file_name()?;
+    Url::parse(&format!("beamtalk-stdlib:///{filename}")).ok()
 }
 
 /// Converts an LSP `Position` (UTF-16 code units) to a beamtalk `Position` (byte offsets).
@@ -1102,5 +1243,107 @@ mod tests {
         // the environment — the result depends on the test runner's
         // installation layout and may be Some or None.
         let _ = sysroot_stdlib_source_dir();
+    }
+
+    #[test]
+    fn path_to_stdlib_uri_produces_beamtalk_stdlib_scheme() {
+        let path = Utf8PathBuf::from("/usr/share/beamtalk/stdlib/src/Integer.bt");
+        let uri = path_to_stdlib_uri(&path).expect("should produce URI");
+        assert_eq!(uri.scheme(), "beamtalk-stdlib");
+        assert_eq!(uri.path(), "/Integer.bt");
+    }
+
+    #[test]
+    fn path_to_stdlib_uri_handles_nested_path() {
+        let path = Utf8PathBuf::from("/some/deep/path/to/Collection.bt");
+        let uri = path_to_stdlib_uri(&path).expect("should produce URI");
+        assert_eq!(uri.scheme(), "beamtalk-stdlib");
+        assert_eq!(uri.path(), "/Collection.bt");
+    }
+
+    #[tokio::test]
+    async fn fetch_content_returns_error_for_unsupported_scheme() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let result: tower_lsp::jsonrpc::Result<FetchContentResult> = backend
+            .fetch_content(FetchContentParams {
+                uri: "file:///some/file.bt".to_string(),
+            })
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("unsupported URI scheme"));
+    }
+
+    #[tokio::test]
+    async fn fetch_content_returns_error_for_missing_stdlib_file() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let result: tower_lsp::jsonrpc::Result<FetchContentResult> = backend
+            .fetch_content(FetchContentParams {
+                uri: "beamtalk-stdlib:///NonExistent.bt".to_string(),
+            })
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("stdlib source not available"));
+        assert!(err.message.contains("NonExistent.bt"));
+    }
+
+    #[tokio::test]
+    async fn fetch_content_returns_content_for_registered_stdlib_file() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let stdlib_path = Utf8PathBuf::from("/fake/stdlib/Integer.bt");
+        let content = "Object subclass: Integer\n  + other => 0".to_string();
+
+        {
+            let mut stdlib_paths = backend
+                .stdlib_paths
+                .lock()
+                .expect("stdlib_paths lock poisoned");
+            stdlib_paths.insert(stdlib_path.clone());
+        }
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(stdlib_path, content.clone());
+        }
+
+        let result: FetchContentResult = backend
+            .fetch_content(FetchContentParams {
+                uri: "beamtalk-stdlib:///Integer.bt".to_string(),
+            })
+            .await
+            .expect("should return content");
+        assert_eq!(result.content, content);
+    }
+
+    #[test]
+    fn collect_preload_files_separates_user_and_stdlib_files() {
+        let temp = unique_temp_dir("beamtalk_lsp_preload_separation");
+        let project_root = temp.join("project");
+        let src_dir = project_root.join("src");
+        let stdlib_dir = temp.join("stdlib");
+
+        fs::create_dir_all(&src_dir).expect("create src dir");
+        fs::create_dir_all(&stdlib_dir).expect("create stdlib dir");
+
+        fs::write(src_dir.join("User.bt"), "Object subclass: User").expect("write user file");
+        fs::write(stdlib_dir.join("Integer.bt"), "Object subclass: Integer")
+            .expect("write stdlib file");
+
+        let config = PreloadConfig {
+            roots: vec![project_root],
+            stdlib_dirs: vec![stdlib_dir],
+        };
+        let loaded = collect_preload_files(config);
+
+        assert_eq!(loaded.user_files.len(), 1);
+        assert_eq!(loaded.stdlib_files.len(), 1);
+        assert!(loaded.user_files[0].0.ends_with("User.bt"));
+        assert!(loaded.stdlib_files[0].0.ends_with("Integer.bt"));
+
+        let _ = fs::remove_dir_all(&temp);
     }
 }
