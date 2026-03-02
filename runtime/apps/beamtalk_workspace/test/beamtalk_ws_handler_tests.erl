@@ -117,11 +117,11 @@ multiple_subscribers_all_receive_class_loaded_test() ->
 
         receive
             sub1_subscribed -> ok
-        after 500 -> ok
+        after 500 -> ?assert(false)
         end,
         receive
             sub2_subscribed -> ok
-        after 500 -> ok
+        after 500 -> ?assert(false)
         end,
         %% Sync: ensure both subscribe casts are processed
         sys:get_state(ServerPid),
@@ -165,7 +165,7 @@ dead_subscriber_auto_removed_test() ->
         end),
         receive
             subscribed -> ok
-        after 500 -> ok
+        after 500 -> ?assert(false)
         end,
         sys:get_state(ServerPid),
 
