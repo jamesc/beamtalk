@@ -203,7 +203,7 @@ The following analysis applies across all three options, noting where the option
 
 Newcomers have no existing code to migrate and no preconceptions about which syntax is "correct." All three options are learnable. The question is discoverability:
 
-- **Option A** (separate `class Foo class [...]` body): The `Foo class [...]` form mirrors the Pharo browser metaphor ("navigate to the metaclass side"). A newcomer who asks "how do I add a class-side method?" can find it by reading the class definition structure rather than remembering a modifier keyword.
+- **Option A** (separate class-side declaration): The metaclass-side declaration visually separates class-side methods from instance-side methods. A newcomer who asks "how do I add a class-side method?" can find it by reading the class definition structure rather than remembering a modifier keyword. However, Beamtalk does not have block delimiters (`[...]`) for class bodies — class definitions are open-ended, with methods continuing until the next class declaration or EOF. Option A requires deciding what the class-side declaration syntax actually looks like in Beamtalk, and how the parser knows where it ends. This is an open design question; see Alternatives Considered for discussion.
 - **Option B** (`meta` modifier): Drop-in replacement for `class` modifier. Newcomers who search for "class-side method" in documentation will find `meta methodName`. The keyword is unambiguous but novel — `meta` is not in mainstream language vocabulary for this concept.
 - **Option C** (`+` sigil): Objective-C/Swift convention. Familiar to iOS developers. Short. However, it is opaque to anyone without Objective-C background: `+ new` does not self-document.
 
@@ -241,8 +241,8 @@ No runtime impact. The class-side/instance-side distinction is purely a compile-
 
 **Best case from each cohort:**
 
-- **Newcomer**: "When I open a class definition and want to add a factory method, the separate `class Foo class [...]` block tells me exactly where to put it. I don't have to remember a modifier; I navigate to the metaclass side as a first-class block, just like switching tabs in a browser. The structure of the source file reflects the structure of the object model."
-- **Smalltalk developer**: "This is the honest representation. In Smalltalk, class-side methods are defined on the metaclass, which is a separate object. Having a separate block for `class Foo class [...]` acknowledges that truth directly, rather than treating class-side methods as a tagged variant of instance-side methods. The `class` message in `Foo class [...]` is the same `class` message I send in expressions — one concept, not two."
+- **Newcomer**: "When I open a class definition and want to add a factory method, the separate class-side declaration tells me exactly where to put it. I don't have to remember a modifier; the structure of the source file reflects the structure of the object model — just like switching tabs in a browser."
+- **Smalltalk developer**: "This is the honest representation. In Smalltalk, class-side methods are defined on the metaclass, which is a separate object. A separate declaration for the metaclass side acknowledges that truth directly, rather than treating class-side methods as a tagged variant of instance-side methods. The `class` message in `Foo class` is the same `class` message I send in expressions — one concept, not two."
 - **BEAM developer**: "The source structure tells me immediately which functions in `foo.beam` are instance methods and which are class-side. I don't have to mentally filter by modifier. The module has two named sections."
 - **Language designer**: "It eliminates the modifier keyword entirely, which eliminates the entire class of modifier-as-method-name collisions for all time. No `meta` keyword to add to the lexer. No `+` sigil to explain. The object model is the syntax."
 
@@ -292,57 +292,58 @@ No runtime impact. The class-side/instance-side distinction is purely a compile-
 
 ## Alternatives Considered
 
-### Option A: Separate Class Body Declaration
+### Option A: Separate Class-Side Declaration
 
-Class bodies are split into two separate top-level declarations: one for instance-side methods and one for class-side methods. The class-side block is introduced by navigating to the metaclass via the `class` message — a plain message send, not a modifier keyword.
+Class-side methods are placed in a separate top-level declaration, distinct from the
+instance-side `subclass:` body. This mirrors the Pharo browser's two-tab model and
+the Smalltalk object model, but must be expressed in Beamtalk's actual syntax — which
+has no block delimiters (`[...]`). Beamtalk class bodies are open-ended: methods
+continue until the next top-level declaration or EOF.
+
+**The syntax is an open design question.** One candidate:
 
 ```beamtalk
-// Instance-side declaration (unchanged from current syntax)
+// Instance-side declaration — unchanged
 Object subclass: TranscriptStream
     classVar: uniqueInstance = nil
 
-    // Instance method — `class` is unambiguously a method name here
-    class -> Metaclass => @primitive "classClass"
+    class -> Metaclass => @primitive "classClass"   // unambiguous: method named `class`
     show: text => self.buffer := self.buffer ++ #(text)
 
-// Class-side declaration — `class` is the metaclass-navigation message
-class TranscriptStream class [
+// Class-side declaration — `extend ... class` as a new top-level form
+extend TranscriptStream class
     new => self error: 'Use uniqueInstance instead'
     uniqueInstance =>
         self.uniqueInstance ifNil: [self.uniqueInstance := super new].
         self.uniqueInstance
-]
-```
 
-For a class with only class-side methods (no instance-side body):
-
-```beamtalk
-class Float class [
-    pi -> Float => @primitive "pi"
-]
-```
-
-For a class with only instance-side methods (the common case), no `class Foo class [...]` block is needed:
-
-```beamtalk
+// Next top-level declaration implicitly ends the class-side block
 Object subclass: Point
-    state: x = 0
-    state: y = 0
-
-    x -> Integer => self.x
-    y -> Integer => self.y
+    ...
 ```
 
-The `class` message in `class TranscriptStream class [...]` is parsed as a message send applied to the class reference `TranscriptStream`, yielding a metaclass object. The `[...]` block is then the method body collection for that metaclass. This is the Pharo model transliterated to Beamtalk syntax.
+The parser knows the class-side block ends at the next top-level keyword (`class`,
+`extend`, EOF) — the same rule that terminates the current instance-side body. No new
+terminator syntax is needed. However this requires a new top-level declaration form
+(`extend Foo class`) with its own parsing rules, and clear documentation that
+`subclass:` and `extend ... class` for the same class must appear in a defined order.
 
-**In stdlib migration terms:** The 57 class-side method definitions would be extracted into separate `class Foo class [...]` blocks. Classes that have both instance-side and class-side methods are split into two top-level declarations. Classes with only class-side methods gain a new declaration form.
+**Unresolved questions for Option A:**
+- What is the exact syntax? (`extend Foo class`, `class Foo class`, something else?)
+- Where do `classVar:` declarations go? Instance-side body, class-side body, or either?
+- Can there be more than one class-side declaration per class (e.g., across files)?
+- What does `self` mean inside the class-side body — the class object or the metaclass?
+
+**In stdlib migration terms:** The 57 class-side method definitions would be extracted
+into separate `extend Foo class` declarations. Classes with both instance and class-side
+methods are split into two top-level declarations.
 
 **Tradeoffs:**
 - Most faithful to the Smalltalk object model; `class` message has one meaning throughout.
 - Eliminates all modifier keyword collision, present and future.
-- Requires splitting classes with mixed instance/class-side methods; this may be perceived as undesirable coupling in a file.
-- Most parser change: new declaration form to parse and validate.
-- Questions about `classVar:` placement: do class variables go in the instance-side block, the class-side block, or both? (Pharo convention: class variable declarations go on the class-side. Beamtalk would need to decide.)
+- Highest design cost: new top-level declaration form, unresolved questions above.
+- Requires splitting classes with mixed instance/class-side methods across two declarations.
+- The open-ended body termination rule requires careful documentation to avoid confusion.
 
 ### Option B: `meta` Modifier Keyword
 
@@ -424,19 +425,24 @@ The consequences below are conditional on the option selected.
 
 **Positive:**
 - Eliminates the modifier keyword entirely; `class` has one meaning throughout the language.
-- Source file structure mirrors the object model structure: two blocks, two sides.
+- Source file structure mirrors the object model structure: two distinct declaration sides.
 - No modifier-as-method-name collision possible, now or in future.
-- Consistent with Pharo text format (Tonel) and the Smalltalk object model.
 
 **Negative:**
-- Classes with mixed instance/class-side methods are split across two top-level declarations.
-- Most parser change: new declaration form, validation rules for `classVar:` placement, enforcement of "at most one class-side block per class."
-- Newcomers may find the two-declaration form unexpected compared to C++/Java-style single class bodies.
-- Migration requires structural reorganisation of existing class files, not just a token rename.
+- Beamtalk has no block delimiters — the class-side declaration form and its termination
+  rule must be designed from scratch. This is the highest design cost of any option.
+- Multiple open questions (syntax, `classVar:` placement, `self` semantics, cross-file
+  ordering) must be resolved before implementation can begin — this ADR cannot be
+  accepted until those questions are answered.
+- Classes with mixed instance/class-side methods are split across two top-level
+  declarations, which may obscure the relationship between `new` (class-side) and
+  `initialize` (instance-side).
+- Migration requires structural reorganisation, not a mechanical token rename.
 
 **Neutral:**
-- `classVar:` placement policy must be established (class-side block, instance-side block, or either).
-- `sealed` and `override` modifiers on class-side methods still apply within the class-side block; their grammar is unchanged.
+- `sealed` and `override` modifiers on class-side methods remain applicable; grammar unchanged.
+- The open-ended body termination rule (ends at next top-level keyword or EOF) is
+  consistent with the current class body rule — no new terminator syntax required.
 
 ### Option B Consequences
 
