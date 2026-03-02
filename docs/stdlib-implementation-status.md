@@ -378,7 +378,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 **Stdlib module:** `stdlib/src/Dictionary.bt` → `beamtalk_dictionary`
 **Helper module:** `beamtalk_map_ops.erl` (complex operations)
-**Methods:** 11 — all implemented
+**Methods:** 12 — all implemented
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
