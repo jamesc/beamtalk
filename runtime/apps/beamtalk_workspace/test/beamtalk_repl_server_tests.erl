@@ -1363,6 +1363,219 @@ context_completions_nonexistent_atom_receiver_returns_empty_test() ->
     ),
     ?assertEqual([], Result).
 
+%%% tokenise_send_chain/1 tests (BT-1006)
+
+tokenise_send_chain_simple_chain_test() ->
+    %% Single hop unary chain
+    ?assertEqual(
+        {ok, <<"\"hello\"">>, [size]},
+        beamtalk_repl_ops_dev:tokenise_send_chain(<<"\"hello\" size">>)
+    ).
+
+tokenise_send_chain_multi_hop_test() ->
+    %% Two-hop unary chain
+    ?assertEqual(
+        {ok, <<"counter">>, [getValue, reversed]},
+        beamtalk_repl_ops_dev:tokenise_send_chain(<<"counter getValue reversed">>)
+    ).
+
+tokenise_send_chain_single_token_returns_error_test() ->
+    %% Single token — no sends to chain
+    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_send_chain(<<"hello">>)).
+
+tokenise_send_chain_empty_returns_error_test() ->
+    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_send_chain(<<>>)).
+
+tokenise_send_chain_keyword_mid_chain_returns_error_test() ->
+    %% Keyword send mid-chain is not a unary chain
+    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_send_chain(<<"myList inject: 0">>)).
+
+tokenise_send_chain_paren_returns_error_test() ->
+    %% Parenthesised subexpression — not supported
+    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_send_chain(<<"(myList size)">>)).
+
+%%% parse_receiver_and_prefix/1 multi-token tests (BT-1006)
+
+parse_receiver_multi_token_expression_test() ->
+    %% Multi-token receiver returns {expression, ReceiverExpr, Prefix}
+    ?assertEqual(
+        {expression, <<"\"hello\" size">>, <<"cl">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"\"hello\" size cl">>)
+    ).
+
+parse_receiver_multi_token_empty_prefix_test() ->
+    %% Multi-token expression with trailing space (empty prefix)
+    ?assertEqual(
+        {expression, <<"\"hello\" size">>, <<>>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"\"hello\" size ">>)
+    ).
+
+parse_receiver_multi_token_three_tokens_test() ->
+    %% Three-token expression with trailing space
+    ?assertEqual(
+        {expression, <<"counter getValue reversed">>, <<>>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"counter getValue reversed ">>)
+    ).
+
+%%% walk_chain/2 and walk_chain_class/2 tests (BT-1006)
+
+walk_chain_empty_selectors_test() ->
+    %% walk_chain with no selectors returns the class unchanged — no registry call
+    ?assertEqual({ok, 'String'}, beamtalk_repl_ops_dev:walk_chain('String', [])).
+
+walk_chain_single_hop_found_test() ->
+    Pid = spawn_mock_class_with_return_types(
+        'WalkChainTestA', #{size => 'Integer'}, #{}
+    ),
+    try
+        ?assertEqual(
+            {ok, 'Integer'},
+            beamtalk_repl_ops_dev:walk_chain('WalkChainTestA', [size])
+        )
+    after
+        cleanup_mock_class('WalkChainTestA', Pid)
+    end.
+
+walk_chain_broken_chain_test() ->
+    %% Selector not in return types → undefined
+    Pid = spawn_mock_class_with_return_types('WalkChainTestB', #{}, #{}),
+    try
+        ?assertEqual(
+            undefined,
+            beamtalk_repl_ops_dev:walk_chain('WalkChainTestB', [unknownMethod])
+        )
+    after
+        cleanup_mock_class('WalkChainTestB', Pid)
+    end.
+
+walk_chain_class_empty_selectors_test() ->
+    %% walk_chain_class with no selectors returns the class unchanged — no registry call
+    ?assertEqual({ok, 'Integer'}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [])).
+
+walk_chain_class_single_hop_found_test() ->
+    Pid = spawn_mock_class_with_return_types(
+        'WalkChainClassTestA', #{}, #{new => 'WalkChainClassTestA'}
+    ),
+    try
+        ?assertEqual(
+            {ok, 'WalkChainClassTestA'},
+            beamtalk_repl_ops_dev:walk_chain_class('WalkChainClassTestA', [new])
+        )
+    after
+        cleanup_mock_class('WalkChainClassTestA', Pid)
+    end.
+
+%%% resolve_chain_type/2 tests (BT-1006)
+
+resolve_chain_type_single_hop_test() ->
+    Pid = spawn_mock_class_with_return_types(
+        'ResolveChainTestA', #{getValue => 'Integer'}, #{}
+    ),
+    try
+        ?assertEqual(
+            {ok, 'Integer'},
+            beamtalk_repl_ops_dev:resolve_chain_type(<<"counter getValue">>, #{
+                counter => #beamtalk_object{
+                    class = 'ResolveChainTestA', class_mod = undefined, pid = self()
+                }
+            })
+        )
+    after
+        cleanup_mock_class('ResolveChainTestA', Pid)
+    end.
+
+resolve_chain_type_multi_hop_test() ->
+    %% Two-hop chain: counter getValue reversed → String
+    PidA = spawn_mock_class_with_return_types(
+        'ResolveChainMultiA', #{getValue => 'ResolveChainMultiB'}, #{}
+    ),
+    PidB = spawn_mock_class_with_return_types(
+        'ResolveChainMultiB', #{reversed => 'String'}, #{}
+    ),
+    try
+        ?assertEqual(
+            {ok, 'String'},
+            beamtalk_repl_ops_dev:resolve_chain_type(
+                <<"counter getValue reversed">>,
+                #{
+                    counter => #beamtalk_object{
+                        class = 'ResolveChainMultiA', class_mod = undefined, pid = self()
+                    }
+                }
+            )
+        )
+    after
+        cleanup_mock_class('ResolveChainMultiA', PidA),
+        cleanup_mock_class('ResolveChainMultiB', PidB)
+    end.
+
+resolve_chain_type_broken_chain_returns_undefined_test() ->
+    %% Selector with no annotation → undefined
+    Pid = spawn_mock_class_with_return_types('ResolveChainTestB', #{}, #{}),
+    try
+        ?assertEqual(
+            undefined,
+            beamtalk_repl_ops_dev:resolve_chain_type(
+                <<"\"hello\" noSuchAnnotation">>, #{}
+            )
+        )
+    after
+        cleanup_mock_class('ResolveChainTestB', Pid)
+    end.
+
+resolve_chain_type_keyword_mid_chain_returns_undefined_test() ->
+    %% Keyword sends mid-chain cannot be tokenised — returns undefined
+    ?assertEqual(
+        undefined,
+        beamtalk_repl_ops_dev:resolve_chain_type(<<"myList inject: 0">>, #{})
+    ).
+
+resolve_chain_type_single_token_returns_undefined_test() ->
+    %% Single token cannot be chain-resolved (must be at least receiver + selector)
+    ?assertEqual(
+        undefined,
+        beamtalk_repl_ops_dev:resolve_chain_type(<<"hello">>, #{})
+    ).
+
+%%% get_context_completions chain resolution tests (BT-1006)
+
+context_completions_chained_no_annotation_returns_empty_test() ->
+    %% Chained expression with no return type annotation → empty completions (no crash)
+    Pid = spawn_mock_class_with_return_types('ChainCompletionTestA', #{}, #{}),
+    try
+        Bindings = #{
+            myObj => #beamtalk_object{
+                class = 'ChainCompletionTestA', class_mod = undefined, pid = self()
+            }
+        },
+        Result = beamtalk_repl_ops_dev:get_context_completions(
+            <<"myObj unknownMethod cl">>, Bindings
+        ),
+        ?assertEqual([], Result)
+    after
+        cleanup_mock_class('ChainCompletionTestA', Pid)
+    end.
+
+context_completions_chained_with_return_type_test() ->
+    %% Chained expression where the method has a return type → Integer completions
+    Pid = spawn_mock_class_with_return_types(
+        'ChainCompletionTestB', #{getValue => 'Integer'}, #{}
+    ),
+    try
+        Bindings = #{
+            myObj => #beamtalk_object{
+                class = 'ChainCompletionTestB', class_mod = undefined, pid = self()
+            }
+        },
+        Result = beamtalk_repl_ops_dev:get_context_completions(
+            <<"myObj getValue cl">>, Bindings
+        ),
+        %% `class` is an Integer (Object) method — should appear in completions
+        ?assert(lists:member(<<"class">>, Result))
+    after
+        cleanup_mock_class('ChainCompletionTestB', Pid)
+    end.
+
 %% Helper: spawn a mock class gen_server process and register it in the class registry.
 spawn_mock_class(Name, ClassMethods, InstanceMethods) ->
     RegName = beamtalk_class_registry:registry_name(Name),
@@ -1400,6 +1613,54 @@ cleanup_mock_class(Name, Pid) ->
     RegName = beamtalk_class_registry:registry_name(Name),
     catch erlang:unregister(RegName),
     Pid ! stop.
+
+%% Helper: spawn a mock class that supports return-type lookups for chain resolution (BT-1006).
+%% InstanceReturnTypes: #{selector() => atom()} — instance-side return types
+%% ClassReturnTypes:    #{selector() => atom()} — class-side return types
+spawn_mock_class_with_return_types(Name, InstanceReturnTypes, ClassReturnTypes) ->
+    RegName = beamtalk_class_registry:registry_name(Name),
+    Self = self(),
+    Pid = spawn(fun() ->
+        erlang:register(RegName, self()),
+        Self ! registered,
+        mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes)
+    end),
+    receive
+        registered -> ok
+    after 1000 ->
+        error({mock_class_register_timeout, Name})
+    end,
+    Pid.
+
+mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes) ->
+    receive
+        {'$gen_call', From, {get_method_return_type, Selector}} ->
+            Reply =
+                case maps:find(Selector, InstanceReturnTypes) of
+                    {ok, ReturnType} -> {ok, ReturnType};
+                    error -> not_found
+                end,
+            gen_server:reply(From, Reply),
+            mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes);
+        {'$gen_call', From, {get_class_method_return_type, Selector}} ->
+            Reply =
+                case maps:find(Selector, ClassReturnTypes) of
+                    {ok, ReturnType} -> {ok, ReturnType};
+                    error -> not_found
+                end,
+            gen_server:reply(From, Reply),
+            mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes);
+        {'$gen_call', From, superclass} ->
+            gen_server:reply(From, none),
+            mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes);
+        {'$gen_call', From, methods} ->
+            gen_server:reply(From, maps:keys(InstanceReturnTypes)),
+            mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes);
+        stop ->
+            ok;
+        _ ->
+            mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes)
+    end.
 
 %%% resolve_class_to_module/1 tests
 

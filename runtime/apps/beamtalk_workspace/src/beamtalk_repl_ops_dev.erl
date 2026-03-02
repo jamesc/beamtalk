@@ -17,6 +17,10 @@
     get_context_completions/1,
     get_context_completions/2,
     parse_receiver_and_prefix/1,
+    tokenise_send_chain/1,
+    resolve_chain_type/2,
+    walk_chain/2,
+    walk_chain_class/2,
     make_class_not_found_error/1,
     base_protocol_response/1
 ]).
@@ -301,6 +305,12 @@ get_context_completions(Line, Bindings) when is_binary(Line) ->
         {undefined, Prefix} ->
             %% No receiver — use standard prefix completion
             get_completions(Prefix);
+        {expression, ReceiverExpr, Prefix} ->
+            %% Multi-token receiver expression — resolve via chain type inference (BT-1006)
+            case resolve_chain_type(ReceiverExpr, Bindings) of
+                {ok, ClassName} -> complete_instance_methods(ClassName, Prefix);
+                undefined -> []
+            end;
         {Receiver, <<>>} ->
             %% Empty prefix with receiver (e.g., "Integer ") — return all methods
             MethodSelectors = get_methods_for_receiver(Receiver, Bindings),
@@ -316,15 +326,22 @@ get_context_completions(Line, Bindings) when is_binary(Line) ->
     end.
 
 %% @private
-%% @doc Parse the line up to the cursor into a {Receiver, Prefix} pair.
+%% @doc Parse the line up to the cursor into a receiver and prefix.
+%%
+%% Returns:
+%%   {undefined, Prefix}                — no receiver (bare prefix, e.g. <<"s">>)
+%%   {ReceiverToken, Prefix}            — single-token receiver (e.g. <<"Integer">>, <<"42">>)
+%%   {expression, ReceiverExpr, Prefix} — multi-token receiver expression (e.g. <<"\"hello\" size">>) (BT-1006)
 %%
 %% Examples:
-%%   <<"Integer s">>  → {<<"Integer">>, <<"s">>}
-%%   <<"Integer ">>   → {<<"Integer">>, <<>>}
-%%   <<"42 s">>       → {<<"42">>, <<"s">>}
-%%   <<"s">>          → {undefined, <<"s">>}
-%%   <<>>             → {undefined, <<>>}
--spec parse_receiver_and_prefix(binary()) -> {binary() | undefined, binary()}.
+%%   <<"Integer s">>       → {<<"Integer">>, <<"s">>}
+%%   <<"Integer ">>        → {<<"Integer">>, <<>>}
+%%   <<"42 s">>            → {<<"42">>, <<"s">>}
+%%   <<"\"hello\" size c">>→ {expression, <<"\"hello\" size">>, <<"c">>}
+%%   <<"s">>               → {undefined, <<"s">>}
+%%   <<>>                  → {undefined, <<>>}
+-spec parse_receiver_and_prefix(binary()) ->
+    {binary() | undefined, binary()} | {expression, binary(), binary()}.
 parse_receiver_and_prefix(<<>>) ->
     {undefined, <<>>};
 parse_receiver_and_prefix(Line) when is_binary(Line) ->
@@ -334,7 +351,7 @@ parse_receiver_and_prefix(Line) when is_binary(Line) ->
     {PrefixCharsRev, Rest} = lists:splitwith(fun is_identifier_char/1, RevStr),
     Prefix = list_to_binary(lists:reverse(PrefixCharsRev)),
     %% Skip whitespace before the prefix
-    {SpaceChars, ReceiverPart} = lists:splitwith(
+    {SpaceChars, ReceiverPartRev} = lists:splitwith(
         fun(C) -> C =:= $\s orelse C =:= $\t end, Rest
     ),
     case SpaceChars of
@@ -343,12 +360,19 @@ parse_receiver_and_prefix(Line) when is_binary(Line) ->
             {undefined, Prefix};
         _ ->
             %% Extract the token immediately before the space (the receiver)
-            {ReceiverCharsRev, _} = lists:splitwith(
-                fun(C) -> C =/= $\s andalso C =/= $\t end, ReceiverPart
+            {ReceiverCharsRev, Tail} = lists:splitwith(
+                fun(C) -> C =/= $\s andalso C =/= $\t end, ReceiverPartRev
             ),
             case ReceiverCharsRev of
-                [] -> {undefined, Prefix};
-                _ -> {list_to_binary(lists:reverse(ReceiverCharsRev)), Prefix}
+                [] ->
+                    {undefined, Prefix};
+                _ when Tail =:= [] ->
+                    %% Single-token receiver — no more content before it
+                    {list_to_binary(lists:reverse(ReceiverCharsRev)), Prefix};
+                _ ->
+                    %% Multi-token receiver expression — return the full expression (BT-1006)
+                    ReceiverExpr = list_to_binary(lists:reverse(ReceiverPartRev)),
+                    {expression, ReceiverExpr, Prefix}
             end
     end.
 
@@ -363,6 +387,152 @@ is_identifier_char(C) ->
         %% `ifTrue:ifFalse:` complete as a unit.  Must stay in sync with
         %% word_start in crates/beamtalk-cli/src/commands/repl/helper.rs.
         C =:= $:.
+
+%%% Chain resolution (BT-1006)
+
+%% @private
+%% @doc Parse a binary expression into a receiver token and a list of unary selectors.
+%%
+%% Accepts only simple unary send chains: whitespace-separated tokens where the first
+%% is a receiver (literal, class name, or variable) and the rest are unary selectors.
+%% Returns `error` for keyword sends mid-chain, parenthesised subexpressions, or `>>`.
+%%
+%% Examples:
+%%   <<"\"hello\" size">>    → {ok, <<"\"hello\"">>, [size]}
+%%   <<"counter getValue">>  → {ok, <<"counter">>, [getValue]}
+%%   <<"\"hello\" size abs">>→ {ok, <<"\"hello\"">>, [size, abs]}
+%%   <<"inject: 0 into:">>   → error  (keyword send)
+%%   <<"(myList size)">>     → error  (paren)
+-spec tokenise_send_chain(binary()) -> {ok, binary(), [atom()]} | error.
+tokenise_send_chain(<<>>) ->
+    error;
+tokenise_send_chain(Expr) when is_binary(Expr) ->
+    Parts = [list_to_binary(T) || T <- string:tokens(binary_to_list(Expr), " \t")],
+    case Parts of
+        [] ->
+            error;
+        [_] ->
+            %% Single token — no sends, nothing to chain-walk
+            error;
+        [ReceiverToken | Selectors] ->
+            case validate_chain_tokens(ReceiverToken, Selectors) of
+                ok ->
+                    %% Use binary_to_existing_atom to avoid atom table exhaustion from
+                    %% user input.  Valid selectors are already loaded as method atoms;
+                    %% unknown selectors mean the chain will break anyway.
+                    try
+                        SelectorAtoms = [binary_to_existing_atom(S, utf8) || S <- Selectors],
+                        {ok, ReceiverToken, SelectorAtoms}
+                    catch
+                        error:badarg -> error
+                    end;
+                error ->
+                    error
+            end
+    end.
+
+%% @private
+-spec validate_chain_tokens(binary(), [binary()]) -> ok | error.
+validate_chain_tokens(ReceiverToken, Selectors) ->
+    AllTokens = [ReceiverToken | Selectors],
+    HasInvalid = lists:any(
+        fun(T) ->
+            binary:match(T, <<"(">>) =/= nomatch orelse
+                binary:match(T, <<")">>) =/= nomatch orelse
+                binary:match(T, <<">>">>) =/= nomatch
+        end,
+        AllTokens
+    ),
+    case HasInvalid of
+        true ->
+            error;
+        false ->
+            case lists:all(fun is_valid_unary_selector/1, Selectors) of
+                true -> ok;
+                false -> error
+            end
+    end.
+
+%% @private
+%% @doc A valid unary selector starts with a letter or underscore and contains no colon.
+-spec is_valid_unary_selector(binary()) -> boolean().
+is_valid_unary_selector(<<>>) ->
+    false;
+is_valid_unary_selector(<<H, _/binary>> = Sel) when
+    (H >= $a andalso H =< $z) orelse (H >= $A andalso H =< $Z) orelse H =:= $_
+->
+    binary:match(Sel, <<":">>) =:= nomatch;
+is_valid_unary_selector(_) ->
+    false.
+
+%% @private
+%% @doc Resolve the type at the end of a send chain using static return-type metadata.
+%%
+%% Tokenises the expression, classifies the receiver, then walks the chain by
+%% looking up each send's return type in `method_return_types` on the class registry.
+-spec resolve_chain_type(binary(), map()) -> {ok, atom()} | undefined.
+resolve_chain_type(Expr, Bindings) ->
+    case tokenise_send_chain(Expr) of
+        {ok, ReceiverToken, Selectors} ->
+            case classify_receiver(ReceiverToken, Bindings) of
+                {instance, ClassName} -> walk_chain(ClassName, Selectors);
+                {class, ClassName} -> walk_chain_class(ClassName, Selectors);
+                undefined -> undefined
+            end;
+        error ->
+            undefined
+    end.
+
+%% @private
+%% @doc Walk an instance-side send chain, following method return types at each hop.
+%%
+%% Returns `{ok, FinalClassName}` when every hop has a known return type,
+%% or `undefined` when any hop breaks (annotation absent or non-Simple).
+-spec walk_chain(atom(), [atom()]) -> {ok, atom()} | undefined.
+walk_chain(ClassName, Selectors) ->
+    walk_chain(ClassName, Selectors, 0).
+
+-spec walk_chain(atom(), [atom()], non_neg_integer()) -> {ok, atom()} | undefined.
+walk_chain(ClassName, [], _Depth) ->
+    {ok, ClassName};
+walk_chain(_ClassName, _Selectors, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    undefined;
+walk_chain(ClassName, [Selector | Rest], Depth) ->
+    case beamtalk_class_registry:get_method_return_type(ClassName, Selector) of
+        {ok, NextClass} -> walk_chain(NextClass, Rest, Depth + 1);
+        {error, not_found} -> undefined
+    end.
+
+%% @private
+%% @doc Walk a chain starting from the class side.
+%%
+%% The first hop uses `class_method_return_types`; subsequent hops transition to the
+%% instance side via `walk_chain/2`.
+-spec walk_chain_class(atom(), [atom()]) -> {ok, atom()} | undefined.
+walk_chain_class(ClassName, []) ->
+    {ok, ClassName};
+walk_chain_class(ClassName, [Selector | Rest]) ->
+    case beamtalk_class_registry:get_class_method_return_type(ClassName, Selector) of
+        {ok, NextClass} -> walk_chain(NextClass, Rest, 1);
+        {error, not_found} -> undefined
+    end.
+
+%% @private
+%% @doc Return all instance methods of a class filtered by the given prefix.
+-spec complete_instance_methods(atom(), binary()) -> [binary()].
+complete_instance_methods(ClassName, Prefix) ->
+    MethodSelectors = collect_all_methods(ClassName, 0),
+    All = [atom_to_binary(S, utf8) || S <- MethodSelectors],
+    case Prefix of
+        <<>> ->
+            lists:usort(All);
+        _ ->
+            lists:usort([
+                M
+             || M <- All,
+                binary:match(M, Prefix) =:= {0, byte_size(Prefix)}
+            ])
+    end.
 
 %% @private
 %% @doc Get method selectors for a given receiver token.
