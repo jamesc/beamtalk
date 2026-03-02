@@ -387,7 +387,7 @@ test-runtime: build-stdlib
     #!/usr/bin/env bash
     set -eo pipefail
     echo "🧪 Running Erlang runtime unit tests..."
-    if OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace 2>&1); then
+    if OUTPUT=$(BEAMTALK_NO_FILE_LOG=1 rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace 2>&1); then
         echo "$OUTPUT" | tail -2
     else
         echo "$OUTPUT"
@@ -399,7 +399,7 @@ test-runtime: build-stdlib
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    @$output = rebar3 eunit '--app=beamtalk_runtime,beamtalk_workspace' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
+    @$env:BEAMTALK_NO_FILE_LOG = "1"; $output = rebar3 eunit '--app=beamtalk_runtime,beamtalk_workspace' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @echo "✅ Runtime tests complete"
 
 # Run performance benchmarks (separate from unit tests, ~30s)
