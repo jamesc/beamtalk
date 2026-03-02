@@ -26,6 +26,7 @@ camino = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
