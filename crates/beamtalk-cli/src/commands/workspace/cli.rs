@@ -289,13 +289,6 @@ fn run_create_background(
     let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()?;
     let paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
-    // Cowboy/cowlib/ranch are needed for the WebSocket transport (ADR 0020)
-    let extra_code_paths = vec![
-        paths.cowboy_ebin.clone(),
-        paths.cowlib_ebin.clone(),
-        paths.ranch_ebin.clone(),
-    ];
-
     // Resolve TLS config if requested
     let ssl_dist_conf = if tls {
         crate::commands::repl::resolve_ssl_dist_conf_for_workspace(&project_root, Some(name))?
@@ -307,12 +300,8 @@ fn run_create_background(
         &project_root,
         Some(name),
         port,
-        &paths.runtime_ebin,
-        &paths.workspace_ebin,
-        &paths.jsx_ebin,
-        &paths.compiler_ebin,
-        &paths.stdlib_ebin,
-        &extra_code_paths,
+        &paths,
+        &[],
         !persistent,
         idle_timeout,
         Some(bind_addr),

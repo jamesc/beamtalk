@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use beamtalk_cli::repl_startup::{BeamPaths, beam_pa_args};
+
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
@@ -220,16 +222,12 @@ pub fn tcp_send_shutdown(host: &str, port: u16, cookie: &str) -> Result<()> {
 
 /// Start a detached BEAM node for a workspace.
 /// Returns the `NodeInfo` for the started node.
-#[allow(clippy::too_many_arguments)] // BEAM node requires separate beam dirs per OTP app
+#[allow(clippy::too_many_arguments)] // workspace node startup requires many independent parameters
 #[allow(clippy::too_many_lines)] // eval command construction is necessarily verbose
 pub fn start_detached_node(
     workspace_id: &str,
     port: u16,
-    runtime_beam_dir: &Path,
-    repl_beam_dir: &Path,
-    jsx_beam_dir: &Path,
-    compiler_beam_dir: &Path,
-    stdlib_beam_dir: &Path,
+    beam_paths: &BeamPaths,
     extra_code_paths: &[PathBuf],
     auto_cleanup: bool,
     max_idle_seconds: Option<u64>,
@@ -329,11 +327,7 @@ pub fn start_detached_node(
     let mut cmd = build_detached_node_command(
         &node_name,
         &cookie_args_file,
-        runtime_beam_dir,
-        repl_beam_dir,
-        jsx_beam_dir,
-        compiler_beam_dir,
-        stdlib_beam_dir,
+        beam_paths,
         extra_code_paths,
         &eval_cmd,
         &project_path,
@@ -596,15 +590,11 @@ fn write_cookie_args_file(workspace_id: &str, cookie: &str) -> Result<PathBuf> {
 ///   cookie is not visible in `ps aux` / `/proc/{pid}/cmdline`.
 /// - **Umask**: Set to 0077 on Unix so workspace files are owner-only.
 /// - **setsid**: Creates a new session on Unix for proper daemon detachment.
-#[allow(clippy::too_many_arguments)] // mirrors start_detached_node params for testability
+#[allow(clippy::too_many_lines)] // BEAM node command construction is necessarily verbose
 fn build_detached_node_command(
     node_name: &str,
     cookie_args_file: &Path,
-    runtime_beam_dir: &Path,
-    repl_beam_dir: &Path,
-    jsx_beam_dir: &Path,
-    compiler_beam_dir: &Path,
-    stdlib_beam_dir: &Path,
+    beam_paths: &BeamPaths,
     extra_code_paths: &[PathBuf],
     eval_cmd: &str,
     project_root: &Path,
@@ -616,7 +606,8 @@ fn build_detached_node_command(
         ("-sname", node_name.to_string())
     };
 
-    let mut args = vec![
+    // Build the initial (non-path) args: detach flags, node name, cookie file.
+    let initial_args = vec![
         // On Windows, don't use -detached - it doesn't work reliably from Rust spawn
         // Instead, we'll use CREATE_NO_WINDOW flag to prevent console popup
         #[cfg(not(windows))]
@@ -627,36 +618,28 @@ fn build_detached_node_command(
         // Cookie via args file instead of -setcookie (BT-726: not visible in ps)
         "-args_file".to_string(),
         path_to_erlang_arg(cookie_args_file),
-        "-pa".to_string(),
-        path_to_erlang_arg(runtime_beam_dir),
-        "-pa".to_string(),
-        path_to_erlang_arg(repl_beam_dir),
-        "-pa".to_string(),
-        path_to_erlang_arg(jsx_beam_dir),
-        "-pa".to_string(),
-        path_to_erlang_arg(compiler_beam_dir),
-        "-pa".to_string(),
-        path_to_erlang_arg(stdlib_beam_dir),
     ];
+
+    let mut cmd = Command::new("erl");
+
+    // Add initial args, then BEAM code paths via the canonical beam_pa_args helper
+    // (same ordering as the foreground REPL startup).
+    cmd.args(&initial_args).args(beam_pa_args(beam_paths));
 
     // Add extra code paths (e.g. package ebin from auto-compile)
     for path in extra_code_paths {
-        args.push("-pa".to_string());
-        args.push(path_to_erlang_arg(path));
+        cmd.arg("-pa").arg(path_to_erlang_arg(path));
     }
 
     // Add TLS distribution args if configured (ADR 0020 Phase 2)
     if let Some(conf_path) = ssl_dist_optfile {
-        args.push("-proto_dist".to_string());
-        args.push("inet_tls".to_string());
-        args.push("-ssl_dist_optfile".to_string());
-        args.push(path_to_erlang_arg(conf_path));
+        cmd.arg("-proto_dist")
+            .arg("inet_tls")
+            .arg("-ssl_dist_optfile")
+            .arg(path_to_erlang_arg(conf_path));
     }
 
-    args.push("-eval".to_string());
-    args.push(eval_cmd.to_string());
-
-    let mut cmd = Command::new("erl");
+    cmd.arg("-eval").arg(eval_cmd);
 
     // Security: clear inherited environment, then allowlist only required vars (BT-726).
     // Prevents leaking AWS_*, DATABASE_URL, SSH_AUTH_SOCK, etc.
@@ -696,8 +679,7 @@ fn build_detached_node_command(
         }
     }
 
-    cmd.args(&args)
-        .current_dir(project_root)
+    cmd.current_dir(project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -916,14 +898,20 @@ mod tests {
         let tmp = std::env::temp_dir();
         let cookie_file = tmp.join("test_cookie_args");
         let beam_dir = tmp.join("test_beam");
+        let paths = beamtalk_cli::repl_startup::BeamPaths {
+            runtime_ebin: beam_dir.clone(),
+            workspace_ebin: beam_dir.clone(),
+            compiler_ebin: beam_dir.clone(),
+            jsx_ebin: beam_dir.clone(),
+            cowboy_ebin: beam_dir.clone(),
+            cowlib_ebin: beam_dir.clone(),
+            ranch_ebin: beam_dir.clone(),
+            stdlib_ebin: beam_dir.clone(),
+        };
         build_detached_node_command(
             "test_node@localhost",
             &cookie_file,
-            &beam_dir,
-            &beam_dir,
-            &beam_dir,
-            &beam_dir,
-            &beam_dir,
+            &paths,
             &[],
             "ok.",
             &tmp,

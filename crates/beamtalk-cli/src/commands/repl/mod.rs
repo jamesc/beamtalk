@@ -473,11 +473,7 @@ pub fn run(
         }
 
         // Auto-compile package if beamtalk.toml is present (BT-606)
-        let mut extra_code_paths = auto_compile_package(&project_root);
-        // cowboy/cowlib/ranch are needed for the WebSocket transport (ADR 0020)
-        extra_code_paths.push(paths.cowboy_ebin.clone());
-        extra_code_paths.push(paths.cowlib_ebin.clone());
-        extra_code_paths.push(paths.ranch_ebin.clone());
+        let extra_code_paths = auto_compile_package(&project_root);
 
         // Resolve TLS config for workspace mode (ADR 0020 Phase 2)
         let ssl_dist_conf = resolve_ssl_dist_conf(&project_root, workspace_name, tls)?;
@@ -486,11 +482,7 @@ pub fn run(
             &project_root,
             workspace_name,
             port,
-            &paths.runtime_ebin,
-            &paths.workspace_ebin,
-            &paths.jsx_ebin,
-            &paths.compiler_ebin,
-            &paths.stdlib_ebin,
+            &paths,
             &extra_code_paths,
             !persistent, // auto_cleanup is opposite of persistent flag
             timeout,
