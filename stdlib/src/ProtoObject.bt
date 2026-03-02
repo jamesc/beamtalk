@@ -39,7 +39,7 @@ abstract nil subclass: ProtoObject
   /// 42 class            // => Integer
   /// "hello" class       // => String
   /// ```
-  class => @primitive "class"
+  class -> Class => @primitive "class"
 
   /// Handle messages the receiver does not understand. Override for custom dispatch.
   ///

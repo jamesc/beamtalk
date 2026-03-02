@@ -22,7 +22,7 @@ ProtoObject subclass: Object
   /// 42 class              // => Integer
   /// "hello" class         // => String
   /// ```
-  class => @primitive "class"
+  class -> Class => @primitive "class"
 
   /// Create a new instance of the receiver class.
   ///
@@ -134,7 +134,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 yourself            // => 42
   /// ```
-  sealed yourself => self
+  sealed yourself -> Object => self
 
   /// Return a hash value for the receiver.
   ///

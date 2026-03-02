@@ -78,7 +78,7 @@ Value subclass: Exception
   /// ```beamtalk
   /// (Exception new) signal
   /// ```
-  signal => @primitive "signal"
+  signal -> Nil => @primitive "signal"
 
   /// Create and raise a new exception with the given message.
   ///
@@ -86,4 +86,4 @@ Value subclass: Exception
   /// ```beamtalk
   /// Exception signal: "something went wrong"
   /// ```
-  signal: msg: String => @primitive "signal:"
+  signal: msg: String -> Nil => @primitive "signal:"
