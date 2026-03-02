@@ -563,6 +563,15 @@ pub fn run(
     let mut client = connect_with_retries(&connect_host, connect_port, &cookie)?;
 
     println!("Connected to REPL backend on port {connect_port}.");
+    if let Some(session_id) = client.session_id() {
+        println!("[beamtalk] session: {session_id}");
+    } else {
+        eprintln!(
+            "[beamtalk] warning: REPL backend did not provide a session id; \
+             editor integrations (e.g., VS Code) may not function correctly."
+        );
+        warn!("REPL backend connected without session id; stdout session contract not satisfied");
+    }
 
     // BT-689: Print browser workspace URL when --web flag is used
     if web {
@@ -1011,6 +1020,11 @@ pub(crate) fn repl_loop(
                                     );
                                 } else {
                                     eprintln!("Reconnected (new session). Retrying evaluation...");
+                                    // BT-1021: Emit updated session line so external consumers
+                                    // (e.g. VS Code) can track the new session ID.
+                                    if let Some(session_id) = client.session_id() {
+                                        println!("[beamtalk] session: {session_id}");
+                                    }
                                 }
                                 // Keep the completion helper's session ID in sync
                                 if let Some(h) = rl.helper() {

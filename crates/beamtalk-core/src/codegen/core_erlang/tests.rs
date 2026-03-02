@@ -5787,3 +5787,118 @@ fn test_repl_expression_spawn_with_args_uses_class_module_index() {
         "Heuristic module name must NOT appear when class_module_index is provided. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_bt1005_writeback_inferred_return_type_appears_in_method_return_types() {
+    // BT-1005: A user-defined Actor class method with no explicit return-type
+    // annotation should have its inferred return type written back into the AST
+    // before codegen, so the emitted BEAM module contains it in method_return_types.
+    let src = "
+Actor subclass: Counter
+  state: value: Integer = 0
+  getValue => value
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("counter"))
+        .expect("codegen should succeed")
+        .code;
+
+    // The writeback pass should have populated method_return_types with
+    // 'getValue' => 'Integer' (inferred from the state variable type).
+    assert!(
+        code.contains("'getValue' => 'Integer'"),
+        "method_return_types should contain inferred return type for unannotated getValue. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt1005_explicit_annotation_not_overwritten_by_writeback() {
+    // BT-1005: An explicitly annotated method must NOT be changed by the writeback pass.
+    let src = "
+Actor subclass: Counter
+  state: value: Integer = 0
+  getValue -> Integer => value
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("counter"))
+        .expect("codegen should succeed")
+        .code;
+
+    // Explicit annotation takes precedence — still appears correctly.
+    assert!(
+        code.contains("'getValue' => 'Integer'"),
+        "Explicitly annotated method should appear in method_return_types. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt1005_literal_return_type_inferred_by_writeback() {
+    // BT-1005: A method returning an integer literal should have Integer inferred
+    // and written back even when the class has no typed state.
+    let src = "
+Actor subclass: Greeter
+  answer => 42
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("greeter"))
+        .expect("codegen should succeed")
+        .code;
+
+    assert!(
+        code.contains("'answer' => 'Integer'"),
+        "method_return_types should contain inferred Integer for literal-returning method. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt1005_standalone_method_writeback_infers_return_type() {
+    // BT-1005: Tonel-style standalone method definitions (Counter >> getValue => ...)
+    // must also have their return types inferred and written back.
+    // This exercises the module.method_definitions loop in infer_method_return_types.
+    let src = "
+Actor subclass: Counter
+  state: value: Integer = 0
+
+Counter >> getValue => value
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("counter"))
+        .expect("codegen should succeed")
+        .code;
+
+    assert!(
+        code.contains("'getValue' => 'Integer'"),
+        "method_return_types should contain inferred Integer for standalone getValue. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt1005_untyped_param_does_not_shadow_state_field_type() {
+    // BT-1005: An untyped parameter with the same name as a state field must NOT
+    // cause the method's return type to be inferred as the state field's type.
+    // The untyped param should be Dynamic, so the method's inferred return type
+    // is also Dynamic and no writeback annotation is emitted.
+    let src = "
+Actor subclass: Counter
+  state: value: Integer = 0
+  add: value => value
+";
+    // `add: value` has an untyped param named `value` that shadows the `value`
+    // state field. The return type should be Dynamic (not Integer).
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("counter"))
+        .expect("codegen should succeed")
+        .code;
+
+    // `add:` must NOT appear in method_return_types with Integer inferred from
+    // the state field — it should be absent (Dynamic = no entry).
+    assert!(
+        !code.contains("'add:' => 'Integer'"),
+        "Untyped param `value` must not be mis-inferred as state field Integer. Got:\n{code}"
+    );
+}
