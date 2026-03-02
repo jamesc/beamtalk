@@ -847,7 +847,7 @@ dist-vscode-platform target:
     @echo "📦 Building VS Code extension for {{target}}..."
     if (!(Get-Command npm -ErrorAction SilentlyContinue)) { Write-Error "npm not found"; exit 1 }
     $binName = if ("{{target}}" -like "win32-*") { "beamtalk-lsp.exe" } else { "beamtalk-lsp" }; $lspBin = "target\release\$binName"; if (!(Test-Path $lspBin)) { $lspBin = "target\x86_64-pc-windows-msvc\release\$binName" }; if (!(Test-Path $lspBin)) { Write-Error "LSP binary not found — run: cargo build --release --bin beamtalk-lsp"; exit 1 }; New-Item -ItemType Directory -Force -Path editors\vscode\bin | Out-Null; Copy-Item $lspBin "editors\vscode\bin\$binName"; Write-Host "   Bundled $binName"
-    Push-Location editors\vscode; try { npm install --quiet; if ($LASTEXITCODE -ne 0) { throw "npm install failed" } } finally { Pop-Location }
+    Push-Location editors\vscode; try { npm ci --quiet; if ($LASTEXITCODE -ne 0) { throw "npm ci failed" } } finally { Pop-Location }
     Push-Location editors\vscode; try { npx --yes @vscode/vsce package --target "{{target}}" --out "..\..\beamtalk-{{target}}.vsix"; if ($LASTEXITCODE -ne 0) { throw "vsce package failed" } } finally { Pop-Location }
     Remove-Item -Recurse -Force editors\vscode\bin -ErrorAction SilentlyContinue
     @echo "✅ VS Code extension: beamtalk-{{target}}.vsix"
