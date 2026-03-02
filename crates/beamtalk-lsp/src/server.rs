@@ -99,9 +99,56 @@ impl Backend {
     }
 
     fn file_version_for_uri(&self, uri: &Url) -> Option<i32> {
-        let path = uri_to_path(uri)?;
+        let path = self.resolve_path_for_uri(uri)?;
         let versions = self.versions.lock().expect("versions lock poisoned");
         versions.get(&path).copied()
+    }
+
+    /// Resolves a URI to an internal path key used by the language service.
+    ///
+    /// - For `file://` URIs: returns the real filesystem path.
+    /// - For `untitled:` URIs: returns a synthetic `__untitled__/` path key.
+    /// - For `beamtalk-stdlib:///ClassName.bt` URIs: looks up the real path
+    ///   from `stdlib_paths`. Returns `None` for unknown class names, invalid
+    ///   URI form, or ambiguous filenames.
+    fn resolve_path_for_uri(&self, uri: &Url) -> Option<Utf8PathBuf> {
+        if uri.scheme() == "beamtalk-stdlib" {
+            self.stdlib_uri_to_path(uri)
+        } else {
+            uri_to_path(uri)
+        }
+    }
+
+    /// Looks up the real filesystem path for a `beamtalk-stdlib:///ClassName.bt` URI.
+    ///
+    /// Returns `None` for invalid URI form, unknown class names, or ambiguous filenames.
+    fn stdlib_uri_to_path(&self, uri: &Url) -> Option<Utf8PathBuf> {
+        // Only canonical form: no host, no query, no fragment.
+        if uri.host().is_some() || uri.query().is_some() || uri.fragment().is_some() {
+            return None;
+        }
+        let path = uri.path().trim_start_matches('/');
+        // Require non-empty, no sub-paths, .bt extension only.
+        if path.is_empty()
+            || path.contains('/')
+            || !std::path::Path::new(path)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("bt"))
+        {
+            return None;
+        }
+
+        let stdlib_paths = self
+            .stdlib_paths
+            .lock()
+            .expect("stdlib_paths lock poisoned");
+        let mut matches = stdlib_paths.iter().filter(|p| p.file_name() == Some(path));
+        let first = matches.next()?.clone();
+        // Ambiguous: multiple files with the same name → None.
+        if matches.next().is_some() {
+            return None;
+        }
+        Some(first)
     }
 
     async fn preload_workspace_source_files(&self, config: PreloadConfig) {
@@ -224,6 +271,10 @@ impl Backend {
 
     /// Formats a document identified by URI, returning whole-document edits.
     fn format_document(&self, uri: &Url) -> Option<Vec<TextEdit>> {
+        // Stdlib virtual documents are read-only; return no edits.
+        if uri.scheme() == "beamtalk-stdlib" {
+            return None;
+        }
         let path = uri_to_path(uri)?;
         let source = {
             let svc = self.service.lock().expect("service lock poisoned");
@@ -248,6 +299,10 @@ impl Backend {
 
     /// Publishes diagnostics for a file after every change.
     async fn publish_diagnostics(&self, uri: &Url) {
+        // Stdlib virtual documents have no user-facing diagnostics.
+        if uri.scheme() == "beamtalk-stdlib" {
+            return;
+        }
         let Some(path) = uri_to_path(uri) else {
             return;
         };
@@ -342,17 +397,15 @@ impl LanguageServer for Backend {
     /// Indexes a newly opened document and publishes diagnostics.
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
-        if let Some(path) = uri_to_path(&uri) {
-            {
+        if let Some(path) = self.resolve_path_for_uri(&uri) {
+            if uri.scheme() != "beamtalk-stdlib" {
+                // Stdlib files are pre-loaded at startup; skip re-indexing.
                 let mut svc = self.service.lock().expect("service lock poisoned");
-                svc.update_file(path, params.text_document.text);
+                svc.update_file(path.clone(), params.text_document.text);
             }
             {
                 let mut versions = self.versions.lock().expect("versions lock poisoned");
-                versions.insert(
-                    uri_to_path(&uri).expect("path already checked"),
-                    params.text_document.version,
-                );
+                versions.insert(path, params.text_document.version);
             }
             self.publish_diagnostics(&uri).await;
         }
@@ -361,6 +414,10 @@ impl LanguageServer for Backend {
     /// Re-indexes a document after edits and republishes diagnostics.
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
+        // Stdlib virtual documents are read-only; ignore all change events.
+        if uri.scheme() == "beamtalk-stdlib" {
+            return;
+        }
         if let (Some(path), Some(change)) =
             (uri_to_path(&uri), params.content_changes.into_iter().last())
         {
@@ -405,8 +462,9 @@ impl LanguageServer for Backend {
     /// Removes a closed document from the index and clears its diagnostics.
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
-        if let Some(path) = uri_to_path(&uri) {
-            {
+        if let Some(path) = self.resolve_path_for_uri(&uri) {
+            if uri.scheme() != "beamtalk-stdlib" {
+                // Keep stdlib files indexed across editor open/close cycles.
                 let mut svc = self.service.lock().expect("service lock poisoned");
                 svc.remove_file(&path);
             }
@@ -421,7 +479,9 @@ impl LanguageServer for Backend {
                     .expect("diagnostic_generation lock poisoned");
                 generations.remove(&uri);
             }
-            self.client.publish_diagnostics(uri, Vec::new(), None).await;
+            if uri.scheme() != "beamtalk-stdlib" {
+                self.client.publish_diagnostics(uri, Vec::new(), None).await;
+            }
         }
     }
 
@@ -435,7 +495,7 @@ impl LanguageServer for Backend {
     /// Returns completion items for the cursor position.
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = &params.text_document_position.text_document.uri;
-        let Some(path) = uri_to_path(uri) else {
+        let Some(path) = self.resolve_path_for_uri(uri) else {
             return Ok(None);
         };
 
@@ -479,7 +539,7 @@ impl LanguageServer for Backend {
     /// Returns hover information (type/docs) for the symbol at the cursor.
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = &params.text_document_position_params.text_document.uri;
-        let Some(path) = uri_to_path(uri) else {
+        let Some(path) = self.resolve_path_for_uri(uri) else {
             return Ok(None);
         };
 
@@ -514,7 +574,7 @@ impl LanguageServer for Backend {
     /// Returns signature help for the method being called at the cursor.
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
         let uri = &params.text_document_position_params.text_document.uri;
-        let Some(path) = uri_to_path(uri) else {
+        let Some(path) = self.resolve_path_for_uri(uri) else {
             return Ok(None);
         };
 
@@ -574,7 +634,7 @@ impl LanguageServer for Backend {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
         let uri = &params.text_document_position_params.text_document.uri;
-        let Some(path) = uri_to_path(uri) else {
+        let Some(path) = self.resolve_path_for_uri(uri) else {
             return Ok(None);
         };
 
@@ -621,7 +681,7 @@ impl LanguageServer for Backend {
         params: ReferenceParams,
     ) -> Result<Option<Vec<tower_lsp::lsp_types::Location>>> {
         let uri = &params.text_document_position.text_document.uri;
-        let Some(path) = uri_to_path(uri) else {
+        let Some(path) = self.resolve_path_for_uri(uri) else {
             return Ok(None);
         };
 
@@ -657,7 +717,7 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = &params.text_document.uri;
-        let Some(path) = uri_to_path(uri) else {
+        let Some(path) = self.resolve_path_for_uri(uri) else {
             return Ok(None);
         };
 
@@ -1608,5 +1668,103 @@ mod tests {
         let pass1 = format_source(source).expect("pass 1");
         let pass2 = format_source(&pass1).expect("pass 2");
         assert_eq!(pass1, pass2, "formatting must be idempotent");
+    }
+
+    #[test]
+    fn resolve_path_for_uri_stdlib_uri_resolves_to_real_path() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let real_path = Utf8PathBuf::from("/fake/stdlib/Integer.bt");
+        {
+            let mut stdlib_paths = backend
+                .stdlib_paths
+                .lock()
+                .expect("stdlib_paths lock poisoned");
+            stdlib_paths.insert(real_path.clone());
+        }
+
+        let uri = Url::parse("beamtalk-stdlib:///Integer.bt").expect("valid URI");
+        let result = backend.resolve_path_for_uri(&uri);
+        assert_eq!(result, Some(real_path));
+    }
+
+    #[test]
+    fn resolve_path_for_uri_unknown_class_returns_none() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let uri = Url::parse("beamtalk-stdlib:///NonExistent.bt").expect("valid URI");
+        let result = backend.resolve_path_for_uri(&uri);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn resolve_path_for_uri_invalid_stdlib_form_returns_none() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let real_path = Utf8PathBuf::from("/fake/stdlib/Integer.bt");
+        {
+            let mut stdlib_paths = backend
+                .stdlib_paths
+                .lock()
+                .expect("stdlib_paths lock poisoned");
+            stdlib_paths.insert(real_path);
+        }
+
+        for bad_uri in &[
+            "beamtalk-stdlib:///",
+            "beamtalk-stdlib:///sub/Integer.bt",
+            "beamtalk-stdlib:///Integer.erl",
+            "beamtalk-stdlib://host/Integer.bt",
+            "beamtalk-stdlib:///Integer.bt?x=1",
+            "beamtalk-stdlib:///Integer.bt#section",
+        ] {
+            let uri = Url::parse(bad_uri).expect("parseable URI");
+            let result = backend.resolve_path_for_uri(&uri);
+            assert!(result.is_none(), "expected None for {bad_uri}");
+        }
+    }
+
+    #[test]
+    fn resolve_path_for_uri_ambiguous_stdlib_returns_none() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        {
+            let mut stdlib_paths = backend
+                .stdlib_paths
+                .lock()
+                .expect("stdlib_paths lock poisoned");
+            stdlib_paths.insert(Utf8PathBuf::from("/fake/stdlib/a/Integer.bt"));
+            stdlib_paths.insert(Utf8PathBuf::from("/fake/stdlib/b/Integer.bt"));
+        }
+
+        let uri = Url::parse("beamtalk-stdlib:///Integer.bt").expect("valid URI");
+        let result = backend.resolve_path_for_uri(&uri);
+        assert!(result.is_none(), "ambiguous filename must return None");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resolve_path_for_uri_file_uri_still_works() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let uri = Url::parse("file:///some/project/main.bt").expect("valid URI");
+        let result = backend.resolve_path_for_uri(&uri);
+        assert_eq!(result, Some(Utf8PathBuf::from("/some/project/main.bt")));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resolve_path_for_uri_file_uri_still_works() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let uri = Url::parse("file:///C:/project/main.bt").expect("valid URI");
+        let result = backend.resolve_path_for_uri(&uri);
+        assert_eq!(result, Some(Utf8PathBuf::from("C:/project/main.bt")));
     }
 }
