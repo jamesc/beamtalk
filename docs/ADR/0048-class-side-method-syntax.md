@@ -44,7 +44,10 @@ The parser resolved this as the former — generating `class_->/2`, with `Self` 
 
 ADR 0047 (Arrow token) fixed Ambiguity 1 (`->` as method selector) using a dedicated `TokenKind::Arrow`. It addressed Ambiguity 2 with a per-case lookahead hack: before consuming `class` as a modifier, peek ahead; if `Arrow Identifier FatArrow` follows, treat `class` as the method selector instead. This lookahead is correct for the one known case, but it is a patched exception to a broken general rule, not a fix to the underlying grammar problem.
 
-The underlying problem is structural: the grammar keyword and the method name are the same token. Any method named `class` on any class must thread through the lookahead special case. Any future method whose name coincides with another modifier keyword (`sealed`, `override`) would create the same class of problem.
+The underlying problem is structural: the grammar keyword and the method name are the same token. Any method named `class` on any class must thread through the lookahead special case. Any future method whose name coincided with another modifier keyword would create
+the same class of problem. (ADR 0049 removes `sealed` as a method modifier — after
+that change, `class` is the sole remaining method modifier keyword, making it the
+last instance of this problem class rather than one of many.)
 
 ### The Smalltalk Comparison
 
@@ -203,13 +206,13 @@ The following analysis applies across all three options, noting where the option
 
 Newcomers have no existing code to migrate and no preconceptions about which syntax is "correct." All three options are learnable. The question is discoverability:
 
-- **Option A** (separate class-side declaration): The metaclass-side declaration visually separates class-side methods from instance-side methods. A newcomer who asks "how do I add a class-side method?" can find it by reading the class definition structure rather than remembering a modifier keyword. However, Beamtalk does not have block delimiters (`[...]`) for class bodies — class definitions are open-ended, with methods continuing until the next class declaration or EOF. Option A requires deciding what the class-side declaration syntax actually looks like in Beamtalk, and how the parser knows where it ends. This is an open design question; see Alternatives Considered for discussion.
+- **Option A** (separate class-side declaration): The metaclass-side declaration visually separates class-side methods from instance-side methods. A newcomer who asks "how do I add a class-side method?" can find it by reading the class definition structure rather than remembering a modifier keyword. The `X class subclass: Y class` form reuses the existing `subclass:` keyword; the second declaration terminates the first using the same open-ended body rule as any class definition. No new terminator syntax is needed.
 - **Option B** (`meta` modifier): Drop-in replacement for `class` modifier. Newcomers who search for "class-side method" in documentation will find `meta methodName`. The keyword is unambiguous but novel — `meta` is not in mainstream language vocabulary for this concept.
 - **Option C** (`+` sigil): Objective-C/Swift convention. Familiar to iOS developers. Short. However, it is opaque to anyone without Objective-C background: `+ new` does not self-document.
 
 ### Smalltalk Developer
 
-A Smalltalk developer's strongest expectation is the object-model-first approach: class-side methods are defined by navigating to the metaclass. Option A is the closest match to this mental model — `class Foo class [...]` reads as "open the metaclass side of Foo and define methods." The `class` message is familiar; the block syntax follows from the instance-side pattern.
+A Smalltalk developer's strongest expectation is the object-model-first approach: class-side methods are defined by navigating to the metaclass. Option A is the closest match to this mental model — `X class subclass: Foo class` reads as "define the metaclass side of Foo." The `class` message is the familiar Smalltalk metaclass-navigation message; no new syntax is needed.
 
 Options B and C use modifier keywords, which are alien to Smalltalk syntax philosophy. However, a Smalltalk developer will immediately understand what they do.
 
@@ -217,7 +220,7 @@ Neither Option B nor Option C collides with the Smalltalk mental model — `meta
 
 ### Erlang/BEAM Developer
 
-An Erlang developer cares about clarity of what compiles to what. Options B and C are more predictable: a method prefixed with `meta` or `+` is straightforwardly a class-side function in the compiled module. Option A's separate declaration block is structurally clear as well, but introduces a question: "are `class Foo [...]` and `class Foo class [...]` compiled into the same module?" (Yes, they are — both compile into `foo.beam`.)
+An Erlang developer cares about clarity of what compiles to what. Options B and C are more predictable: a method prefixed with `meta` or `+` is straightforwardly a class-side function in the compiled module. Option A's separate declaration is structurally clear as well, but introduces a question: "are `X subclass: Foo` and `X class subclass: Foo class` compiled into the same module?" (Yes — both compile into `foo.beam`.)
 
 All three options produce identical BEAM output; the choice is purely syntactic.
 
@@ -244,13 +247,13 @@ No runtime impact. The class-side/instance-side distinction is purely a compile-
 - **Newcomer**: "When I open a class definition and want to add a factory method, the separate class-side declaration tells me exactly where to put it. I don't have to remember a modifier; the structure of the source file reflects the structure of the object model — just like switching tabs in a browser."
 - **Smalltalk developer**: "This is the honest representation. In Smalltalk, class-side methods are defined on the metaclass, which is a separate object. A separate declaration for the metaclass side acknowledges that truth directly, rather than treating class-side methods as a tagged variant of instance-side methods. The `class` message in `Foo class` is the same `class` message I send in expressions — one concept, not two."
 - **BEAM developer**: "The source structure tells me immediately which functions in `foo.beam` are instance methods and which are class-side. I don't have to mentally filter by modifier. The module has two named sections."
-- **Language designer**: "It eliminates the `class` modifier keyword specifically, which is the one that collides with a real method name. `sealed` and `override` are not plausible method names, so their collision risk is negligible and they can remain as modifiers. The object model provides the syntax for the one case that mattered."
+- **Language designer**: "It eliminates the last method-level modifier keyword. With ADR 0049 removing `sealed` from methods, Option A means Beamtalk's method grammar has zero modifiers — the object model provides all the structure. That is a principled, Smalltalk-correct outcome."
 
 **Honest tensions:**
 
 - Classes with both instance and class-side methods require two separate top-level declaration blocks, which splits code that conceptually belongs together (e.g., `new` alongside `initialize`). The Pharo browser solves this with tabs; in a flat file, the split is physical and potentially confusing.
-- The `class Foo class [...]` form introduces a question about ordering: can there be more than two blocks? (No — one instance-side, one class-side.) Can they interleave? (No.) This rule must be documented and enforced by the parser.
-- The `class` message in `Foo class [...]` is parsed as a message send, not a modifier keyword. This requires the parser to handle class body introductions differently depending on whether they are followed by `class` (navigate to metaclass side) or not. This is more complex than a modifier keyword but less ambiguous.
+- The `X class subclass: Y class` form introduces a question about ordering: must the instance-side declaration precede the class-side? Can there be more than one of each? (One instance-side, one class-side, in that order.) This rule must be documented and enforced by the parser.
+- The parser must recognise `X class subclass: Y class` as a metaclass-side declaration. This is a new production rule — more complex than a modifier keyword, but structurally unambiguous.
 
 ### Option B: `meta` Modifier Keyword
 
@@ -267,6 +270,7 @@ No runtime impact. The class-side/instance-side distinction is purely a compile-
 - `meta` is not a concept in Smalltalk or mainstream OO vocabulary for this purpose. Every other major language uses `static` or `class` or `self.`; `meta` is a Beamtalk invention. Newcomers from Swift will expect `class func`, not `meta`.
 - Using `meta` means the `class` message and the `class` method definition keyword coexist, distinguished only by context (expression position vs. declaration position). The ambiguity is fixed by replacing one keyword — but the broader pattern of modifiers-vs-method-names is still a latent issue if future modifiers are introduced.
 - `meta` could reasonably be confused with metaprogramming or metadata in other languages, creating a false connotation.
+- **Philosophical incoherence with ADR 0049:** ADR 0049 removes `sealed` as the last method modifier, arguing that one modifier keyword is awkward and the grammar is better with zero. Option B then immediately introduces `meta` as a new sole method modifier — trading one for another. A user wanting to define a method called `meta` (plausible for a metaprogramming API) would hit the same collision class.
 
 ### Option C: `+` Sigil
 
@@ -429,6 +433,37 @@ Stdlib examples:
 - The `+` character appears in many contexts in Beamtalk (binary message send, string/collection operations). At the declaration level it is unambiguous, but visually noisy in mixed files.
 - Objective-C uses `-` for instance-side methods alongside `+` for class-side. Beamtalk would only adopt the `+` half of the convention, which makes the analogy incomplete.
 
+### Option D: Do Nothing — Keep `class` Modifier + ADR 0047 Lookahead
+
+Keep the existing `class` modifier syntax. ADR 0047's lookahead handles the one known
+collision (`sealed class -> Metaclass =>`) correctly. After ADR 0049 removes `sealed`
+from methods, `class` is the only modifier keyword, and the one colliding method
+(`Class.class`) is handled by the targeted lookahead.
+
+```beamtalk
+// Status quo — unchanged
+class pi -> Float => @primitive "pi"
+class new -> Foo => @primitive "new"
+sealed class -> Metaclass => @primitive "classClass"  // ADR 0047 lookahead resolves this
+```
+
+**Tradeoffs:**
+- Zero migration cost. No stdlib files change. No parser changes beyond ADR 0047.
+- The ADR 0047 lookahead is correct for the one known case. There is exactly one method
+  named `class` in the entire stdlib.
+- `class` as a modifier is familiar to Swift developers and has 57 existing uses.
+- Retains one method-level modifier keyword, counter to the direction of ADR 0049
+  (which eliminates the other, leaving `class` as the sole survivor).
+- The collision is real but narrow: only methods named `class` are affected, and only
+  one such method exists. The generalized concern about "future modifier keywords" is
+  moot — the project is actively moving toward zero method modifiers.
+- The underlying grammar problem (modifier keyword = valid method name) remains. If a
+  user defines a method named `class` on any class, the lookahead must handle it. This
+  is a latent fragility even if the surface symptom is addressed.
+- Philosophically unsatisfying: the `class` modifier was introduced before metaclasses
+  existed (ADR 0013). With the full metaclass tower (ADR 0036), it is an anachronism —
+  a syntactic shortcut for a feature the object model now provides natively.
+
 ## Consequences
 
 The consequences below are conditional on the option selected.
@@ -438,8 +473,8 @@ The consequences below are conditional on the option selected.
 **Positive:**
 - Reuses `subclass:` entirely — no new keywords, no new tokens, no new syntax form.
 - `class` has one meaning throughout the language: the metaclass-navigation message.
-- Eliminates the `class`-modifier collision; `sealed` and `override` remain as modifiers
-  on individual methods within either declaration and are unaffected.
+- Eliminates the last method-level modifier keyword; combined with ADR 0049
+  (which removes `sealed` from methods), the method grammar has zero modifiers.
 - Makes metaclass inheritance explicit and structurally correct.
 - Both sides live in the same file; no forced file split.
 - `classVar:` placement is naturally resolved: instance-side declaration, as now.
@@ -496,25 +531,28 @@ The consequences below are conditional on the option selected.
 
 | Component | Option A | Option B | Option C |
 |---|---|---|---|
-| `crates/beamtalk-compiler/src/parser/lexer.rs` | No change | Add `meta` keyword token | No change (or minimal: `+` sigil detection in declaration context) |
-| `crates/beamtalk-compiler/src/parser/token.rs` | No change | Add `TokenKind::Meta` | No change |
-| `crates/beamtalk-compiler/src/parser/declarations.rs` | New declaration form for `class Foo class [...]` | Replace `class`-modifier handling with `meta`-modifier handling | Replace `class`-modifier handling with `+`-sigil detection |
-| `crates/beamtalk-compiler/src/ast.rs` | `ClassDefinition` gains optional `class_side_body`; or two separate `ClassDefinition` nodes per class | No change to AST structure | No change to AST structure |
-| `stdlib/src/*.bt` | ~57 definitions extracted into new `class Foo class [...]` blocks | ~57 `class methodName` → `meta methodName` renames | ~57 `class methodName` → `+ methodName` renames |
-| `crates/beamtalk-compiler/src/codegen/generated_builtins.rs` | Regenerate after stdlib migration | Regenerate after stdlib migration | Regenerate after stdlib migration |
+| `crates/beamtalk-core/src/source_analysis/lexer.rs` | No change | Add `meta` keyword token | No change (or minimal: `+` sigil detection in declaration context) |
+| `crates/beamtalk-core/src/source_analysis/token.rs` | No change | Add `TokenKind::Meta` | No change |
+| `crates/beamtalk-core/src/source_analysis/parser/declarations.rs` | New recognition rule for `X class subclass: Y class` headers | Replace `class`-modifier handling with `meta`-modifier handling | Replace `class`-modifier handling with `+`-sigil detection |
+| `crates/beamtalk-core/src/ast.rs` | Two separate `ClassDefinition` nodes per class (instance-side and class-side); or a single node with an optional `class_side_methods` field | No change to AST structure | No change to AST structure |
+| `stdlib/src/*.bt` | ~57 definitions extracted into new `X class subclass: Y class` declarations | ~57 `class methodName` → `meta methodName` renames | ~57 `class methodName` → `+ methodName` renames |
+| `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs` | Regenerate after stdlib migration | Regenerate after stdlib migration | Regenerate after stdlib migration |
 
 ### Migration Scope
 
-The stdlib contains approximately 57 class-side method definitions distributed across these files (representative, not exhaustive):
+The stdlib contains exactly 57 class-side method definitions distributed across 22 files:
 
-- `stdlib/src/Object.bt` — `class new`, `class error:`, etc.
-- `stdlib/src/Class.bt` — `sealed class` (the `classClass` collision case), `class name`
-- `stdlib/src/Boolean.bt`, `stdlib/src/True.bt`, `stdlib/src/False.bt` — class-side constructors
-- `stdlib/src/Integer.bt`, `stdlib/src/Float.bt` — `class pi`, numeric factories
-- `stdlib/src/Array.bt`, `stdlib/src/OrderedCollection.bt` — `class new`, `class new:`
-- `stdlib/src/TestCase.bt` — `class allTestSelectors`, `class run`
+- `stdlib/src/System.bt` (8) — `class exit:`, `class env:`, etc.
+- `stdlib/src/DateTime.bt` (6) — `class now`, `class today`, etc.
+- `stdlib/src/File.bt` (5) — `class readFrom:`, `class writeTo:put:`, etc.
+- `stdlib/src/Random.bt` (4) — `class next`, `class nextInt:`, etc.
+- `stdlib/src/Float.bt` (3) — `class pi`, `class nan`, `class infinity`
+- `stdlib/src/TranscriptStream.bt` (3), `stdlib/src/TestRunner.bt` (3),
+  `stdlib/src/Stream.bt` (3), `stdlib/src/JSON.bt` (3)
+- Plus 13 other files with 1–2 class-side methods each (Array, Collection,
+  TestCase, Regex, Metaclass, String, etc.)
 
-For Options B and C, migration is token-level: replace the modifier/sigil and no structural reorganisation is needed. For Option A, each file with class-side methods gains a new top-level `class Foo class [...]` declaration block.
+For Options B and C, migration is token-level: replace the modifier/sigil and no structural reorganisation is needed. For Option A, each file with class-side methods gains a new top-level `X class subclass: Y class` declaration block.
 
 ### Superseding ADR 0013
 
@@ -572,18 +610,17 @@ Object subclass: TranscriptStream
         self.uniqueInstance ifNil: [self.uniqueInstance := super new].
         self.uniqueInstance
 
-// After (Option A — two blocks)
+// After (Option A — two declarations)
 Object subclass: TranscriptStream
     classVar: uniqueInstance = nil
 
     show: text => ...
 
-class TranscriptStream class [
+Object class subclass: TranscriptStream class
     new => self error: 'Use uniqueInstance instead'
     uniqueInstance =>
         self.uniqueInstance ifNil: [self.uniqueInstance := super new].
         self.uniqueInstance
-]
 ```
 
 ### User-Facing Communication
@@ -603,5 +640,5 @@ error: `class` is no longer a method modifier — use `meta methodName` (Option 
 ## References
 
 - Related issues: BT-1003 (stdlib return type annotation audit — discovered Ambiguity 2), BT-1018 (parser ambiguity cleanup)
-- Related ADRs: ADR 0013 (class-side methods introduced — this ADR supersedes ADR 0013 Section 2 on class-side method syntax), ADR 0036 (full metaclass tower — makes the original motivation for the `class` modifier obsolete), ADR 0047 (Arrow token disambiguation — fixed Ambiguity 1; documented Ambiguity 2 as a structural grammar problem requiring this ADR)
+- Related ADRs: ADR 0013 (class-side methods introduced — this ADR supersedes ADR 0013 Section 2 on class-side method syntax), ADR 0036 (full metaclass tower — makes the original motivation for the `class` modifier obsolete), ADR 0047 (Arrow token disambiguation — fixed Ambiguity 1; documented Ambiguity 2 as a structural grammar problem requiring this ADR), ADR 0049 (removes method-level `sealed` — after ADR 0049, `class` is the sole remaining method modifier keyword)
 - Prior art: Pharo by Example, Classes and Metaclasses chapter; Smalltalk-80 Blue Book Chapter 14 (Classes as Objects); Objective-C Programming Language Guide (instance vs. class methods); Swift Language Reference (static and class methods); Kotlin Reference (companion objects)
