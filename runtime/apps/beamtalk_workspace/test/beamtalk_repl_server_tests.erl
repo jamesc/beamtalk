@@ -1546,7 +1546,10 @@ resolve_chain_type_single_token_returns_undefined_test() ->
 %%% get_context_completions chain resolution tests (BT-1006)
 
 context_completions_chained_no_annotation_returns_empty_test() ->
-    %% Chained expression with no return type annotation → empty completions (no crash)
+    %% Chained expression where the selector exists as an atom but has no return-type
+    %% annotation → mock returns {error, not_found} → walk_chain returns undefined →
+    %% empty completions. Uses 'size' (a known atom) so tokenise_send_chain succeeds
+    %% and the test exercises the "unannotated selector" path through the mock.
     Pid = spawn_mock_class_with_return_types('ChainCompletionTestA', #{}, #{}),
     try
         Bindings = #{
@@ -1555,7 +1558,7 @@ context_completions_chained_no_annotation_returns_empty_test() ->
             }
         },
         Result = beamtalk_repl_ops_dev:get_context_completions(
-            <<"myObj unknownMethod cl">>, Bindings
+            <<"myObj size cl">>, Bindings
         ),
         ?assertEqual([], Result)
     after
