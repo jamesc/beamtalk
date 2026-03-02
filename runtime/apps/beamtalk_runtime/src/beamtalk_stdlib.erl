@@ -125,7 +125,8 @@ load_compiled_stdlib_modules() ->
                             ?LOG_DEBUG("Loaded stdlib module", #{module => Mod});
                         {error, Reason} ->
                             ?LOG_WARNING(
-                                "Failed to load stdlib module",
+                                "Failed to load module ~s: ~p",
+                                [format_bt_module(Mod), Reason],
                                 #{module => Mod, reason => Reason}
                             )
                     end
@@ -252,7 +253,8 @@ discover_and_load_fallback(Dir) ->
                             ?LOG_DEBUG("Loaded stdlib module (fallback)", #{module => Mod});
                         {error, Reason} ->
                             ?LOG_WARNING(
-                                "Failed to load stdlib module",
+                                "Failed to load module ~s: ~p",
+                                [format_bt_module(Mod), Reason],
                                 #{module => Mod, reason => Reason}
                             )
                     end
@@ -305,6 +307,12 @@ dispatch(Selector, _Args, _Receiver) ->
         Error1, <<"Check spelling or use 'Beamtalk respondsTo:' to verify method exists">>
     ),
     beamtalk_error:raise(Error2).
+
+%% @doc Format an Erlang module atom as a Beamtalk dotted path.
+%% e.g. 'bt@sicp@scheme@lambda' -> "bt.sicp.scheme.lambda"
+-spec format_bt_module(module()) -> string().
+format_bt_module(Mod) ->
+    re:replace(atom_to_list(Mod), "@", ".", [global, {return, list}]).
 
 %% @doc Check if the Beamtalk class responds to the given selector.
 -spec has_method(atom()) -> boolean().
