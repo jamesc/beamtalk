@@ -1,7 +1,7 @@
 # ADR 0047: Return Type Arrow Token Disambiguation
 
 ## Status
-Proposed
+Proposed (2026-03-02)
 
 ## Context
 
@@ -17,7 +17,8 @@ kind used for any other binary operator. The parser distinguishes the return-typ
 from a binary message send via a lookahead function (`is_return_type_then_fat_arrow`)
 that checks whether `-> Identifier =>` follows the current position.
 
-This lookahead fails in two confirmed cases discovered during BT-1003:
+This lookahead fails in two confirmed cases discovered during BT-1003 (both are in the
+stdlib; no user-defined `->` methods are currently affected):
 
 ### Ambiguity 1 — `->` as method selector
 
@@ -58,16 +59,20 @@ which reduces return-type coverage for chain resolution in the REPL (ADR 0045 Ph
 
 ### Constraint
 
-The `->` syntax for return types is well-established in the codebase (~500 annotated
+The `->` syntax for return types is well-established in the codebase (~590 annotated
 methods across stdlib), well-precedented in comparable languages (Gleam, Rust, Swift),
 and is the right choice semantically. The fix must not change user-visible syntax.
 
 ## Decision
 
 Give `->` its own `TokenKind::Arrow` variant in the lexer, separate from
-`BinarySelector`. The parser is then updated to handle `Arrow` in all positions where
-`->` currently appears — both as a return-type separator and as a binary method
-selector — using the dedicated token to disambiguate.
+`BinarySelector`. In return-type position `->` is structural punctuation in a method
+signature — no operands, no precedence — while in expression position (`x -> y`) it
+remains a binary message send. Classifying it as `BinarySelector` conflates these two
+roles; a dedicated token lets the parser resolve the role from position alone. The
+parser is then updated to handle `Arrow` in all positions where `->` currently appears
+— both as a return-type separator and as a binary method selector — using the
+dedicated token to disambiguate.
 
 ### Lexer change
 
@@ -188,7 +193,27 @@ in completions. The dedicated `Arrow` token also simplifies syntax highlighting 
   method signature would see `balance ^ Integer =>` and momentarily parse `^` as a
   return statement. The disambiguation requires knowing you're in a signature, not a
   body — exactly the kind of context-dependent reading that makes languages harder to
-  learn. The ~500 existing `->` annotations would require a mechanical migration.
+  learn. The ~590 existing `->` annotations would require a mechanical migration.
+
+### Option D: Parser-only fix (combined)
+
+- 🧑‍💻 **Newcomer:** "No lexer change, no new token kind, no exhaustive-match cascade.
+  The fix is invisible to anyone reading token.rs."
+- ⚙️ **BEAM veteran:** "Token kinds are part of your compiler's public surface — fewer
+  variants means less churn for downstream tooling (LSP, syntax highlighters, Tree-sitter
+  grammars)."
+- 🎨 **Language designer:** "Ambiguity 1 is already solvable without a new token: in
+  `parse_method_selector`, seeing `BinarySelector(\"->\")` tells you unambiguously this
+  is the selector; the next `->` must be the return-type arrow. Ambiguity 2 can be fixed
+  with two extra lines in the existing `class`-keyword lookahead. Total diff: ~10 lines."
+
+  **Why rejected:** The deeper problem is semantic, not syntactic. `->` plays two
+  distinct roles: structural punctuation in signature position (no operands, no precedence)
+  and a binary operator in expression position (`x -> y`). Lumping both into `BinarySelector`
+  conflates them — every consumer must re-derive which role applies from surrounding context.
+  `Arrow` gives the token stream a single, neutral identity; the parser then resolves the
+  role from position, which is exactly where that decision belongs. A parser workaround
+  patches the symptom; the dedicated token fixes the representation.
 
 ### Option C: Minimal workarounds per method
 
@@ -231,11 +256,10 @@ sees `BinarySelector("->")` it knows this is the selector. After consuming the
 parameter name, a second `BinarySelector("->")` must be the return type separator
 (binary methods take exactly one parameter). This is deterministic.
 
-Rejected: solves ambiguity 1 but not ambiguity 2 (`class` keyword). Also distributes
-`"->"`-specific logic across multiple parser functions rather than centralising it in
-the token layer. The dedicated token is a cleaner separation of concerns and gives
-downstream consumers (LSP, highlighter) a distinct signal without re-implementing
-the disambiguation logic.
+Rejected: solves ambiguity 1 but not ambiguity 2 (`class` keyword). More fundamentally,
+the return-type `->` is not a binary operator — it is structural punctuation with no
+operands or precedence. Keeping it as `BinarySelector` is a misclassification that
+all downstream consumers must compensate for individually. See Steelman Analysis.
 
 ### Alternative E: Parenthesise return types to disambiguate
 
@@ -252,7 +276,11 @@ parser's internal ambiguity into user-visible syntax.
 - `Object.->` and `Class.class` gain return type annotations, improving REPL chain
   resolution coverage (ADR 0045 Phase 1)
 - Future binary methods named `->` (unlikely but possible) work correctly
-- Dedicated `Arrow` token simplifies syntax highlighting and LSP tokenisation
+- `Arrow` gives `->` a neutral identity in the token stream; the parser resolves its
+  role (structural punctuation in signature position, binary operator in expression
+  position) from context — the right place for that decision
+- Simplifies syntax highlighting and LSP tokenisation; consumers can distinguish
+  return-type arrows from binary sends by parse position rather than string matching
 - No user-visible syntax change; zero migration burden
 
 ### Negative
@@ -268,6 +296,14 @@ parser's internal ambiguity into user-visible syntax.
 - The `BinarySelector("->")` string value disappears from the token stream; any
   tooling that matched on it directly must match `Arrow` instead (internal only —
   no public API surface)
+- Ambiguity 2 (keyword-as-method-name) is a class of grammar problem. `sealed` and
+  `override` are the other modifier keywords; neither is a plausible method name in
+  existing or planned stdlib code, so no additional instances of this class are known.
+  If future method names collide with modifiers, the same lookahead extension pattern
+  applies.
+- When generic type parameters land (e.g. `-> Map<K, V>`), `parse_optional_return_type`
+  will need to handle parameterised types. The `Arrow` token fix is orthogonal to that
+  work and does not make it harder.
 
 ## Implementation
 
@@ -300,7 +336,7 @@ parser's internal ambiguity into user-visible syntax.
 - `parse_binary_with_pratt()` (line 300): extend the `while let BinarySelector`
   loop to also match `Arrow`, treating it as binary operator `"->"` in expression
   position
-- `parse_send_continuation()` (line 193): extend binary message detection to match
+- `parse_cascade_message()` (line 193): extend binary message detection to match
   `Arrow` alongside `BinarySelector`
 - Negative number pattern (line 863): no change needed — only matches `"-"`, not `"->"`
 
@@ -308,6 +344,18 @@ parser's internal ambiguity into user-visible syntax.
 - Add `-> Association` to `Object.->` in `Object.bt`
 - Add `-> Metaclass` to `sealed class` in `Class.bt`
 - Regenerate `generated_builtins.rs`
+
+**Implementation scope:** The codebase has ~25 references to `BinarySelector` across
+5 files (`token.rs`, `lexer.rs`, `declarations.rs`, `expressions.rs`, `mod.rs`). Of
+these, 6 sites specifically match `BinarySelector(s) if s == "->"` and must be converted
+to match `Arrow`; ~8 generic `BinarySelector(_)` sites must add `Arrow` alongside.
+Comma-handling sites (`BinarySelector(s) if s == ","`) and the negative-number site
+(`BinarySelector(op) if op == "-"`) are unaffected. The compiler enforces exhaustive
+matching, so newly-added `TokenKind::Arrow` arms will be flagged at compile time.
+
+**Phases 1–3 are a single atomic change** and must ship together; an `Arrow` token
+emitted by the lexer without updated parser handling is a regression, not a partial
+deliverable. Phase 4 (stdlib annotations) can follow in a subsequent commit.
 
 **Affected components:** Lexer (`lexer.rs`, `token.rs`), parser (`declarations.rs`,
 `expressions.rs`), stdlib sources, `generated_builtins.rs`. No codegen, runtime,
@@ -318,3 +366,7 @@ or REPL changes needed.
 - Related issues: BT-1018 (parser ambiguity cleanup), BT-1017 (Association/`->` on Object review)
 - Related ADRs: ADR 0025 (Gradual Typing — introduced `->` return type syntax), ADR 0039 (Syntax Pragmatism)
 - Discovered during: BT-1003 (stdlib return type annotation audit)
+- BT-1017 note: if BT-1017 removes `->` from `Object`, Ambiguity 1 becomes moot, but the
+  `Arrow` token remains the correct fix — any future binary method named `->` on any class
+  would hit the same wall, and the semantic argument for a neutral token kind holds
+  independently of whether `Object.->` exists.
