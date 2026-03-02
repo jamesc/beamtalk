@@ -13,7 +13,7 @@ The WebSocket infrastructure (ADR 0017) already supports everything needed:
 - `bindings` — list session-local variable bindings
 - `actors` — list running actors with class and PID
 - `inspect` — get actor internal state
-- `modules` — list loaded modules
+- `classes` — list loaded classes
 - `transcript` push — server-initiated Transcript streaming
 - `actors` push — server-initiated actor lifecycle events (spawned, stopped)
 
@@ -57,7 +57,7 @@ A `TreeDataProvider` showing the live workspace state as a native VSCode tree:
         spawned: 10:42:31
       Timer    <0.235.0>
       Logger   <0.240.0>
-  ▾ Modules  (12 loaded)
+  ▾ Classes  (12 loaded)
       Counter
       Timer
       Logger
@@ -66,9 +66,9 @@ A `TreeDataProvider` showing the live workspace state as a native VSCode tree:
 
 - Bindings section: shows bindings from the extension-owned REPL session. The extension started the REPL, knows the session ID, and queries `bindings` directly on that session. Refreshed on eval completion in the integrated terminal.
 - Actors section: workspace-wide, updated via push events (`actors` channel)
-- Modules section: workspace-wide, refreshed on `module-loaded` push event (see Protocol Changes below)
+- Classes section: workspace-wide, refreshed on `class-loaded` push event (see Protocol Changes below)
 - Clicking an actor or binding sends `inspect` and expands a detail subtree
-- Context menus: `reload` on modules, `kill` on actors, `inspect` on bindings
+- Context menus: `reload` on classes, `kill` on actors, `inspect` on bindings
 
 **2. Transcript (WebviewView)**
 
@@ -78,7 +78,7 @@ Transcript is workspace-wide (shared across all sessions), matching the Smalltal
 
 **3. Connection lifecycle**
 
-The extension owns the REPL session. There is no support for connecting to sessions started outside VSCode — if a user runs `beamtalk repl` in an external terminal, bindings from that session are not shown. Actors and modules are workspace-wide and always visible regardless.
+The extension owns the REPL session. There is no support for connecting to sessions started outside VSCode — if a user runs `beamtalk repl` in an external terminal, bindings from that session are not shown. Actors and classes are workspace-wide and always visible regardless.
 
 The extension host manages a single `WorkspaceClient` per VSCode window:
 
@@ -99,7 +99,7 @@ On terminal closed by user:
   → Sidebar shows disconnected state, session bindings cleared
 ```
 
-Workspace persistence: a Beamtalk workspace (BEAM node) survives REPL disconnects (ADR 0004). If the extension reconnects after a terminal close, actors and modules persist. Bindings from the previous session are gone (ephemeral by design), and the new session starts empty — this is correct and expected.
+Workspace persistence: a Beamtalk workspace (BEAM node) survives REPL disconnects (ADR 0004). If the extension reconnects after a terminal close, actors and classes persist. Bindings from the previous session are gone (ephemeral by design), and the new session starts empty — this is correct and expected.
 
 ### Connection Architecture: Direct WebSocket (not LSP-proxied)
 
@@ -121,10 +121,10 @@ VSCode Extension Host
   └── WorkspaceClient →  ws://127.0.0.1:{port}/ws    [sidebar: session, bindings, actors, transcript]
 
 beamtalk-lsp (Rust)
-  └── WorkspaceTypeClient → ws://127.0.0.1:{port}/ws [Tier 3: module-loaded events, class hierarchy]
+  └── WorkspaceTypeClient → ws://127.0.0.1:{port}/ws [Tier 3: class-loaded events, class hierarchy]
 ```
 
-The LSP's connection is read-only and minimal — it subscribes to `module-loaded` push events, queries `modules` and class metadata on connect, and maintains an updated in-memory class hierarchy for completions. No REPL session is needed. The LSP discovers the workspace via `--print-sysroot` (BT-1010). This keeps the LSP autonomous and independent of the extension host's connection lifecycle.
+The LSP's connection is read-only and minimal — it subscribes to `class-loaded` push events, queries `classes` and class metadata on connect, and maintains an updated in-memory class hierarchy for completions. No REPL session is needed. The LSP discovers the workspace via `--print-sysroot` (BT-1010). This keeps the LSP autonomous and independent of the extension host's connection lifecycle.
 
 ### Refresh Strategy
 
@@ -132,15 +132,15 @@ The LSP's connection is read-only and minimal — it subscribes to `module-loade
 - **Transcript**: event-driven via `transcript` push — no polling
 - **Bindings**: refreshed on eval completion in the extension-owned terminal session
 - **Actor state (expanded)**: refreshed on expand and on manual refresh action, not continuously polled
-- **Modules**: event-driven via `module-loaded` push event (see Protocol Changes below)
+- **Classes**: event-driven via `class-loaded` push event (see Protocol Changes below)
 
-Most updates are event-driven via existing push channels. The extension owns the REPL terminal, so it can observe eval completion directly (terminal output parsing or `eval` op response). The only missing push event is `module-loaded` — see Protocol Changes below.
+Most updates are event-driven via existing push channels. The extension owns the REPL terminal, so it can observe eval completion directly (terminal output parsing or `eval` op response). The only missing push event is `class-loaded` — see Protocol Changes below.
 
 ### Protocol Changes Required
 
 One small addition to the existing protocol:
 
-**`module-loaded` push event**: When any session loads, reloads, or eval-defines a module, the workspace broadcasts a push event to all WebSocket subscribers — analogous to the existing `actor_spawned`/`actor_stopped` push events. This lets the sidebar refresh the Modules section without polling.
+**`class-loaded` push event**: When any session loads, reloads, or eval-defines a class, the workspace broadcasts a push event to all WebSocket subscribers — analogous to the existing `actor_spawned`/`actor_stopped` push events. This lets the sidebar refresh the Classes section without polling.
 
 No `bindings` session param is needed: the extension owns the REPL session and queries its own session's bindings directly. The `complete` op's session param pattern already exists and works the same way.
 
@@ -150,7 +150,7 @@ This sidebar defines the panel structure that ADR 0017 Phase 3 should implement 
 
 | Panel | Data Source | Update Trigger |
 |-------|-------------|----------------|
-| Workspace Explorer | `bindings`, `actors`, `modules` ops | push events + eval completion |
+| Workspace Explorer | `bindings`, `actors`, `classes` ops | push events + eval completion |
 | Transcript | `transcript` push channel | server push |
 | Inspector | `inspect` op | on demand (expand / click) |
 | *(future)* Test Results | `test`/`test-all` ops | on demand |
@@ -183,19 +183,19 @@ The Elixir community uses Observer (standalone Wx GUI) or LiveDashboard (browser
 - Auto-connect means zero configuration — just `beamtalk repl` and the sidebar lights up
 - Clicking an actor to inspect its state is more discoverable than typing `actors inspect: somePid` in the REPL
 - Transcript in the sidebar means they don't need to understand `Transcript show:` output routing
-- **Risk**: information overload if too much is shown by default. Mitigation: collapse Modules by default, show only top-level actor list until expanded.
+- **Risk**: information overload if too much is shown by default. Mitigation: collapse Classes by default, show only top-level actor list until expanded.
 
 ### Smalltalk Developer
 - The Workspace Explorer is a simplified System Browser — classes, instances, live state
 - Transcript in the sidebar is familiar (Pharo has a Transcript window)
 - The inspector is the Smalltalk Inspector — drill into object state by clicking
-- The absence of a method browser is notable (the class browser shows loaded modules but not methods). This is Phase 2 scope.
+- The absence of a method browser is notable (the class browser shows loaded classes but not methods). This is Phase 2 scope.
 - **Risk**: Smalltalk developers expect to be able to edit code in the inspector and send it to an object. That is REPL-native today; the sidebar is read-only inspection for now.
 
 ### Erlang/BEAM Developer
 - The Actors panel is a simplified Observer process list scoped to the Beamtalk workspace
 - `inspect` showing gen_server state is familiar from `:sys.get_state/1`
-- Module reload from context menu is familiar from `c:l/1` in the Erlang shell
+- Class reload from context menu is familiar from `c:l/1` in the Erlang shell
 - **Risk**: they will miss the supervision tree view. That is future scope.
 
 ### Production Operator
@@ -246,10 +246,10 @@ The Elixir community uses Observer (standalone Wx GUI) or LiveDashboard (browser
 ## Alternatives Considered
 
 ### Full WebviewPanel for Everything
-Show all four panels (explorer, transcript, inspector, modules) as a single React webview, like the browser workspace UI.
+Show all four panels (explorer, transcript, inspector, classes) as a single React webview, like the browser workspace UI.
 
 **Rejected because:**
-- The structured state (bindings, actors, modules) is hierarchical — TreeView renders it with zero code and native VSCode feel (themes, keyboard nav, accessibility)
+- The structured state (bindings, actors, classes) is hierarchical — TreeView renders it with zero code and native VSCode feel (themes, keyboard nav, accessibility)
 - We don't need React for a tree of strings; adding a framework for Phase 1 is premature
 - `vscode-webview-ui-toolkit` is deprecated; choosing a replacement framework adds maintenance burden
 - The browser UI (ADR 0017 Phase 3) is where the rich WebviewPanel investment should go — doing it twice (in VSCode sidebar and in browser) wastes effort
@@ -260,7 +260,7 @@ Route all workspace communication through the LSP server: extension → LSP → 
 **Rejected because:**
 - "Restart Language Server" is a common user action (fixing stale completions, picking up config changes). If the LSP owns the sidebar session, restarting it kills the REPL session and clears all bindings — UX the extension cannot prevent.
 - The extension host owns the terminal running `beamtalk repl`. Routing its session through the LSP breaks the natural ownership — the child process lifecycle belongs with the parent that started it.
-- Actor management via LSP requests (`$/beamtalk/killActor`, `$/beamtalk/reloadModule`) is a category error. The LSP is a language intelligence service, not an operations console.
+- Actor management via LSP requests (`$/beamtalk/killActor`, `$/beamtalk/reloadClass`) is a category error. The LSP is a language intelligence service, not an operations console.
 - Note: connection count is NOT a win for Option A — the LSP opens its own separate WebSocket for Tier 3 anyway, so two connections exist regardless of this choice.
 
 ### Debug Adapter Protocol (DAP)
@@ -273,7 +273,7 @@ Implement a DAP server backed by the workspace, exposing bindings and actor stat
 - Beamtalk may add true debugging (breakpoints via `:int`) later; that should be a separate DAP implementation, not conflated with workspace inspection
 
 ### Polling TreeView (no push)
-Connect to the workspace, poll `bindings`/`actors`/`modules` on a configurable interval.
+Connect to the workspace, poll `bindings`/`actors`/`classes` on a configurable interval.
 
 **Rejected because:**
 - The workspace already pushes actor lifecycle events and Transcript — polling is unnecessary
@@ -282,7 +282,7 @@ Connect to the workspace, poll `bindings`/`actors`/`modules` on a configurable i
 - Event-driven refresh is more responsive for actor spawn/stop events
 
 ### Do Nothing (Status Quo)
-Rely on the terminal REPL for all workspace inspection. The REPL already supports `actors`, `bindings`, `inspect`, `modules`, and Transcript output.
+Rely on the terminal REPL for all workspace inspection. The REPL already supports `actors`, `bindings`, `inspect`, `classes`, and Transcript output.
 
 **Rejected because:**
 - Live programming is Beamtalk's differentiation — but it's invisible if users have to know to type inspection commands
@@ -306,7 +306,7 @@ Rely on the terminal REPL for all workspace inspection. The REPL already support
 - TreeView cannot display richly formatted values (Dictionary, Array contents) — labels only. Phase 2 can add a detail WebviewPanel for expanded inspection.
 - The extension now manages two connections (LSP + WebSocket). Extension host complexity increases. The two connections have independent lifecycle — the sidebar could show "Connected" while the LSP is dead, or vice versa. This needs clear, distinct status indicators.
 - Workspace auto-connect requires reading `~/.beamtalk/workspaces/{id}/port` and `cookie` files — both must be reliable across platforms (Windows NTFS ACLs vs Unix permissions, path conventions). The 1:1 mapping between project directory and workspace (enforced by hashing the project path) means there is no ambiguity about which workspace to connect to.
-- **Protocol gap**: the current WebSocket protocol lacks `module-loaded` push events. This must be added before or alongside the sidebar implementation. Small but real prerequisite work on the Erlang side.
+- **Protocol gap**: the current WebSocket protocol lacks `class-loaded` push events. This must be added before or alongside the sidebar implementation. Small but real prerequisite work on the Erlang side.
 - Each VSCode window creates a cloned session on the workspace. Multiple windows, plus crash/force-quit without cleanup, can leave orphan sessions. The workspace's idle monitor and session timeout should handle this, but session proliferation under multi-window use needs testing.
 
 ### Neutral
@@ -320,8 +320,8 @@ Rely on the terminal REPL for all workspace inspection. The REPL already support
 
 One runtime-side change:
 
-1. **`module-loaded` push event** (`beamtalk_repl_server.erl`, `beamtalk_ws_handler.erl`)
-   - Broadcast `{"push":"modules","event":"loaded","data":{"module":"Counter"}}` to all WebSocket subscribers when any session loads, reloads, or eval-defines a module
+1. **`class-loaded` push event** (`beamtalk_repl_server.erl`, `beamtalk_ws_handler.erl`)
+   - Broadcast `{"push":"classes","event":"loaded","data":{"class":"Counter"}}` to all WebSocket subscribers when any session loads, reloads, or eval-defines a class
 
 2. **Session ID on REPL startup** (`beamtalk-cli/src/commands/repl.rs`)
    - REPL prints session ID to stdout on connect, e.g. `[beamtalk] session: abc123`
@@ -331,13 +331,13 @@ One runtime-side change:
 
 1. **`WorkspaceClient` class** (`editors/vscode/src/workspaceClient.ts`)
    - WebSocket connection management (connect, auth, reconnect with backoff)
-   - `bindings(sessionId)`, `actors()`, `modules()`, `inspect(pid)`, `sessions()` op wrappers
-   - Push channel subscription (`transcript`, `actors`, `modules`)
+   - `bindings(sessionId)`, `actors()`, `classes()`, `inspect(pid)`, `sessions()` op wrappers
+   - Push channel subscription (`transcript`, `actors`, `classes`)
    - Session lifecycle (`clone`, `close`)
 
 2. **`WorkspaceTreeDataProvider`** (`editors/vscode/src/workspaceTreeView.ts`)
    - `TreeDataProvider<WorkspaceNode>` implementation
-   - Nodes: ConnectedRoot / DisconnectedRoot / BindingsSection / ActorSection / ModulesSection / BindingItem / ActorItem / ModuleItem
+   - Nodes: ConnectedRoot / DisconnectedRoot / BindingsSection / ActorSection / ClassesSection / BindingItem / ActorItem / ClassItem
    - `onDidChangeTreeData` wired to push events
    - Context menus: `kill`, `inspect`, `reload` via `package.json` contributions
 
