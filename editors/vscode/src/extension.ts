@@ -64,12 +64,12 @@ function findLspViaSysroot(): Promise<string | null> {
  */
 function lspIsOnPath(): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = execFile(withPlatformExecutable("beamtalk-lsp"), ["--version"], {
-      timeout: 3000,
-      windowsHide: true,
-    });
-    child.on("close", () => resolve(true));
-    child.on("error", () => resolve(false));
+    execFile(
+      withPlatformExecutable("beamtalk-lsp"),
+      ["--version"],
+      { timeout: 3000, windowsHide: true },
+      (error) => resolve(!error)
+    );
   });
 }
 
