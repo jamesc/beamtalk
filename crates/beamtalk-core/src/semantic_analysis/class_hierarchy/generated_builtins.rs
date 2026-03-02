@@ -354,7 +354,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: Some("Symbol".into()), param_types: vec![] },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "isClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: Some("Boolean".into()), param_types: vec![] },
-                MethodInfo { selector: "class".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "class".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: Some("Metaclass".into()), param_types: vec![] },
                 MethodInfo { selector: "classBuilder".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Class".into(), is_sealed: true, return_type: Some("ClassBuilder".into()), param_types: vec![] },
             ],
             class_methods: vec![],
@@ -635,7 +635,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "ifTrue:ifFalse:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, return_type: None, param_types: vec![Some("Block".into()), Some("Block".into())] },
-                MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, return_type: None, param_types: vec![Some("Block".into())] },
+                MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, return_type: Some("False".into()), param_types: vec![Some("Block".into())] },
                 MethodInfo { selector: "ifFalse:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, return_type: None, param_types: vec![Some("Block".into())] },
                 MethodInfo { selector: "not".into(), arity: 0, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
                 MethodInfo { selector: "isTrue".into(), arity: 0, kind: MethodKind::Primary, defined_in: "False".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
@@ -1552,7 +1552,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             methods: vec![
                 MethodInfo { selector: "ifTrue:ifFalse:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, return_type: None, param_types: vec![Some("Block".into()), Some("Block".into())] },
                 MethodInfo { selector: "ifTrue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, return_type: None, param_types: vec![Some("Block".into())] },
-                MethodInfo { selector: "ifFalse:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, return_type: None, param_types: vec![Some("Block".into())] },
+                MethodInfo { selector: "ifFalse:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, return_type: Some("True".into()), param_types: vec![Some("Block".into())] },
                 MethodInfo { selector: "not".into(), arity: 0, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
                 MethodInfo { selector: "isTrue".into(), arity: 0, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
                 MethodInfo { selector: "isFalse".into(), arity: 0, kind: MethodKind::Primary, defined_in: "True".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
