@@ -162,9 +162,14 @@ mod tests {
 
     #[test]
     fn test_generate_workspace_id_different_paths() {
-        let id1 = generate_workspace_id(Path::new("/tmp")).unwrap();
-        let id2 = generate_workspace_id(Path::new("/")).unwrap();
-        assert_ne!(id1, id2, "Different paths should produce different IDs");
+        let temp = std::env::temp_dir();
+        let cwd = std::env::current_dir().unwrap();
+        // Only run if temp and cwd differ (they almost always do)
+        if temp != cwd {
+            let id1 = generate_workspace_id(&temp).unwrap();
+            let id2 = generate_workspace_id(&cwd).unwrap();
+            assert_ne!(id1, id2, "Different paths should produce different IDs");
+        }
     }
 
     #[test]

@@ -121,17 +121,16 @@ mod tests {
 
     #[test]
     fn test_generate_workspace_id_deterministic() {
-        // Use /tmp which always exists
-        let path = Path::new("/tmp");
-        let id1 = generate_workspace_id(path);
-        let id2 = generate_workspace_id(path);
+        let path = std::env::temp_dir();
+        let id1 = generate_workspace_id(&path);
+        let id2 = generate_workspace_id(&path);
         assert_eq!(id1, id2, "Same path should produce same workspace ID");
     }
 
     #[test]
     fn test_generate_workspace_id_length() {
-        let path = Path::new("/tmp");
-        let id = generate_workspace_id(path);
+        let path = std::env::temp_dir();
+        let id = generate_workspace_id(&path);
         assert_eq!(
             id.len(),
             12,
@@ -141,8 +140,8 @@ mod tests {
 
     #[test]
     fn test_generate_workspace_id_hex_format() {
-        let path = Path::new("/tmp");
-        let id = generate_workspace_id(path);
+        let path = std::env::temp_dir();
+        let id = generate_workspace_id(&path);
         assert!(
             id.chars().all(|c| c.is_ascii_hexdigit()),
             "Workspace ID should be all hex digits, got: {id}"
@@ -151,9 +150,13 @@ mod tests {
 
     #[test]
     fn test_different_paths_produce_different_ids() {
-        let id1 = generate_workspace_id(Path::new("/tmp"));
-        let id2 = generate_workspace_id(Path::new("/"));
-        assert_ne!(id1, id2, "Different paths should produce different IDs");
+        let temp = std::env::temp_dir();
+        let cwd = std::env::current_dir().unwrap();
+        if temp != cwd {
+            let id1 = generate_workspace_id(&temp);
+            let id2 = generate_workspace_id(&cwd);
+            assert_ne!(id1, id2, "Different paths should produce different IDs");
+        }
     }
 
     #[test]

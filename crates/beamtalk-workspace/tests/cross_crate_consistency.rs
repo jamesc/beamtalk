@@ -11,7 +11,6 @@ use beamtalk_workspace::{
     generate_workspace_id, read_cookie_file, read_port_file, workspaces_base_dir,
 };
 use std::fs;
-use std::path::Path;
 
 /// The CLI's algorithm (before extraction) used `format!("{result:x}")[..12]`.
 /// The MCP's algorithm used a custom `hex_encode(&result[..6])`.
@@ -21,8 +20,8 @@ use std::path::Path;
 fn test_workspace_id_matches_cli_algorithm() {
     use sha2::{Digest, Sha256};
 
-    // Simulate the CLI's old algorithm on /tmp (which always exists).
-    let path = Path::new("/tmp");
+    // Use temp_dir which exists on all platforms.
+    let path = std::env::temp_dir();
     let canonical = path.canonicalize().unwrap();
     let path_str = canonical.to_str().unwrap();
 
@@ -31,7 +30,7 @@ fn test_workspace_id_matches_cli_algorithm() {
     let result = hasher.finalize();
     let cli_id = format!("{result:x}")[..12].to_string();
 
-    let shared_id = generate_workspace_id(path).unwrap();
+    let shared_id = generate_workspace_id(&path).unwrap();
     assert_eq!(
         shared_id, cli_id,
         "Shared crate must produce the same ID as the old CLI algorithm"
@@ -43,7 +42,7 @@ fn test_workspace_id_matches_cli_algorithm() {
 fn test_workspace_id_matches_mcp_algorithm() {
     use sha2::{Digest, Sha256};
 
-    let path = Path::new("/tmp");
+    let path = std::env::temp_dir();
     let canonical = path.canonicalize().unwrap();
     // MCP used to_string_lossy; for valid UTF-8 paths this is identical to to_str().unwrap()
     let path_str = canonical.to_string_lossy();
@@ -61,7 +60,7 @@ fn test_workspace_id_matches_mcp_algorithm() {
             s
         });
 
-    let shared_id = generate_workspace_id(path).unwrap();
+    let shared_id = generate_workspace_id(&path).unwrap();
     assert_eq!(
         shared_id, mcp_id,
         "Shared crate must produce the same ID as the old MCP algorithm for UTF-8 paths"
