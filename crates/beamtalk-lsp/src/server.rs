@@ -19,20 +19,21 @@ use beamtalk_core::language_service::{
     SimpleLanguageService,
 };
 use beamtalk_core::semantic_analysis::ClassHierarchy;
-use beamtalk_core::source_analysis::{Severity, Span};
+use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
+use beamtalk_core::unparse::unparse_module;
 use camino::Utf8PathBuf;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
     DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentSymbolParams,
-    DocumentSymbolResponse, Documentation, GotoDefinitionParams, GotoDefinitionResponse, Hover,
-    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    InitializedParams, MarkupContent, MarkupKind, OneOf, ParameterInformation, ParameterLabel,
-    Range, ReferenceParams, ServerCapabilities, SignatureHelp, SignatureHelpOptions,
-    SignatureHelpParams, SignatureInformation, SymbolKind, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
-    WorkDoneProgressOptions,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
+    DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, Documentation,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, MarkupContent,
+    MarkupKind, OneOf, ParameterInformation, ParameterLabel, Range, ReferenceParams,
+    ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    SignatureInformation, SymbolKind, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions,
 };
 use tower_lsp::{Client, LanguageServer};
 use tracing::debug;
@@ -90,6 +91,30 @@ impl Backend {
             };
             svc.update_file(utf8_path, content);
         }
+    }
+
+    /// Formats a document identified by URI, returning whole-document edits.
+    fn format_document(&self, uri: &Url) -> Option<Vec<TextEdit>> {
+        let path = uri_to_path(uri)?;
+        let source = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            svc.file_source(&path)?
+        };
+
+        let formatted = format_source(&source)?;
+
+        if formatted == source {
+            return Some(vec![]);
+        }
+
+        let end = offset_to_position(source.len(), &source);
+        Some(vec![TextEdit {
+            range: Range {
+                start: tower_lsp::lsp_types::Position::new(0, 0),
+                end,
+            },
+            new_text: formatted,
+        }])
     }
 
     /// Publishes diagnostics for a file after every change.
@@ -150,6 +175,8 @@ impl LanguageServer for Backend {
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
+                document_range_formatting_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -501,6 +528,47 @@ impl LanguageServer for Backend {
             Ok(Some(DocumentSymbolResponse::Nested(lsp_symbols)))
         }
     }
+
+    /// Formats the entire document using the Beamtalk unparser.
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        Ok(self.format_document(&params.text_document.uri))
+    }
+
+    /// Formats the document for a selected range.
+    ///
+    /// Beamtalk formatting is a whole-file operation (the unparser works on the
+    /// full module AST), so this method formats the entire document and returns
+    /// a single edit even when only a range is selected. `VSCode` accepts
+    /// whole-document edits from `rangeFormatting` without issue.
+    async fn range_formatting(
+        &self,
+        params: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        Ok(self.format_document(&params.text_document.uri))
+    }
+}
+
+/// Formats a Beamtalk source string using the unparser.
+///
+/// Returns `None` if the source has parse errors (formatting a broken file
+/// could corrupt it), otherwise returns the formatted string.
+fn format_source(source: &str) -> Option<String> {
+    let tokens = lex_with_eof(source);
+    let (module, diags) = parse(tokens);
+
+    let has_errors = diags.iter().any(|d| d.severity == Severity::Error);
+    if has_errors {
+        return None;
+    }
+
+    let formatted = unparse_module(&module);
+    let formatted = if formatted.is_empty() || formatted.ends_with('\n') {
+        formatted
+    } else {
+        format!("{formatted}\n")
+    };
+
+    Some(formatted)
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
@@ -1102,5 +1170,40 @@ mod tests {
         // the environment — the result depends on the test runner's
         // installation layout and may be Some or None.
         let _ = sysroot_stdlib_source_dir();
+    }
+
+    #[test]
+    fn format_source_returns_none_for_parse_errors() {
+        let result = format_source("@@@invalid beamtalk@@@");
+        assert!(result.is_none(), "parse errors must suppress formatting");
+    }
+
+    #[test]
+    fn format_source_returns_formatted_string() {
+        // An unformatted source must produce non-empty output, and that output
+        // must be stable (formatting the result again returns the same string).
+        let source = "Object subclass: Foo\n  bar => 42\n";
+        let pass1 = format_source(source).expect("valid source must produce output");
+        assert!(!pass1.is_empty(), "formatted output must not be empty");
+        let pass2 = format_source(&pass1).expect("formatted output must be valid");
+        assert_eq!(pass1, pass2, "output must be canonical (idempotent)");
+    }
+
+    #[test]
+    fn format_source_ensures_trailing_newline() {
+        let source = "x := 42";
+        let result = format_source(source).expect("valid source");
+        assert!(
+            result.ends_with('\n'),
+            "formatted output must end with newline"
+        );
+    }
+
+    #[test]
+    fn format_source_idempotent() {
+        let source = "Object subclass: Foo\n  bar => 42\n";
+        let pass1 = format_source(source).expect("pass 1");
+        let pass2 = format_source(&pass1).expect("pass 2");
+        assert_eq!(pass1, pass2, "formatting must be idempotent");
     }
 }
