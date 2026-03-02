@@ -880,22 +880,40 @@ mod tests {
     // These tests spawn real BEAM nodes and are `#[ignore]` by default.
     // Run them with: `just test-integration` or `cargo test -- --ignored`
 
-    /// Guard that kills a BEAM node by PID when dropped, preventing orphans.
+    /// Guard that kills a BEAM node when dropped, preventing orphans.
+    ///
+    /// Performs full cleanup: force-kill → wait for port release → wait for
+    /// epmd deregistration.  This ensures the next `#[serial]` test starts
+    /// with a clean slate (no `TIME_WAIT` ports, no stale epmd entries).
     struct NodeGuard {
-        pid: u32,
+        info: NodeInfo,
+    }
+
+    impl NodeGuard {
+        fn new(info: &NodeInfo) -> Self {
+            Self { info: info.clone() }
+        }
     }
 
     impl Drop for NodeGuard {
         fn drop(&mut self) {
-            let _ = force_kill_process(self.pid);
+            let _ = force_kill_process(self.info.pid);
+            // Wait for port release so the next test doesn't hit TIME_WAIT.
+            let _ = wait_for_workspace_exit(self.info.connect_host(), self.info.port, 15);
+            // Wait for epmd deregistration so the next test can reuse node names.
+            #[cfg(unix)]
+            {
+                let _ = wait_for_epmd_deregistration(&self.info.node_name, 5);
+            }
         }
     }
 
     /// Kill a BEAM node without cleanup (simulates a crash).
     ///
     /// Uses sysinfo for cross-platform process kill, then waits for the port
-    /// to be released with a generous timeout for loaded CI machines.
-    /// Panics if the process cannot be found or killed.
+    /// to be released AND epmd deregistration with generous timeouts for
+    /// loaded CI machines.  This ensures the next operation in the same test
+    /// (e.g. restarting a node with the same name) doesn't hit stale state.
     fn kill_node_raw(info: &NodeInfo) {
         let pid = Pid::from_u32(info.pid);
         let mut system = System::new();
@@ -916,6 +934,15 @@ mod tests {
             panic!(
                 "workspace did not exit after forced kill (pid {}, port {}): {e}",
                 info.pid, info.port
+            )
+        });
+        // Wait for epmd deregistration so a subsequent node with the same name
+        // doesn't get rejected by epmd.
+        #[cfg(unix)]
+        wait_for_epmd_deregistration(&info.node_name, 5).unwrap_or_else(|e| {
+            panic!(
+                "epmd did not deregister '{}' after kill: {e}",
+                info.node_name
             )
         });
     }
@@ -998,7 +1025,7 @@ mod tests {
             None, // web_port
         )
         .expect("start_detached_node should succeed");
-        let _guard = NodeGuard { pid: node_info.pid };
+        let _guard = NodeGuard::new(&node_info);
 
         // Verify node.info was written with correct fields
         let saved = get_node_info(&tw.id)
@@ -1070,7 +1097,7 @@ mod tests {
             None, // web_port
         )
         .expect("start_detached_node should succeed");
-        let _guard = NodeGuard { pid: node_info.pid };
+        let _guard = NodeGuard::new(&node_info);
 
         // True case: node is running
         assert!(
@@ -1112,7 +1139,7 @@ mod tests {
             None, // web_port
         )
         .expect("first get_or_start should succeed");
-        let _guard1 = NodeGuard { pid: info1.pid };
+        let _guard1 = NodeGuard::new(&info1);
         assert!(started1, "first call should start a new node");
         assert_eq!(id1, tw.id);
         assert!(is_node_running(&info1), "node should be running");
@@ -1167,7 +1194,7 @@ mod tests {
             None, // web_port
         )
         .expect("restart should succeed");
-        let _guard3 = NodeGuard { pid: info3.pid };
+        let _guard3 = NodeGuard::new(&info3);
         assert!(started3, "third call should start a new node");
         assert_eq!(id3, tw.id);
         assert_ne!(
@@ -1245,9 +1272,7 @@ mod tests {
         let infos: Vec<_> = results.into_iter().map(|r| r.unwrap()).collect();
 
         // Safety net: ensure the node is killed even if an assertion below panics.
-        let _guard = NodeGuard {
-            pid: infos[0].0.pid,
-        };
+        let _guard = NodeGuard::new(&infos[0].0);
 
         // Exactly one caller must have started a new node; the other must have joined it
         let started_count = infos.iter().filter(|(_, started, _)| *started).count();
@@ -1321,11 +1346,6 @@ mod tests {
         .expect("first start should succeed");
         let stale_port = first_info.port;
         kill_node_raw(&first_info);
-        // Wait for epmd to deregister the old node name before restarting.
-        // After force-kill, epmd may still hold the registration briefly,
-        // which prevents a new node with the same name from starting.
-        wait_for_epmd_deregistration(&first_info.node_name, 5)
-            .expect("epmd should deregister node name within timeout");
 
         // Step 2: Remove node.info but deliberately LEAVE the stale port file.
         // This simulates the scenario where TestWorkspace::Drop's remove_dir_all
@@ -1364,7 +1384,7 @@ mod tests {
             None,
         )
         .expect("restart with stale port file should succeed without timing out");
-        let _guard = NodeGuard { pid: new_info.pid };
+        let _guard = NodeGuard::new(&new_info);
 
         assert!(started, "should have started a new node");
         assert_ne!(
@@ -1418,8 +1438,6 @@ mod tests {
         )
         .expect("first start should succeed");
         kill_node_raw(&first_info);
-        wait_for_epmd_deregistration(&first_info.node_name, 5)
-            .expect("epmd should deregister node name within timeout");
 
         // Step 2: Write a `starting` tombstone to simulate a partial startup that
         // was interrupted before the node finished initialising.
@@ -1452,7 +1470,7 @@ mod tests {
             None,
         )
         .expect("restart with tombstone present should succeed");
-        let _guard = NodeGuard { pid: new_info.pid };
+        let _guard = NodeGuard::new(&new_info);
 
         assert!(started, "should have started a new node");
         assert_ne!(
@@ -1496,7 +1514,7 @@ mod tests {
             None, // web_port
         )
         .expect("start_detached_node should succeed");
-        let _guard = NodeGuard { pid: node_info.pid };
+        let _guard = NodeGuard::new(&node_info);
 
         let workspaces = list_workspaces().unwrap();
         let found = workspaces
@@ -1576,7 +1594,7 @@ mod tests {
             None, // web_port
         )
         .expect("start_detached_node should succeed");
-        let _guard = NodeGuard { pid: node_info.pid };
+        let _guard = NodeGuard::new(&node_info);
 
         let detail = workspace_status(Some(&tw.id)).unwrap();
         assert_eq!(detail.workspace_id, tw.id);
@@ -1619,7 +1637,7 @@ mod tests {
             None, // web_port
         )
         .expect("start_detached_node should succeed");
-        let _guard = NodeGuard { pid: node_info.pid };
+        let _guard = NodeGuard::new(&node_info);
 
         // Graceful stop (force=false) uses TCP shutdown + init:stop(),
         // which should succeed for detached BEAM nodes
@@ -1661,7 +1679,7 @@ mod tests {
         .expect("start_detached_node should succeed");
         // Safety net: NodeGuard ensures cleanup if test fails before stop_workspace runs.
         // NodeGuard is a no-op for already-dead PIDs, so it won't conflict with stop_workspace.
-        let _guard = NodeGuard { pid: node_info.pid };
+        let _guard = NodeGuard::new(&node_info);
 
         // Verify node is running before we stop it
         assert!(
