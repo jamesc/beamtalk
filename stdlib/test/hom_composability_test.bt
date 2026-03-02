@@ -37,4 +37,3 @@ TestCase subclass: HomComposabilityTest
   testNestedHOMsThreadState =>
     actor := HomComposabilityActor spawn
     self assert: actor testNestedHOMsAccumulate equals: 15
-

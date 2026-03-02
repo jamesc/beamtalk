@@ -5,7 +5,6 @@
 // variable persistence, reassignment, closure capture of outer variables,
 // and self reference within actor method bodies
 
-
 TestCase subclass: SemanticScopeTest
 
   testVariableScopeAndClosureCapture =>

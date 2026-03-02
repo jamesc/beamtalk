@@ -6,8 +6,6 @@
 
 TestCase subclass: FailingTest
 
-  testPass =>
-    self assert: true
+  testPass => self assert: true
 
-  testFail =>
-    self assert: 1 equals: 2
+  testFail => self assert: 1 equals: 2

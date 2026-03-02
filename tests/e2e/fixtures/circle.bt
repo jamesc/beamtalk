@@ -8,8 +8,10 @@
 Shape subclass: Circle
   state: radius = 1.0
 
-  class withRadius: r => self new: #{radius => r}
+  class withRadius: r => self new: #{#radius => r}
 
   radius => self.radius
+
   area => 3.14159 * self.radius * self.radius
+
   perimeter => 2.0 * 3.14159 * self.radius

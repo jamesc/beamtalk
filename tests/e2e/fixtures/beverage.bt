@@ -7,6 +7,6 @@
 Object subclass: Beverage
   state: value = nil
 
-  class wrap: anObject => self new: #{value => anObject}
+  class wrap: anObject => self new: #{#value => anObject}
 
   value => self.value

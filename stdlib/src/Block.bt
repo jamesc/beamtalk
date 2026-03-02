@@ -16,6 +16,7 @@
 /// [true] whileTrue: [Transcript show: "loop"]
 /// ```
 sealed Object subclass: Block
+
   /// Evaluate a zero-argument block.
   ///
   /// ## Examples
@@ -104,5 +105,3 @@ sealed Object subclass: Block
   /// [:x :y | x + y] valueWithArguments: #(3, 4)   // => 7
   /// ```
   valueWithArguments: args: List => @primitive "valueWithArguments:"
-
-

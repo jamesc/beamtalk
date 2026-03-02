@@ -6,8 +6,7 @@
 Actor subclass: ActorNlrLocalVar
   state: data = #{}
 
-  store: key val: v =>
-    self.data := self.data at: key put: v
+  store: key val: v => self.data := self.data at: key put: v
 
   fetch: key =>
     val := self.data at: key ifAbsent: [nil]

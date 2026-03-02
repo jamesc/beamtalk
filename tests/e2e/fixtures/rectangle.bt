@@ -9,9 +9,12 @@ Shape subclass: Rectangle
   state: width = 1.0
   state: height = 1.0
 
-  class withWidth: w height: h => self new: #{width => w, height => h}
+  class withWidth: w height: h => self new: #{#width => w, #height => h}
 
   width => self.width
+
   height => self.height
+
   area => self.width * self.height
+
   perimeter => 2.0 * (self.width + self.height)

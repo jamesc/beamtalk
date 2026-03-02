@@ -11,4 +11,3 @@
 /// [Counter new] on: InstantiationError do: [:e | e message]
 /// ```
 Error subclass: InstantiationError
-

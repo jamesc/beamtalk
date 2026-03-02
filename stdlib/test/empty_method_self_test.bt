@@ -4,7 +4,6 @@
 // BT-631/BT-859: Tests that an actor method explicitly returning self
 // returns the actor reference and that reference is usable for further messages
 
-
 TestCase subclass: EmptyMethodSelfTest
 
   testDoNothingReturnsSelf =>

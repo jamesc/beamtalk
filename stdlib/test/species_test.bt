@@ -11,17 +11,13 @@ TestCase subclass: SpeciesTest
   // ===========================================================================
   // species method
   // ===========================================================================
+  testListSpecies => self assert: #(1, 2, 3) species equals: List
 
-  testListSpecies =>
-    self assert: #(1, 2, 3) species equals: List
-
-  testArraySpecies =>
-    self assert: #[1, 2, 3] species equals: Array
+  testArraySpecies => self assert: #[1, 2, 3] species equals: Array
 
   // ===========================================================================
   // List species — collect:/select:/reject: return List
   // ===========================================================================
-
   testListCollectReturnsListType =>
     result := #(1, 2, 3) collect: [:x | x * 2]
     self assert: result class equals: List
@@ -40,7 +36,6 @@ TestCase subclass: SpeciesTest
   // ===========================================================================
   // Array species — collect:/select:/reject: return Array
   // ===========================================================================
-
   testArrayCollectReturnsArrayType =>
     result := #[1, 2, 3] collect: [:x | x * 2]
     self assert: result class equals: Array
@@ -59,7 +54,6 @@ TestCase subclass: SpeciesTest
   // ===========================================================================
   // Set species — collect:/select: return Set
   // ===========================================================================
-
   testSetCollectReturnsSetType =>
     s := Set new fromList: #(1, 2, 3)
     result := s collect: [:x | x * 2]
@@ -76,7 +70,6 @@ TestCase subclass: SpeciesTest
   // ===========================================================================
   // withAll: factories
   // ===========================================================================
-
   testListWithAll =>
     result := List withAll: #(1, 2, 3)
     self assert: result class equals: List
@@ -108,7 +101,6 @@ TestCase subclass: SpeciesTest
   // ===========================================================================
   // Dictionary collect: maps values preserving keys
   // ===========================================================================
-
   testDictionaryCollectPreservesKeys =>
     d := #{#a => 1, #b => 2, #c => 3}
     result := d collect: [:v | v * 10]

@@ -18,20 +18,16 @@ TestCase subclass: RemoveFromSystemTest
   testStdlibClassRejected =>
     // Attempting to remove a stdlib class raises a runtime_error
     self should: [Integer removeFromSystem] raise: #runtime_error
-    // => _
 
   testSubclassRejected =>
     // A class with subclasses cannot be removed (subclasses must go first)
     // RemovalTestParent has RemovalTestChild as a subclass (see fixtures)
     self should: [RemovalTestParent removeFromSystem] raise: #runtime_error
-    // => _
 
   testStringClassRejected =>
     // String is stdlib — cannot be removed
     self should: [String removeFromSystem] raise: #runtime_error
-    // => _
 
   testObjectClassRejected =>
     // Object is stdlib — cannot be removed
     self should: [Object removeFromSystem] raise: #runtime_error
-    // => _

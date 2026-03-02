@@ -7,4 +7,5 @@ Actor subclass: CBCounter
   state: total = 0
 
   add => self.total := self.total + 1
+
   getTotal => self.total

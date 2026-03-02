@@ -5,7 +5,6 @@
 // methods — empty/non-empty, classify, local var storage, mutation, recursion,
 // on:do: with NLR, and NLR with persistent state
 
-
 TestCase subclass: ActorNonLocalReturnTest
 
   testNonLocalReturnInActorBlocks =>

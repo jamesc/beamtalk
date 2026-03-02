@@ -3,7 +3,6 @@
 
 // Keyword message tests (block value: dispatch)
 
-
 TestCase subclass: KeywordMessagesTest
 
   testSingleKeywordMessages =>
@@ -22,7 +21,9 @@ TestCase subclass: KeywordMessagesTest
 
   testNestedKeywordMessages =>
     self assert: ([:x | [:y | x + y] value: 10] value: 5) equals: 15
-    self assert: ([:a | [:b | [:c | a + b + c] value: 3] value: 2] value: 1) equals: 6
+    self assert: ([:a |
+      [:b | [:c | a + b + c] value: 3] value: 2
+    ] value: 1) equals: 6
 
   testKeywordMessagesWithLiterals =>
     self assert: ([:s | s] value: "test") equals: "test"
@@ -44,14 +45,12 @@ TestCase subclass: KeywordMessagesTest
 
   testMultiLineKeywordMessage =>
     // BT-890: keyword messages should continue across newlines
-    result := true ifTrue: [42]
-                   ifFalse: [0]
+    result := true ifTrue: [42] ifFalse: [0]
     self assert: result equals: 42
 
   testMultiLineInjectInto =>
     // BT-890: multi-line inject:into: keyword message
-    sum := #(1, 2, 3) inject: 0
-                       into: [:acc :each | acc + each]
+    sum := #(1, 2, 3) inject: 0 into: [:acc :each | acc + each]
     self assert: sum equals: 6
 
   test4KeywordMessagesOnObjects =>

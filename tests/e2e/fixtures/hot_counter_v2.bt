@@ -9,5 +9,7 @@ Actor subclass: HotCounter
   state: step = 5
 
   increment => self.value := self.value + 10
+
   getValue => ^self.value
+
   getStep => ^self.step

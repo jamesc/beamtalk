@@ -69,7 +69,12 @@ abstract typed Value subclass: Number
   /// -7 sign           // => -1
   /// 0 sign            // => 0
   /// ```
-  sign -> Integer => (self > 0) ifTrue: [1] ifFalse: [(self < 0) ifTrue: [-1] ifFalse: [0]]
+  sign -> Integer =>
+    self match: [
+      _ when: [self > 0] -> 1;
+      _ when: [self < 0] -> -1;
+      _ -> 0
+    ]
 
   /// Test if the receiver is between `min` and `max` (inclusive).
   ///
@@ -78,4 +83,5 @@ abstract typed Value subclass: Number
   /// 5 between: 1 and: 10   // => true
   /// 15 between: 1 and: 10  // => false
   /// ```
-  between: min: Number and: max: Number -> Boolean => (self >= min) and: [self <= max]
+  between: min: Number and: max: Number -> Boolean =>
+    (self >= min) and: [self <= max]

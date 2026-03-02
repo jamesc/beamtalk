@@ -18,8 +18,7 @@ Object subclass: NlrNestedHom
 
   // Inner HOM: calls aBlock for each element. Has no ^ of its own
   // When aBlock throws NLR, it propagates out of this method
-  applyBlock: aBlock forEach: items =>
-    items do: [:each | aBlock value: each]
+  applyBlock: aBlock forEach: items => items do: [:each | aBlock value: each]
 
   // Outer HOM: delegates to inner HOM. Adds a second frame of indirection
   // When aBlock throws NLR through applyBlock:forEach:, it also propagates here

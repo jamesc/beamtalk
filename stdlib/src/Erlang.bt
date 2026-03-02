@@ -33,4 +33,5 @@ sealed ProtoObject subclass: Erlang
   /// Erlang lists       // => #ErlangModule<lists>
   /// Erlang maps        // => #ErlangModule<maps>
   /// ```
-  class doesNotUnderstand: selector args: arguments => @intrinsic erlangModuleLookup
+  class doesNotUnderstand: selector args: arguments =>
+    @intrinsic erlangModuleLookup

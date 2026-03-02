@@ -46,5 +46,4 @@ TestCase subclass: WorkspaceInterfaceTest
   testIncludesSelectorUnbind =>
     self assert: (WorkspaceInterface includesSelector: #unbind:)
 
-  testInheritsFromActor =>
-    self assert: (WorkspaceInterface inheritsFrom: Actor)
+  testInheritsFromActor => self assert: (WorkspaceInterface inheritsFrom: Actor)

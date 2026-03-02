@@ -622,9 +622,8 @@ fn unparse_literal(lit: &Literal) -> Document<'static> {
         Literal::Integer(n) => Document::String(n.to_string()),
         Literal::Float(f) => Document::String(format_float(*f)),
         Literal::String(s) => {
-            // The lexer unescapes doubled delimiters ("") to bare " in the AST,
-            // but preserves backslash escapes (\" stays as \"). We need to
-            // re-escape any bare " that isn't already preceded by \.
+            // The lexer unescapes doubled delimiters ("" → ") in the AST.
+            // We re-escape any bare " using the Beamtalk convention: double it ("").
             docvec!["\"", Document::String(escape_string_quotes(s)), "\""]
         }
         Literal::Symbol(s) => {
@@ -646,8 +645,15 @@ fn unparse_literal(lit: &Literal) -> Document<'static> {
             }
         }
         Literal::Character(c) => {
-            // $a or $\n etc.
-            Document::String(format!("${c}"))
+            // $a, $\n, $\t etc. — re-escape control characters
+            let repr = match c {
+                '\n' => "\\n".to_string(),
+                '\t' => "\\t".to_string(),
+                '\r' => "\\r".to_string(),
+                '\\' => "\\\\".to_string(),
+                _ => c.to_string(),
+            };
+            Document::String(format!("${repr}"))
         }
     }
 }
@@ -662,22 +668,14 @@ fn format_float(f: f64) -> String {
     }
 }
 
-/// Escape bare `"` characters in a string that aren't already backslash-escaped.
-/// The lexer unescapes doubled delimiters (`""` → `"`) but preserves backslash
-/// escapes (`\"` stays as `\"`). We re-escape bare quotes using `\"`.
+/// Escape bare `"` characters in a string using Beamtalk's doubled-delimiter convention.
+/// The lexer unescapes `""` → `"` when building the AST, so the unparser must
+/// double any `"` in the string value to produce valid source.
 fn escape_string_quotes(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            // Backslash escape sequence — preserve as-is
-            result.push('\\');
-            if let Some(next) = chars.next() {
-                result.push(next);
-            }
-        } else if c == '"' {
-            // Bare quote — re-escape it
-            result.push('\\');
+    let mut result = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        if c == '"' {
+            result.push('"');
             result.push('"');
         } else {
             result.push(c);
@@ -992,7 +990,7 @@ fn unparse_match_arm(arm: &MatchArm) -> Document<'static> {
 
     let pat = unparse_pattern(&arm.pattern);
     let guard = if let Some(g) = &arm.guard {
-        docvec![" when: ", unparse_expression(g)]
+        docvec![" when: [", unparse_expression(g), "]"]
     } else {
         nil()
     };
@@ -1421,11 +1419,11 @@ mod tests {
 
     #[test]
     fn string_literal_with_embedded_double_quotes() {
-        // Bare " in the AST (from doubled-delimiter unescaping) gets re-escaped as \"
+        // Bare " in the AST (from doubled-delimiter unescaping) gets re-escaped as ""
         let expr = Expression::Literal(Literal::String("say \"hello\"".into()), span());
         assert_eq!(
             unparse_expression(&expr).to_pretty_string(),
-            "\"say \\\"hello\\\"\""
+            "\"say \"\"hello\"\"\""
         );
     }
 
@@ -1448,6 +1446,30 @@ mod tests {
     fn float_literal() {
         let expr = Expression::Literal(Literal::Float(1.5), span());
         assert_eq!(unparse_expression(&expr).to_pretty_string(), "1.5");
+    }
+
+    #[test]
+    fn character_literal_plain() {
+        let expr = Expression::Literal(Literal::Character('A'), span());
+        assert_eq!(unparse_expression(&expr).to_pretty_string(), "$A");
+    }
+
+    #[test]
+    fn character_literal_newline() {
+        let expr = Expression::Literal(Literal::Character('\n'), span());
+        assert_eq!(unparse_expression(&expr).to_pretty_string(), "$\\n");
+    }
+
+    #[test]
+    fn character_literal_tab() {
+        let expr = Expression::Literal(Literal::Character('\t'), span());
+        assert_eq!(unparse_expression(&expr).to_pretty_string(), "$\\t");
+    }
+
+    #[test]
+    fn character_literal_backslash() {
+        let expr = Expression::Literal(Literal::Character('\\'), span());
+        assert_eq!(unparse_expression(&expr).to_pretty_string(), "$\\\\");
     }
 
     // --- Assignment ---

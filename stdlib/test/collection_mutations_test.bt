@@ -4,7 +4,6 @@
 // BT-524: Tests that the is_list guard in mutation-threading codegen works
 // correctly when actor methods iterate over List, Set, and Dictionary arguments
 
-
 TestCase subclass: CollectionMutationsTest
 
   testActorMutatingCollections =>
@@ -17,5 +16,9 @@ TestCase subclass: CollectionMutationsTest
     self assert: (counter2 sumSet: s) equals: 6
     self assert: counter2 getTotal equals: 6
     counter3 := CollectionMutationCounter spawn
-    self assert: (counter3 sumDictValues: (Dictionary new: #{#a => 10, #b => 20, #c => 30})) equals: 60
+    self assert: (counter3 sumDictValues: (Dictionary new: #{
+      #a => 10,
+      #b => 20,
+      #c => 30
+    })) equals: 60
     self assert: counter3 getTotal equals: 60

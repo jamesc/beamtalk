@@ -13,6 +13,7 @@
 /// false not                    // => true
 /// ```
 sealed Boolean subclass: False
+
   /// If true, evaluate `trueBlock`; otherwise evaluate `falseBlock`. Returns `falseBlock` result.
   ///
   /// ## Examples

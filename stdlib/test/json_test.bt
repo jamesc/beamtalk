@@ -50,29 +50,50 @@ TestCase subclass: JsonTest
     // Round-trip an array
     self assert: (JSON parse: (JSON generate: #(1, 2, 3))) equals: #(1, 2, 3)
     // Round-trip a Dictionary
-    self assert: ((JSON parse: (JSON generate: #{"name" => "Ada"})) at: "name") equals: "Ada"
+    self assert: ((JSON parse: (JSON generate: #{
+      "name" => "Ada"
+    })) at: "name") equals: "Ada"
     // Round-trip nested structures
-    self assert: (((JSON parse: (JSON generate: #{"user" => #{"age" => 36}})) at: "user") at: "age") equals: 36
+    self assert: (((JSON parse: (JSON generate: #{
+      "user" => #{"age" => 36}
+    })) at: "user") at: "age") equals: 36
 
   testDictionaryGenerateAndParse =>
     // Generate JSON from a Dictionary, then verify structure
     self assert: ((JSON generate: #{"a" => 1}) size > 2)
     // Generate and re-parse a Dictionary
-    self assert: ((JSON parse: (JSON generate: #{"x" => 10, "y" => 20})) at: "x") equals: 10
-    self assert: ((JSON parse: (JSON generate: #{"x" => 10, "y" => 20})) at: "y") equals: 20
-    self assert: (JSON parse: (JSON generate: #{"x" => 10, "y" => 20})) size equals: 2
+    self assert: ((JSON parse: (JSON generate: #{
+      "x" => 10,
+      "y" => 20
+    })) at: "x") equals: 10
+    self assert: ((JSON parse: (JSON generate: #{
+      "x" => 10,
+      "y" => 20
+    })) at: "y") equals: 20
+    self assert: (JSON parse: (JSON generate: #{
+      "x" => 10,
+      "y" => 20
+    })) size equals: 2
     // Dictionary with nested List
-    self assert: ((JSON parse: (JSON generate: #{"items" => #(1, 2, 3)})) at: "items") equals: #(1, 2, 3)
+    self assert: ((JSON parse: (JSON generate: #{
+      "items" => #(1, 2, 3)
+    })) at: "items") equals: #(1, 2, 3)
     // Dictionary with boolean values
-    self assert: ((JSON parse: (JSON generate: #{"active" => true})) at: "active")
+    self assert: ((JSON parse: (JSON generate: #{
+      "active" => true
+    })) at: "active")
     // Dictionary with null value
-    self assert: ((JSON parse: (JSON generate: #{"value" => nil})) at: "value") equals: nil
+    self assert: ((JSON parse: (JSON generate: #{
+      "value" => nil
+    })) at: "value") equals: nil
 
   testPrettyPrinting =>
     // Pretty print produces a non-empty string
     self assert: ((JSON prettyPrint: #{"a" => 1}) size > 0)
     // Pretty print produces same data as generate when re-parsed
-    self assert: ((JSON parse: (JSON prettyPrint: #{"a" => 1})) at: "a") equals: 1
+    self assert: ((JSON parse: (JSON prettyPrint: #{
+      "a" => 1
+    })) at: "a") equals: 1
 
   testErrorHandling =>
     // Parse invalid JSON produces a parse_error

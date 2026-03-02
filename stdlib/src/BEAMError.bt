@@ -18,4 +18,3 @@
 /// [Erlang erlang exit: 1] on: BEAMError do: [:e | e message]
 /// ```
 Error subclass: BEAMError
-

@@ -16,15 +16,25 @@ TestCase subclass: CollectionProtocolTest
     self assert: ((Set new add: 1) includes: 1)
     self deny: ((Set new add: 1) includes: 2)
     // Set collect: (inherited from Collection)
-    self assert: (((Set new add: 1) add: 2) collect: [:x | x * 10]) size equals: 2
+    self assert: (((Set new add: 1) add: 2) collect: [:x |
+      x * 10
+    ]) size equals: 2
     // Set select: (inherited from Collection)
-    self assert: ((((Set new add: 1) add: 2) add: 3) select: [:x | x > 1]) size equals: 2
+    self assert: ((((Set new add: 1) add: 2) add: 3) select: [:x |
+      x > 1
+    ]) size equals: 2
     // Set reject: (inherited from Collection)
-    self assert: ((((Set new add: 1) add: 2) add: 3) reject: [:x | x > 2]) size equals: 2
+    self assert: ((((Set new add: 1) add: 2) add: 3) reject: [:x |
+      x > 2
+    ]) size equals: 2
     // Set inject:into: (inherited from Collection)
-    self assert: ((((Set new add: 1) add: 2) add: 3) inject: 0 into: [:sum :x | sum + x]) equals: 6
+    self assert: ((((Set new add: 1) add: 2) add: 3) inject: 0 into: [:sum :x |
+      sum + x
+    ]) equals: 6
     // Set detect: (inherited from Collection)
-    self assert: ((((Set new add: 1) add: 2) add: 3) detect: [:x | x > 1]) notNil
+    self assert: ((((Set new add: 1) add: 2) add: 3) detect: [:x |
+      x > 1
+    ]) notNil
     // Set detect:ifNone: (inherited from Collection)
     self assert: ((Set new add: 1) detect: [:x | x > 5] ifNone: [0]) equals: 0
     // Set anySatisfy: (inherited from Collection)
@@ -46,9 +56,17 @@ TestCase subclass: CollectionProtocolTest
     // Dictionary collect: (inherited from Collection via do:)
     self assert: (#{#a => 1, #b => 2} collect: [:v | v * 10]) size equals: 2
     // Dictionary select: (inherited from Collection via do:)
-    self assert: (#{#a => 1, #b => 2, #c => 3} select: [:v | v > 1]) size equals: 2
+    self assert: (#{
+      #a => 1,
+      #b => 2,
+      #c => 3
+    } select: [:v | v > 1]) size equals: 2
     // Dictionary inject:into: (inherited from Collection via do:)
-    self assert: (#{#a => 1, #b => 2, #c => 3} inject: 0 into: [:sum :v | sum + v]) equals: 6
+    self assert: (#{
+      #a => 1,
+      #b => 2,
+      #c => 3
+    } inject: 0 into: [:sum :v | sum + v]) equals: 6
     // Dictionary detect: (inherited from Collection via do:)
     self assert: (#{#a => 1, #b => 5, #c => 3} detect: [:v | v > 4]) equals: 5
     // Dictionary detect:ifNone:

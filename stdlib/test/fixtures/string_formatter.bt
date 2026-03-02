@@ -9,6 +9,7 @@ Object subclass: StringFormatter
   state: suffix = ""
 
   prefix => self.prefix
+
   suffix => self.suffix
 
   // Helper method called via self send in blocks
@@ -19,5 +20,4 @@ Object subclass: StringFormatter
     items inject: "" into: [:acc :item | acc ++ (self formatItem: item)]
 
   // collect: with self send in block — should use simple path
-  collectFormatted: items =>
-    items collect: [:item | self formatItem: item]
+  collectFormatted: items => items collect: [:item | self formatItem: item]

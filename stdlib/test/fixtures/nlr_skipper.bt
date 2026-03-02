@@ -4,6 +4,7 @@
 // BT-754: NlrSkipper — early return skips later expressions fixture
 
 Object subclass: NlrSkipper
+
   test: x =>
     x isEmpty ifTrue: [^"early"]
     "middle"

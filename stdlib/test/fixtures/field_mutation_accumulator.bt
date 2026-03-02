@@ -10,7 +10,9 @@ Actor subclass: FieldMutationAccumulator
   state: count = 0
 
   getSum => self.sum
+
   getProduct => self.product
+
   getCount => self.count
 
   // Multiple fields mutated in do:

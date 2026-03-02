@@ -10,7 +10,10 @@ Object subclass: MathHelper
   factorial: n => (n <= 1) ifTrue: [1] ifFalse: [n * (self factorial: n - 1)]
 
   // Double-recursive keyword method: fibonacci
-  fibonacci: n => (n <= 1) ifTrue: [n] ifFalse: [(self fibonacci: n - 1) + (self fibonacci: n - 2)]
+  fibonacci: n =>
+    (n <= 1) ifTrue: [
+      n
+    ] ifFalse: [(self fibonacci: n - 1) + (self fibonacci: n - 2)]
 
   // Simple recursive keyword method: countdown
   countdown: n => (n <= 0) ifTrue: [0] ifFalse: [1 + (self countdown: n - 1)]

@@ -14,6 +14,6 @@ TestCase subclass: ProtoobjectManualTest
     self deny: (nil /= nil)
 
   testPerformWithargumentsDynamicDispatch =>
-    self assert: (42 perform: #+ withArguments: #(3)) equals: 45
+    self assert: (42 perform: #'+' withArguments: #(3)) equals: 45
     self assert: (42 perform: #asString withArguments: #()) equals: "42"
-    self assert: ("hello" perform: #++ withArguments: #(" world")) equals: "hello world"
+    self assert: ("hello" perform: #'++' withArguments: #(" world")) equals: "hello world"

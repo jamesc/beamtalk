@@ -5,7 +5,6 @@
 // returns only methods defined directly on the class, allMethods returns the full
 // inheritance chain, and respondsTo: works on class objects
 
-
 TestCase subclass: ClassReflectionTest
 
   testLocalAndFullMethodLists =>
@@ -46,5 +45,4 @@ TestCase subclass: ClassReflectionTest
     self deny: (Counter respondsTo: #bogus)
 
   // BT-942: superclass returns correct value via __beamtalk_meta/0 fast path
-  testActorSuperclassReflection =>
-    self assert: Counter superclass equals: Actor
+  testActorSuperclassReflection => self assert: Counter superclass equals: Actor

@@ -5,7 +5,6 @@
 // ensure: cleanup blocks are correctly threaded — mutations accumulate across
 // multiple calls and both try-body and cleanup mutations are preserved
 
-
 TestCase subclass: ExceptionMutationsTest
 
   testMutationsInOnDoAndEnsure =>

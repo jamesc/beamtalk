@@ -16,16 +16,13 @@ Actor subclass: ActorCollectCounter
     item * 2
 
   // collect: with self-send — needs state threading
-  doubleAll: items =>
-    items collect: [:item | self processItem: item]
+  doubleAll: items => items collect: [:item | self processItem: item]
 
   // select: with self-send — needs state threading
-  selectPositive: items =>
-    items select: [:item | self checkPositive: item]
+  selectPositive: items => items select: [:item | self checkPositive: item]
 
   // reject: with self-send — needs state threading
-  rejectNegative: items =>
-    items reject: [:item | self checkNegative: item]
+  rejectNegative: items => items reject: [:item | self checkNegative: item]
 
   // collect: with field assignment in block — direct field mutation
   doubleAllWithFieldMutation: items =>
@@ -35,8 +32,7 @@ Actor subclass: ActorCollectCounter
     ]
 
   // collect: as last expression (no ^) — uses last-expression handler
-  doubleAllImplicit: items =>
-    items collect: [:item | self processItem: item]
+  doubleAllImplicit: items => items collect: [:item | self processItem: item]
 
   // do: with self-send — already works (has state threading)
   countAll: items =>

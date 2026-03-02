@@ -11,7 +11,6 @@
 //   value_subclass_test.bt — auto-generated getter/setter/reflection tests
 //   value_type_update_test.bt — multi-field update semantics
 
-
 TestCase subclass: ValueObjectTest
 
   // =========================================================================

@@ -14,6 +14,7 @@
 /// 42 class              // => Integer
 /// ```
 ProtoObject subclass: Object
+
   /// Return the class of the receiver.
   ///
   /// ## Examples
@@ -82,7 +83,8 @@ ProtoObject subclass: Object
   /// 42 ifNil: [0] ifNotNil: [:v | v + 1]    // => 43
   /// nil ifNil: [0] ifNotNil: [:v | v + 1]   // => 0
   /// ```
-  ifNil: _nilBlock: Block ifNotNil: notNilBlock: Block => notNilBlock value: self
+  ifNil: _nilBlock: Block ifNotNil: notNilBlock: Block =>
+    notNilBlock value: self
 
   /// If not nil, evaluate `notNilBlock` with self; otherwise evaluate `nilBlock`.
   ///
@@ -91,7 +93,8 @@ ProtoObject subclass: Object
   /// 42 ifNotNil: [:v | v + 1] ifNil: [0]    // => 43
   /// nil ifNotNil: [:v | v + 1] ifNil: [0]   // => 0
   /// ```
-  ifNotNil: notNilBlock: Block ifNil: _nilBlock: Block => notNilBlock value: self
+  ifNotNil: notNilBlock: Block ifNil: _nilBlock: Block =>
+    notNilBlock value: self
 
   /// Return a developer-readable string representation.
   ///
@@ -187,7 +190,8 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 3 perform: #max: withArguments: #(5)   // => 5
   /// ```
-  sealed perform: selector: Symbol withArguments: args: List => @intrinsic dynamicSendWithArgs
+  sealed perform: selector: Symbol withArguments: args: List =>
+    @intrinsic dynamicSendWithArgs
 
   /// Create an Association (key-value pair) with the receiver as key.
   ///
@@ -203,7 +207,8 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// self subclassResponsibility
   /// ```
-  subclassResponsibility => self error: "This method is abstract and must be overridden by a subclass"
+  subclassResponsibility =>
+    self error: "This method is abstract and must be overridden by a subclass"
 
   /// Raise an error indicating this method has not yet been implemented.
   ///

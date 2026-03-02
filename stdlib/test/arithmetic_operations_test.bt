@@ -57,8 +57,7 @@ TestCase subclass: ArithmeticOperationsTest
     // Greater than or equal (false)
     self deny: (3 >= 5)
 
-  testAsString =>
-    self assert: 42 asString equals: "42"
+  testAsString => self assert: 42 asString equals: "42"
 
   testAsFloat =>
     // Test integer to float conversion

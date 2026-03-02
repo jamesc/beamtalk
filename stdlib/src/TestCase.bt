@@ -17,6 +17,22 @@
 /// ```
 Object subclass: TestCase
 
+  /// Run all test methods in this class and print a summary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// CounterTest runAll     // prints results to transcript
+  /// ```
+  class runAll => @primitive "runAll"
+
+  /// Run the named test method in this class and print a summary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// CounterTest run: #testIncrement
+  /// ```
+  class run: testName => @primitive "run:"
+
   /// Prepare the test fixture. Called before each test method.
   /// Override in subclasses to set up shared state or resources.
   setUp -> Nil => nil
@@ -33,7 +49,9 @@ Object subclass: TestCase
   /// self assert: false              // fails
   /// ```
   assert: condition: Boolean -> Nil =>
-    condition ifFalse: [self fail: "Assertion failed: expected true, got {condition}"]
+    condition ifFalse: [
+      self fail: "Assertion failed: expected true, got {condition}"
+    ]
     nil
 
   /// Assert that `condition` is false, failing the test if it is true.
@@ -44,7 +62,9 @@ Object subclass: TestCase
   /// self deny: true                 // fails
   /// ```
   deny: condition: Boolean -> Nil =>
-    condition ifTrue: [self fail: "Denial failed: expected false, got {condition}"]
+    condition ifTrue: [
+      self fail: "Denial failed: expected false, got {condition}"
+    ]
     nil
 
   /// Assert that `actual` equals `expected`, failing the test if they differ.
@@ -55,7 +75,9 @@ Object subclass: TestCase
   /// self assert: (1 + 1) equals: 3   // fails
   /// ```
   assert: actual equals: expected -> Nil =>
-    (actual =:= expected) ifFalse: [self fail: "Expected {expected}, got {actual}"]
+    (actual =:= expected) ifFalse: [
+      self fail: "Expected {expected}, got {actual}"
+    ]
     nil
 
   /// Assert that evaluating `block` raises an error of kind `errorKind`.
@@ -64,7 +86,8 @@ Object subclass: TestCase
   /// ```beamtalk
   /// self should: [1 / 0] raise: ZeroDivisionError
   /// ```
-  should: block: Block raise: errorKind: Object -> Nil => @primitive "should:raise:"
+  should: block: Block raise: errorKind: Object -> Nil =>
+    @primitive "should:raise:"
 
   /// Fail the test immediately with the given `message`.
   ///
@@ -73,19 +96,3 @@ Object subclass: TestCase
   /// self fail: "This branch should not be reached"
   /// ```
   fail: message: String -> Nil => @primitive "fail:"
-
-  /// Run all test methods in this class and print a summary.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// CounterTest runAll     // prints results to transcript
-  /// ```
-  class runAll => @primitive "runAll"
-
-  /// Run the named test method in this class and print a summary.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// CounterTest run: #testIncrement
-  /// ```
-  class run: testName => @primitive "run:"

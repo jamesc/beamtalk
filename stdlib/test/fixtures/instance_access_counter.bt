@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-413: Test fixture for instance-side class variable access (Actor)
+
 Actor subclass: InstanceAccessCounter
-  classState: instanceCount = 0
   state: count = 0
+  classState: instanceCount = 0
 
   class create =>
     self.instanceCount := self.instanceCount + 1
@@ -13,8 +14,7 @@ Actor subclass: InstanceAccessCounter
   // Class method accessor for class variable
   class instanceCount => self.instanceCount
 
-  increment =>
-    self.count := self.count + 1
+  increment => self.count := self.count + 1
 
   getCount => self.count
 

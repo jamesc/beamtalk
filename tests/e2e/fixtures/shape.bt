@@ -7,5 +7,7 @@
 // cross-file value-object inheritance.
 
 Object subclass: Shape
+
   area => self subclassResponsibility
+
   perimeter => self subclassResponsibility

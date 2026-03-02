@@ -3,7 +3,6 @@
 
 // Tests for self-reference behavior (BT-172)
 
-
 TestCase subclass: SelfReferenceTest
 
   testMethodReturningSelf =>
@@ -33,4 +32,4 @@ TestCase subclass: SelfReferenceTest
     // perform: also works on primitives (synchronous dispatch)
     self assert: (42 perform: #asString) equals: "42"
     // perform:withArguments: works on primitives
-    self assert: (10 perform: #+ withArguments: #(32)) equals: 42
+    self assert: (10 perform: #'+' withArguments: #(32)) equals: 42

@@ -10,7 +10,6 @@
 // Fixtures: stdlib/test/fixtures/value_point.bt (ValuePoint)
 //           stdlib/test/fixtures/tagged_value.bt (TaggedValue — BT-996)
 
-
 TestCase subclass: ValueSubclassTest
 
   testAutoGetter =>

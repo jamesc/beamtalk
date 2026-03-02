@@ -24,6 +24,14 @@
 /// ```
 sealed Collection subclass: Array
 
+  /// Create an Array from a list of elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Array withAll: #(1, 2, 3)   // => #[1, 2, 3]
+  /// ```
+  class withAll: list: List -> Array => @primitive "withAll:"
+
   /// Number of elements in the array.
   ///
   /// ## Examples
@@ -111,11 +119,3 @@ sealed Collection subclass: Array
   /// #[1, 2, 3] printString       // => "#[1, 2, 3]"
   /// ```
   printString -> String => @primitive "printString"
-
-  /// Create an Array from a list of elements.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Array withAll: #(1, 2, 3)   // => #[1, 2, 3]
-  /// ```
-  class withAll: list: List -> Array => @primitive "withAll:"

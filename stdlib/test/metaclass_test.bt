@@ -77,12 +77,10 @@ TestCase subclass: MetaclassTest
     self assert: Metaclass class class class equals: Metaclass class class
 
   // BT-803: Metaclass allSubclasses returns [] (sealed)
-  testAllSubclassesSealed =>
-    self assert: Metaclass allSubclasses isEmpty
+  testAllSubclassesSealed => self assert: Metaclass allSubclasses isEmpty
 
   // BT-803: Metaclass new raises error
-  testNewRaisesError =>
-    self should: [Metaclass new] raise: #user_error
+  testNewRaisesError => self should: [Metaclass new] raise: #user_error
 
   // Class identity tests for domain classes
   testClassIdentityForDomainClasses =>

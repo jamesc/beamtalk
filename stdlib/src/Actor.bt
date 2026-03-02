@@ -15,6 +15,7 @@
 ///   count => self.count
 /// ```
 Object subclass: Actor
+
   /// Spawn a new actor process with default state.
   ///
   /// ## Examples
@@ -79,5 +80,3 @@ Object subclass: Actor
   /// counter isAlive   // => true or false
   /// ```
   sealed isAlive -> Boolean => @primitive "actorIsAlive"
-
-

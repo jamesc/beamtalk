@@ -5,7 +5,6 @@
 // Field assignments use Self-threading (Self -> Self1 -> Self{N}) so that
 // `self` in expression position resolves to the latest snapshot
 
-
 TestCase subclass: ValueTypeUpdateTest
 
   testSingleFieldUpdate =>

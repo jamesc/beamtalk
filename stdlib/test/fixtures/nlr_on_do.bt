@@ -5,6 +5,7 @@
 // Verifies that on:do: does NOT swallow NLR throws (re-raises them)
 
 Object subclass: NlrOnDo
+
   test: x =>
     [x isEmpty ifTrue: [^"early"]] on: Error do: [:e | "caught"]
     "not early"

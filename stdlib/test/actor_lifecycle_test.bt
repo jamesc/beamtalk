@@ -4,7 +4,6 @@
 // BT-172, BT-397: Tests actor lifecycle — isAlive, stop, idempotent stop,
 // and error behaviour when sending to a stopped actor
 
-
 TestCase subclass: ActorLifecycleTest
 
   testIsAliveAndStop =>
@@ -32,8 +31,8 @@ TestCase subclass: ActorLifecycleTest
     self should: [Counter spawnWith: true] raise: #type_error
 
   testSpawnwithWithBareIdentifierKeys =>
-    // Bare identifier keys in map literals work as implicit symbols
-    c3 := Counter spawnWith: #{value => 10}
+    // Bare identifier keys in map literals work as implicit symbols (formatter normalizes to #symbol form)
+    c3 := Counter spawnWith: #{#value => 10}
     self assert: c3 getValue equals: 10
     self assert: c3 increment equals: 11
 

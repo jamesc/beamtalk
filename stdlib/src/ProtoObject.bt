@@ -13,6 +13,7 @@
 ///
 /// All methods are compiler intrinsics dispatched at the call site.
 abstract nil subclass: ProtoObject
+
   /// Test value equality (Erlang `==`).
   ///
   /// ## Examples
@@ -46,7 +47,8 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// 42 unknownMessage   // => ERROR: does_not_understand
   /// ```
-  doesNotUnderstand: selector args: arguments => @primitive "doesNotUnderstand:args:"
+  doesNotUnderstand: selector args: arguments =>
+    @primitive "doesNotUnderstand:args:"
 
   /// Send a message dynamically with an arguments list.
   ///
@@ -54,4 +56,5 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// 42 perform: #abs withArguments: #()   // => 42
   /// ```
-  perform: selector withArguments: arguments => @primitive "perform:withArguments:"
+  perform: selector withArguments: arguments =>
+    @primitive "perform:withArguments:"

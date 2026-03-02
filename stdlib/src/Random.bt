@@ -100,6 +100,3 @@ sealed Value subclass: Random
   /// rng nextInteger: 6           // => 1..6
   /// ```
   nextInteger: max: Integer -> Integer => @primitive "instanceNextInteger:"
-
-
-

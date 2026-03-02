@@ -4,7 +4,6 @@
 // BT-478: Tests that nested to:do: loops correctly thread actor field mutations
 // through multiple loop iterations (outer × inner increments persist in state)
 
-
 TestCase subclass: NestedToDoTest
 
   testNestedLoopWithFieldMutation =>

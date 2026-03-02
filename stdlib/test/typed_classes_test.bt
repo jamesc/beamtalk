@@ -3,7 +3,6 @@
 
 // Consolidated type annotation tests (BT-673)
 
-
 TestCase subclass: TypedClassesTest
 
   testAnnotationSyntaxVariations =>

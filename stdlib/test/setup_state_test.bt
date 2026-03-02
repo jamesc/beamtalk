@@ -8,11 +8,9 @@
 TestCase subclass: SetupStateTest
   state: value = 0
 
-  setUp =>
-    self.value := 42
+  setUp => self.value := 42
 
-  testFieldFromSetUp =>
-    self assert: self.value equals: 42
+  testFieldFromSetUp => self assert: self.value equals: 42
 
   testFieldFromSetUpAgain =>
     // Each test gets a fresh setUp instance — verify isolation

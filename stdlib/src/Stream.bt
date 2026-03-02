@@ -29,7 +29,8 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream from: 1 by: [:n | n * 2]) take: 4  // => #(1, 2, 4, 8)
   /// ```
-  class sealed from: start: Integer by: stepFun: Block -> Stream => @primitive "from:by:"
+  class sealed from: start: Integer by: stepFun: Block -> Stream =>
+    @primitive "from:by:"
 
   /// Create a Stream from a collection (list).
   ///
@@ -134,5 +135,3 @@ sealed Object subclass: Stream
   /// (Stream from: 1) printString        // => "Stream(from: 1)"
   /// ```
   printString -> String => @primitive "printString"
-
-

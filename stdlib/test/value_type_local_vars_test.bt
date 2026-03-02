@@ -5,7 +5,6 @@
 // variables — single local, multiple locals in sequence, local as message
 // receiver, and local from a conditional branch
 
-
 TestCase subclass: ValueTypeLocalVarsTest
 
   testLocalVariablesInValueTypeMethods =>

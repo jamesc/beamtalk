@@ -48,7 +48,8 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorsOf: Counter
   /// ```
-  actorsOf: aClass: Object -> List => self actors select: [:a | a class includesBehaviour: aClass]
+  actorsOf: aClass: Object -> List =>
+    self actors select: [:a | a class includesBehaviour: aClass]
 
   /// Return a list of loaded user classes with source file info.
   ///

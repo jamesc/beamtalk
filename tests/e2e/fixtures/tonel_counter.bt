@@ -6,7 +6,5 @@
 
 Actor subclass: TonelCounter
   state: value = 0
-
 TonelCounter >> increment => self.value := self.value + 1
-
 TonelCounter >> getValue => ^self.value

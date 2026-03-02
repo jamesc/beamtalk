@@ -44,12 +44,16 @@ TestCase subclass: StackFrameTest
 
   testStackFrameArguments =>
     // StackFrame arguments returns an Integer (arity)
-    result := [1 / 0] on: Exception do: [:e | (e stackTrace first arguments) class]
+    result := [
+      1 / 0
+    ] on: Exception do: [:e | (e stackTrace first arguments) class]
     self assert: result equals: Integer
 
   testStackFramePrintString =>
     // StackFrame printString returns a String
-    result := [1 / 0] on: Exception do: [:e | (e stackTrace first printString) class]
+    result := [
+      1 / 0
+    ] on: Exception do: [:e | (e stackTrace first printString) class]
     self assert: result equals: String
 
   testStackFrameAccessors =>

@@ -147,5 +147,3 @@ sealed Collection subclass: Dictionary
   /// (#{#a => 1} stream) asList
   /// ```
   stream -> Stream => @primitive "stream"
-
-

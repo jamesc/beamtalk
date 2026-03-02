@@ -11,8 +11,12 @@ Actor subclass: RecursiveActor
   factorial: n => (n <= 1) ifTrue: [1] ifFalse: [n * (self factorial: n - 1)]
 
   // Double-recursive keyword method: fibonacci
-  fibonacci: n => (n <= 1) ifTrue: [n] ifFalse: [(self fibonacci: n - 1) + (self fibonacci: n - 2)]
+  fibonacci: n =>
+    (n <= 1) ifTrue: [
+      n
+    ] ifFalse: [(self fibonacci: n - 1) + (self fibonacci: n - 2)]
 
   // Self-send to different method (non-recursive)
   double: n => n * 2
+
   quadruple: n => (self double: n) * 2

@@ -34,7 +34,9 @@ TestCase subclass: ClosuresAdvancedTest
 
   testClosureChains =>
     // Multiple levels of nesting
-    makeMultiplier := [:factor | [:makeAdder | [:value | (value + makeAdder) * factor]]]
+    makeMultiplier := [:factor |
+      [:makeAdder | [:value | (value + makeAdder) * factor]]
+    ]
     times2 := makeMultiplier value: 2
     times2Plus10 := times2 value: 10
     self assert: (times2Plus10 value: 5) equals: 30

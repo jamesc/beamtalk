@@ -14,8 +14,7 @@ TestCase subclass: StringOperationsTest
     self assert: "hello" capitalize equals: "Hello"
     self assert: "HELLO" capitalize equals: "HELLO"
 
-  testReverse =>
-    self assert: "hello" reverse equals: "olleh"
+  testReverse => self assert: "hello" reverse equals: "olleh"
 
   testIncludesSubstring =>
     self assert: ("hello world" includesSubstring: "world")
@@ -33,14 +32,11 @@ TestCase subclass: StringOperationsTest
     self assert: ("hello" indexOf: "ell") equals: 2
     self assert: ("hello" indexOf: "xyz") equals: nil
 
-  testSplitOn =>
-    self assert: ("a,b,c" splitOn: ",") equals: #("a", "b", "c")
+  testSplitOn => self assert: ("a,b,c" splitOn: ",") equals: #("a", "b", "c")
 
-  testRepeat =>
-    self assert: ("ab" repeat: 3) equals: "ababab"
+  testRepeat => self assert: ("ab" repeat: 3) equals: "ababab"
 
-  testAsList =>
-    self assert: "hi" asList equals: #("h", "i")
+  testAsList => self assert: "hi" asList equals: #("h", "i")
 
   testDo =>
     // do: returns nil
@@ -52,7 +48,9 @@ TestCase subclass: StringOperationsTest
     self assert: ("abc" collect: [:ch | ch uppercase]) equals: #("A", "B", "C")
     // on string variables (not just literals)
     s := "hello"
-    self assert: (s collect: [:ch | ch uppercase]) equals: #("H", "E", "L", "L", "O")
+    self assert: (s collect: [:ch |
+      ch uppercase
+    ]) equals: #("H", "E", "L", "L", "O")
 
   testSelect =>
     // select: - filter graphemes (returns string)

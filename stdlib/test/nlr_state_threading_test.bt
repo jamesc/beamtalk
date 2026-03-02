@@ -52,7 +52,6 @@ TestCase subclass: NlrStateThreadingTest
     self assert: updated lastQuery equals: 100
 
   // BT-857: anySatisfy: — field mutation before ^ is preserved after early return
-
   testAnySatisfyReturnsTrueOnMatch =>
     // anySatisfy:in: uses ^ to short-circuit and return true when match found
     obj := NlrFieldMutation new
@@ -76,7 +75,6 @@ TestCase subclass: NlrStateThreadingTest
   // reflects the original object (not updated in place after a method call that
   // doesn't return self). The anySatisfy: tests below verify only the return value;
   // field mutation preservation is demonstrated by the findViaSingleHOM: tests
-
   testFindViaSingleHOMPreservesFieldMutation =>
     // NLR propagates through one HOM frame; visitCount (set to 1 before block) is
     // preserved in the returned self. Block uses ^self to return updated self

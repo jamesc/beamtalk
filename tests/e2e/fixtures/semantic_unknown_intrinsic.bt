@@ -5,4 +5,5 @@
 // Unquoted @primitive names must be in the STRUCTURAL_INTRINSICS list
 
 Object subclass: BadIntrinsic
+
   badOp => @primitive unknownFoo

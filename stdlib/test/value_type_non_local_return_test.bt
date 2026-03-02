@@ -5,7 +5,6 @@
 // (non-actor) methods — empty/non-empty arrays, classify, check, double, and
 // on:do: with NLR
 
-
 TestCase subclass: ValueTypeNonLocalReturnTest
 
   testNonLocalReturnInValueTypeMethods =>

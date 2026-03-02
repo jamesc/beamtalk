@@ -5,7 +5,6 @@
 // dispatch. When `actor method1 method2` is written, method1 returns the value
 // directly (sync gen_server:call), and method2 is dispatched on that value
 
-
 TestCase subclass: ActorMessageChainingTest
 
   // Chained send: actor method returning a primitive, chained with printString
@@ -34,7 +33,7 @@ TestCase subclass: ActorMessageChainingTest
 
   // Chained send: method dispatched on actor-method result
   testChainedSendOnActorMethodResult =>
-    a := ActorChainingFixture spawnWith: #{value => 42}
+    a := ActorChainingFixture spawnWith: #{#value => 42}
     // getName returns a string directly; size is dispatched on the string
     self assert: a getName size equals: 7
 

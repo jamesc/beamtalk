@@ -15,6 +15,14 @@
 /// ```
 sealed Integer subclass: Character
 
+  /// Create a Character from a Unicode codepoint integer (class method).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Character value: 65      // => $A
+  /// ```
+  class sealed value: codepoint: Integer -> Character => @primitive "value:"
+
   /// Test strict equality with another character.
   ///
   /// ## Examples
@@ -157,11 +165,3 @@ sealed Integer subclass: Character
   /// $A lowercase             // => $a
   /// ```
   lowercase -> Character => @primitive "lowercase"
-
-  /// Create a Character from a Unicode codepoint integer (class method).
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Character value: 65      // => $A
-  /// ```
-  class sealed value: codepoint: Integer -> Character => @primitive "value:"

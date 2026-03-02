@@ -11,4 +11,3 @@
 /// [1 / 0] on: Error do: [:e | e message]
 /// ```
 Exception subclass: Error
-

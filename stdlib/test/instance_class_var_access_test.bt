@@ -5,7 +5,6 @@
 // verifying that the class variable is shared across all instances and reflects
 // the total count of created objects
 
-
 TestCase subclass: InstanceClassVarAccessTest
 
   testInstanceAccessToClassVariable =>
