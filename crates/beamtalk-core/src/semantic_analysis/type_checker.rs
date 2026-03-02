@@ -91,6 +91,85 @@ pub fn infer_types(module: &Module, hierarchy: &ClassHierarchy) -> TypeMap {
     checker.take_type_map()
 }
 
+/// Key for method return type map: (ClassName, Selector, IsClassMethod)
+///
+/// Used by the return-type writeback pass (BT-1005) to track inferred return
+/// types for each method before writing them back into the AST.
+pub type MethodReturnKey = (EcoString, EcoString, bool);
+
+/// Infers return types for all unannotated methods in a module.
+///
+/// This function walks all instance methods and class methods in the module,
+/// infers the type of each method body, and returns a map of inferred types.
+///
+/// Only returns `InferredType::Known(class_name)` results. `Dynamic` types are
+/// omitted from the map (absence = dynamic, no annotation written back).
+///
+/// This is used by the return-type writeback pass (BT-1005, ADR 0045 Phase 1b)
+/// before codegen so that unannotated user-defined methods appear in the emitted
+/// `method_return_types` map, enabling REPL expression completion.
+#[must_use]
+pub fn infer_method_return_types(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+) -> HashMap<MethodReturnKey, EcoString> {
+    let mut checker = TypeChecker::new();
+    let mut result = HashMap::new();
+
+    for class in &module.classes {
+        let is_abstract = class.is_abstract || hierarchy.is_abstract(&class.name.name);
+
+        for method in &class.methods {
+            if method.return_type.is_some() {
+                continue;
+            }
+            if method
+                .body
+                .iter()
+                .any(|s| matches!(s.expression, crate::ast::Expression::Primitive { .. }))
+            {
+                continue;
+            }
+            let mut env = TypeEnv::new();
+            env.set("self", InferredType::Known(class.name.name.clone()));
+            TypeChecker::set_param_types(&mut env, &method.parameters);
+            let body_type = checker.infer_stmts(&method.body, hierarchy, &mut env, is_abstract);
+            if let InferredType::Known(ref inferred) = body_type {
+                result.insert(
+                    (class.name.name.clone(), method.selector.name(), false),
+                    inferred.clone(),
+                );
+            }
+        }
+
+        for method in &class.class_methods {
+            if method.return_type.is_some() {
+                continue;
+            }
+            if method
+                .body
+                .iter()
+                .any(|s| matches!(s.expression, crate::ast::Expression::Primitive { .. }))
+            {
+                continue;
+            }
+            let mut env = TypeEnv::new();
+            env.in_class_method = true;
+            env.set("self", InferredType::Known(class.name.name.clone()));
+            TypeChecker::set_param_types(&mut env, &method.parameters);
+            let body_type = checker.infer_stmts(&method.body, hierarchy, &mut env, is_abstract);
+            if let InferredType::Known(ref inferred) = body_type {
+                result.insert(
+                    (class.name.name.clone(), method.selector.name(), true),
+                    inferred.clone(),
+                );
+            }
+        }
+    }
+
+    result
+}
+
 /// Type checking domain service.
 ///
 /// **DDD Context:** Semantic Analysis - Domain Service
@@ -212,7 +291,24 @@ impl TypeChecker {
                     "true" | "false" => InferredType::Known("Boolean".into()),
                     "nil" => InferredType::Known("UndefinedObject".into()),
                     "self" => env.get("self").unwrap_or(InferredType::Dynamic),
-                    _ => env.get(name).unwrap_or(InferredType::Dynamic),
+                    _ => {
+                        // First check environment for local variables or parameters
+                        if let Some(ty) = env.get(name) {
+                            ty
+                        } else {
+                            // Bare identifier might be implicit self field access
+                            // (e.g., `getValue => value` is sugar for `getValue => self.value`)
+                            if let Some(InferredType::Known(class_name)) = env.get("self") {
+                                if let Some(field_type) = hierarchy.state_field_type(&class_name, name) {
+                                    InferredType::Known(field_type)
+                                } else {
+                                    InferredType::Dynamic
+                                }
+                            } else {
+                                InferredType::Dynamic
+                            }
+                        }
+                    }
                 }
             }
 
