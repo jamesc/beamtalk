@@ -1115,7 +1115,7 @@ Stream from: 1 by: [:n | n * 2]   // 1, 2, 4, 8, ...
 // Stream from a collection (List, String, Set)
 Stream on: #(1, 2, 3)             // wraps collection lazily
 
-// Collection shorthand — any collection responds to `stream`
+// Collection shorthand — List, String, and Set respond to `stream`
 #(1, 2, 3) stream                  // same as Stream on: #(1, 2, 3)
 "hello" stream                     // Stream over characters
 (Set new add: 1) stream            // Stream over set elements

@@ -391,7 +391,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `includesKey:` | @primitive selector | ✅ | 🧪 | `Dictionary>>includesKey:` |
 | `removeKey:` | @primitive selector | ✅ | 🧪 | `Dictionary>>removeKey:` |
 | `merge:` | @primitive selector | ✅ | 🧪 | `Dictionary>>merge:` |
-| `doWithKey:` | @primitive selector | ✅ | 🧪 | `Dictionary>>keysAndValuesDo:` |
+| `doWithKey:` | @primitive selector | ✅ | 🧪 | `Dictionary>>doWithKey:` |
 | `keysAndValuesDo:` | pure BT (delegates to `doWithKey:`) | ✅ | 🧪 | `Dictionary>>keysAndValuesDo:` |
 | `describe` | pure BT | ✅ | | `Dictionary>>printString` |
 
