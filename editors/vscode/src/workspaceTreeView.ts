@@ -172,12 +172,22 @@ export class WorkspaceTreeDataProvider
     if (!this.client || this.connectionState !== "connected") {
       return;
     }
-    const sessionId = this.client.currentSessionId;
+    const activeClient = this.client;
+    const sessionId = activeClient.currentSessionId;
     if (!sessionId) {
       return;
     }
     try {
-      this.bindings = await this.client.bindings(sessionId);
+      const nextBindings = await activeClient.bindings(sessionId);
+      // Guard: client, session, or connection may have changed while awaiting.
+      if (
+        this.client !== activeClient ||
+        this.connectionState !== "connected" ||
+        activeClient.currentSessionId !== sessionId
+      ) {
+        return;
+      }
+      this.bindings = nextBindings;
       this._onDidChangeTreeData.fire(BINDINGS_SECTION);
     } catch {
       // Ignore transient refresh errors
@@ -425,6 +435,7 @@ export class WorkspaceTreeDataProvider
 
   private _resetState(state: ConnectionState): void {
     this.initialFetchGeneration++;
+    this.classFetchGeneration++;
     this.connectionState = state;
     this.bindings = {};
     this.actors = [];
@@ -484,7 +495,12 @@ export class WorkspaceTreeDataProvider
       void client
         .classes()
         .then((classes) => {
-          if (this.client !== client || this.classFetchGeneration !== gen) return;
+          if (
+            this.client !== client ||
+            this.connectionState !== "connected" ||
+            this.classFetchGeneration !== gen
+          )
+            return;
           this.classes = classes;
           this._onDidChangeTreeData.fire(CLASSES_SECTION);
         })
