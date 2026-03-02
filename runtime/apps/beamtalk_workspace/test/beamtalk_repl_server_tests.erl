@@ -1226,8 +1226,8 @@ context_completions_class_receiver_returns_class_methods_test() ->
         cleanup_mock_class('TestCompletionClassA', Pid)
     end.
 
-%% BT-1044: Class receiver also shows instance methods when prefix matches
-context_completions_class_receiver_includes_instance_methods_test() ->
+%% Class receiver must NOT show instance methods — they can't be called on the class object.
+context_completions_class_receiver_excludes_instance_methods_test() ->
     Pid = spawn_mock_class('TestCompletionClassA2', #{spawn => ok}, [
         increment, inspect, decrement
     ]),
@@ -1235,10 +1235,9 @@ context_completions_class_receiver_includes_instance_methods_test() ->
         Result = beamtalk_repl_ops_dev:get_context_completions(
             <<"TestCompletionClassA2 in">>, #{}
         ),
-        %% Instance methods matching "in" should appear for class-name receivers
-        ?assert(lists:member(<<"increment">>, Result)),
-        ?assert(lists:member(<<"inspect">>, Result)),
-        %% Non-matching instance methods must not appear
+        %% Instance methods must NOT appear for class-name receivers
+        ?assertNot(lists:member(<<"increment">>, Result)),
+        ?assertNot(lists:member(<<"inspect">>, Result)),
         ?assertNot(lists:member(<<"decrement">>, Result))
     after
         cleanup_mock_class('TestCompletionClassA2', Pid)
@@ -1263,6 +1262,37 @@ context_completions_instance_binding_returns_instance_methods_test() ->
         ?assertNot(lists:member(<<"spawnWith:">>, Result))
     after
         cleanup_mock_class('TestCompletionClassB', Pid)
+    end.
+
+%% Hidden meta-protocol methods (subclassResponsibility, notImplemented, fieldNames, etc.)
+%% must not appear in instance completions regardless of prefix.
+context_completions_instance_hides_meta_protocol_methods_test() ->
+    Bindings = #{i => 42},
+    ResultAll = beamtalk_repl_ops_dev:get_context_completions(<<"i ">>, Bindings),
+    ?assertNot(lists:member(<<"subclassResponsibility">>, ResultAll)),
+    ?assertNot(lists:member(<<"notImplemented">>, ResultAll)),
+    ?assertNot(lists:member(<<"doesNotUnderstand:args:">>, ResultAll)),
+    ?assertNot(lists:member(<<"fieldNames">>, ResultAll)),
+    ?assertNot(lists:member(<<"fieldAt:">>, ResultAll)),
+    ?assertNot(lists:member(<<"fieldAt:put:">>, ResultAll)),
+    %% new/new: are also hidden on instances (they error via basicNew for most classes)
+    ?assertNot(lists:member(<<"new">>, ResultAll)),
+    ?assertNot(lists:member(<<"new:">>, ResultAll)),
+    %% perform:/perform:withArguments: — dynamic dispatch meta-protocol
+    ?assertNot(lists:member(<<"perform:">>, ResultAll)),
+    ?assertNot(lists:member(<<"perform:withArguments:">>, ResultAll)).
+
+%% new/new: must still appear for class-name receivers (they ARE the constructors there).
+context_completions_class_receiver_new_methods_visible_test() ->
+    Pid = spawn_mock_class('TestCompletionNewClass', #{'new' => ok, 'new:' => ok}, []),
+    try
+        Result = beamtalk_repl_ops_dev:get_context_completions(
+            <<"TestCompletionNewClass n">>, #{}
+        ),
+        ?assert(lists:member(<<"new">>, Result)),
+        ?assert(lists:member(<<"new:">>, Result))
+    after
+        cleanup_mock_class('TestCompletionNewClass', Pid)
     end.
 
 %% BT: Uppercase global binding (e.g. Transcript) falls back to binding lookup
@@ -1490,6 +1520,27 @@ walk_chain_class_single_hop_found_test() ->
         )
     after
         cleanup_mock_class('WalkChainClassTestA', Pid)
+    end.
+
+%% BT-1048: `ClassName class` chain — `class` is an instance method on ProtoObject
+%% (no class-side return-type annotation), but sending it to a class object returns
+%% the metaclass, which has the same class-side methods. The chain should stay on the
+%% class side rather than returning undefined.
+walk_chain_class_class_selector_stays_on_class_side_test() ->
+    ?assertEqual({ok, 'Integer'}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [class])).
+
+walk_chain_class_class_then_method_test() ->
+    Pid = spawn_mock_class_with_return_types(
+        'WalkChainClassB', #{}, #{new => 'WalkChainClassB'}
+    ),
+    try
+        %% `WalkChainClassB class new` — `class` stays on class side, then `new` resolves
+        ?assertEqual(
+            {ok, 'WalkChainClassB'},
+            beamtalk_repl_ops_dev:walk_chain_class('WalkChainClassB', [class, new])
+        )
+    after
+        cleanup_mock_class('WalkChainClassB', Pid)
     end.
 
 walk_chain_multi_hop_test() ->

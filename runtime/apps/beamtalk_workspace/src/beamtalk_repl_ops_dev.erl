@@ -28,6 +28,28 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+%% Methods inherited from Object that are internal implementation protocol and
+%% should not appear in user-facing completions. Long-term, reflection methods
+%% (fieldNames, fieldAt:, fieldAt:put:) should move to Mirror classes (BT-1049).
+-define(COMPLETION_HIDDEN_METHODS, [
+    %% Abstract-class stubs — only meaningful inside a class body
+    subclassResponsibility,
+    notImplemented,
+    %% Message-not-understood handler — internal dispatch protocol
+    'doesNotUnderstand:args:',
+    %% Reflection intrinsics — long-term these should move to a Mirror class
+    fieldNames,
+    'fieldAt:',
+    'fieldAt:put:',
+    %% Object constructors — valid on class objects but confusing on instances
+    %% ("foo" new dispatches via basicNew which most classes don't support directly)
+    new,
+    'new:',
+    %% Dynamic dispatch — advanced/meta protocol, rarely called directly
+    'perform:',
+    'perform:withArguments:'
+]).
+
 %% @doc Handle complete/docs/describe ops.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"complete">>, Params, Msg, SessionPid) ->
@@ -526,9 +548,17 @@ walk_chain(ClassName, [Selector | Rest], Depth) ->
 %%
 %% The first hop uses `class_method_return_types`; subsequent hops transition to the
 %% instance side via `walk_chain/2`.
+%%
+%% Special case: `class` is an instance method on ProtoObject (not annotated with a
+%% return type). When a class object receives `class`, it returns its metaclass, which
+%% has the same class-side methods for completion purposes. We stay on the class side
+%% rather than failing the chain.
 -spec walk_chain_class(atom(), [atom()]) -> {ok, atom()} | undefined.
 walk_chain_class(ClassName, []) ->
     {ok, ClassName};
+walk_chain_class(ClassName, [class | Rest]) ->
+    %% `ClassName class` → metaclass; for completions treat as still on the class side.
+    walk_chain_class(ClassName, Rest);
 walk_chain_class(ClassName, [Selector | Rest]) ->
     case beamtalk_class_registry:get_class_method_return_type(ClassName, Selector) of
         {ok, NextClass} -> walk_chain(NextClass, Rest, 1);
@@ -536,10 +566,18 @@ walk_chain_class(ClassName, [Selector | Rest]) ->
     end.
 
 %% @private
+%% @doc Remove methods that are internal Object protocol and should not appear
+%% in user-facing completions. See ?COMPLETION_HIDDEN_METHODS.
+-spec filter_hidden_methods([atom()]) -> [atom()].
+filter_hidden_methods(Selectors) ->
+    Hidden = sets:from_list(?COMPLETION_HIDDEN_METHODS, [{version, 2}]),
+    [S || S <- Selectors, not sets:is_element(S, Hidden)].
+
+%% @private
 %% @doc Return all instance methods of a class filtered by the given prefix.
 -spec complete_instance_methods(atom(), binary()) -> [binary()].
 complete_instance_methods(ClassName, Prefix) ->
-    MethodSelectors = collect_all_methods(ClassName, 0),
+    MethodSelectors = filter_hidden_methods(collect_all_methods(ClassName, 0)),
     All = [atom_to_binary(S, utf8) || S <- MethodSelectors],
     case Prefix of
         <<>> ->
@@ -554,8 +592,8 @@ complete_instance_methods(ClassName, Prefix) ->
 
 %% @private
 %% @doc Get method selectors for a given receiver token.
-%% For class-name receivers (uppercase), returns class-side methods (via hierarchy
-%% walk) and instance methods (what instances of that class respond to).
+%% For class-name receivers (uppercase), returns only class-side methods (via hierarchy
+%% walk). Instance methods are excluded — they cannot be called on the class object.
 %% For instance receivers (literals, bindings), returns instance methods.
 -spec get_methods_for_receiver(binary(), map()) -> [atom()].
 get_methods_for_receiver(Receiver, Bindings) when is_binary(Receiver) ->
@@ -563,12 +601,16 @@ get_methods_for_receiver(Receiver, Bindings) when is_binary(Receiver) ->
         undefined ->
             [];
         {class, ClassName} ->
-            %% Class-object receiver: class-side methods (via hierarchy walk) and
-            %% instance methods (users commonly want to see what instances respond to).
-            collect_all_class_methods(ClassName, 0) ++
-                collect_all_methods(ClassName, 0);
+            %% Class-object receiver: class-side methods plus the ProtoObject instance
+            %% methods that are genuinely callable on any object (including class objects).
+            %% Most instance methods are excluded — they can't be called on the class object
+            %% and would cause misleading completions that always error.
+            %% ProtoObject methods (e.g. `class`) are included because class objects ARE
+            %% objects and `ClassName class` is meaningful (returns the metaclass).
+            ProtoObjMethods = filter_hidden_methods(collect_all_methods('ProtoObject', 0)),
+            collect_all_class_methods(ClassName, 0) ++ ProtoObjMethods;
         {instance, ClassName} ->
-            collect_all_methods(ClassName, 0)
+            filter_hidden_methods(collect_all_methods(ClassName, 0))
     end.
 
 %% @private
