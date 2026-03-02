@@ -974,10 +974,8 @@ impl ReplClient {
         let response = self.send_op(&serde_json::json!({
             "op": "complete",
             "id": format!("e2e-complete-{cursor}"),
-            "params": {
-                "code": code_with_space,
-                "cursor": cursor
-            }
+            "code": code_with_space,
+            "cursor": cursor
         }))?;
         let mut completions: Vec<String> = response
             .get("completions")
