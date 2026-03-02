@@ -167,6 +167,38 @@ pub fn infer_method_return_types(
         }
     }
 
+    // Standalone (Tonel-style) method definitions: `Counter >> getValue => ...`
+    for standalone in &module.method_definitions {
+        let method = &standalone.method;
+        if method.return_type.is_some() {
+            continue;
+        }
+        if method
+            .body
+            .iter()
+            .any(|s| matches!(s.expression, crate::ast::Expression::Primitive { .. }))
+        {
+            continue;
+        }
+        let class_name = &standalone.class_name.name;
+        let is_abstract = hierarchy.is_abstract(class_name);
+        let mut env = TypeEnv::new();
+        env.in_class_method = standalone.is_class_method;
+        env.set("self", InferredType::Known(class_name.clone()));
+        TypeChecker::set_param_types(&mut env, &method.parameters);
+        let body_type = checker.infer_stmts(&method.body, hierarchy, &mut env, is_abstract);
+        if let InferredType::Known(ref inferred) = body_type {
+            result.insert(
+                (
+                    class_name.clone(),
+                    method.selector.name(),
+                    standalone.is_class_method,
+                ),
+                inferred.clone(),
+            );
+        }
+    }
+
     result
 }
 

@@ -1238,6 +1238,25 @@ impl CoreErlangGenerator {
                     ]);
                 }
             }
+            // BT-1005: Include standalone instance methods for this class
+            for standalone in module
+                .method_definitions
+                .iter()
+                .filter(|m| m.class_name.name == class.name.name && !m.is_class_method)
+            {
+                if let Some(TypeAnnotation::Simple(id)) = &standalone.method.return_type {
+                    if !method_return_type_docs.is_empty() {
+                        method_return_type_docs.push(Document::Str(", "));
+                    }
+                    method_return_type_docs.push(docvec![
+                        "'",
+                        Document::String(standalone.method.selector.name().to_string()),
+                        "' => '",
+                        Document::String(id.name.to_string()),
+                        "'"
+                    ]);
+                }
+            }
             let method_return_types_doc = Document::Vec(method_return_type_docs);
 
             // BT-1002 / ADR 0045: Class-side method return-type map (Simple annotations only).
@@ -1254,6 +1273,25 @@ impl CoreErlangGenerator {
                     class_method_return_type_docs.push(docvec![
                         "'",
                         Document::String(method.selector.name().to_string()),
+                        "' => '",
+                        Document::String(id.name.to_string()),
+                        "'"
+                    ]);
+                }
+            }
+            // BT-1005: Include standalone class methods for this class
+            for standalone in module
+                .method_definitions
+                .iter()
+                .filter(|m| m.class_name.name == class.name.name && m.is_class_method)
+            {
+                if let Some(TypeAnnotation::Simple(id)) = &standalone.method.return_type {
+                    if !class_method_return_type_docs.is_empty() {
+                        class_method_return_type_docs.push(Document::Str(", "));
+                    }
+                    class_method_return_type_docs.push(docvec![
+                        "'",
+                        Document::String(standalone.method.selector.name().to_string()),
                         "' => '",
                         Document::String(id.name.to_string()),
                         "'"

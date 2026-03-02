@@ -5852,3 +5852,26 @@ Actor subclass: Greeter
         "method_return_types should contain inferred Integer for literal-returning method. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_bt1005_standalone_method_writeback_infers_return_type() {
+    // BT-1005: Tonel-style standalone method definitions (Counter >> getValue => ...)
+    // must also have their return types inferred and written back.
+    // This exercises the module.method_definitions loop in infer_method_return_types.
+    let src = "
+Actor subclass: Counter
+  state: value: Integer = 0
+
+Counter >> getValue => value
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("counter"))
+        .expect("codegen should succeed")
+        .code;
+
+    assert!(
+        code.contains("'getValue' => 'Integer'"),
+        "method_return_types should contain inferred Integer for standalone getValue. Got:\n{code}"
+    );
+}
