@@ -189,10 +189,10 @@ sort_with(_List, Block) ->
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
-%% @doc Zip two lists into a list of maps #{key => K, value => V}.
+%% @doc Zip two lists into a list of 2-element List pairs [Elem1, Elem2].
 -spec zip(list(), list()) -> list().
 zip(List, Other) when is_list(List), is_list(Other) ->
-    zip_to_maps(List, Other);
+    zip_to_pairs(List, Other);
 zip(List, Other) when is_list(List) ->
     Error0 = beamtalk_error:new(type_error, 'List'),
     Error1 = beamtalk_error:with_selector(Error0, 'zip:'),
@@ -302,9 +302,9 @@ safe_nthtail(0, List) -> List;
 safe_nthtail(_, []) -> [];
 safe_nthtail(N, [_ | T]) -> safe_nthtail(N - 1, T).
 
-zip_to_maps([], _) -> [];
-zip_to_maps(_, []) -> [];
-zip_to_maps([H1 | T1], [H2 | T2]) -> [#{<<"key">> => H1, <<"value">> => H2} | zip_to_maps(T1, T2)].
+zip_to_pairs([], _) -> [];
+zip_to_pairs(_, []) -> [];
+zip_to_pairs([H1 | T1], [H2 | T2]) -> [[H1, H2] | zip_to_pairs(T1, T2)].
 
 %% @doc Return a human-readable description of a value for error messages.
 %%
