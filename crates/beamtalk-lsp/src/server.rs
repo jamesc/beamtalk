@@ -1180,9 +1180,13 @@ mod tests {
 
     #[test]
     fn format_source_returns_formatted_string() {
+        // An unformatted source must produce non-empty output, and that output
+        // must be stable (formatting the result again returns the same string).
         let source = "Object subclass: Foo\n  bar => 42\n";
-        let result = format_source(source);
-        assert!(result.is_some(), "valid source must be formatted");
+        let pass1 = format_source(source).expect("valid source must produce output");
+        assert!(!pass1.is_empty(), "formatted output must not be empty");
+        let pass2 = format_source(&pass1).expect("formatted output must be valid");
+        assert_eq!(pass1, pass2, "output must be canonical (idempotent)");
     }
 
     #[test]
