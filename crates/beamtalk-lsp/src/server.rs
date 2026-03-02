@@ -157,8 +157,8 @@ impl Backend {
             )));
         }
 
-        // Only the canonical form `beamtalk-stdlib:///ClassName.bt` (empty authority) is accepted.
-        if uri.host().is_some() {
+        // Only the canonical form `beamtalk-stdlib:///ClassName.bt` (empty authority, no query/fragment) is accepted.
+        if uri.host().is_some() || uri.query().is_some() || uri.fragment().is_some() {
             return Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
                 "invalid stdlib URI `{}` (expected beamtalk-stdlib:///ClassName.bt)",
                 params.uri
@@ -1429,6 +1429,30 @@ mod tests {
             "expected 'invalid stdlib URI' but got: {}",
             err.message
         );
+    }
+
+    #[tokio::test]
+    async fn fetch_content_rejects_stdlib_uri_with_query_or_fragment() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        for bad_uri in &[
+            "beamtalk-stdlib:///Integer.bt?x=1",
+            "beamtalk-stdlib:///Integer.bt#section",
+        ] {
+            let result: tower_lsp::jsonrpc::Result<FetchContentResult> = backend
+                .fetch_content(FetchContentParams {
+                    uri: bad_uri.to_string(),
+                })
+                .await;
+            assert!(result.is_err(), "expected error for {bad_uri}");
+            let err = result.unwrap_err();
+            assert!(
+                err.message.contains("invalid stdlib URI"),
+                "expected 'invalid stdlib URI' for {bad_uri}, got: {}",
+                err.message
+            );
+        }
     }
 
     #[tokio::test]
