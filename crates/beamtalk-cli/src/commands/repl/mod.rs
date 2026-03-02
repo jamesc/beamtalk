@@ -563,6 +563,9 @@ pub fn run(
     let mut client = connect_with_retries(&connect_host, connect_port, &cookie)?;
 
     println!("Connected to REPL backend on port {connect_port}.");
+    if let Some(session_id) = client.session_id() {
+        println!("[beamtalk] session: {session_id}");
+    }
 
     // BT-689: Print browser workspace URL when --web flag is used
     if web {
