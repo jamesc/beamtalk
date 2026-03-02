@@ -1474,6 +1474,48 @@ walk_chain_class_single_hop_found_test() ->
         cleanup_mock_class('WalkChainClassTestA', Pid)
     end.
 
+walk_chain_multi_hop_test() ->
+    %% Two-hop chain: WalkChainMultiA →size→ WalkChainMultiB →reversed→ String
+    PidA = spawn_mock_class_with_return_types(
+        'WalkChainMultiA', #{size => 'WalkChainMultiB'}, #{}
+    ),
+    PidB = spawn_mock_class_with_return_types(
+        'WalkChainMultiB', #{reversed => 'String'}, #{}
+    ),
+    try
+        ?assertEqual(
+            {ok, 'String'},
+            beamtalk_repl_ops_dev:walk_chain('WalkChainMultiA', [size, reversed])
+        )
+    after
+        cleanup_mock_class('WalkChainMultiA', PidA),
+        cleanup_mock_class('WalkChainMultiB', PidB)
+    end.
+
+walk_chain_superclass_inheritance_test() ->
+    %% 'WalkChainSub' has no return type for 'size'; its superclass 'WalkChainSuper'
+    %% does.  get_method_return_type/2 walks the ETS hierarchy table, so walk_chain/2
+    %% should resolve through the superclass.
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    Saved = ets:tab2list(beamtalk_class_hierarchy),
+    ets:delete_all_objects(beamtalk_class_hierarchy),
+    ets:insert(beamtalk_class_hierarchy, {'WalkChainSub', 'WalkChainSuper'}),
+    PidSub = spawn_mock_class_with_return_types('WalkChainSub', #{}, #{}),
+    PidSuper = spawn_mock_class_with_return_types(
+        'WalkChainSuper', #{size => 'Integer'}, #{}
+    ),
+    try
+        ?assertEqual(
+            {ok, 'Integer'},
+            beamtalk_repl_ops_dev:walk_chain('WalkChainSub', [size])
+        )
+    after
+        cleanup_mock_class('WalkChainSub', PidSub),
+        cleanup_mock_class('WalkChainSuper', PidSuper),
+        ets:delete_all_objects(beamtalk_class_hierarchy),
+        ets:insert(beamtalk_class_hierarchy, Saved)
+    end.
+
 %%% resolve_chain_type/2 tests (BT-1006)
 
 resolve_chain_type_single_hop_test() ->
