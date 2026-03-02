@@ -6,5 +6,4 @@
 
 TestCase subclass: EmptyTest
 
-  helperMethod =>
-    42
+  helperMethod => 42

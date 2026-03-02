@@ -5,7 +5,6 @@
 // are correctly threaded through the state monad — setValue, sumArray via do:,
 // sumWithInject:, and multi-field accumulation (sum, count, product)
 
-
 TestCase subclass: FieldMutationsDoTest
 
   testFieldMutationsWithSetAndDo =>
@@ -24,7 +23,11 @@ TestCase subclass: FieldMutationsDoTest
     self assert: (counter sumWithInject: #(1, 2, 3)) equals: 6
     self assert: (counter sumWithInject: #(100, 200, 300)) equals: 600
     acc := FieldMutationAccumulator spawn
-    self assert: (acc processArray: #(2, 3, 4)) equals: #{#count => 3, #product => 24, #sum => 9}
+    self assert: (acc processArray: #(2, 3, 4)) equals: #{
+      #count => 3,
+      #product => 24,
+      #sum => 9
+    }
     self assert: acc getSum equals: 9
     self assert: acc getProduct equals: 24
     self assert: acc getCount equals: 3

@@ -4,6 +4,7 @@
 // BT-754: NlrBar — ifFalse: non-local return fixture
 
 Object subclass: NlrBar
+
   check: x =>
     x isEmpty ifFalse: [^"not empty"]
     "empty"

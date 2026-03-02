@@ -10,7 +10,9 @@ TestCase subclass: CustomCollectionTest
     col := NumberList new: #{#items => #(1, 2, 3)}
     self assert: (col inject: 0 into: [:sum :x | sum + x]) equals: 6
     // Non-commutative: verifies block arg order is (accumulator, element)
-    self assert: (col inject: #() into: [:acc :x | acc addFirst: x]) equals: #(3, 2, 1)
+    self assert: (col inject: #() into: [:acc :x |
+      acc addFirst: x
+    ]) equals: #(3, 2, 1)
 
   testInheritedCollect =>
     col := NumberList new: #{#items => #(1, 2, 3)}

@@ -10,7 +10,10 @@ TestCase subclass: DictionaryTest
     self assert: (Dictionary new) size equals: 0
     self assert: (Dictionary new) class equals: Dictionary
     // Dictionary new: initializes with given entries
-    self assert: (Dictionary new: #{#x => 10, #y => 20}) equals: #{#x => 10, #y => 20}
+    self assert: (Dictionary new: #{
+      #x => 10,
+      #y => 20
+    }) equals: #{#x => 10, #y => 20}
     self assert: (Dictionary new: #{#x => 10, #y => 20}) size equals: 2
     self assert: ((Dictionary new: #{#x => 10}) at: #x) equals: 10
     self assert: (Dictionary new: #{#x => 10}) class equals: Dictionary
@@ -65,11 +68,15 @@ TestCase subclass: DictionaryTest
     // Works for empty dictionary
     self assert: (#{} keysAndValuesDo: [:k :v | nil]) equals: nil
     // Works for multi-entry dictionary
-    self assert: (#{#a => 1, #b => 2} keysAndValuesDo: [:k :v | nil]) equals: nil
+    self assert: (#{
+      #a => 1,
+      #b => 2
+    } keysAndValuesDo: [:k :v | nil]) equals: nil
     // Block receives correct key (#a) and value (99) — raises if wrong values passed
     self assert: (#{#a => 99} keysAndValuesDo: [:k :v |
       (k =:= #a) ifFalse: [k error: "unexpected key"]
-      (v =:= 99) ifFalse: [v error: "unexpected value"]]) equals: nil
+      (v =:= 99) ifFalse: [v error: "unexpected value"]
+    ]) equals: nil
 
   testNestedDictionaries =>
     // Nested dictionaries display correctly

@@ -14,17 +14,25 @@ TestCase subclass: StreamCollectionsTest
     // Single element
     self assert: (#(42) stream) asList equals: #(42)
     // Lazy pipeline on list stream
-    self assert: ((#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]) asList equals: #(3, 4, 5)
+    self assert: ((#(1, 2, 3, 4, 5) stream) select: [:n |
+      n > 2
+    ]) asList equals: #(3, 4, 5)
     // Collect on list stream
-    self assert: ((#(1, 2, 3) stream) collect: [:n | n * 10]) asList equals: #(10, 20, 30)
+    self assert: ((#(1, 2, 3) stream) collect: [:n |
+      n * 10
+    ]) asList equals: #(10, 20, 30)
     // Stream returns Stream, not List
     self assert: (#(1, 2, 3) stream) class equals: Stream
     // Chained lazy pipeline
-    self assert: (((#(1, 2, 3, 4, 5, 6) stream) select: [:n | n > 2]) collect: [:n | n * 10]) asList equals: #(30, 40, 50, 60)
+    self assert: (((#(1, 2, 3, 4, 5, 6) stream) select: [:n |
+      n > 2
+    ]) collect: [:n | n * 10]) asList equals: #(30, 40, 50, 60)
     // Take on list stream
     self assert: ((#(1, 2, 3, 4, 5) stream) take: 3) equals: #(1, 2, 3)
     // Inject into on list stream
-    self assert: ((#(1, 2, 3) stream) inject: 0 into: [:sum :n | sum + n]) equals: 6
+    self assert: ((#(1, 2, 3) stream) inject: 0 into: [:sum :n |
+      sum + n
+    ]) equals: 6
     // Detect on list stream
     self assert: ((#(1, 2, 3, 4) stream) detect: [:n | n > 2]) equals: 3
     // anySatisfy on list stream
@@ -45,19 +53,27 @@ TestCase subclass: StreamCollectionsTest
     // Single character
     self assert: ("x" stream) asList equals: #("x")
     // Select on string stream
-    self assert: (("hello" stream) select: [:ch | ch /= "l"]) asList equals: #("h", "e", "o")
+    self assert: (("hello" stream) select: [:ch |
+      ch /= "l"
+    ]) asList equals: #("h", "e", "o")
     // Collect on string stream
-    self assert: (("abc" stream) collect: [:ch | ch uppercase]) asList equals: #("A", "B", "C")
+    self assert: (("abc" stream) collect: [:ch |
+      ch uppercase
+    ]) asList equals: #("A", "B", "C")
     // String stream returns Stream
     self assert: ("hello" stream) class equals: Stream
     // reject on string stream
-    self assert: (("hello" stream) reject: [:ch | ch =:= "l"]) asList equals: #("h", "e", "o")
+    self assert: (("hello" stream) reject: [:ch |
+      ch =:= "l"
+    ]) asList equals: #("h", "e", "o")
     // drop on string stream
     self assert: (("hello" stream) drop: 3) asList equals: #("l", "o")
     // do: on string stream (side effect, returns nil)
     self assert: (("abc" stream) do: [:ch | ch]) equals: nil
     // inject:into: on string stream
-    self assert: (("abc" stream) inject: "" into: [:acc :ch | acc ++ ch]) equals: "abc"
+    self assert: (("abc" stream) inject: "" into: [:acc :ch |
+      acc ++ ch
+    ]) equals: "abc"
     // anySatisfy on string stream
     self assert: (("hello" stream) anySatisfy: [:ch | ch =:= "e"])
     // allSatisfy on string stream
@@ -70,13 +86,19 @@ TestCase subclass: StreamCollectionsTest
     // Single element set stream
     self assert: ((Set new add: 42) stream) asList equals: #(42)
     // Select on set stream
-    self assert: (((((Set new add: 1) add: 2) add: 3) stream) select: [:n | n > 1]) asList equals: #(2, 3)
+    self assert: (((((Set new add: 1) add: 2) add: 3) stream) select: [:n |
+      n > 1
+    ]) asList equals: #(2, 3)
     // Collect on set stream
-    self assert: (((((Set new add: 1) add: 2) add: 3) stream) collect: [:n | n * 10]) asList equals: #(10, 20, 30)
+    self assert: (((((Set new add: 1) add: 2) add: 3) stream) collect: [:n |
+      n * 10
+    ]) asList equals: #(10, 20, 30)
     // Set stream returns Stream
     self assert: ((Set new add: 1) stream) class equals: Stream
     // reject on set stream
-    self assert: (((((Set new add: 1) add: 2) add: 3) stream) reject: [:n | n =:= 2]) asList equals: #(1, 3)
+    self assert: (((((Set new add: 1) add: 2) add: 3) stream) reject: [:n |
+      n =:= 2
+    ]) asList equals: #(1, 3)
     // drop on set stream
     self assert: (((((Set new add: 1) add: 2) add: 3) stream) drop: 1) asList equals: #(2, 3)
     // take on set stream
@@ -84,9 +106,13 @@ TestCase subclass: StreamCollectionsTest
     // do: on set stream (returns nil)
     self assert: (((Set new add: 1) stream) do: [:n | n]) equals: nil
     // inject:into: on set stream
-    self assert: (((((Set new add: 1) add: 2) add: 3) stream) inject: 0 into: [:sum :n | sum + n]) equals: 6
+    self assert: (((((Set new add: 1) add: 2) add: 3) stream) inject: 0 into: [:sum :n |
+      sum + n
+    ]) equals: 6
     // detect on set stream
-    self assert: (((((Set new add: 1) add: 2) add: 3) stream) detect: [:n | n > 1]) equals: 2
+    self assert: (((((Set new add: 1) add: 2) add: 3) stream) detect: [:n |
+      n > 1
+    ]) equals: 2
     // anySatisfy on set stream
     self assert: ((((Set new add: 1) add: 2) stream) anySatisfy: [:n | n > 1])
     // allSatisfy on set stream
@@ -104,13 +130,28 @@ TestCase subclass: StreamCollectionsTest
     // Dictionary stream returns Stream
     self assert: (#{#a => 1} stream) class equals: Stream
     // Select on dictionary stream
-    self assert: (((#{#a => 1, #b => 2, #c => 3} stream) select: [:assoc | assoc value > 1]) asList) size equals: 2
+    self assert: (((#{
+      #a => 1,
+      #b => 2,
+      #c => 3
+    } stream) select: [:assoc | assoc value > 1]) asList) size equals: 2
     // Collect on dictionary stream — transform associations
-    self assert: (((#{#a => 1, #b => 2} stream) collect: [:assoc | assoc value]) asList) size equals: 2
+    self assert: (((#{
+      #a => 1,
+      #b => 2
+    } stream) collect: [:assoc | assoc value]) asList) size equals: 2
     // Detect on dictionary stream
-    self assert: ((#{#a => 1, #b => 2, #c => 3} stream) detect: [:assoc | assoc value > 2]) value equals: 3
+    self assert: ((#{
+      #a => 1,
+      #b => 2,
+      #c => 3
+    } stream) detect: [:assoc | assoc value > 2]) value equals: 3
     // reject on dictionary stream
-    self assert: (((#{#a => 1, #b => 2, #c => 3} stream) reject: [:assoc | assoc value =:= 2]) asList) size equals: 2
+    self assert: (((#{
+      #a => 1,
+      #b => 2,
+      #c => 3
+    } stream) reject: [:assoc | assoc value =:= 2]) asList) size equals: 2
     // drop on dictionary stream
     self assert: (((#{#a => 1, #b => 2} stream) drop: 1) asList) size equals: 1
     // take on dictionary stream
@@ -118,11 +159,21 @@ TestCase subclass: StreamCollectionsTest
     // do: on dictionary stream (returns nil)
     self assert: ((#{#a => 1} stream) do: [:assoc | assoc]) equals: nil
     // inject:into: on dictionary stream — sum values
-    self assert: ((#{#a => 1, #b => 2, #c => 3} stream) inject: 0 into: [:sum :assoc | sum + assoc value]) equals: 6
+    self assert: ((#{
+      #a => 1,
+      #b => 2,
+      #c => 3
+    } stream) inject: 0 into: [:sum :assoc | sum + assoc value]) equals: 6
     // anySatisfy on dictionary stream
-    self assert: ((#{#a => 1, #b => 2} stream) anySatisfy: [:assoc | assoc value > 1])
+    self assert: ((#{
+      #a => 1,
+      #b => 2
+    } stream) anySatisfy: [:assoc | assoc value > 1])
     // allSatisfy on dictionary stream
-    self assert: ((#{#a => 1, #b => 2} stream) allSatisfy: [:assoc | assoc value > 0])
+    self assert: ((#{
+      #a => 1,
+      #b => 2
+    } stream) allSatisfy: [:assoc | assoc value > 0])
     // Stream on: with string
     self assert: (Stream on: "abc") asList equals: #("a", "b", "c")
     // Stream on: with set

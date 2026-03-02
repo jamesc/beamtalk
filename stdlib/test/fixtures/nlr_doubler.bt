@@ -4,6 +4,7 @@
 // BT-754: NlrDoubler — non-local return with computed value fixture
 
 Object subclass: NlrDoubler
+
   test: x =>
     x > 0 ifTrue: [^x * 2]
     0

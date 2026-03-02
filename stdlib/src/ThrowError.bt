@@ -13,4 +13,3 @@
 /// [Erlang erlang throw: #oops] on: ThrowError do: [:e | e message]
 /// ```
 BEAMError subclass: ThrowError
-

@@ -3,7 +3,6 @@
 
 // Stdlib tests for CompiledMethod introspection (BT-101, BT-323, BT-454)
 
-
 TestCase subclass: CompiledMethodTest
 
   testMethodLookup =>
@@ -17,8 +16,7 @@ TestCase subclass: CompiledMethodTest
     self assert: (cls >> #getValue) selector equals: #getValue
     self assert: (cls >> #nonExistent) equals: nil
 
-  testClass =>
-    self assert: (Counter >> #getValue) class equals: CompiledMethod
+  testClass => self assert: (Counter >> #getValue) class equals: CompiledMethod
 
   testSelector =>
     self assert: (Counter >> #getValue) selector equals: #getValue

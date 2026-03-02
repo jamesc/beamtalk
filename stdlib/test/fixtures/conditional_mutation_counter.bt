@@ -19,8 +19,9 @@ Actor subclass: ConditionalMutationCounter
 
   // Two-branch conditional: +10 if true, -1 if false
   conditionalToggle: flag =>
-    flag ifTrue: [self.count := self.count + 10]
-         ifFalse: [self.count := self.count - 1]
+    flag ifTrue: [
+      self.count := self.count + 10
+    ] ifFalse: [self.count := self.count - 1]
     self.count
 
   // Method with two sequential conditional mutations
@@ -31,16 +32,12 @@ Actor subclass: ConditionalMutationCounter
 
   // Nested conditionals: outer and inner both have mutations
   nestedConditional: outer and: inner =>
-    outer ifTrue: [
-      inner ifTrue: [self.count := self.count + 100]
-    ]
+    outer ifTrue: [inner ifTrue: [self.count := self.count + 100]]
     self.count
 
   // Conditional as last expression (no trailing self.count)
-  conditionalLast: flag =>
-    flag ifTrue: [self.count := self.count + 5]
+  conditionalLast: flag => flag ifTrue: [self.count := self.count + 5]
 
   getCount => self.count
 
   reset => self.count := 0
-

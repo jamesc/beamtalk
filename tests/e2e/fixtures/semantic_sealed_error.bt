@@ -5,4 +5,5 @@
 // Integer is a sealed builtin — cannot be subclassed
 
 Integer subclass: MyInteger
+
   double => ^self * 2

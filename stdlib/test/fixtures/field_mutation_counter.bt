@@ -18,5 +18,4 @@ Actor subclass: FieldMutationCounter
     self.value
 
   // inject:into: without field mutation (pure functional)
-  sumWithInject: items =>
-    items inject: 0 into: [:sum :item | sum + item]
+  sumWithInject: items => items inject: 0 into: [:sum :item | sum + item]

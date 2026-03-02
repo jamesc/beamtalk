@@ -9,14 +9,10 @@
 TestCase subclass: LifecycleTest
   state: log = "init"
 
-  setUp =>
-    self.log := "S"
+  setUp => self.log := "S"
 
-  tearDown =>
-    nil
+  tearDown => nil
 
-  testFirst =>
-    self assert: self.log equals: "S"
+  testFirst => self assert: self.log equals: "S"
 
-  testSecond =>
-    self assert: self.log equals: "S"
+  testSecond => self assert: self.log equals: "S"

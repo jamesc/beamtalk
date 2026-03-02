@@ -5,7 +5,6 @@
 // direct __sealed_* calls instead of dynamic dispatch, verified by exercising
 // external calls, internal self-sends, and state persistence
 
-
 TestCase subclass: SealedClassTest
 
   testSealedClassOperations =>

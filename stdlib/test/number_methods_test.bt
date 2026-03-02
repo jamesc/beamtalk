@@ -45,17 +45,13 @@ TestCase subclass: NumberMethodsTest
     self assert: 0 isZero
     self deny: 5 isZero
 
-  testIntegerIsPositive =>
-    self assert: 5 isPositive
+  testIntegerIsPositive => self assert: 5 isPositive
 
-  testIntegerIsNegative =>
-    self assert: -3 isNegative
+  testIntegerIsNegative => self assert: -3 isNegative
 
-  testFloatNegated =>
-    self assert: 3.14 negated equals: -3.14
+  testFloatNegated => self assert: 3.14 negated equals: -3.14
 
-  testFloatAbs =>
-    self assert: -3.14 abs equals: 3.14
+  testFloatAbs => self assert: -3.14 abs equals: 3.14
 
   testFloatMinMax =>
     self assert: (3.14 min: 2.71) equals: 2.71
@@ -65,14 +61,11 @@ TestCase subclass: NumberMethodsTest
     // asInteger (truncates)
     self assert: 3.75 asInteger equals: 3
 
-  testFloatAsString =>
-    self assert: 3.14 asString equals: "3.14"
+  testFloatAsString => self assert: 3.14 asString equals: "3.14"
 
-  testFloatIsNaN =>
-    self deny: 3.14 isNaN
+  testFloatIsNaN => self deny: 3.14 isNaN
 
-  testFloatIsInfinite =>
-    self deny: 3.14 isInfinite
+  testFloatIsInfinite => self deny: 3.14 isInfinite
 
   testIntegerSign =>
     self assert: 5 sign equals: 1
@@ -87,13 +80,12 @@ TestCase subclass: NumberMethodsTest
     self assert: 3.14 sign equals: 1
     self assert: -2.5 sign equals: -1
 
-  testFloatBetween =>
-    self assert: (3.14 between: 1.0 and: 5.0)
+  testFloatBetween => self assert: (3.14 between: 1.0 and: 5.0)
 
   testRespondsToSign =>
     self assert: (42 respondsTo: #sign)
     self assert: (3.14 respondsTo: #sign)
 
   testRespondsToBetweenAnd =>
-    self assert: (42 respondsTo: #'between:and:')
-    self assert: (3.14 respondsTo: #'between:and:')
+    self assert: (42 respondsTo: #between:and:)
+    self assert: (3.14 respondsTo: #between:and:)

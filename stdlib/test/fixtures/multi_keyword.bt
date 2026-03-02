@@ -18,7 +18,6 @@ Actor subclass: MultiKeyword
     self.result
 
   // 4-keyword method: verify argument order by weighted sum
-  first: a second: b third: c fourth: d =>
-    a * 1000 + b * 100 + c * 10 + d
+  first: a second: b third: c fourth: d => a * 1000 + b * 100 + c * 10 + d
 
   getResult => self.result

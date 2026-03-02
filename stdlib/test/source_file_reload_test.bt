@@ -24,13 +24,13 @@ TestCase subclass: SourceFileReloadTest
     self assert: Boolean sourceFile isNil
     // => _
     self assert: Actor sourceFile isNil
-    // => _
 
+  // => _
   testBootstrapBehaviourSourceFileIsNil =>
     // Behaviour itself is a stdlib class — no source file
     self assert: Behaviour sourceFile isNil
-    // => _
 
+  // => _
   testStdlibReloadRaisesNoSourceFile =>
     // Reloading a stdlib class raises no_source_file
     self should: [Integer reload] raise: #no_source_file
@@ -38,20 +38,20 @@ TestCase subclass: SourceFileReloadTest
     self should: [String reload] raise: #no_source_file
     // => _
     self should: [Object reload] raise: #no_source_file
-    // => _
 
+  // => _
   testSourceFileMethodExists =>
     // sourceFile is a sealed method defined in Behaviour (class protocol)
     self assert: (Behaviour includesSelector: #sourceFile)
     // => _
     // Sending sourceFile to any class object returns nil or a path (no DNU)
     self assert: Integer sourceFile isNil
-    // => _
 
+  // => _
   testReloadMethodExists =>
     // reload is a sealed method defined in Behaviour (class protocol)
     self assert: (Behaviour includesSelector: #reload)
     // => _
     // Reloading a stdlib class (Behaviour itself) raises no_source_file
     self should: [Behaviour reload] raise: #no_source_file
-    // => _
+// => _

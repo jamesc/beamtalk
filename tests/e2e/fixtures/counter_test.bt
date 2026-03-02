@@ -9,8 +9,6 @@
 
 TestCase subclass: CounterTest
 
-  testIncrement =>
-    self assert: (Counter spawn increment await) equals: 1
+  testIncrement => self assert: (Counter spawn increment await) equals: 1
 
-  testInitialValue =>
-    self assert: (Counter spawn getValue await) equals: 0
+  testInitialValue => self assert: (Counter spawn getValue await) equals: 0

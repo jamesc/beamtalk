@@ -9,5 +9,7 @@ Object subclass: Message
   state: sender = "Anonymous"
 
   getText => self.text
+
   getSender => self.sender
+
   printString => self.sender ++ ": " ++ self.text

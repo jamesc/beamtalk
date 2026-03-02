@@ -5,7 +5,6 @@
 // variables via self class — same BT-413 invariant as actors but for
 // non-actor classes (e.g. ClassVarPoint)
 
-
 TestCase subclass: InstanceClassVarAccessValueTypeTest
 
   testValueTypeInstanceAccessToClassVariable =>

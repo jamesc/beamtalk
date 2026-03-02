@@ -10,11 +10,16 @@ Actor subclass: ErrorCounter
 
   // on:do: handler mutates errorCount when division by zero occurs
   riskyIncrement =>
-    [self.value := self.value + (1 / 0)] on: Exception do: [:e | self.errorCount := self.errorCount + 1]
+    [
+      self.value := self.value + (1 / 0)
+    ] on: Exception do: [:e | self.errorCount := self.errorCount + 1]
 
   // ensure: cleanup mutates errorCount (runs on success path)
   safeIncrementWithCleanup =>
-    [self.value := self.value + 1] ensure: [self.errorCount := self.errorCount + 1]
+    [
+      self.value := self.value + 1
+    ] ensure: [self.errorCount := self.errorCount + 1]
 
   getValue => self.value
+
   getErrorCount => self.errorCount

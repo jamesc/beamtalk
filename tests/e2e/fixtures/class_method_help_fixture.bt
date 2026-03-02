@@ -5,5 +5,4 @@
 
 Object subclass: HelpTestWidget
 
-  class create: name: String -> HelpTestWidget =>
-    self new: name
+  class create: name: String -> HelpTestWidget => self new: name

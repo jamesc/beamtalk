@@ -6,7 +6,6 @@
 // BT-924: Reflection tests — fieldAt: reads slots, fieldNames returns slot names,
 //         fieldAt:put: raises immutable_value
 
-
 TestCase subclass: ValueSubclassTest
 
   testAutoGetter =>

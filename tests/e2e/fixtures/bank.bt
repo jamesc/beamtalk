@@ -9,9 +9,9 @@ Actor subclass: Bank
   state: lastCreated = nil
 
   openAccount: name =>
-    self.lastCreated := Account spawn.
-    self.lastCreated setOwner: name.
-    self.accounts := self.accounts at: name put: self.lastCreated.
+    self.lastCreated := Account spawn
+    self.lastCreated setOwner: name
+    self.accounts := self.accounts at: name put: self.lastCreated
     ^self.lastCreated
 
   accountFor: name =>

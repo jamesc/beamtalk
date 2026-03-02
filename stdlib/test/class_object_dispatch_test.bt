@@ -10,9 +10,7 @@ TestCase subclass: ClassObjectDispatchTest
 
   // Note: respondsTo: on class objects is a known limitation (virtual metaclass
   // tag isn't registered in the class registry). Tracked in BT-776
-
-  testClassObjectYourself =>
-    self assert: Counter yourself equals: Counter
+  testClassObjectYourself => self assert: Counter yourself equals: Counter
 
   testClassObjectHash =>
     h := Counter hash
@@ -34,14 +32,12 @@ TestCase subclass: ClassObjectDispatchTest
     self assert: (Counter perform: #name) equals: #Counter
 
   // --- Primitive class objects also work ---
-
   testPrimitiveClassObjectReflection =>
     self assert: (Integer respondsTo: #isNil)
     self assert: Integer yourself equals: Integer
     self assert: Integer notNil
 
   // --- Pure Beamtalk Behaviour methods (BT-753 converted from @primitive) ---
-
   testInheritsFrom =>
     self assert: (Counter inheritsFrom: Actor)
     self assert: (Counter inheritsFrom: Object)

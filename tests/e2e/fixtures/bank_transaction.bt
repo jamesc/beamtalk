@@ -12,7 +12,11 @@ Object subclass: Transaction
   state: status = "pending"
 
   getAmount => ^self.amount
+
   getFrom => ^self.from
+
   getTo => ^self.to
+
   getTimestamp => ^self.timestamp
+
   getStatus => ^self.status

@@ -3,7 +3,6 @@
 
 // Tests for abstract classes and subclassResponsibility
 
-
 TestCase subclass: AbstractClassesTest
 
   testConcreteSubclassWorksNormally =>

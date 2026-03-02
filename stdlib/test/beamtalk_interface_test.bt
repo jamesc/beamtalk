@@ -30,5 +30,4 @@ TestCase subclass: BeamtalkInterfaceTest
   testIncludesSelectorHelpSelector =>
     self assert: (BeamtalkInterface includesSelector: #help:selector:)
 
-  testInheritsFromActor =>
-    self assert: (BeamtalkInterface inheritsFrom: Actor)
+  testInheritsFromActor => self assert: (BeamtalkInterface inheritsFrom: Actor)

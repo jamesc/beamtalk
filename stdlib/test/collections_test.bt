@@ -48,7 +48,9 @@ TestCase subclass: CollectionsTest
     // --- flatten ---
     self assert: #(#(1, 2), #(3, 4)) flatten equals: #(1, 2, 3, 4)
     // --- flatMap: ---
-    self assert: (#(1, 2, 3) flatMap: [:x | #(x, (x * 10))]) equals: #(1, 10, 2, 20, 3, 30)
+    self assert: (#(1, 2, 3) flatMap: [:x |
+      #(x, (x * 10))
+    ]) equals: #(1, 10, 2, 20, 3, 30)
     // --- count: ---
     self assert: (#(1, 2, 3, 4, 5) count: [:x | x > 2]) equals: 3
     // --- anySatisfy: ---
@@ -118,11 +120,15 @@ TestCase subclass: CollectionsTest
     self assert: (#(1, 2, 3, 2) indexOf: 2) equals: 2
     self assert: (#() indexOf: 1) equals: nil
     // eachWithIndex: returns nil after iterating
-    self assert: (#(10, 20, 30) eachWithIndex: [:elem :idx | elem + idx]) equals: nil
+    self assert: (#(10, 20, 30) eachWithIndex: [:elem :idx |
+      elem + idx
+    ]) equals: nil
     // Verify eachWithIndex: iterates (empty list is a no-op)
     self assert: (#() eachWithIndex: [:elem :idx | elem]) equals: nil
     // The block receives (elem, idx) — verify it doesn't error with 2-arg block:
-    self assert: (#(100, 200, 300) eachWithIndex: [:elem :idx | elem + idx]) equals: nil
+    self assert: (#(100, 200, 300) eachWithIndex: [:elem :idx |
+      elem + idx
+    ]) equals: nil
     // --- ++ with variables ---
     a := #(1, 2, 3)
     self assert: a equals: #(1, 2, 3)

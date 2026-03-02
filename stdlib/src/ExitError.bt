@@ -13,4 +13,3 @@
 /// [Erlang erlang exit: #killed] on: ExitError do: [:e | e message]
 /// ```
 BEAMError subclass: ExitError
-

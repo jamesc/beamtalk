@@ -17,32 +17,24 @@ Object subclass: NlrFieldMutation
   // The NLR throw carries Self1 (with lastQuery set)
   findFirst: item in: items =>
     self.lastQuery := item
-    items do: [:each |
-      each =:= item ifTrue: [^each]
-    ]
+    items do: [:each | each =:= item ifTrue: [^each]]
     nil
 
   // Returns self via ^, making field mutations visible to the caller
   // self.lastQuery is set before the block, then ^self returns the updated Self
   findAndReturnSelf: item in: items =>
     self.lastQuery := item
-    items do: [:each |
-      each =:= item ifTrue: [^self]
-    ]
+    items do: [:each | each =:= item ifTrue: [^self]]
     self
 
   // Normal NLR with no field mutations — exercises the tuple return format
   detect: aBlock in: items =>
-    items do: [:each |
-      (aBlock value: each) ifTrue: [^each]
-    ]
+    items do: [:each | (aBlock value: each) ifTrue: [^each]]
     nil
 
   // Tests the non-NLR path: the body returns {Result, Self{N}}
   findNone: items =>
-    items do: [:each |
-      false ifTrue: [^each]
-    ]
+    items do: [:each | false ifTrue: [^each]]
     nil
 
   // BT-857: Returns true if any element satisfies aBlock (early return via ^)
@@ -50,9 +42,7 @@ Object subclass: NlrFieldMutation
   // Verifies NLR state preservation: anySatisfy: pattern (bool return)
   anySatisfy: aBlock in: items =>
     self.lastQuery := items size
-    items do: [:each |
-      (aBlock value: each) ifTrue: [^true]
-    ]
+    items do: [:each | (aBlock value: each) ifTrue: [^true]]
     false
 
   lastQuery => self.lastQuery

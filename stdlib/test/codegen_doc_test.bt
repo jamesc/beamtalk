@@ -6,12 +6,10 @@
 TestCase subclass: CodegenDocTest
 
   // --- Class doc from /// comment ---
-
   testClassDocFromTripleSlash =>
     self assert: DocCounter doc equals: "A counter that tracks a value."
 
   // --- Method docs from /// comments ---
-
   testMethodDocFromTripleSlash =>
     m := DocCounter >> #increment
     self assert: m doc equals: "Increment the counter by one."
@@ -21,7 +19,6 @@ TestCase subclass: CodegenDocTest
     self assert: m doc equals: "Return the current count."
 
   // --- Method without doc comment has nil doc ---
-
   testMethodWithoutDocHasNilDoc =>
     m := DocCounter >> #reset
     self assert: m doc equals: nil

@@ -10,4 +10,5 @@ Actor subclass: TaskWorker
   state: count = 0
 
   increment => self.count := self.count + 1
+
   getCount => self.count

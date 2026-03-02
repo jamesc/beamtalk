@@ -26,8 +26,7 @@ TestCase subclass: ListLiteralsTest
     self assert: #(1, 2, 3) first equals: 1
     self assert: #(1, 2, 3) rest equals: #(2, 3)
 
-  testTrailingComma =>
-    self assert: #(10, 20, 30,) equals: #(10, 20, 30)
+  testTrailingComma => self assert: #(10, 20, 30) equals: #(10, 20, 30)
 
   testListWithExpressionsParenthesizedForBinaryOps =>
     self assert: #((1 + 2), (3 * 4)) equals: #(3, 12)

@@ -5,7 +5,6 @@
 // bus notify: calls receive: on the collector synchronously — when notify:
 // returns, the collector has already processed the event
 
-
 TestCase subclass: ActorCoordinationTest
 
   testSyncEventDelivery =>

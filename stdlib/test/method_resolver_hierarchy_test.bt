@@ -9,7 +9,6 @@
 TestCase subclass: MethodResolverHierarchyTest
 
   // --- Inherited method resolution ---
-
   testInheritedMethodReturnsCompiledMethod =>
     // greetParent is defined on HierarchyParent, inherited by HierarchyChild
     m := HierarchyChild >> #greetParent
@@ -23,14 +22,12 @@ TestCase subclass: MethodResolverHierarchyTest
     self assert: m selector equals: #isNil
 
   // --- Local methods still work ---
-
   testLocalMethodStillReturnsCompiledMethod =>
     m := HierarchyChild >> #greetChild
     self assert: m class equals: CompiledMethod
     self assert: m selector equals: #greetChild
 
   // --- Local method takes precedence over inherited ---
-
   testLocalMethodShadowsInherited =>
     // sharedMethod is defined on both parent and child
     m := HierarchyChild >> #sharedMethod
@@ -38,12 +35,10 @@ TestCase subclass: MethodResolverHierarchyTest
     self assert: m selector equals: #sharedMethod
 
   // --- Non-existent methods still return nil ---
-
   testNonExistentMethodReturnsNil =>
     self assert: (HierarchyChild >> #nonExistent) equals: nil
 
   // --- Inherited method carries doc from defining class ---
-
   testInheritedMethodDocFromParent =>
     HierarchyParent setDocForMethod: #greetParent to: "Parent greeting"
     m := HierarchyChild >> #greetParent

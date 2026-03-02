@@ -12,6 +12,7 @@
 /// Exception signal: "something went wrong"
 /// ```
 Value subclass: Exception
+
   /// Return the error message string.
   ///
   /// ## Examples

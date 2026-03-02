@@ -5,28 +5,25 @@
 // Demonstrates: actors, Set, List, blocks, string formatting
 
 // ChatRoom actor manages members and message history
+
 Actor subclass: ChatRoom
   state: members = Set new
   state: history = #()
 
   // Add a member to the room
-  join: member =>
-    self.members := self.members add: member
-  
+  join: member => self.members := self.members add: member
+
   // Remove a member from the room
-  leave: member =>
-    self.members := self.members remove: member
-  
+  leave: member => self.members := self.members remove: member
+
   // Broadcast a message to all members
   // Formats message as "sender: text" string
   say: text from: senderName =>
-    self.history := self.history ++ #(senderName ++ ": " ++ text).
+    self.history := self.history ++ #(senderName ++ ": " ++ text)
     self.members do: [:m | m receiveMessage: senderName ++ ": " ++ text!]
-  
+
   // Return current online members (Set of actor refs)
-  online =>
-    ^self.members
-  
+  online => ^self.members
+
   // Return message history (List of formatted strings)
-  getHistory =>
-    ^self.history
+  getHistory => ^self.history

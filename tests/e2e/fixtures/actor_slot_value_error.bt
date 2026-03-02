@@ -9,5 +9,4 @@ Value subclass: ImmutablePoint
   state: y = 0
 
   // This should be a compile error: value types are immutable
-  badSetX: newX =>
-    self.x := newX
+  badSetX: newX => self.x := newX

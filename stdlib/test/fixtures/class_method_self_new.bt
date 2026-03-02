@@ -3,6 +3,7 @@
 
 // BT-893: Test fixture for class method self-sends (new/new:/spawn)
 // Factory pattern: class methods that call self new: to create instances
+
 Object subclass: Shape
   state: kind = #unknown
   state: sides = 0

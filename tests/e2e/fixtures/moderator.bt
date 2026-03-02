@@ -7,20 +7,14 @@
 ChatMember subclass: Moderator
   state: muted = Set new
 
-  say: message =>
-    super say: "[MOD] " ++ message
+  say: message => super say: "[MOD] " ++ message
 
-  kick: member =>
-    self.room leave: member
+  kick: member => self.room leave: member
 
-  mute: memberName =>
-    self.muted := self.muted add: memberName
+  mute: memberName => self.muted := self.muted add: memberName
 
-  unmute: memberName =>
-    self.muted := self.muted remove: memberName
+  unmute: memberName => self.muted := self.muted remove: memberName
 
-  isMuted: memberName =>
-    ^self.muted includes: memberName
+  isMuted: memberName => ^self.muted includes: memberName
 
-  getMuted =>
-    ^self.muted
+  getMuted => ^self.muted

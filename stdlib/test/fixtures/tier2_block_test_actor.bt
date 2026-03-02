@@ -10,8 +10,7 @@ Actor subclass: Tier2BlockTestActor
   // BT-851: HOM that receives a block and calls it with the Tier 2 protocol
   // The block parameter `aBlock` is compiled with the stateful calling convention
   // when the compiler detects it receives a Tier 2 (captured-mutation) block
-  applyBlock: aBlock to: anItem =>
-    aBlock value: anItem
+  applyBlock: aBlock to: anItem => aBlock value: anItem
 
   // BT-853: HOM where the block call is NOT the last expression
   // After calling the block (which mutates count via StateAcc), this method
@@ -54,7 +53,10 @@ Actor subclass: Tier2BlockTestActor
   // Block computes (count + x) = (0 + 4) = 4, HOM returns result + 10 = 14
   testTier2ResultCapture =>
     count := 0
-    self applyBlockGetResult: [:x | count := count + x. count] to: 4 addend: 10
+    self applyBlockGetResult: [:x |
+      count := count + x
+      count
+    ] to: 4 addend: 10
 
   // BT-852/BT-853 new_state ordering: Two sequential Tier 2 assignments in HOM
   // block1 adds x to count, block2 multiplies count by x
@@ -62,4 +64,10 @@ Actor subclass: Tier2BlockTestActor
   // count=0 -> block1(2) -> count=2, r1=2 -> block2(2) -> count=4, r2=4
   testTwoBlocks =>
     count := 0
-    self applyTwoBlocks: [:x | count := count + x. count] and: [:x | count := count * x. count] to: 2
+    self applyTwoBlocks: [:x |
+      count := count + x
+      count
+    ] and: [:x |
+      count := count * x
+      count
+    ] to: 2

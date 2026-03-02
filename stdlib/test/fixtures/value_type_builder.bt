@@ -31,4 +31,5 @@ Object subclass: ValueTypeBuilder
 
   // Getters
   getX => self.x
+
   getY => self.y

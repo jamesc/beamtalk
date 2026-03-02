@@ -12,6 +12,7 @@
 /// (#name -> "James") value     // => "James"
 /// ```
 sealed Value subclass: Association
+
   /// Return the key of the association.
   ///
   /// ## Examples
@@ -46,6 +47,5 @@ sealed Value subclass: Association
   /// ```beamtalk
   /// (#name -> "James") printString // => "#name -> ""James"""
   /// ```
-  printString -> String => self key printString ++ " -> " ++ self value printString
-
-
+  printString -> String =>
+    self key printString ++ " -> " ++ self value printString

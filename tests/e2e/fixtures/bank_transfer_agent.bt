@@ -12,8 +12,8 @@ Actor subclass: TransferAgent
   state: lastAmount = 0
 
   transfer: amount from: source to: destination =>
-    source withdraw: amount.
-    destination deposit: amount.
+    source withdraw: amount
+    destination deposit: amount
     self.lastAmount := amount
 
   getLastAmount => ^self.lastAmount

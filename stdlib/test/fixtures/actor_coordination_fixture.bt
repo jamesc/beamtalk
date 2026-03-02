@@ -7,8 +7,7 @@
 Actor subclass: EventCollector
   state: events = #()
 
-  receive: event =>
-    self.events := self.events ++ #(event)
+  receive: event => self.events := self.events ++ #(event)
 
   events => self.events
 

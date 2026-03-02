@@ -8,8 +8,6 @@
 Actor subclass: DeadlockA
   state: peer = nil
 
-  setPeer: p =>
-    self.peer := p
+  setPeer: p => self.peer := p
 
-  callPeer =>
-    self.peer respondToA: self
+  callPeer => self.peer respondToA: self

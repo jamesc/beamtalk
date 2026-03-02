@@ -6,4 +6,5 @@
 // after it has been registered with a different module atom emits a warning.
 
 Object subclass: CollisionTestClass
+
   greet => "hello"

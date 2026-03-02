@@ -3,7 +3,6 @@
 
 // Tests for recursive method dispatch BT-330
 
-
 TestCase subclass: RecursionTest
 
   testRecursiveKeywordMethodFactorial =>

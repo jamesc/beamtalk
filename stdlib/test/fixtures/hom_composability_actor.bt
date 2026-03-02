@@ -19,14 +19,11 @@ Actor subclass: HomComposabilityActor
   // aBlock value: each is called via the Tier 2 protocol with StateAcc threading
   eachItem: aBlock =>
     last := nil
-    #(1, 2, 3, 4, 5) do: [:each |
-      last := aBlock value: each
-    ]
+    #(1, 2, 3, 4, 5) do: [:each | last := aBlock value: each]
     last
 
   // Nested HOM: outer delegates to inner, testing two-layer state threading
-  outerEachItem: aBlock =>
-    self eachItem: aBlock
+  outerEachItem: aBlock => self eachItem: aBlock
 
   // Returns sum of (aBlock value: each) for each item in items
   // Used to test pure block correctness via a loop HOM
@@ -53,8 +50,7 @@ Actor subclass: HomComposabilityActor
 
   // Test: pure block passed to HOM — correct result, no crash
   // sumOf:over: loops with a pure block [:x | x * 2]; result = 2+4+6+8+10 = 30
-  testPureBlockViaHOM =>
-    self sumOf: [:x | x * 2] over: #(1, 2, 3, 4, 5)
+  testPureBlockViaHOM => self sumOf: [:x | x * 2] over: #(1, 2, 3, 4, 5)
 
   // Test: block stored in local variable, then passed to user-defined HOM
   // Mutations from the stored block must propagate back to the caller

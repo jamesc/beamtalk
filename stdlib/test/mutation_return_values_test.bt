@@ -5,7 +5,6 @@
 // computed value (not nil) from inject:into:, on:do:, and ensure: when
 // combined with actor field mutations
 
-
 TestCase subclass: MutationReturnValuesTest
 
   testMutationReturnValues =>

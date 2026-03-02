@@ -12,9 +12,7 @@ Actor subclass: LocalMutationActor
   // Local mutation in do: (lists:foldl path)
   sumWithDo: items =>
     total := 0
-    items do: [:item |
-      total := total + item
-    ]
+    items do: [:item | total := total + item]
     total
 
   // Local mutation in inject:into:
@@ -29,17 +27,13 @@ Actor subclass: LocalMutationActor
   // Local mutation in timesRepeat:
   countToN: n =>
     counter := 0
-    n timesRepeat: [
-      counter := counter + 1
-    ]
+    n timesRepeat: [counter := counter + 1]
     counter
 
   // Local mutation in to:do:
   sumRange: n =>
     total := 0
-    1 to: n do: [:i |
-      total := total + i
-    ]
+    1 to: n do: [:i | total := total + i]
     total
 
   // Local mutation in whileTrue:
@@ -55,17 +49,13 @@ Actor subclass: LocalMutationActor
   // Local mutation in whileFalse:
   countUpWithWhileFalseFrom: n =>
     counter := 0
-    [counter >= n] whileFalse: [
-      counter := counter + 1
-    ]
+    [counter >= n] whileFalse: [counter := counter + 1]
     counter
 
   // Local mutation in to:by:do:
   sumEvens: n =>
     total := 0
-    2 to: n by: 2 do: [:i |
-      total := total + i
-    ]
+    2 to: n by: 2 do: [:i | total := total + i]
     total
 
   // Mixed local + field mutation

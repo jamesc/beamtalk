@@ -15,7 +15,9 @@ TestCase subclass: ErlangInteropTest
     // Single keyword: lists:reverse/1
     self assert: (Erlang lists reverse: #(3, 2, 1)) equals: #(1, 2, 3)
     // Multi-keyword: maps:merge/2
-    self assert: (Erlang maps merge: #{#a => 1} with: #{#b => 2}) equals: #{#a => 1, #b => 2}
+    self assert: (Erlang maps merge: #{
+      #a => 1
+    } with: #{#b => 2}) equals: #{#a => 1, #b => 2}
     // lists:seq/2
     self assert: (Erlang lists seq: 1 with: 5) equals: #(1, 2, 3, 4, 5)
     // lists:nth/2

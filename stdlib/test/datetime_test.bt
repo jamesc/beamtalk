@@ -112,7 +112,9 @@ TestCase subclass: DateTimeTest
     // Invalid date raises error
     self should: [DateTime year: 2026 month: 13 day: 1] raise: #type_error
     // Invalid time raises error
-    self should: [DateTime year: 2026 month: 1 day: 1 hour: 25 minute: 0 second: 0] raise: #type_error
+    self should: [
+      DateTime year: 2026 month: 1 day: 1 hour: 25 minute: 0 second: 0
+    ] raise: #type_error
     // Invalid string format raises error
     self should: [DateTime fromString: "not-a-date"] raise: #type_error
     // Non-integer argument raises error
@@ -120,4 +122,6 @@ TestCase subclass: DateTimeTest
     self should: [DateTime fromTimestamp: "hello"] raise: #type_error
     // diffSeconds: with non-DateTime raises error
     @expect type
-    self should: [(DateTime year: 2026 month: 1 day: 1) diffSeconds: "hello"] raise: #type_error
+    self should: [
+      (DateTime year: 2026 month: 1 day: 1) diffSeconds: "hello"
+    ] raise: #type_error

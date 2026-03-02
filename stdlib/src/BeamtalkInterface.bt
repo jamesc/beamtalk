@@ -61,7 +61,8 @@ Actor subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk help: Counter selector: #increment
   /// ```
-  sealed help: aClass: Object selector: aSelector: Symbol -> String => @primitive "help:selector:"
+  sealed help: aClass: Object selector: aSelector: Symbol -> String =>
+    @primitive "help:selector:"
 
   /// Return the Beamtalk version string.
   ///

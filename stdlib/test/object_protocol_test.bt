@@ -53,7 +53,7 @@ TestCase subclass: ObjectProtocolTest
 
   testRespondstoMethodExistenceCheck =>
     // Integers respond to +
-    self assert: (42 respondsTo: #+)
+    self assert: (42 respondsTo: #'+')
     // Integers respond to class (inherited from Object)
     self assert: (42 respondsTo: #class)
     // Integers do not respond to nonsense
@@ -65,12 +65,12 @@ TestCase subclass: ObjectProtocolTest
     // nil responds to isNil
     self assert: (nil respondsTo: #isNil)
     // Booleans respond to ifTrue:ifFalse:
-    self assert: (true respondsTo: #'ifTrue:ifFalse:')
+    self assert: (true respondsTo: #ifTrue:ifFalse:)
     // Blocks respond to value
     self assert: ([1] respondsTo: #value)
     self deny: ([1] respondsTo: #invalidMethod)
     // Float responds to arithmetic operations
-    self assert: (3.14 respondsTo: #+)
+    self assert: (3.14 respondsTo: #'+')
     self assert: (3.14 respondsTo: #'-')
     self assert: (3.14 respondsTo: #class)
     self assert: (3.14 respondsTo: #asString)

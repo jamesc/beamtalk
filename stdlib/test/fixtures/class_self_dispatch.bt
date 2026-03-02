@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-773: Test fixture for class method self vs explicit class name dispatch
+
 Object subclass: ClassSelfDispatch
   state: x = 0
 

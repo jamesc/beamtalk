@@ -13,6 +13,7 @@
 /// nil ifNil: ["nothing"]       // => "nothing"
 /// ```
 sealed Object subclass: UndefinedObject
+
   /// Returns true. nil is nil.
   ///
   /// ## Examples

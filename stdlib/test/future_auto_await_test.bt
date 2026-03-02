@@ -7,7 +7,6 @@
 // resolved value, not a Future. The codegen wraps operands with
 // beamtalk_future:maybe_await/1 for backward compatibility during migration
 
-
 TestCase subclass: FutureAutoAwaitTest
 
   // Equality: actor method result used in == comparison

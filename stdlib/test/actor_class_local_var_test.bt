@@ -4,7 +4,6 @@
 // BT-741: Tests that Actor class methods can use local variables (arithmetic,
 // block literals, dictionaries) without referencing actor State fields
 
-
 TestCase subclass: ActorClassLocalVarTest
 
   testClassMethodsWithLocalVariables =>

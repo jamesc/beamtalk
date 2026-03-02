@@ -3,7 +3,6 @@
 
 // Auto-tests for examples in docs/beamtalk-language-features.md
 
-
 TestCase subclass: LanguageFeaturesDocTest
 
   testStringEncodingAndUtf8 =>
@@ -52,27 +51,64 @@ TestCase subclass: LanguageFeaturesDocTest
     // Block with arguments
     self assert: ([:x :y | x + y] value: 3 value: 4) equals: 7
     // Block with local variables
-    myBlock := [:x | temp := x * 2. temp + 1]
+    myBlock := [:x |
+      temp := x * 2
+      temp + 1
+    ]
     self assert: (myBlock value: 5) equals: 11
 
   testPatternMatchingMatchExpression =>
     // Variable binding in patterns
     self assert: (42 match: [n -> n + 1]) equals: 43
     // Match on computed expression
-    self assert: ((3 + 4) match: [7 -> "correct"; _ -> "wrong"]) equals: "correct"
+    self assert: ((3 + 4) match: [
+      7 -> "correct";
+      _ -> "wrong"
+    ]) equals: "correct"
     // Integer literal matching
-    self assert: (1 match: [1 -> "one"; 2 -> "two"; _ -> "other"]) equals: "one"
-    self assert: (2 match: [1 -> "one"; 2 -> "two"; _ -> "other"]) equals: "two"
-    self assert: (3 match: [1 -> "one"; 2 -> "two"; _ -> "other"]) equals: "other"
+    self assert: (1 match: [
+      1 -> "one";
+      2 -> "two";
+      _ -> "other"
+    ]) equals: "one"
+    self assert: (2 match: [
+      1 -> "one";
+      2 -> "two";
+      _ -> "other"
+    ]) equals: "two"
+    self assert: (3 match: [
+      1 -> "one";
+      2 -> "two";
+      _ -> "other"
+    ]) equals: "other"
     // Symbol matching
-    self assert: (#ok match: [#ok -> "success"; #error -> "failure"; _ -> "unknown"]) equals: "success"
+    self assert: (#ok match: [
+      #ok -> "success";
+      #error -> "failure";
+      _ -> "unknown"
+    ]) equals: "success"
     // String matching
-    self assert: ("hello" match: ["hello" -> "hi"; _ -> "huh?"]) equals: "hi"
+    self assert: ("hello" match: [
+      "hello" -> "hi";
+      _ -> "huh?"
+    ]) equals: "hi"
     // Negative number patterns
-    self assert: (-1 match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]) equals: "minus one"
-    self assert: (0 match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]) equals: "zero"
+    self assert: (-1 match: [
+      -1 -> "minus one";
+      0 -> "zero";
+      _ -> "other"
+    ]) equals: "minus one"
+    self assert: (0 match: [
+      -1 -> "minus one";
+      0 -> "zero";
+      _ -> "other"
+    ]) equals: "zero"
     // Guard clauses with when:
-    self assert: (10 match: [n when: [n > 100] -> "big"; n when: [n > 5] -> "medium"; _ -> "small"]) equals: "medium"
+    self assert: (10 match: [
+      n when: [n > 100] -> "big";
+      n when: [n > 5] -> "medium";
+      _ -> "small"
+    ]) equals: "medium"
     // Wildcard match
     self assert: (42 match: [_ -> "matched"]) equals: "matched"
 
@@ -84,8 +120,12 @@ TestCase subclass: LanguageFeaturesDocTest
 
   testStandardLibraryStream =>
     // Terminal forces computation through the pipeline
-    self assert: (((Stream from: 1) select: [:n | n isEven]) take: 5) equals: #(2, 4, 6, 8, 10)
-    self assert: ((Stream on: #(1, 2, 3, 4)) inject: 0 into: [:sum :n | sum + n]) equals: 10
+    self assert: (((Stream from: 1) select: [:n |
+      n isEven
+    ]) take: 5) equals: #(2, 4, 6, 8, 10)
+    self assert: ((Stream on: #(1, 2, 3, 4)) inject: 0 into: [:sum :n |
+      sum + n
+    ]) equals: 10
     // Stream printString — pipeline inspection
     self assert: ((Stream from: 1) printString) notNil
     self assert: ((Stream on: #(1, 2, 3)) printString) notNil

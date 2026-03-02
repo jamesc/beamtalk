@@ -6,7 +6,6 @@
 // delivering messages asynchronously. A subsequent sync send acts as a
 // barrier ensuring the cast was processed before asserting
 
-
 TestCase subclass: CastSendTest
 
   testCastSendIncrements =>

@@ -8,7 +8,6 @@
 // the block executes as a pure closure and the mutated state is local
 // to the closure and never returned to handle_call
 
-
 TestCase subclass: ActorConditionalMutationsTest
 
   testIfTrueWithTrueFlag =>
@@ -54,7 +53,9 @@ TestCase subclass: ActorConditionalMutationsTest
   testStatePersistedAcrossCalls =>
     // Verify state accumulates across multiple conditional calls
     c := ConditionalMutationCounter spawn
-    c conditionalIncrement: true; conditionalIncrement: true; conditionalIncrement: false
+    c conditionalIncrement: true;
+      conditionalIncrement: true;
+      conditionalIncrement: false
     self assert: c getCount equals: 2
 
   testSequentialConditionals =>
@@ -96,4 +97,3 @@ TestCase subclass: ActorConditionalMutationsTest
     result2 := c conditionalLast: false
     self assert: result2 equals: nil
     self assert: c getCount equals: 0
-

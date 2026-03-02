@@ -16,6 +16,18 @@
 /// "hello" ++ " world"   // => "hello world"
 /// ```
 sealed typed Collection subclass: String
+
+  /// Create a String by joining a list of grapheme cluster strings.
+  ///
+  /// Useful for constructing a String from the result of `asList` or
+  /// `select:` operations. Each element should be a grapheme string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// String class withAll: #("h", "e", "l", "l", "o")  // => "hello"
+  /// ```
+  class withAll: list: List -> String => @primitive "withAll:"
+
   /// Test strict equality with another string.
   ///
   /// ## Examples
@@ -243,7 +255,8 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "aabaa" replaceAll: "a" with: "x"     // => "xxbxx"
   /// ```
-  replaceAll: old: String with: new: String -> String => @primitive "replaceAll:with:"
+  replaceAll: old: String with: new: String -> String =>
+    @primitive "replaceAll:with:"
 
   /// Replace the first occurrence of `old` with `new`.
   ///
@@ -251,7 +264,8 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "aabaa" replaceFirst: "a" with: "x"   // => "xabaa"
   /// ```
-  replaceFirst: old: String with: new: String -> String => @primitive "replaceFirst:with:"
+  replaceFirst: old: String with: new: String -> String =>
+    @primitive "replaceFirst:with:"
 
   /// Take the first `n` grapheme clusters.
   ///
@@ -291,7 +305,8 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hi" padLeft: 5 with: "0"  // => "000hi"
   /// ```
-  padLeft: width: Integer with: char: String -> String => @primitive "padLeft:with:"
+  padLeft: width: Integer with: char: String -> String =>
+    @primitive "padLeft:with:"
 
   /// Right-pad the string to the given width with the specified character.
   ///
@@ -299,7 +314,8 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hi" padRight: 5 with: "0"  // => "hi000"
   /// ```
-  padRight: width: Integer with: char: String -> String => @primitive "padRight:with:"
+  padRight: width: Integer with: char: String -> String =>
+    @primitive "padRight:with:"
 
   /// Test if the string is empty.
   ///
@@ -429,7 +445,8 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "Hello" matchesRegex: "[a-z]+" options: #(#caseless)  // => true
   /// ```
-  matchesRegex: pattern options: opts: List -> Boolean => @primitive "matchesRegex:options:"
+  matchesRegex: pattern options: opts: List -> Boolean =>
+    @primitive "matchesRegex:options:"
 
   /// Find the first regex match, returning matched String or nil.
   ///
@@ -454,7 +471,8 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hello world" replaceRegex: "[aeiou]" with: "*"      // => "h*llo world"
   /// ```
-  replaceRegex: pattern with: replacement: String -> String => @primitive "replaceRegex:with:"
+  replaceRegex: pattern with: replacement: String -> String =>
+    @primitive "replaceRegex:with:"
 
   /// Replace all regex matches with a replacement string.
   ///
@@ -462,7 +480,8 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hello world" replaceAllRegex: "[aeiou]" with: "*"   // => "h*ll* w*rld"
   /// ```
-  replaceAllRegex: pattern with: replacement: String -> String => @primitive "replaceAllRegex:with:"
+  replaceAllRegex: pattern with: replacement: String -> String =>
+    @primitive "replaceAllRegex:with:"
 
   /// Split the string by a regex pattern.
   ///
@@ -488,14 +507,3 @@ sealed typed Collection subclass: String
   /// "hello" displayString       // => "hello"
   /// ```
   displayString -> String => self
-
-  /// Create a String by joining a list of grapheme cluster strings.
-  ///
-  /// Useful for constructing a String from the result of `asList` or
-  /// `select:` operations. Each element should be a grapheme string.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// String class withAll: #("h", "e", "l", "l", "o")  // => "hello"
-  /// ```
-  class withAll: list: List -> String => @primitive "withAll:"

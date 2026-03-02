@@ -3,13 +3,10 @@
 
 // BUnit tests for runtime-embedded documentation (ADR 0033, BT-769)
 
-
 TestCase subclass: RuntimeDocTest
 
   // --- Class doc ---
-
-  testClassDocDefaultsToNil =>
-    self assert: DocTestHelper doc equals: nil
+  testClassDocDefaultsToNil => self assert: DocTestHelper doc equals: nil
 
   testSetClassDoc =>
     DocTestHelper doc: "A helper for testing"
@@ -21,7 +18,6 @@ TestCase subclass: RuntimeDocTest
     self assert: DocTestHelper doc equals: "Second doc"
 
   // --- Method doc via >> and doc message ---
-
   testMethodDocDefaultsToNil =>
     m := DocTestHelper >> #greet
     self assert: m doc equals: nil
@@ -37,7 +33,6 @@ TestCase subclass: RuntimeDocTest
     self assert: m doc equals: "Return 42"
 
   // --- CompiledMethod doc accessor ---
-
   testCompiledMethodDocField =>
     DocTestHelper setDocForMethod: #greet to: "Greeting method"
     m := DocTestHelper >> #greet
@@ -45,13 +40,11 @@ TestCase subclass: RuntimeDocTest
     self assert: m selector equals: #greet
 
   // --- doc: returns self (chainable) ---
-
   testDocSetterReturnsSelf =>
     result := DocTestHelper doc: "Chainable"
     self assert: result equals: DocTestHelper
 
   // --- docForMethod: ---
-
   testDocForMethodReturnsDoc =>
     DocTestHelper setDocForMethod: #greet to: "Say hello"
     self assert: (DocTestHelper docForMethod: #greet) equals: "Say hello"

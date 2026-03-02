@@ -18,6 +18,19 @@
 /// ```
 abstract typed Value subclass: Collection
 
+  /// Factory method — create a collection of this type from a list.
+  ///
+  /// Default implementation returns the list as-is, giving `List` results
+  /// for custom user-defined Collection subclasses. Sealed built-in types
+  /// (List, Set, Array, Tuple, String) override this to produce their own type.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// List withAll: #(1, 2, 3)         // => #(1, 2, 3)
+  /// Array withAll: #(1, 2, 3)        // => #[1, 2, 3]
+  /// ```
+  class withAll: list: List -> Collection => list
+
   // === Abstract protocol (subclasses must implement) ===
 
   /// Return the number of elements.
@@ -42,19 +55,6 @@ abstract typed Value subclass: Collection
   /// #[1, 2] species         // => Array
   /// ```
   species -> Object => self class
-
-  /// Factory method — create a collection of this type from a list.
-  ///
-  /// Default implementation returns the list as-is, giving `List` results
-  /// for custom user-defined Collection subclasses. Sealed built-in types
-  /// (List, Set, Array, Tuple, String) override this to produce their own type.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// List withAll: #(1, 2, 3)         // => #(1, 2, 3)
-  /// Array withAll: #(1, 2, 3)        // => #[1, 2, 3]
-  /// ```
-  class withAll: list: List -> Collection => list
 
   // === Shared protocol (implemented in terms of abstract methods) ===
 
@@ -118,7 +118,9 @@ abstract typed Value subclass: Collection
   /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
   /// ```
   collect: block: Block -> Collection =>
-    result := (self inject: #() into: [:acc :each | acc addFirst: (block value: each)]) reversed
+    result := (self inject: #() into: [:acc :each |
+      acc addFirst: (block value: each)
+    ]) reversed
     // species returns the receiver's class at runtime — withAll: is a class-side
     // method not visible to the static type checker on the Object return type.
     @expect dnu

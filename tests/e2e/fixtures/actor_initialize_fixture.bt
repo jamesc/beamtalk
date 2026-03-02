@@ -6,10 +6,8 @@
 Actor subclass: InitCounter
   state: value = 0
 
-  initialize =>
-    self.value := 100
+  initialize => self.value := 100
 
   getValue => self.value
 
-  increment =>
-    self.value := self.value + 1
+  increment => self.value := self.value + 1
