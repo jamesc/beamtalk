@@ -9,6 +9,7 @@
 //! **DDD Context:** CLI / Language Service
 
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use miette::{IntoDiagnostic, Result, miette};
@@ -81,11 +82,12 @@ pub fn workspace_dir(workspace_id: &str) -> Result<PathBuf> {
 pub fn read_port_file(workspace_id: &str) -> Result<Option<(u16, Option<String>)>> {
     let port_file_path = workspace_dir(workspace_id)?.join("port");
 
-    if !port_file_path.exists() {
-        return Ok(None);
-    }
+    let content = match fs::read_to_string(&port_file_path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).into_diagnostic(),
+    };
 
-    let content = fs::read_to_string(&port_file_path).into_diagnostic()?;
     let mut lines = content.lines();
     if let Some(port_line) = lines.next() {
         if let Ok(port) = port_line.trim().parse::<u16>() {
@@ -95,7 +97,10 @@ pub fn read_port_file(workspace_id: &str) -> Result<Option<(u16, Option<String>)
                 .filter(|s| !s.is_empty());
             Ok(Some((port, nonce)))
         } else {
-            tracing::warn!("Invalid port file content: {content:?}");
+            tracing::warn!(
+                path = %port_file_path.display(),
+                "Invalid port file content in workspace port file"
+            );
             Ok(None)
         }
     } else {
@@ -113,11 +118,11 @@ pub fn read_port_file(workspace_id: &str) -> Result<Option<(u16, Option<String>)
 pub fn read_cookie_file(workspace_id: &str) -> Result<Option<String>> {
     let cookie_path = workspace_dir(workspace_id)?.join("cookie");
 
-    if !cookie_path.exists() {
-        return Ok(None);
-    }
-
-    let content = fs::read_to_string(&cookie_path).into_diagnostic()?;
+    let content = match fs::read_to_string(&cookie_path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).into_diagnostic(),
+    };
     let trimmed = content.trim();
     if trimmed.is_empty() {
         Ok(None)
