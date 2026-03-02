@@ -44,6 +44,7 @@ function findLspViaSysroot(): string | null {
     const result = spawnSync("beamtalk", ["--print-sysroot"], {
       encoding: "utf8",
       timeout: 5000,
+      windowsHide: true,
     });
     if (result.status !== 0 || !result.stdout?.trim()) {
       return null;
@@ -114,6 +115,7 @@ function resolveServerPath(context: vscode.ExtensionContext): ResolvedServerPath
   const probe = spawnSync(withPlatformExecutable("beamtalk-lsp"), ["--version"], {
     encoding: "utf8",
     timeout: 3000,
+    windowsHide: true,
   });
   if (!probe.error) {
     return { serverPath: "beamtalk-lsp", warning };
@@ -154,7 +156,7 @@ class BeamtalkTaskProvider implements vscode.TaskProvider {
       vscode.TaskScope.Workspace,
       "build",
       "beamtalk",
-      new vscode.ShellExecution("beamtalk build ."),
+      new vscode.ShellExecution("beamtalk", ["build", "."]),
       "$beamtalk"
     );
     buildTask.group = vscode.TaskGroup.Build;
@@ -164,7 +166,7 @@ class BeamtalkTaskProvider implements vscode.TaskProvider {
       vscode.TaskScope.Workspace,
       "test",
       "beamtalk",
-      new vscode.ShellExecution("beamtalk test"),
+      new vscode.ShellExecution("beamtalk", ["test"]),
       "$beamtalk"
     );
     testTask.group = vscode.TaskGroup.Test;
