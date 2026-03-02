@@ -39,14 +39,13 @@ use beamtalk_core::source_analysis::is_input_complete;
 use serial_test::serial;
 use std::env;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::time::Duration;
 use tungstenite::WebSocket;
-
-/// Default port for the REPL TCP server.
-const REPL_PORT: u16 = 9000;
 
 /// Explicit cookie for E2E test BEAM nodes.
 /// Both the `erl` process and the WebSocket client use this value so that
@@ -68,12 +67,6 @@ fn repl_timeout() -> Duration {
     };
     Duration::from_secs(secs)
 }
-
-/// Maximum retries when connecting to REPL backend.
-const MAX_CONNECT_RETRIES: u32 = 20;
-
-/// Delay between connection retries in milliseconds.
-const RETRY_DELAY_MS: u64 = 300;
 
 /// Find the workspace root directory.
 fn workspace_root() -> PathBuf {
@@ -275,6 +268,8 @@ struct ProcessManager {
     beam_process: Option<Child>,
     #[cfg_attr(not(unix), allow(dead_code))]
     cover_enabled: bool,
+    /// The OS-assigned port on which the REPL TCP server is listening.
+    port: u16,
 }
 
 /// Build the `-eval` command for the BEAM node.
@@ -294,7 +289,8 @@ fn beam_eval_cmd(
         // Cover mode wraps instrumentation BEFORE starting the workspace.
         // Cover-compiling must happen before the workspace supervisor spawns
         // the acceptor process, otherwise spawned closures use uninstrumented code.
-        let prelude = repl_startup::startup_prelude(REPL_PORT, None, None);
+        // Port 0 = OS-assigned ephemeral port; actual port is reported on stdout.
+        let prelude = repl_startup::startup_prelude(0, None, None);
         format!(
             "cover:start(), \
              case cover:compile_beam_directory(\"{ebin}\") of \
@@ -306,6 +302,8 @@ fn beam_eval_cmd(
                  _ -> ok \
              end, \
              {prelude}, \
+             {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
+             io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
              WaitFun = fun Wait() -> \
                  case filelib:is_file(\"{signal}\") of \
                      true -> ok; \
@@ -321,28 +319,63 @@ fn beam_eval_cmd(
              init:stop().",
         )
     } else {
-        repl_startup::build_eval_cmd(REPL_PORT, None, None)
+        // Port 0 = OS-assigned ephemeral port; build_eval_cmd already prints BEAMTALK_PORT.
+        repl_startup::build_eval_cmd(0, None, None)
     }
 }
 
-impl ProcessManager {
-    /// Start the BEAM REPL backend if not already running.
-    ///
-    /// Note: If the test detects an existing REPL on the port, it will use that
-    /// and not start its own processes. This is useful for development but means
-    /// the test won't manage the lifecycle. If the external REPL fails or stops
-    /// mid-test, errors may be confusing. For CI, always start with a clean state.
-    #[allow(clippy::too_many_lines)] // REPL startup with build, BEAM node init, and retry loop
-    fn start() -> Self {
-        // Check if REPL is already running by trying to connect
-        if TcpStream::connect(format!("127.0.0.1:{REPL_PORT}")).is_ok() {
-            eprintln!("E2E: REPL already running on port {REPL_PORT}");
-            return Self {
-                beam_process: None,
-                cover_enabled: false,
-            };
-        }
+/// Read the OS-assigned REPL port from the BEAM child's stdout.
+///
+/// The BEAM node prints `BEAMTALK_PORT:<port>` on stdout after binding.
+/// Blocks until the announcement is received or `repl_timeout()` elapses.
+/// After discovering the port, the reader thread **continues draining stdout**
+/// for the lifetime of the BEAM process so the pipe never fills and stalls the
+/// node. When `E2E_DEBUG` is set, all stdout lines are echoed to stderr.
+/// Panics (after killing the child) if the timeout expires.
+fn read_port_from_beam(child: &mut Child) -> u16 {
+    let stdout = child.stdout.take().expect("stdout must be piped");
+    let (tx, rx) = mpsc::channel::<u16>();
+    let debug_output = env::var("E2E_DEBUG").is_ok();
 
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        let mut port_sent = false;
+        // Always drain every line to prevent the pipe buffer from filling and
+        // stalling the BEAM node after the port has been discovered.
+        for line in reader.lines().map_while(Result::ok) {
+            if debug_output {
+                eprintln!("E2E BEAM: {line}");
+            }
+            if !port_sent {
+                if let Some(port_str) = line.strip_prefix("BEAMTALK_PORT:") {
+                    if let Ok(port) = port_str.trim().parse::<u16>() {
+                        let _ = tx.send(port); // receiver may have already timed out; keep draining
+                        port_sent = true;
+                    }
+                }
+            }
+        }
+    });
+
+    // Use repl_timeout() so startup and read timeouts stay consistent (120s
+    // for cover mode, 30s otherwise).
+    if let Ok(port) = rx.recv_timeout(repl_timeout()) {
+        return port;
+    }
+
+    // Timeout: kill the child to avoid leaving an orphaned erl process.
+    let _ = child.kill();
+    let _ = child.wait();
+    panic!("E2E: Timed out waiting for BEAM node to report its port (BEAMTALK_PORT line not seen)");
+}
+
+impl ProcessManager {
+    /// Start the BEAM REPL backend with an OS-assigned ephemeral port.
+    ///
+    /// Spawns the BEAM node with `tcp_port => 0` so the OS picks a free port,
+    /// then reads the actual port from the node's stdout (`BEAMTALK_PORT:<n>`).
+    /// This eliminates port conflicts between parallel test runs or other services.
+    fn start() -> Self {
         // Check if debug output is requested via environment variable
         let debug_output = env::var("E2E_DEBUG").is_ok();
 
@@ -362,12 +395,6 @@ impl ProcessManager {
 
             assert!(status.success(), "Failed to build runtime");
         }
-
-        let (stdout_cfg, stderr_cfg) = if debug_output {
-            (Stdio::inherit(), Stdio::inherit())
-        } else {
-            (Stdio::null(), Stdio::null())
-        };
 
         // When E2E_COVER=1, instrument all runtime modules with Erlang's cover
         // tool and export coverdata on shutdown via a signal file.
@@ -405,7 +432,15 @@ impl ProcessManager {
         pa_args.push("-eval".into());
         pa_args.push(eval_cmd.into());
 
-        let beam_child = Command::new("erl")
+        // Stdout is always piped so we can read the BEAMTALK_PORT announcement.
+        // Stderr is optionally inherited for debug output.
+        let stderr_cfg = if debug_output {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        };
+
+        let mut beam_child = Command::new("erl")
             .arg("-noshell")
             .arg("-sname")
             .arg("beamtalk_e2e_test")
@@ -414,30 +449,20 @@ impl ProcessManager {
             .args(&pa_args)
             .current_dir(workspace_root())
             .env("BEAMTALK_WORKSPACE", E2E_SESSION_NAME)
-            .stdout(stdout_cfg)
+            .env("BEAMTALK_NO_FILE_LOG", "1")
+            .stdout(Stdio::piped())
             .stderr(stderr_cfg)
             .spawn()
             .expect("Failed to start BEAM node");
 
-        // Wait for REPL to be ready
-        let mut retries = MAX_CONNECT_RETRIES;
-        while retries > 0 {
-            std::thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
-            if TcpStream::connect(format!("127.0.0.1:{REPL_PORT}")).is_ok() {
-                eprintln!("E2E: REPL ready on port {REPL_PORT}");
-                return Self {
-                    beam_process: Some(beam_child),
-                    cover_enabled,
-                };
-            }
-            retries -= 1;
-        }
-
-        eprintln!("E2E: Warning - REPL may not be fully started. Port {REPL_PORT} not responding.");
+        // Discover the OS-assigned port from the BEAM node's stdout.
+        let port = read_port_from_beam(&mut beam_child);
+        eprintln!("E2E: REPL ready on port {port}");
 
         Self {
             beam_process: Some(beam_child),
             cover_enabled,
+            port,
         }
     }
 
@@ -529,12 +554,12 @@ struct ReplClient {
 
 impl ReplClient {
     /// Connect to the REPL via WebSocket with cookie auth.
-    fn connect() -> Result<Self, std::io::Error> {
-        let tcp = TcpStream::connect(format!("127.0.0.1:{REPL_PORT}"))?;
+    fn connect(port: u16) -> Result<Self, std::io::Error> {
+        let tcp = TcpStream::connect(format!("127.0.0.1:{port}"))?;
         tcp.set_read_timeout(Some(repl_timeout()))?;
         tcp.set_write_timeout(Some(repl_timeout()))?;
 
-        let url = format!("ws://127.0.0.1:{REPL_PORT}/ws");
+        let url = format!("ws://127.0.0.1:{port}/ws");
         let (mut ws, _response) = tungstenite::client(&url, tcp)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e))?;
 
@@ -1507,8 +1532,8 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
 #[ignore = "slow test - run with `just test-e2e`"]
 #[serial(e2e)]
 fn e2e_inline_class_trailing_expressions() {
-    let _manager = ProcessManager::start();
-    let mut client = ReplClient::connect().expect("Failed to connect to REPL");
+    let manager = ProcessManager::start();
+    let mut client = ReplClient::connect(manager.port).expect("Failed to connect to REPL");
 
     // Use a unique class name per run to avoid collisions with pre-existing REPL state.
     let class_name = format!(
@@ -1554,14 +1579,14 @@ fn e2e_language_tests() {
         return;
     }
 
-    // Start or connect to BEAM REPL
-    let _manager = ProcessManager::start();
+    // Start BEAM REPL with OS-assigned port
+    let manager = ProcessManager::start();
 
     // Connect to REPL
-    let mut client = match ReplClient::connect() {
+    let mut client = match ReplClient::connect(manager.port) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Failed to connect to REPL on port {REPL_PORT}: {e}");
+            eprintln!("Failed to connect to REPL on port {}: {e}", manager.port);
             eprintln!("Make sure the REPL backend is running");
             panic!("Could not connect to REPL");
         }
