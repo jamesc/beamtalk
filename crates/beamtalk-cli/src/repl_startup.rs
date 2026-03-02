@@ -28,7 +28,7 @@ pub enum RuntimeLayout {
 }
 
 /// Directories that must be on the BEAM code path (`-pa`) for the REPL to work.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BeamPaths {
     /// Path to the `beamtalk_runtime` application's `ebin/` directory.
     pub runtime_ebin: PathBuf,
