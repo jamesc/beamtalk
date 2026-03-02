@@ -142,7 +142,7 @@ Most updates are event-driven via existing push channels. The extension owns the
 
 One small addition to the existing protocol:
 
-**`class-loaded` push event**: When any session loads, reloads, or eval-defines a class, the workspace broadcasts a push event to all WebSocket subscribers — analogous to the existing `actor_spawned`/`actor_stopped` push events. This lets the sidebar refresh the Classes section without polling.
+**`class-loaded` push event**: When any session loads, reloads, or eval-defines a class, the workspace broadcasts a push event to all WebSocket subscribers — analogous to the existing `actors` channel `spawned`/`stopped` events. This lets the sidebar refresh the Classes section without polling.
 
 No `bindings` session param is needed: the extension owns the REPL session and queries its own session's bindings directly. The `complete` op's session param pattern already exists and works the same way.
 
@@ -327,7 +327,7 @@ Rely on the terminal REPL for all workspace inspection. The REPL already support
 One runtime-side change:
 
 1. **`class-loaded` push event** (`beamtalk_repl_server.erl`, `beamtalk_ws_handler.erl`)
-   - Broadcast `{"push":"class-loaded","class":"Counter"}` to all WebSocket subscribers when any session loads, reloads, or eval-defines a class — flat structure matching the existing `actor-spawned`/`actor-stopped` convention
+   - Broadcast `{"type":"push","channel":"classes","event":"loaded","data":{"class":"Counter"}}` to all WebSocket subscribers when any session loads, reloads, or eval-defines a class — same structured format as the existing `actors` channel push events
 
 2. **Session ID on REPL startup** (`beamtalk-cli/src/commands/repl.rs`)
    - REPL prints session ID to stdout on connect, e.g. `[beamtalk] session: abc123`
@@ -338,7 +338,7 @@ One runtime-side change:
 1. **`WorkspaceClient` class** (`editors/vscode/src/workspaceClient.ts`)
    - WebSocket connection management (connect, auth, reconnect with backoff)
    - `bindings(sessionId)`, `actors()`, `classes()`, `inspect(pid)`, `sessions()` op wrappers
-   - Push channel subscription (`transcript`, `actors`, `classes`)
+   - Push channel subscription (`transcript`, `actors`, `classes`) — `classes` is the channel name; events within it are `loaded` (and future: `reloaded`, `removed`)
    - Session lifecycle (`clone`, `close`)
 
 2. **`WorkspaceTreeDataProvider`** (`editors/vscode/src/workspaceTreeView.ts`)
