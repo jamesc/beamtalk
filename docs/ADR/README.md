@@ -74,6 +74,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0045](0045-repl-expression-completion-type-inference.md) | REPL Expression-Level Completion via Gradual Type Inference | Accepted | 2026-03-01 |
 | [0046](0046-vscode-live-workspace-sidebar.md) | VSCode Live Workspace Sidebar | Accepted | 2026-03-02 |
 | [0047](0047-return-type-arrow-token-disambiguation.md) | Return Type Arrow Token Disambiguation | Proposed | 2026-03-02 |
+| [0048](0048-class-side-method-syntax.md) | Class-Side Method Syntax Redesign | Proposed | 2026-03-02 |
 
 ## Creating New ADRs
 

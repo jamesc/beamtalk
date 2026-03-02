@@ -17,8 +17,8 @@ kind used for any other binary operator. The parser distinguishes the return-typ
 from a binary message send via a lookahead function (`is_return_type_then_fat_arrow`)
 that checks whether `-> Identifier =>` follows the current position.
 
-This lookahead fails in two confirmed cases discovered during BT-1003 (both are in the
-stdlib; no user-defined `->` methods are currently affected):
+This lookahead fails in at least two cases discovered during BT-1003. This ADR
+addresses the first:
 
 ### Ambiguity 1 — `->` as method selector
 
@@ -35,32 +35,19 @@ The `Object.->` method (Association creation) cannot be annotated with its retur
 The root cause: the selector token `->` and the return-type separator token `->` are
 indistinguishable. The lookahead cannot determine which `->` opens the return type.
 
-### Ambiguity 2 — `class` as method name vs. class-side modifier
+### Ambiguity 2 — `class` as method name vs. class-side modifier (out of scope)
 
-The `Class.class` method (returns the metaclass of a class) cannot be annotated:
+A second ambiguity exists: the `Class.class` method (returns the metaclass) cannot be
+annotated because `class` is both a valid method name and the keyword introducing
+class-side method definitions. This is a deeper structural issue — Beamtalk's `class`
+modifier is a syntactic convenience that has no equivalent in Smalltalk (where
+`(MyClass class) >> #myMethod` is a plain message send, not modifier syntax). Addressing
+it properly requires reconsidering the class-side method definition syntax; that decision
+is the subject of ADR 0048.
 
-```beamtalk
-// Intended: sealed instance method `class`, return type `Metaclass`
-sealed class -> Metaclass => @primitive "classClass"
+### Current workaround
 
-// Parser sees: class-side binary method named `->` with arg `Metaclass`
-// Codegen produces class_->/2; `Self` is unbound.
-```
-
-The root cause: `class` is both a valid method name (returning the receiver's class)
-and the grammar keyword that introduces class-side method definitions. The parser
-resolves `sealed class ->` as "sealed class-side binary method `->` with argument
-`Metaclass`" rather than "sealed instance method `class` returning `Metaclass`".
-
-This ambiguity is Beamtalk-specific. In Smalltalk, `class` is never a modifier
-keyword — `(MyClass class) >> #myMethod` is a plain message send (`class` returns
-the metaclass object; `>>` defines a method on it). Beamtalk's `class` modifier is
-a syntactic convenience that collapses this two-step reflective pattern into a single
-declaration, and that convenience is the source of the collision.
-
-### Current workarounds
-
-Both methods are left unannotated (`return_type: None` in `generated_builtins.rs`),
+`Object.->` is left unannotated (`return_type: None` in `generated_builtins.rs`),
 which reduces return-type coverage for chain resolution in the REPL (ADR 0045 Phase 1).
 
 ### Constraint
@@ -109,33 +96,16 @@ This correctly handles:
 -> value -> Association => @primitive "->"
 ```
 
-### Parser change — `class` ambiguity
-
-The parser's `parse_method_definition()` already handles the `class` modifier by
-consuming it before parsing the selector. It must be updated so that when it sees
-`class` followed by `Arrow TypeName FatArrow`, it treats `class` as the method name
-(a unary selector) rather than as a class-side modifier, and does **not** consume it
-as a modifier.
-
-Concretely: before consuming `class` as a modifier, peek ahead. If the lookahead
-matches `Arrow Identifier (Pipe Identifier)* FatArrow` after `class`, treat `class`
-as the method selector and skip the modifier-consumption path.
-
-```beamtalk
-// class = unary method name, -> Metaclass = return type — now unambiguous
-sealed class -> Metaclass => @primitive "classClass"
-```
-
 ### Result
 
-After this change, both previously-unannotatable methods can carry return types:
+After this change, `Object.->` can carry a return type annotation:
 
 ```beamtalk
 -> value -> Association => @primitive "->"      // Object — Association creation
-sealed class -> Metaclass => @primitive "classClass"  // Class — metaclass access
 ```
 
-No user-visible syntax change. All existing annotations continue to work identically.
+`Class.class` remains unannotated pending ADR 0048. No user-visible syntax change.
+All existing annotations continue to work identically.
 
 ## Prior Art
 
@@ -181,9 +151,9 @@ fix is purely at the parse layer. Erlang `-spec` annotations generated from retu
 types become more complete (previously-unannotatable methods now carry specs).
 
 **Tooling developer (LSP/IDE):** Positive. The LSP can now provide return type
-information for `Object.->` and `Class.class` — two methods that appear frequently
-in completions. The dedicated `Arrow` token also simplifies syntax highlighting rules
-(one token kind for type arrows, one for binary selectors).
+information for `Object.->`. `Class.class` annotation is pending ADR 0048. The
+dedicated `Arrow` token also simplifies syntax highlighting rules (one token kind
+for type arrows, one for binary selectors).
 
 **Production operator:** No runtime change. Pure compile-time fix.
 
@@ -235,9 +205,9 @@ in completions. The dedicated `Arrow` token also simplifies syntax highlighting 
 - 🏭 **Operator:** "Fewer parser changes = fewer regressions. Just accept the two gaps."
 - 🎨 **Language designer:** "The grammar is already complex. Don't add more lookahead."
 
-  **Why rejected:** Leaves a permanent, documented limitation in the type system. Future
-  binary methods (should `->` ever be used for something else) would hit the same wall.
-  The fix is constrained to the parser layer and does not propagate complexity elsewhere.
+  **Why rejected:** Leaves Ambiguity 1 as a permanent grammar limitation. The `Class.class`
+  annotation gap (Ambiguity 2) is addressed separately by ADR 0048 at the right structural
+  level — not by accepting it as permanent.
 
 ### Tension points
 
@@ -256,10 +226,10 @@ Rejected: visual confusion with early-return `^` in method bodies; migration cos
 
 ### Alternative C: Leave specific methods unannotated
 
-Accept `Object.->` and `Class.class` as permanently unannotatable. Document the
-limitation. Remove `->` from Object as part of BT-1017 to eliminate ambiguity 1;
-special-case `class` in parser documentation as a reserved method name.
+Accept `Object.->` as permanently unannotatable. Document the limitation. Remove
+`->` from Object as part of BT-1017 to eliminate ambiguity 1.
 Rejected: incomplete fix; leaves the grammar with a known, non-obvious limitation.
+`Class.class` is addressed structurally by ADR 0048, not by acceptance.
 
 ### Alternative D: Parser-only fix (count arrows in context)
 
@@ -285,8 +255,8 @@ parser's internal ambiguity into user-visible syntax.
 ## Consequences
 
 ### Positive
-- `Object.->` and `Class.class` gain return type annotations, improving REPL chain
-  resolution coverage (ADR 0045 Phase 1)
+- `Object.->` gains a return type annotation, improving REPL chain resolution coverage
+  (ADR 0045 Phase 1); `Class.class` follows once ADR 0048 is resolved
 - Future binary methods named `->` (unlikely but possible) work correctly
 - `Arrow` gives `->` a neutral identity in the token stream; the parser resolves its
   role (structural punctuation in signature position, binary operator in expression
@@ -310,11 +280,9 @@ parser's internal ambiguity into user-visible syntax.
   compiler/token-stream API change with no source-level syntax change, but downstream
   tooling that consumes the token stream (LSP, syntax highlighters, Tree-sitter grammars)
   will need to update their `->` handling.
-- Ambiguity 2 (keyword-as-method-name) is a class of grammar problem. `sealed` and
-  `override` are the other modifier keywords; neither is a plausible method name in
-  existing or planned stdlib code, so no additional instances of this class are known.
-  If future method names collide with modifiers, the same lookahead extension pattern
-  applies.
+- Ambiguity 2 (`class` as method name vs. class-side modifier) is addressed structurally
+  by ADR 0048 rather than by a per-case lookahead here. `sealed` and `override` are the
+  only other modifier keywords; neither is a plausible method name in current stdlib.
 - When generic type parameters land (e.g. `-> Map<K, V>`), `parse_optional_return_type`
   will need to handle parameterised types. The `Arrow` token fix is orthogonal to that
   work and does not make it harder.
@@ -342,9 +310,8 @@ parser's internal ambiguity into user-visible syntax.
   method detection branch (line 267), so `-> value -> Association =>` is recognised
   as a method definition rather than falling through to "end of class body"
 - `parse_method_selector()`: accept `Arrow` as a valid binary method selector name
-- `parse_method_definition()`: extend the `class`-as-method-name check (line 619) to
-  also break when `is_return_type_then_fat_arrow(1)` is true, reusing the existing
-  lookahead infrastructure
+- `parse_method_definition()`: no change needed for the `class` modifier check — that
+  ambiguity is addressed structurally by ADR 0048
 
 **Phase 3 — Parser expressions (`expressions.rs`):**
 - `parse_binary_with_pratt()` (line 300): extend the `while let BinarySelector`
@@ -356,8 +323,8 @@ parser's internal ambiguity into user-visible syntax.
 
 **Phase 4 — Stdlib annotations:**
 - Add `-> Association` to `Object.->` in `Object.bt`
-- Add `-> Metaclass` to `sealed class` in `Class.bt`
 - Regenerate `generated_builtins.rs`
+- `Class.class` annotation (`-> Metaclass`) is deferred to ADR 0048
 
 **Implementation scope:** The codebase has ~25 references to `BinarySelector` across
 5 files (`token.rs`, `lexer.rs`, `declarations.rs`, `expressions.rs`, `mod.rs`). Of
@@ -378,7 +345,7 @@ or REPL changes needed.
 ## References
 
 - Related issues: BT-1018 (parser ambiguity cleanup), BT-1017 (Association/`->` on Object review)
-- Related ADRs: ADR 0025 (Gradual Typing — introduced `->` return type syntax), ADR 0039 (Syntax Pragmatism)
+- Related ADRs: ADR 0025 (Gradual Typing — introduced `->` return type syntax), ADR 0039 (Syntax Pragmatism), ADR 0048 (class-side method syntax redesign — addresses Ambiguity 2)
 - Discovered during: BT-1003 (stdlib return type annotation audit)
 - BT-1017 note: if BT-1017 removes `->` from `Object`, Ambiguity 1 becomes moot, but the
   `Arrow` token remains the correct fix — any future binary method named `->` on any class
