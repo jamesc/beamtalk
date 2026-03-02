@@ -378,7 +378,14 @@ get_method_return_type(ClassName, Selector) ->
         undefined ->
             {error, not_found};
         Pid ->
-            case gen_server:call(Pid, {get_method_return_type, Selector}) of
+            Result =
+                try
+                    gen_server:call(Pid, {get_method_return_type, Selector}, 5000)
+                catch
+                    exit:{timeout, _} -> not_found;
+                    exit:{noproc, _} -> not_found
+                end,
+            case Result of
                 {ok, _} = Found ->
                     Found;
                 not_found ->
@@ -406,7 +413,14 @@ get_class_method_return_type(ClassName, Selector) ->
         undefined ->
             {error, not_found};
         Pid ->
-            case gen_server:call(Pid, {get_class_method_return_type, Selector}) of
+            Result =
+                try
+                    gen_server:call(Pid, {get_class_method_return_type, Selector}, 5000)
+                catch
+                    exit:{timeout, _} -> not_found;
+                    exit:{noproc, _} -> not_found
+                end,
+            case Result of
                 {ok, _} = Found ->
                     Found;
                 not_found ->
