@@ -207,11 +207,12 @@ impl ReplClient {
 
     /// Send a complete operation.
     ///
-    /// `cursor` is the byte offset into `code` at which completion is requested.
-    /// Passing `code.len()` (end of input) is the standard default. The REPL
-    /// uses the presence of the `cursor` field to enable chain completion
-    /// (e.g. `"hello" size` → Integer methods); omitting it falls back to
-    /// bare-prefix completion only.
+    /// `code` must already be truncated to `cursor` (i.e. only the text the
+    /// user has typed up to the cursor position). `cursor` is included as a
+    /// field in the JSON request; its presence tells the REPL to use the
+    /// context-aware chain-completion path (`get_context_completions/2`)
+    /// rather than the legacy bare-prefix path. The cursor value itself is not
+    /// used by the current REPL handler — only its presence matters.
     pub async fn complete(&self, code: &str, cursor: usize) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "complete",

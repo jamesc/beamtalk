@@ -52,13 +52,18 @@ pub struct EvaluateParams {
 /// Parameters for the `complete` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CompleteParams {
-    /// Partial input to complete.
-    #[schemars(description = "Partial beamtalk input to get completions for")]
-    pub code: String,
-    /// Cursor position (byte offset). Defaults to end of `code` if absent.
-    /// When present, enables chain completion (e.g. `\"hello\" size` → Integer methods).
+    /// Beamtalk expression up to the cursor position to get completions for.
+    /// For chain completions (e.g. `"hello" size `) include the full expression
+    /// up to where the cursor is placed.
     #[schemars(
-        description = "Cursor position as byte offset into code. Omit to use end of input."
+        description = "Beamtalk expression up to the cursor position to get completions for"
+    )]
+    pub code: String,
+    /// Cursor position (byte offset into `code`). Defaults to `code.len()` if absent.
+    /// The `code` string is truncated to this offset before forwarding to the REPL,
+    /// enabling correct completions when the cursor is mid-expression.
+    #[schemars(
+        description = "Cursor position as byte offset into code. Omit to complete at end of input."
     )]
     pub cursor: Option<usize>,
 }
@@ -182,9 +187,12 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let code_len = params.code.len();
         let cursor = params.cursor.unwrap_or(code_len).min(code_len);
+        // Truncate code to cursor: the REPL uses the code string as-is for
+        // completions, so only the text up to the cursor should be sent.
+        let code_up_to_cursor = &params.code[..cursor];
         let response = self
             .client
-            .complete(&params.code, cursor)
+            .complete(code_up_to_cursor, cursor)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
