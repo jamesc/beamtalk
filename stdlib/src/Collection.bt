@@ -29,7 +29,7 @@ abstract typed Value subclass: Collection
   /// List withAll: #(1, 2, 3)         // => #(1, 2, 3)
   /// Array withAll: #(1, 2, 3)        // => #[1, 2, 3]
   /// ```
-  class withAll: list: List -> Collection => list
+  class withAll: list: List -> Self => list
 
   // === Abstract protocol (subclasses must implement) ===
 
@@ -117,7 +117,7 @@ abstract typed Value subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
   /// ```
-  collect: block: Block -> Collection =>
+  collect: block: Block -> Self =>
     result := (self inject: #() into: [:acc :each |
       acc addFirst: (block value: each)
     ]) reversed
@@ -135,7 +135,7 @@ abstract typed Value subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3, 4) select: [:x | x > 2]  // => #(3, 4)
   /// ```
-  select: block: Block -> Collection =>
+  select: block: Block -> Self =>
     result := (self inject: #() into: [:acc :each |
       (block value: each) ifTrue: [acc addFirst: each] ifFalse: [acc]
     ]) reversed
@@ -149,7 +149,7 @@ abstract typed Value subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3, 4) reject: [:x | x > 2]  // => #(1, 2)
   /// ```
-  reject: block: Block -> Collection =>
+  reject: block: Block -> Self =>
     self select: [:each | (block value: each) not]
 
   /// Find the first element for which `block` returns true.

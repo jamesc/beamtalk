@@ -366,6 +366,7 @@ fn type_annotation_label(type_annotation: &crate::ast::TypeAnnotation) -> String
         crate::ast::TypeAnnotation::FalseOr { inner, .. } => {
             format!("{}?", type_annotation_label(inner))
         }
+        crate::ast::TypeAnnotation::SelfType { .. } => "Self".to_string(),
     }
 }
 

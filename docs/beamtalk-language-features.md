@@ -462,14 +462,27 @@ sum: left: Integer with: right: Integer -> Integer => left + right
 // Union type annotations parse (full checking is phased in)
 maybeName: flag: Boolean -> Integer | String =>
   ^flag ifTrue: [1] ifFalse: ["none"]
+
+// Self return type — resolves to the static receiver class at call sites
+// (only valid in return position, not parameters)
+collect: block: Block -> Self =>
+  self species withAll: (self inject: #() into: [:acc :each |
+    acc addFirst: (block value: each)
+  ]) reversed
+
+// At call sites, Self resolves to the static receiver type:
+// (List new collect: [:each | each])  — inferred return type: List
+// (Set new collect: [:each | each])   — inferred return type: Set
 ```
 
 ### Current Semantics
 
-- Type diagnostics are warnings, never compile-stopping errors.
+- Type mismatch diagnostics are warnings, never compile-stopping errors.
+- Invalid annotation forms (e.g., `Self` in parameter position) are errors.
 - `typed` classes require parameter/return annotations on non-primitive methods.
 - State annotations (`state: value: Integer = 0`) are checked for defaults and `self.field := ...` assignments.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
+- `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
 ---
 

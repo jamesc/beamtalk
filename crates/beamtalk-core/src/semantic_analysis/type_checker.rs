@@ -249,6 +249,7 @@ impl TypeChecker {
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
                 self.check_override_param_compatibility(method, &class.name.name, hierarchy);
+                self.check_no_self_in_params(method, &class.name.name);
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
                 }
@@ -261,6 +262,7 @@ impl TypeChecker {
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
+                self.check_no_self_in_params(method, &class.name.name);
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
                 }
@@ -285,6 +287,7 @@ impl TypeChecker {
                 is_abstract,
             );
             self.check_return_type(&standalone.method, &body_type, class_name, hierarchy);
+            self.check_no_self_in_params(&standalone.method, class_name);
         }
     }
 
@@ -689,7 +692,13 @@ impl TypeChecker {
             // Infer return type from method info
             if let Some(method) = hierarchy.find_method(class_name, &selector_name) {
                 if let Some(ref ret_ty) = method.return_type {
-                    return InferredType::Known(ret_ty.clone());
+                    // `Self` resolves to the static receiver class
+                    let resolved = if ret_ty.as_str() == "Self" {
+                        class_name.clone()
+                    } else {
+                        ret_ty.clone()
+                    };
+                    return InferredType::Known(resolved);
                 }
             }
         }
@@ -739,7 +748,13 @@ impl TypeChecker {
             _ => {
                 if let Some(method) = hierarchy.find_class_method(class_name, selector) {
                     if let Some(ref ret_ty) = method.return_type {
-                        return InferredType::Known(ret_ty.clone());
+                        // `Self` resolves to the static receiver class
+                        let resolved = if ret_ty.as_str() == "Self" {
+                            class_name.clone()
+                        } else {
+                            ret_ty.clone()
+                        };
+                        return InferredType::Known(resolved);
                     }
                 }
                 InferredType::Dynamic
@@ -902,16 +917,18 @@ impl TypeChecker {
         let Some(ref declared) = method.return_type else {
             return;
         };
-        // Only check Simple type annotations (Phase 3 handles unions/generics)
-        let TypeAnnotation::Simple(type_id) = declared else {
-            return;
-        };
         let InferredType::Known(actual_ty) = body_type else {
             return; // Dynamic body — can't check
         };
 
-        let expected_ty = &type_id.name;
-        if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
+        // For `-> Self`, the expected type is the class itself
+        let expected_ty: EcoString = match declared {
+            TypeAnnotation::Simple(type_id) => type_id.name.clone(),
+            TypeAnnotation::SelfType { .. } => class_name.clone(),
+            _ => return, // Phase 3 handles unions/generics
+        };
+
+        if !Self::is_type_compatible(actual_ty, &expected_ty, hierarchy) {
             let selector = method.selector.name();
             let mut diag = Diagnostic::warning(
                 format!(
@@ -924,6 +941,32 @@ impl TypeChecker {
                 format!("Declared -> {expected_ty}, inferred body type is {actual_ty}").into(),
             );
             self.diagnostics.push(diag);
+        }
+    }
+
+    /// Emit an error for any parameter annotated with `Self`.
+    ///
+    /// `Self` is only valid in return position (TypeScript `this` return type).
+    /// Using it as a parameter type is unsound in the presence of subclassing
+    /// (Eiffel's mistake) and is rejected at the semantic analysis level.
+    fn check_no_self_in_params(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        class_name: &EcoString,
+    ) {
+        let selector = method.selector.name();
+        for param in &method.parameters {
+            if matches!(param.type_annotation, Some(TypeAnnotation::SelfType { .. })) {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "`Self` cannot be used as a parameter type in `{class_name}::{selector}` (only valid in return position)"
+                        ),
+                        param.name.span,
+                    )
+                    .with_category(DiagnosticCategory::Type),
+                );
+            }
         }
     }
 
@@ -3832,6 +3875,207 @@ mod tests {
             field_diags[0].severity,
             Severity::Warning,
             "Non-self field assignment should be a warning, not an error"
+        );
+    }
+
+    // ---- Self return type tests (BT-1041) ----
+
+    #[test]
+    fn test_self_return_type_parsed() {
+        // `-> Self` parses to TypeAnnotation::SelfType
+        let source = "Object subclass: Foo\n  clone -> Self => self";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let method = &module.classes[0].methods[0];
+        assert!(
+            matches!(method.return_type, Some(TypeAnnotation::SelfType { .. })),
+            "Expected SelfType annotation, got: {:?}",
+            method.return_type
+        );
+    }
+
+    #[test]
+    fn test_self_return_type_no_warning_when_body_returns_self() {
+        // Method declares -> Self and body returns self (same class) — no warning
+        let source = "Object subclass: Foo\n  clone -> Self => self";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+            .0
+            .unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert!(
+            return_warnings.is_empty(),
+            "-> Self with body returning self should not warn, got: {return_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_self_return_type_warns_on_mismatch() {
+        // Method declares -> Self but body returns a String — should warn
+        let source = "Object subclass: Foo\n  clone -> Self => \"not-self\"";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+            .0
+            .unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let return_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("declares return type"))
+            .collect();
+        assert_eq!(
+            return_warnings.len(),
+            1,
+            "-> Self with body returning String should warn"
+        );
+        // The warning should mention the class name (Foo) and the actual body type (String)
+        assert!(
+            return_warnings[0].message.contains("Foo"),
+            "Warning should mention class name"
+        );
+        assert!(
+            return_warnings[0].message.contains("String"),
+            "Warning should mention actual return type"
+        );
+    }
+
+    #[test]
+    fn test_self_in_param_position_emits_error() {
+        // `clone: other: Self` — Self in param position is an error
+        let source = "Object subclass: Foo\n  mergeWith: other: Self => self";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+            .0
+            .unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let self_errors: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("cannot be used as a parameter type"))
+            .collect();
+        assert_eq!(
+            self_errors.len(),
+            1,
+            "Expected error for Self in parameter position, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_self_resolves_to_receiver_class_in_instance_send() {
+        // List collect: [...] should infer return type List (not Collection or Self)
+        // Use `first` which is List-specific (not on Collection) to prove resolution
+        let source = "
+Object subclass: Foo
+  test =>
+    list := #(1, 2, 3)
+    result := list collect: [:x | x]
+    result first
+";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        // `result first` should be valid — `first` is List-specific, proving Self resolved to List
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "result.first should be valid when collect: returns List via Self, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_self_resolves_to_receiver_class_in_class_send() {
+        // List withAll: #(1,2,3) should infer return type List (not Collection or Self)
+        // Use `first` which is List-specific (not on Collection) to prove resolution
+        let source = "
+Object subclass: Foo
+  test =>
+    result := List withAll: #(1, 2, 3)
+    result first
+";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        // `result first` should be valid — proves Self resolved to List, not Collection
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "result.first should be valid when List withAll: returns List via Self, got: {dnu_warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_self_type_name_is_self() {
+        // TypeAnnotation::SelfType::type_name() returns "Self"
+        let ann = TypeAnnotation::SelfType { span: span() };
+        assert_eq!(ann.type_name(), "Self");
+    }
+
+    #[test]
+    fn test_self_resolves_through_multi_level_inheritance() {
+        // A defines -> Self, B extends A, C extends B with a unique method.
+        // A call on C should resolve Self to C (not A or B).
+        let source = "
+Object subclass: A
+  clone -> Self => self
+
+A subclass: B
+
+B subclass: C
+  onlyOnC => 42
+
+Object subclass: Foo
+  test =>
+    c := C new
+    result := c clone
+    result onlyOnC
+";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+            .0
+            .unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        // result.onlyOnC should be valid — proves Self resolved to C (not A or B)
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "result.onlyOnC should be valid for multi-level Self, got: {dnu_warnings:?}"
         );
     }
 }

@@ -662,6 +662,7 @@ impl MethodDefinition {
 /// - `Counter` (custom class)
 /// - `Integer | String` (union)
 /// - `#north | #south | #east | #west` (singleton/enum)
+/// - `Self` (return type resolves to the static receiver class)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeAnnotation {
     /// A simple named type (e.g., `Integer`, `String`, `Counter`).
@@ -698,6 +699,15 @@ pub enum TypeAnnotation {
         /// Source location of the entire false-or type.
         span: Span,
     },
+    /// The `Self` return type — resolves to the static receiver class at call sites.
+    ///
+    /// Only valid in return position. Placing `Self` in parameter position is an error.
+    ///
+    /// Example: `collect: block: Block -> Self`
+    SelfType {
+        /// Source location.
+        span: Span,
+    },
 }
 
 impl TypeAnnotation {
@@ -709,7 +719,8 @@ impl TypeAnnotation {
             Self::Union { span, .. }
             | Self::Singleton { span, .. }
             | Self::Generic { span, .. }
-            | Self::FalseOr { span, .. } => *span,
+            | Self::FalseOr { span, .. }
+            | Self::SelfType { span } => *span,
         }
     }
 
@@ -794,6 +805,7 @@ impl TypeAnnotation {
                 };
                 eco_format!("{inner_name} | False")
             }
+            Self::SelfType { .. } => "Self".into(),
         }
     }
 }
