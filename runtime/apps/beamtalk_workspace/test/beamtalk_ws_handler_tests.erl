@@ -207,6 +207,144 @@ on_class_loaded_safe_when_server_not_running_test() ->
     ?assertEqual(ok, beamtalk_class_events:on_class_loaded('Counter')).
 
 %%% ===========================================================================
+%%% methods op: list_class_methods_for_ws/1
+%%% ===========================================================================
+
+methods_op_unknown_class_returns_empty_list_test() ->
+    %% An atom that has never been registered returns []
+    Result = beamtalk_repl_ops_dev:list_class_methods_for_ws(<<"NonExistentClass12345">>),
+    ?assertEqual([], Result).
+
+methods_op_empty_class_name_returns_empty_list_test() ->
+    Result = beamtalk_repl_ops_dev:list_class_methods_for_ws(<<"">>),
+    ?assertEqual([], Result).
+
+methods_op_known_class_returns_instance_and_class_methods_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    ClassName = 'BT1026TestClass',
+    RegName = beamtalk_class_registry:registry_name(ClassName),
+    %% Clean up any leftover registration from a previous test run
+    case whereis(RegName) of
+        undefined -> ok;
+        Pid0 -> gen_server:stop(Pid0)
+    end,
+    InstanceFun = fun(_Self) -> ok end,
+    ClassFun = fun(_Self) -> ok end,
+    ClassInfo = #{
+        name => ClassName,
+        module => bt_test_module,
+        superclass => none,
+        instance_methods => #{
+            increment => #{block => InstanceFun, arity => 1},
+            value => #{block => InstanceFun, arity => 1}
+        },
+        class_methods => #{
+            new => #{block => ClassFun, arity => 1}
+        }
+    },
+    {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+    try
+        Result = beamtalk_repl_ops_dev:list_class_methods_for_ws(<<"BT1026TestClass">>),
+        %% Check total count: 2 instance + 1 class
+        ?assertEqual(3, length(Result)),
+        %% Check all entries have required keys
+        lists:foreach(
+            fun(Entry) ->
+                ?assert(maps:is_key(<<"name">>, Entry)),
+                ?assert(maps:is_key(<<"selector">>, Entry)),
+                ?assert(maps:is_key(<<"side">>, Entry)),
+                Side = maps:get(<<"side">>, Entry),
+                ?assert(Side =:= <<"instance">> orelse Side =:= <<"class">>)
+            end,
+            Result
+        ),
+        %% Check instance methods are present
+        InstanceEntries = [E || E <- Result, maps:get(<<"side">>, E) =:= <<"instance">>],
+        ?assertEqual(2, length(InstanceEntries)),
+        InstanceSelectors = [maps:get(<<"selector">>, E) || E <- InstanceEntries],
+        ?assert(lists:member(<<"increment">>, InstanceSelectors)),
+        ?assert(lists:member(<<"value">>, InstanceSelectors)),
+        %% Check class-side method is present
+        ClassEntries = [E || E <- Result, maps:get(<<"side">>, E) =:= <<"class">>],
+        ?assertEqual(1, length(ClassEntries)),
+        ?assertEqual(<<"new">>, maps:get(<<"selector">>, hd(ClassEntries)))
+    after
+        gen_server:stop(Pid)
+    end.
+
+methods_op_protocol_json_shape_test() ->
+    %% Exercise the full "methods" op handler and assert on JSON response shape.
+    beamtalk_class_registry:ensure_pg_started(),
+    ClassName = 'BT1026ProtoTestClass',
+    RegName = beamtalk_class_registry:registry_name(ClassName),
+    case whereis(RegName) of
+        undefined -> ok;
+        Pid0 -> gen_server:stop(Pid0)
+    end,
+    Fun = fun(_Self) -> ok end,
+    ClassInfo = #{
+        name => ClassName,
+        module => bt_test_module_proto,
+        superclass => none,
+        instance_methods => #{
+            value => #{block => Fun, arity => 1}
+        },
+        class_methods => #{
+            new => #{block => Fun, arity => 1}
+        }
+    },
+    {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+    try
+        %% Build a protocol message via decode, then call handle/4
+        Json = jsx:encode(#{
+            <<"op">> => <<"methods">>,
+            <<"id">> => <<"test-1">>,
+            <<"class">> => <<"BT1026ProtoTestClass">>
+        }),
+        {ok, Msg} = beamtalk_repl_protocol:decode(Json),
+        Params = beamtalk_repl_protocol:get_params(Msg),
+        %% SessionPid unused for methods op, pass self()
+        Reply = beamtalk_repl_ops_dev:handle(<<"methods">>, Params, Msg, self()),
+        Decoded = jsx:decode(Reply, [return_maps]),
+        %% Must have status, methods, and id fields
+        ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+        ?assert(maps:is_key(<<"methods">>, Decoded)),
+        ?assertEqual(<<"test-1">>, maps:get(<<"id">>, Decoded)),
+        %% 1 instance + 1 class method
+        Methods = maps:get(<<"methods">>, Decoded),
+        ?assertEqual(2, length(Methods))
+    after
+        gen_server:stop(Pid)
+    end.
+
+methods_op_name_equals_selector_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    ClassName = 'BT1026NameSelectorClass',
+    RegName = beamtalk_class_registry:registry_name(ClassName),
+    case whereis(RegName) of
+        undefined -> ok;
+        Pid0 -> gen_server:stop(Pid0)
+    end,
+    Fun = fun(_Self) -> ok end,
+    ClassInfo = #{
+        name => ClassName,
+        module => bt_test_module2,
+        superclass => none,
+        instance_methods => #{
+            'printString' => #{block => Fun, arity => 1}
+        },
+        class_methods => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+    try
+        [Entry] = beamtalk_repl_ops_dev:list_class_methods_for_ws(<<"BT1026NameSelectorClass">>),
+        ?assertEqual(maps:get(<<"name">>, Entry), maps:get(<<"selector">>, Entry)),
+        ?assertEqual(<<"printString">>, maps:get(<<"selector">>, Entry))
+    after
+        gen_server:stop(Pid)
+    end.
+
+%%% ===========================================================================
 %%% Push Message Format: classes channel
 %%% ===========================================================================
 
