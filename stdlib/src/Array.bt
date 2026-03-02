@@ -32,6 +32,14 @@ sealed Collection subclass: Array
   /// ```
   class withAll: list: List -> Array => @primitive "withAll:"
 
+  /// Create an Array from a list. Convenience alias for `withAll:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Array new: #(1, 2, 3)            // => #[1, 2, 3]
+  /// ```
+  class new: elements: List -> Array => self withAll: elements
+
   /// Number of elements in the array.
   ///
   /// ## Examples

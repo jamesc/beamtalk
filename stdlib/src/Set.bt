@@ -26,6 +26,14 @@ sealed Collection subclass: Set
   /// ```
   class withAll: list: List -> Set => @primitive "withAll:"
 
+  /// Create a Set from a list, deduplicating elements. Convenience alias for `withAll:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Set new: #(1, 2, 2, 3)           // => Set(1, 2, 3)
+  /// ```
+  class new: elements: List -> Set => self withAll: elements
+
   /// Number of elements in the set.
   ///
   /// ## Examples

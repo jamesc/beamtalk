@@ -122,4 +122,5 @@ sealed Class subclass: Metaclass
   /// ```beamtalk
   /// Integer class class classIncludesSelector: #new   // => true
   /// ```
-  sealed classIncludesSelector: selector -> Boolean => @primitive "metaclassIncludesSelector"
+  sealed classIncludesSelector: selector -> Boolean =>
+    @primitive "metaclassIncludesSelector"
