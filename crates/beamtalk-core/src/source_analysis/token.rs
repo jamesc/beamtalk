@@ -503,6 +503,35 @@ impl Token {
         false
     }
 
+    /// Returns `true` if there is a blank line (two or more consecutive
+    /// newlines) **before the first comment** in the leading trivia.
+    ///
+    /// Unlike [`has_preceding_blank_line`] this stops as soon as it sees any
+    /// non-whitespace trivia (i.e., the first comment), so a blank line that
+    /// appears *between* two leading comments does **not** count.
+    ///
+    /// Used by the parser to distinguish a blank line that separates statements
+    /// from a blank line that appears inside a block of assertion comments
+    /// (BT-1016).
+    #[must_use]
+    pub fn has_blank_line_before_first_comment(&self) -> bool {
+        for trivia in &self.leading_trivia {
+            match trivia {
+                Trivia::Whitespace(s) => {
+                    let newline_count = s.chars().filter(|&c| c == '\n').count();
+                    if newline_count >= 2 {
+                        return true;
+                    }
+                }
+                _ => {
+                    // First non-whitespace trivia (a comment): stop looking.
+                    return false;
+                }
+            }
+        }
+        false
+    }
+
     /// Returns the indentation level (number of characters after the last
     /// newline in the leading trivia). Returns `None` if there is no leading newline.
     ///

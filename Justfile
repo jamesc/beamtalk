@@ -229,17 +229,17 @@ fmt-erlang:
     @echo "✅ Erlang code formatted"
 
 # Format all Beamtalk source files
-# bootstrap-test/ and tests/e2e/cases/ use script-style assertion syntax (// => X)
-# that the formatter does not preserve, so they are intentionally excluded.
+# .btscript files (bootstrap-test/, tests/e2e/cases/) use identity formatting —
+# only parse errors are reported; file content is never rewritten (BT-1016).
 fmt-beamtalk:
     @echo "✨ Formatting Beamtalk source files..."
-    @cargo run --bin beamtalk --quiet -- fmt stdlib/src/ stdlib/test/ tests/e2e/fixtures/
+    @cargo run --bin beamtalk --quiet -- fmt stdlib/src/ stdlib/test/ stdlib/bootstrap-test/ tests/e2e/cases/ tests/e2e/fixtures/
     @echo "✅ Beamtalk source files formatted"
 
 # Check Beamtalk source file formatting
 fmt-check-beamtalk:
     @echo "📋 Checking Beamtalk source formatting..."
-    @cargo run --bin beamtalk --quiet -- fmt-check stdlib/src/ stdlib/test/ tests/e2e/fixtures/
+    @cargo run --bin beamtalk --quiet -- fmt-check stdlib/src/ stdlib/test/ stdlib/bootstrap-test/ tests/e2e/cases/ tests/e2e/fixtures/
     @echo "✅ Beamtalk formatting check passed"
 
 # Run Dialyzer on Erlang runtime
