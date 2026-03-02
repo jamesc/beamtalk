@@ -1207,7 +1207,7 @@ context_completions_with_bindings_empty_line_test() ->
     %% Empty line with bindings returns empty
     ?assertEqual([], beamtalk_repl_ops_dev:get_context_completions(<<>>, #{a => 1})).
 
-%% BT: Core behavior — class receiver returns class-side methods, not instance methods
+%% BT-1044: Class receiver returns both class-side and instance methods
 context_completions_class_receiver_returns_class_methods_test() ->
     Pid = spawn_mock_class('TestCompletionClassA', #{spawn => ok, 'spawnWith:' => ok}, [
         increment, decrement
@@ -1216,14 +1216,32 @@ context_completions_class_receiver_returns_class_methods_test() ->
         Result = beamtalk_repl_ops_dev:get_context_completions(
             <<"TestCompletionClassA sp">>, #{}
         ),
-        %% Class-side methods and builtin class methods matching "sp" should appear
+        %% Class-side methods matching "sp" should appear
         ?assert(lists:member(<<"spawn">>, Result)),
         ?assert(lists:member(<<"spawnWith:">>, Result)),
-        %% Instance methods must NOT appear
+        %% Instance methods not matching prefix "sp" must not appear
         ?assertNot(lists:member(<<"increment">>, Result)),
         ?assertNot(lists:member(<<"decrement">>, Result))
     after
         cleanup_mock_class('TestCompletionClassA', Pid)
+    end.
+
+%% BT-1044: Class receiver also shows instance methods when prefix matches
+context_completions_class_receiver_includes_instance_methods_test() ->
+    Pid = spawn_mock_class('TestCompletionClassA2', #{spawn => ok}, [
+        increment, inspect, decrement
+    ]),
+    try
+        Result = beamtalk_repl_ops_dev:get_context_completions(
+            <<"TestCompletionClassA2 in">>, #{}
+        ),
+        %% Instance methods matching "in" should appear for class-name receivers
+        ?assert(lists:member(<<"increment">>, Result)),
+        ?assert(lists:member(<<"inspect">>, Result)),
+        %% Non-matching instance methods must not appear
+        ?assertNot(lists:member(<<"decrement">>, Result))
+    after
+        cleanup_mock_class('TestCompletionClassA2', Pid)
     end.
 
 %% BT: Core behavior — instance binding returns instance methods, not class-side methods
