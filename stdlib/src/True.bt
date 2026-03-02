@@ -36,7 +36,7 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true ifFalse: ["no"]       // => true
   /// ```
-  ifFalse: _falseBlock: Block => self
+  ifFalse: _falseBlock: Block -> True => self
 
   /// Logical NOT. Returns false.
   ///
