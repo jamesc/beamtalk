@@ -882,9 +882,15 @@ mod tests {
 
     /// Guard that kills a BEAM node when dropped, preventing orphans.
     ///
-    /// Performs full cleanup: force-kill → wait for port release → wait for
-    /// epmd deregistration.  This ensures the next `#[serial]` test starts
-    /// with a clean slate (no `TIME_WAIT` ports, no stale epmd entries).
+    /// Performs best-effort cleanup: force-kill → wait for port release and,
+    /// on Unix, wait for epmd deregistration. This helps the next `#[serial]`
+    /// test start from a clean slate (fewer `TIME_WAIT` ports, fewer stale
+    /// epmd entries).
+    ///
+    /// When not already panicking, cleanup failures cause a panic so that
+    /// leaked nodes surface as test failures rather than silent flakiness.
+    /// During an unwind (test already failed), errors are printed to stderr
+    /// to avoid double-panics.
     struct NodeGuard {
         info: NodeInfo,
     }
@@ -897,24 +903,61 @@ mod tests {
 
     impl Drop for NodeGuard {
         fn drop(&mut self) {
-            let _ = force_kill_process(self.info.pid);
+            if let Err(e) = force_kill_process(self.info.pid) {
+                if std::thread::panicking() {
+                    eprintln!("NodeGuard: failed to force-kill pid {}: {e}", self.info.pid);
+                } else {
+                    panic!("NodeGuard: failed to force-kill pid {}: {e}", self.info.pid);
+                }
+            }
             // Wait for port release so the next test doesn't hit TIME_WAIT.
-            let _ = wait_for_workspace_exit(self.info.connect_host(), self.info.port, 15);
+            if let Err(e) = wait_for_workspace_exit(self.info.connect_host(), self.info.port, 15) {
+                if std::thread::panicking() {
+                    eprintln!(
+                        "NodeGuard: workspace did not exit (pid {}, port {}): {e}",
+                        self.info.pid, self.info.port
+                    );
+                } else {
+                    panic!(
+                        "NodeGuard: workspace did not exit (pid {}, port {}): {e}",
+                        self.info.pid, self.info.port
+                    );
+                }
+            }
             // Wait for epmd deregistration so the next test can reuse node names.
             #[cfg(unix)]
-            {
-                let _ = wait_for_epmd_deregistration(&self.info.node_name, 5);
+            if let Err(e) = wait_for_epmd_deregistration(&self.info.node_name, 5) {
+                if std::thread::panicking() {
+                    eprintln!(
+                        "NodeGuard: epmd did not deregister '{}': {e}",
+                        self.info.node_name
+                    );
+                } else {
+                    panic!(
+                        "NodeGuard: epmd did not deregister '{}': {e}",
+                        self.info.node_name
+                    );
+                }
             }
         }
     }
 
     /// Kill a BEAM node without cleanup (simulates a crash).
     ///
-    /// Uses sysinfo for cross-platform process kill, then waits for the port
-    /// to be released AND epmd deregistration with generous timeouts for
-    /// loaded CI machines.  This ensures the next operation in the same test
+    /// Uses sysinfo for cross-platform process kill, then waits for port
+    /// release and (on Unix) epmd deregistration with generous timeouts for
+    /// loaded CI machines. This ensures the next operation in the same test
     /// (e.g. restarting a node with the same name) doesn't hit stale state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the PID is the sentinel value (0), the process cannot be
+    /// found or killed, or post-kill waits time out.
     fn kill_node_raw(info: &NodeInfo) {
+        assert!(
+            info.pid != 0,
+            "kill_node_raw called with sentinel PID 0 — node PID unknown"
+        );
         let pid = Pid::from_u32(info.pid);
         let mut system = System::new();
         system.refresh_processes_specifics(
