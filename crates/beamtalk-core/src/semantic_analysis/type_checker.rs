@@ -4086,7 +4086,11 @@ Object subclass: Foo
         }
     }
 
-    fn method_annotated(selector: &str, return_type: &str, body: Vec<Expression>) -> MethodDefinition {
+    fn method_annotated(
+        selector: &str,
+        return_type: &str,
+        body: Vec<Expression>,
+    ) -> MethodDefinition {
         MethodDefinition {
             selector: MessageSelector::Unary(selector.into()),
             parameters: vec![],
@@ -4220,8 +4224,14 @@ Object subclass: Foo
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
         let first = checker.take_method_return_types();
-        assert!(!first.is_empty(), "first take should have collected entries");
+        assert!(
+            !first.is_empty(),
+            "first take should have collected entries"
+        );
         let second = checker.take_method_return_types();
-        assert!(second.is_empty(), "second take should return empty map after drain");
+        assert!(
+            second.is_empty(),
+            "second take should return empty map after drain"
+        );
     }
 }
