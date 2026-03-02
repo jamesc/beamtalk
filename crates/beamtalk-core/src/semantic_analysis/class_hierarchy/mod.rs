@@ -651,6 +651,40 @@ impl ClassHierarchy {
         &mut self.classes
     }
 
+    /// Applies inferred method return types to user-defined classes.
+    ///
+    /// Updates `MethodInfo.return_type` for methods that have no explicit annotation
+    /// but whose return type was inferred by [`crate::semantic_analysis::infer_method_return_types`].
+    ///
+    /// This enriches the hierarchy so that type-aware completions and hover can
+    /// resolve receiver types for chains involving user-defined methods (BT-1014).
+    /// Only methods without an existing `return_type` are updated (explicit annotations
+    /// are never overwritten).
+    ///
+    /// # Arguments
+    ///
+    /// * `inferred` — map from `(ClassName, Selector, IsClassMethod)` to return type name,
+    ///   as returned by `infer_method_return_types`.
+    pub fn apply_inferred_return_types(
+        &mut self,
+        inferred: &HashMap<(EcoString, EcoString, bool), EcoString>,
+    ) {
+        for ((class_name, selector, is_class_method), return_type) in inferred {
+            if let Some(class_info) = self.classes.get_mut(class_name) {
+                let methods = if *is_class_method {
+                    &mut class_info.class_methods
+                } else {
+                    &mut class_info.methods
+                };
+                if let Some(method) = methods.iter_mut().find(|m| m.selector == *selector) {
+                    if method.return_type.is_none() {
+                        method.return_type = Some(return_type.clone());
+                    }
+                }
+            }
+        }
+    }
+
     /// Merge another hierarchy's user-defined classes into this one.
     ///
     /// Built-in classes from `other` are skipped (they already exist in `self`).

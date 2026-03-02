@@ -31,7 +31,9 @@ use crate::ast::{
 };
 use crate::language_service::{HoverInfo, Position};
 use crate::semantic_analysis::type_checker::TypeMap;
-use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
+use crate::semantic_analysis::{
+    ClassHierarchy, InferredType, infer_method_return_types, infer_types,
+};
 use crate::source_analysis::Span;
 
 /// Computes hover information at a given position.
@@ -75,6 +77,22 @@ pub fn compute_hover(
 
     // Find the class context at this position for self-type hover
     let class_context = find_hover_class_context(module, offset_val);
+
+    // Enrich hierarchy with inferred return types for user-defined methods (BT-1014).
+    // This enables chain-resolved hover for methods whose return type is not explicitly
+    // annotated but can be inferred from the method body (BT-1005).
+    let inferred = infer_method_return_types(module, hierarchy);
+    let enriched_hierarchy;
+    let hierarchy = if inferred.is_empty() {
+        hierarchy
+    } else {
+        enriched_hierarchy = {
+            let mut h = hierarchy.clone();
+            h.apply_inferred_return_types(&inferred);
+            h
+        };
+        &enriched_hierarchy
+    };
 
     // Run type inference to get types at positions
     let type_map = infer_types(module, hierarchy);
@@ -1539,6 +1557,90 @@ mod tests {
         assert!(
             hover.contents.contains("Class: `Counter`"),
             "Unexpected hover contents: {}",
+            hover.contents
+        );
+    }
+
+    // --- Chain resolution hover tests (BT-1014) ---
+    //
+    // Verify that hovering over a message selector shows the resolved return type
+    // when the receiver class is known (stdlib annotations from BT-1003,
+    // user-defined method annotations, or inferred types from BT-1005).
+
+    #[test]
+    fn hover_on_stdlib_selector_shows_return_type() {
+        // Hovering over `size` in `"hello" size` should show `size -> Integer`
+        // "hello" is 7 chars, space at 7, size starts at 8
+        let source = r#""hello" size"#;
+        let pos = Position::from_offset(source, 8).unwrap(); // inside "size"
+        let hover = hover_at(source, pos);
+        assert!(hover.is_some(), "Should hover on stdlib selector");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("-> Integer"),
+            "Hover should show return type Integer for String#size. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_chained_selector_shows_return_type() {
+        // Hovering over `abs` in `"hello" size abs` should show `abs -> Integer`
+        // "hello" size = 12 chars, space at 12, abs at 13-15
+        let source = r#""hello" size abs"#;
+        let pos = Position::from_offset(source, 13).unwrap(); // inside "abs"
+        let hover = hover_at(source, pos);
+        assert!(hover.is_some(), "Should hover on chained selector");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("-> Integer"),
+            "Hover should show return type Integer for Integer#abs. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_user_defined_annotated_selector_shows_return_type() {
+        // A user-defined method with an explicit -> Integer annotation
+        let source = "Object subclass: Box\n  value -> Integer => 42\n\nb := Box new\nb value";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let selector_offset = source.rfind("value").unwrap();
+        let pos = Position::from_offset(source, selector_offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy);
+        assert!(
+            hover.is_some(),
+            "Should hover on user-defined annotated selector"
+        );
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("-> Integer"),
+            "Hover should show annotated return type. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_user_defined_inferred_selector_shows_return_type() {
+        // A user-defined method whose return type is inferred from the body (BT-1005)
+        let source = "Object subclass: Box\n  value => 42\n\nb := Box new\nb value";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let selector_offset = source.rfind("value").unwrap();
+        let pos = Position::from_offset(source, selector_offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy);
+        assert!(
+            hover.is_some(),
+            "Should hover on user-defined inferred selector"
+        );
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("-> Integer"),
+            "Hover should show inferred return type. Got: {}",
             hover.contents
         );
     }
