@@ -126,7 +126,8 @@ load_compiled_stdlib_modules() ->
                         {error, Reason} ->
                             ?LOG_WARNING(
                                 "Failed to load module ~s: ~p",
-                                [format_bt_module(Mod), Reason]
+                                [format_bt_module(Mod), Reason],
+                                #{module => Mod, reason => Reason}
                             )
                     end
                 end,
@@ -253,7 +254,8 @@ discover_and_load_fallback(Dir) ->
                         {error, Reason} ->
                             ?LOG_WARNING(
                                 "Failed to load module ~s: ~p",
-                                [format_bt_module(Mod), Reason]
+                                [format_bt_module(Mod), Reason],
+                                #{module => Mod, reason => Reason}
                             )
                     end
                 end,
@@ -308,7 +310,7 @@ dispatch(Selector, _Args, _Receiver) ->
 
 %% @doc Format an Erlang module atom as a Beamtalk dotted path.
 %% e.g. 'bt@sicp@scheme@lambda' -> "bt.sicp.scheme.lambda"
--spec format_bt_module(atom()) -> string().
+-spec format_bt_module(module()) -> string().
 format_bt_module(Mod) ->
     re:replace(atom_to_list(Mod), "@", ".", [global, {return, list}]).
 
