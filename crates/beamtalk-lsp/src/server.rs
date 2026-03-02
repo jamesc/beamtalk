@@ -156,7 +156,19 @@ impl Backend {
             )));
         }
 
-        let filename = uri.path().trim_start_matches('/').to_string();
+        let path = uri.path().trim_start_matches('/');
+        if path.is_empty()
+            || path.contains('/')
+            || !std::path::Path::new(path)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("bt"))
+        {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
+                "invalid stdlib URI path `{}` (expected beamtalk-stdlib:///ClassName.bt)",
+                params.uri
+            )));
+        }
+        let filename = path.to_string();
 
         let matching_path = {
             let stdlib_paths = self
@@ -1288,6 +1300,31 @@ mod tests {
         let err = result.unwrap_err();
         assert!(err.message.contains("stdlib source not available"));
         assert!(err.message.contains("NonExistent.bt"));
+    }
+
+    #[tokio::test]
+    async fn fetch_content_rejects_malformed_stdlib_uri_path() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        for bad_uri in &[
+            "beamtalk-stdlib:///",
+            "beamtalk-stdlib:///sub/Integer.bt",
+            "beamtalk-stdlib:///Integer.erl",
+        ] {
+            let result: tower_lsp::jsonrpc::Result<FetchContentResult> = backend
+                .fetch_content(FetchContentParams {
+                    uri: bad_uri.to_string(),
+                })
+                .await;
+            assert!(result.is_err(), "expected error for {bad_uri}");
+            let err = result.unwrap_err();
+            assert!(
+                err.message.contains("invalid stdlib URI path"),
+                "expected 'invalid stdlib URI path' in error for {bad_uri}, got: {}",
+                err.message
+            );
+        }
     }
 
     #[tokio::test]
