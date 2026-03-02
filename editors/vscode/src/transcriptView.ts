@@ -5,6 +5,8 @@ import type * as vscode from "vscode";
 import type { PushEvent, WorkspaceClient } from "./workspaceClient";
 
 const MAX_LINES = 10_000;
+/** Trim the pre-resolve buffer to this many lines when MAX_LINES is exceeded. */
+const BUFFER_TRIM_TO = Math.floor(MAX_LINES * 0.9);
 
 /**
  * TranscriptViewProvider implements a sidebar WebviewView that streams live
@@ -115,14 +117,16 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
       // Count at least 1 per chunk so newline-free chunks (e.g. a long single
       // line) still advance the counter and keep the buffer bounded.
       this.pendingLineCount += Math.max(1, (text.match(/\n/g) || []).length);
-      // Apply the same MAX_LINES cap to the pre-resolve buffer to bound memory
-      // if a runaway actor writes to Transcript before the panel is opened.
+      // Apply the MAX_LINES cap to the pre-resolve buffer to bound extension-host
+      // memory if a runaway actor writes to Transcript before the panel is opened.
+      // Trim to BUFFER_TRIM_TO (90%) to amortise repeated join/split rebuilds.
       if (this.pendingLineCount > MAX_LINES) {
         const allLines = this.pendingChunks.join("").split("\n");
-        const keep = allLines.slice(allLines.length - MAX_LINES);
+        const startIdx = allLines.length > BUFFER_TRIM_TO ? allLines.length - BUFFER_TRIM_TO : 0;
+        const keep = allLines.slice(startIdx);
         this.pendingChunks.length = 0;
         this.pendingChunks.push(keep.join("\n"));
-        this.pendingLineCount = MAX_LINES;
+        this.pendingLineCount = Math.max(0, keep.length - 1);
       }
     }
   }
