@@ -231,8 +231,9 @@ in completions. The dedicated `Arrow` token also simplifies syntax highlighting 
 ### Tension points
 
 Newcomers and operators both lean toward Option C (minimal change, minimal risk).
-Language designers and LSP developers prefer Option A (correct fix, complete coverage).
-The tiebreaker: Option A's implementation is contained to ~50 lines in the parser and
+Language designers and LSP developers prefer the dedicated `Arrow` token approach
+(correct fix, complete coverage, accurate representation).
+The tiebreaker: the `Arrow` token approach is contained to ~50 lines in the parser and
 lexer, with no observable behaviour change for any user.
 
 ## Alternatives Considered
@@ -294,8 +295,10 @@ parser's internal ambiguity into user-visible syntax.
 
 ### Neutral
 - The `BinarySelector("->")` string value disappears from the token stream; any
-  tooling that matched on it directly must match `Arrow` instead (internal only —
-  no public API surface)
+  tooling that matched on it directly must match `Arrow` instead. This is an internal
+  compiler/token-stream API change with no source-level syntax change, but downstream
+  tooling that consumes the token stream (LSP, syntax highlighters, Tree-sitter grammars)
+  will need to update their `->` handling.
 - Ambiguity 2 (keyword-as-method-name) is a class of grammar problem. `sealed` and
   `override` are the other modifier keywords; neither is a plausible method name in
   existing or planned stdlib code, so no additional instances of this class are known.
