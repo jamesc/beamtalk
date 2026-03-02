@@ -11,19 +11,16 @@ use std::path::Path;
 
 /// Generate a workspace ID from a project path (SHA256 hex, first 12 chars).
 ///
-/// Uses strict behavior: rejects non-UTF-8 paths and propagates canonicalize errors.
-/// Returns an empty string on error (logged as a warning).
-pub fn generate_workspace_id(path: &Path) -> String {
-    match beamtalk_workspace::generate_workspace_id(path) {
-        Ok(id) => id,
-        Err(err) => {
+/// Returns `None` if the path cannot be canonicalized or contains non-UTF-8 bytes.
+pub fn generate_workspace_id(path: &Path) -> Option<String> {
+    beamtalk_workspace::generate_workspace_id(path)
+        .inspect_err(|err| {
             tracing::warn!(
                 "Failed to generate workspace ID for {}: {err}",
                 path.display()
             );
-            String::new()
-        }
-    }
+        })
+        .ok()
 }
 
 /// Read the port file for a workspace.
@@ -51,11 +48,7 @@ pub fn discover_port_and_cookie(workspace_id: Option<&str>) -> Option<(u16, Stri
         id.to_string()
     } else {
         let cwd = std::env::current_dir().ok()?;
-        let id = generate_workspace_id(&cwd);
-        if id.is_empty() {
-            return None;
-        }
-        id
+        generate_workspace_id(&cwd)?
     };
     let port = read_port_file(&id)?;
     let cookie = read_cookie_file(&id)?;
@@ -122,15 +115,15 @@ mod tests {
     #[test]
     fn test_generate_workspace_id_deterministic() {
         let path = std::env::temp_dir();
-        let id1 = generate_workspace_id(&path);
-        let id2 = generate_workspace_id(&path);
+        let id1 = generate_workspace_id(&path).unwrap();
+        let id2 = generate_workspace_id(&path).unwrap();
         assert_eq!(id1, id2, "Same path should produce same workspace ID");
     }
 
     #[test]
     fn test_generate_workspace_id_length() {
         let path = std::env::temp_dir();
-        let id = generate_workspace_id(&path);
+        let id = generate_workspace_id(&path).unwrap();
         assert_eq!(
             id.len(),
             12,
@@ -141,7 +134,7 @@ mod tests {
     #[test]
     fn test_generate_workspace_id_hex_format() {
         let path = std::env::temp_dir();
-        let id = generate_workspace_id(&path);
+        let id = generate_workspace_id(&path).unwrap();
         assert!(
             id.chars().all(|c| c.is_ascii_hexdigit()),
             "Workspace ID should be all hex digits, got: {id}"
@@ -153,8 +146,8 @@ mod tests {
         let temp = std::env::temp_dir();
         let cwd = std::env::current_dir().unwrap();
         if temp != cwd {
-            let id1 = generate_workspace_id(&temp);
-            let id2 = generate_workspace_id(&cwd);
+            let id1 = generate_workspace_id(&temp).unwrap();
+            let id2 = generate_workspace_id(&cwd).unwrap();
             assert_ne!(id1, id2, "Different paths should produce different IDs");
         }
     }

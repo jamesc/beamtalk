@@ -225,7 +225,8 @@ async fn start_workspace(
     } else {
         parse_workspace_id(&stdout).unwrap_or_else(|| {
             std::env::current_dir()
-                .map(|p| workspace::generate_workspace_id(&p))
+                .ok()
+                .and_then(|p| workspace::generate_workspace_id(&p))
                 .unwrap_or_default()
         })
     };
