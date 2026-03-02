@@ -156,7 +156,7 @@ handle(<<"methods">>, Params, Msg, _SessionPid) ->
     ClassBin = maps:get(<<"class">>, Params, <<>>),
     Methods = list_class_methods_for_ws(ClassBin),
     Base = base_protocol_response(Msg),
-    jsx:encode(Base#{<<"methods">> => Methods});
+    jsx:encode(Base#{<<"methods">> => Methods, <<"status">> => [<<"done">>]});
 handle(<<"test">>, Params, Msg, _SessionPid) ->
     ClassName = maps:get(<<"class">>, Params, undefined),
     run_test_op(ClassName, Msg);

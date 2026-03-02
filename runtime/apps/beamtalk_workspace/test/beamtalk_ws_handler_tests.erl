@@ -272,6 +272,51 @@ methods_op_known_class_returns_instance_and_class_methods_test() ->
         gen_server:stop(Pid)
     end.
 
+methods_op_protocol_json_shape_test() ->
+    %% Exercise the full "methods" op handler and assert on JSON response shape.
+    beamtalk_class_registry:ensure_pg_started(),
+    ClassName = 'BT1026ProtoTestClass',
+    RegName = beamtalk_class_registry:registry_name(ClassName),
+    case whereis(RegName) of
+        undefined -> ok;
+        Pid0 -> gen_server:stop(Pid0)
+    end,
+    Fun = fun(_Self) -> ok end,
+    ClassInfo = #{
+        name => ClassName,
+        module => bt_test_module_proto,
+        superclass => none,
+        instance_methods => #{
+            value => #{block => Fun, arity => 1}
+        },
+        class_methods => #{
+            new => #{block => Fun, arity => 1}
+        }
+    },
+    {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+    try
+        %% Build a protocol message via decode, then call handle/4
+        Json = jsx:encode(#{
+            <<"op">> => <<"methods">>,
+            <<"id">> => <<"test-1">>,
+            <<"class">> => <<"BT1026ProtoTestClass">>
+        }),
+        {ok, Msg} = beamtalk_repl_protocol:decode(Json),
+        Params = beamtalk_repl_protocol:get_params(Msg),
+        %% SessionPid unused for methods op, pass self()
+        Reply = beamtalk_repl_ops_dev:handle(<<"methods">>, Params, Msg, self()),
+        Decoded = jsx:decode(Reply, [return_maps]),
+        %% Must have status, methods, and id fields
+        ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+        ?assert(maps:is_key(<<"methods">>, Decoded)),
+        ?assertEqual(<<"test-1">>, maps:get(<<"id">>, Decoded)),
+        %% 1 instance + 1 class method
+        Methods = maps:get(<<"methods">>, Decoded),
+        ?assertEqual(2, length(Methods))
+    after
+        gen_server:stop(Pid)
+    end.
+
 methods_op_name_equals_selector_test() ->
     beamtalk_class_registry:ensure_pg_started(),
     ClassName = 'BT1026NameSelectorClass',
