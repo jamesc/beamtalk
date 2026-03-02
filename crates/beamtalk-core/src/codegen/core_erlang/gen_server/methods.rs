@@ -12,7 +12,7 @@ use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
     Block, ClassDefinition, ClassKind, Expression, Literal, MessageSelector, MethodDefinition,
-    MethodKind, Module,
+    MethodKind, Module, TypeAnnotation,
 };
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
@@ -1219,6 +1219,47 @@ impl CoreErlangGenerator {
             }
             let class_method_sigs_doc = Document::Vec(class_method_sig_docs);
 
+            // BT-1002 / ADR 0045: Instance method return-type map (Simple annotations only).
+            // Selectors with None or non-Simple return type are omitted (absence = dynamic).
+            let mut method_return_type_docs: Vec<Document<'static>> = Vec::new();
+            for method in &instance_methods {
+                if let Some(TypeAnnotation::Simple(id)) = &method.return_type {
+                    if !method_return_type_docs.is_empty() {
+                        method_return_type_docs.push(Document::Str(", "));
+                    }
+                    method_return_type_docs.push(docvec![
+                        "'",
+                        Document::String(method.selector.name().to_string()),
+                        "' => '",
+                        Document::String(id.name.to_string()),
+                        "'"
+                    ]);
+                }
+            }
+            let method_return_types_doc = Document::Vec(method_return_type_docs);
+
+            // BT-1002 / ADR 0045: Class-side method return-type map (Simple annotations only).
+            let mut class_method_return_type_docs: Vec<Document<'static>> = Vec::new();
+            for method in class
+                .class_methods
+                .iter()
+                .filter(|m| m.kind == MethodKind::Primary)
+            {
+                if let Some(TypeAnnotation::Simple(id)) = &method.return_type {
+                    if !class_method_return_type_docs.is_empty() {
+                        class_method_return_type_docs.push(Document::Str(", "));
+                    }
+                    class_method_return_type_docs.push(docvec![
+                        "'",
+                        Document::String(method.selector.name().to_string()),
+                        "' => '",
+                        Document::String(id.name.to_string()),
+                        "'"
+                    ]);
+                }
+            }
+            let class_method_return_types_doc = Document::Vec(class_method_return_type_docs);
+
             // BT-412: Class variable initial values
             let mut class_var_parts: Vec<Document<'static>> = Vec::new();
             for (cv_idx, cv) in class.class_variables.iter().enumerate() {
@@ -1326,6 +1367,14 @@ impl CoreErlangGenerator {
                         line(),
                         "'classMethodSignatures' => ~{",
                         class_method_sigs_doc,
+                        "}~,",
+                        line(),
+                        "'methodReturnTypes' => ~{",
+                        method_return_types_doc,
+                        "}~,",
+                        line(),
+                        "'classMethodReturnTypes' => ~{",
+                        class_method_return_types_doc,
                         "}~,",
                         line(),
                         "'classState' => ~{",
