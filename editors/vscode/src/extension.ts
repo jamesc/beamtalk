@@ -299,7 +299,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.inspectBinding", (_node) => {
       // Auto-connect + REPL wiring (BT-1024) will implement this fully.
-      void vscode.window.showInformationMessage("Inspect binding: not yet connected to a workspace.");
+      void vscode.window.showInformationMessage(
+        "Inspect binding: not yet connected to a workspace."
+      );
     })
   );
 

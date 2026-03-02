@@ -92,8 +92,9 @@ const CLASSES_SECTION: ClassesSectionNode = { kind: "classes-section" };
 export class WorkspaceTreeDataProvider
   implements vscode.TreeDataProvider<WorkspaceNode>, vscode.Disposable
 {
-  private readonly _onDidChangeTreeData =
-    new vscode.EventEmitter<WorkspaceNode | undefined | null>();
+  private readonly _onDidChangeTreeData = new vscode.EventEmitter<
+    WorkspaceNode | undefined | null
+  >();
   readonly onDidChangeTreeData: vscode.Event<WorkspaceNode | undefined | null> =
     this._onDidChangeTreeData.event;
 
@@ -409,7 +410,9 @@ export class WorkspaceTreeDataProvider
     }
     if (typeof value === "object") {
       const keys = Object.keys(value as object);
-      return keys.length > 0 ? `{${keys.slice(0, 3).join(", ")}${keys.length > 3 ? "…" : ""}}` : "{}";
+      return keys.length > 0
+        ? `{${keys.slice(0, 3).join(", ")}${keys.length > 3 ? "…" : ""}}`
+        : "{}";
     }
     return String(value);
   }
