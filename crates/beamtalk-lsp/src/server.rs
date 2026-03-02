@@ -156,6 +156,14 @@ impl Backend {
             )));
         }
 
+        // Only the canonical form `beamtalk-stdlib:///ClassName.bt` (empty authority) is accepted.
+        if uri.host().is_some() {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
+                "invalid stdlib URI `{}` (expected beamtalk-stdlib:///ClassName.bt)",
+                params.uri
+            )));
+        }
+
         let path = uri.path().trim_start_matches('/');
         if path.is_empty()
             || path.contains('/')
@@ -170,23 +178,33 @@ impl Backend {
         }
         let filename = path.to_string();
 
-        let matching_path = {
+        let matching_paths: Vec<Utf8PathBuf> = {
             let stdlib_paths = self
                 .stdlib_paths
                 .lock()
                 .expect("stdlib_paths lock poisoned");
             stdlib_paths
                 .iter()
-                .find(|p| p.file_name() == Some(filename.as_str()))
+                .filter(|p| p.file_name() == Some(filename.as_str()))
                 .cloned()
+                .collect()
         };
 
-        let Some(path) = matching_path else {
-            return Err(tower_lsp::jsonrpc::Error {
-                code: tower_lsp::jsonrpc::ErrorCode::ServerError(-32_001),
-                message: format!("stdlib source not available: {filename}").into(),
-                data: None,
-            });
+        let path = match matching_paths.as_slice() {
+            [single] => single.clone(),
+            [] => {
+                return Err(tower_lsp::jsonrpc::Error {
+                    code: tower_lsp::jsonrpc::ErrorCode::ServerError(-32_001),
+                    message: format!("stdlib source not available: {filename}").into(),
+                    data: None,
+                });
+            }
+            _ => {
+                return Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
+                    "ambiguous stdlib URI `{}`: multiple files named `{filename}`",
+                    params.uri
+                )));
+            }
         };
 
         let content = {
@@ -1325,6 +1343,61 @@ mod tests {
                 err.message
             );
         }
+    }
+
+    #[tokio::test]
+    async fn fetch_content_rejects_authority_bearing_stdlib_uri() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let result: tower_lsp::jsonrpc::Result<FetchContentResult> = backend
+            .fetch_content(FetchContentParams {
+                uri: "beamtalk-stdlib://host/Integer.bt".to_string(),
+            })
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.message.contains("invalid stdlib URI"),
+            "expected 'invalid stdlib URI' but got: {}",
+            err.message
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_content_returns_error_for_ambiguous_stdlib_filename() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let path1 = Utf8PathBuf::from("/fake/stdlib/a/Integer.bt");
+        let path2 = Utf8PathBuf::from("/fake/stdlib/b/Integer.bt");
+        let content = "Object subclass: Integer".to_string();
+
+        {
+            let mut stdlib_paths = backend
+                .stdlib_paths
+                .lock()
+                .expect("stdlib_paths lock poisoned");
+            stdlib_paths.insert(path1.clone());
+            stdlib_paths.insert(path2.clone());
+        }
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(path1, content.clone());
+            svc.update_file(path2, content);
+        }
+
+        let result: tower_lsp::jsonrpc::Result<FetchContentResult> = backend
+            .fetch_content(FetchContentParams {
+                uri: "beamtalk-stdlib:///Integer.bt".to_string(),
+            })
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.message.contains("ambiguous"),
+            "expected 'ambiguous' but got: {}",
+            err.message
+        );
     }
 
     #[tokio::test]
