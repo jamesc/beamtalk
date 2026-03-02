@@ -12,8 +12,8 @@ TestCase subclass: CollectionsTest
     self assert: List new equals: #()
     self assert: (List new) size equals: 0
     self assert: (List new) class equals: List
-    // List new: is not supported (no meaningful init-from-map)
-    self should: [List new: #{#a => 1}] raise: #instantiation_error
+    // List new: accepts a List (convenience alias for withAll:)
+    self assert: (List new: #(1, 2, 3)) equals: #(1, 2, 3)
 
   testTier1EssentialMethods =>
     // --- last ---

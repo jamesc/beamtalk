@@ -44,4 +44,5 @@ Object subclass: TestRunner
   /// result := TestRunner run: CounterTest method: #testIncrement
   /// result hasPassed       // => true
   /// ```
-  class run: testClass method: testName -> TestResult => @primitive "run:method:"
+  class run: testClass method: testName -> TestResult =>
+    @primitive "run:method:"

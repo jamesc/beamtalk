@@ -316,21 +316,48 @@ handle_call(
     #class_state{
         name = ClassName,
         module = Module,
-        is_constructible = IsConstructible0
+        is_constructible = IsConstructible0,
+        class_methods = ClassMethods,
+        class_state = ClassVars
     } = State
 ) ->
-    case
-        beamtalk_class_instantiation:handle_new(
-            Args,
-            ClassName,
-            Module,
-            IsConstructible0
-        )
-    of
-        {ok, Result, IsConstructible} ->
-            {reply, {ok, Result}, State#class_state{is_constructible = IsConstructible}};
-        {error, Error, IsConstructible} ->
-            {reply, {error, Error}, State#class_state{is_constructible = IsConstructible}}
+    %% When Args is non-empty and the class has a user-defined `class new:` method
+    %% (detected by checking that the module exports 'class_new:'/3), route the
+    %% `new:` call through it instead of the generic field-initialisation constructor.
+    %% This lets `List new: #(1,2,3)` call `List class new:` rather than the
+    %% `Object.new:` dict-initialiser (which would error on a non-map argument).
+    %%
+    %% Note: the `classMethods` metadata includes auto-generated `new:` for all
+    %% classes, so `is_map_key/2` alone cannot distinguish user-defined from
+    %% auto-generated. We use `erlang:function_exported/3` which is true only when
+    %% the BEAM module contains an explicit `class_new:` function.
+    case Args =/= [] andalso erlang:function_exported(Module, 'class_new:', 3) of
+        true ->
+            case
+                beamtalk_class_dispatch:handle_class_method_call(
+                    'new:', Args, ClassName, Module, ClassMethods, ClassVars
+                )
+            of
+                {reply, Result, NewClassVars} ->
+                    {reply, Result, State#class_state{class_state = NewClassVars}};
+                {error, not_found} ->
+                    Err = beamtalk_error:new(does_not_understand, ClassName, 'new:'),
+                    {reply, {error, Err}, State}
+            end;
+        false ->
+            case
+                beamtalk_class_instantiation:handle_new(
+                    Args,
+                    ClassName,
+                    Module,
+                    IsConstructible0
+                )
+            of
+                {ok, Result, IsConstructible} ->
+                    {reply, {ok, Result}, State#class_state{is_constructible = IsConstructible}};
+                {error, Error, IsConstructible} ->
+                    {reply, {error, Error}, State#class_state{is_constructible = IsConstructible}}
+            end
     end;
 %% ADR 0032 Phase 1: Returns local (non-inherited) method selectors only.
 %% Full hierarchy walk is done by Behaviour.methods in Phase 2.

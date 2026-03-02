@@ -42,7 +42,7 @@ pub(crate) fn format_value(value: &serde_json::Value) -> String {
         serde_json::Value::Null => color::paint(color::BOLD_BLUE, "nil"),
         serde_json::Value::Array(arr) => {
             let items: Vec<String> = arr.iter().map(format_value).collect();
-            format!("[{}]", items.join(", "))
+            format!("#({})", items.join(", "))
         }
         serde_json::Value::Object(obj) => {
             // Regular object
@@ -227,5 +227,50 @@ pub(crate) fn display_info(info: &serde_json::Value) {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strip_ansi(s: &str) -> String {
+        // Remove ESC[...m sequences for comparison
+        let mut out = String::new();
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                // Skip until 'm'
+                for ch in chars.by_ref() {
+                    if ch == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn list_displays_with_beamtalk_syntax() {
+        let val = serde_json::json!([1, 2, 3]);
+        let rendered = strip_ansi(&format_value(&val));
+        assert_eq!(rendered, "#(1, 2, 3)");
+    }
+
+    #[test]
+    fn empty_list_displays_with_beamtalk_syntax() {
+        let val = serde_json::json!([]);
+        let rendered = strip_ansi(&format_value(&val));
+        assert_eq!(rendered, "#()");
+    }
+
+    #[test]
+    fn nested_list_displays_with_beamtalk_syntax() {
+        let val = serde_json::json!([[1, 2], [3, 4]]);
+        let rendered = strip_ansi(&format_value(&val));
+        assert_eq!(rendered, "#(#(1, 2), #(3, 4))");
     }
 }

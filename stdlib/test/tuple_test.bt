@@ -9,8 +9,8 @@ TestCase subclass: TupleTest
   testCreation =>
     // Tuple new returns an empty tuple
     self assert: (Tuple new) class equals: Tuple
-    // Tuple new: is not supported (no meaningful init-from-map)
-    self should: [Tuple new: #{#a => 1}] raise: #instantiation_error
+    // Tuple new: accepts a List (convenience alias for withAll:)
+    self assert: (Tuple new: #(1, 2)) size equals: 2
 
   testDisplay =>
     // Tuple printString shows tuple format
