@@ -29,9 +29,9 @@
 
 use crate::ast::{ClassDefinition, Expression, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
+use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::queries::erlang_modules;
 use crate::semantic_analysis::type_checker::TypeMap;
-use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use ecow::EcoString;
 use std::collections::HashSet;

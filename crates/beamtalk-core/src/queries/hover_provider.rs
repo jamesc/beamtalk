@@ -30,8 +30,8 @@ use crate::ast::{
     ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module, to_module_name,
 };
 use crate::language_service::{HoverInfo, Position};
-use crate::semantic_analysis::type_checker::TypeMap;
 use crate::queries::enrich_hierarchy_with_inferred_returns;
+use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use crate::source_analysis::Span;
 
