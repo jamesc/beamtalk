@@ -1,7 +1,7 @@
 # ADR 0047: Return Type Arrow Token Disambiguation
 
 ## Status
-Proposed (2026-03-02)
+Accepted (2026-03-02)
 
 ## Context
 
