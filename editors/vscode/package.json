@@ -145,7 +145,7 @@
         "beamtalk.workspace.autoConnect": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically connect the Workspace Explorer to a running Beamtalk workspace when a .bt file is opened."
+          "description": "(BT-1024) Auto-connect the Workspace Explorer to a running Beamtalk workspace when a .bt file is opened. Not yet active — wiring is implemented in BT-1024."
         }
       }
     },

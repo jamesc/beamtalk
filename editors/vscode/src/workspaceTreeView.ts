@@ -113,6 +113,9 @@ export class WorkspaceTreeDataProvider
   /** Monotonic counter to discard stale class-list fetches. */
   private classFetchGeneration = 0;
 
+  /** Monotonic counter to discard stale _fetchInitialData calls. */
+  private initialFetchGeneration = 0;
+
   // ─── Public API ──────────────────────────────────────────────────────────
 
   /**
@@ -421,6 +424,7 @@ export class WorkspaceTreeDataProvider
   }
 
   private _resetState(state: ConnectionState): void {
+    this.initialFetchGeneration++;
     this.connectionState = state;
     this.bindings = {};
     this.actors = [];
@@ -431,6 +435,7 @@ export class WorkspaceTreeDataProvider
 
   /** Fetch bindings, actors, and classes from a newly-connected client. */
   private async _fetchInitialData(client: WorkspaceClient): Promise<void> {
+    const gen = ++this.initialFetchGeneration;
     const sessionId = client.currentSessionId;
     const [bindingsResult, actorsResult, classesResult] = await Promise.allSettled([
       sessionId ? client.bindings(sessionId) : Promise.resolve<BindingsMap>({}),
@@ -438,8 +443,8 @@ export class WorkspaceTreeDataProvider
       client.classes(),
     ]);
 
-    // Guard: client may have been detached while the fetches were in-flight.
-    if (this.client !== client) {
+    // Guard: client may have been detached, or a newer fetch superseded this one.
+    if (this.client !== client || this.initialFetchGeneration !== gen) {
       return;
     }
 
