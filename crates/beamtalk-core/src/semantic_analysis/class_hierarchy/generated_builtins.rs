@@ -20,7 +20,6 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
         name,
         "Actor"
             | "Array"
-            | "Association"
             | "BEAMError"
             | "BeamtalkInterface"
             | "Behaviour"
@@ -136,28 +135,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, return_type: Some("Array".into()), param_types: vec![Some("List".into())] },
             ],
-            class_variables: vec![],
-        },
-    );
-
-    classes.insert(
-        "Association".into(),
-        ClassInfo {
-            name: "Association".into(),
-            superclass: Some("Value".into()),
-            is_sealed: true,
-            is_abstract: false,
-            is_typed: false,
-            is_value: true,
-            state: vec![],
-            state_types: HashMap::new(),
-            methods: vec![
-                MethodInfo { selector: "key".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Association".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![] },
-                MethodInfo { selector: "value".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Association".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![] },
-                MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Association".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
-                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Association".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
-            ],
-            class_methods: vec![],
             class_variables: vec![],
         },
     );
@@ -514,9 +491,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "includes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None] },
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())] },
                 MethodInfo { selector: "collect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: Some("Dictionary".into()), param_types: vec![Some("Block".into())] },
+                MethodInfo { selector: "doWithKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())] },
                 MethodInfo { selector: "keysAndValuesDo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())] },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
-                MethodInfo { selector: "stream".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: Some("Stream".into()), param_types: vec![] },
             ],
             class_methods: vec![],
             class_variables: vec![],
@@ -1027,7 +1004,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "fieldAt:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: true, return_type: None, param_types: vec![Some("Symbol".into()), None] },
                 MethodInfo { selector: "perform:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: true, return_type: None, param_types: vec![Some("Symbol".into())] },
                 MethodInfo { selector: "perform:withArguments:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: true, return_type: None, param_types: vec![Some("Symbol".into()), Some("List".into())] },
-                MethodInfo { selector: "->".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "subclassResponsibility".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "notImplemented".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None, param_types: vec![] },
                 MethodInfo { selector: "trace:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, return_type: None, param_types: vec![None] },

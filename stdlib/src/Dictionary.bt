@@ -127,10 +127,18 @@ sealed Collection subclass: Dictionary
   ///
   /// ## Examples
   /// ```beamtalk
+  /// #{#a => 1} doWithKey: [:k :v | Transcript show: k]
+  /// ```
+  doWithKey: block: Block -> Nil => @primitive "doWithKey:"
+
+  /// Iterate over each key-value pair, evaluating `block` with key and value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
   /// #{#a => 1} keysAndValuesDo: [:k :v | Transcript show: k]
   /// ```
   keysAndValuesDo: block: Block -> Nil =>
-    self stream do: [:assoc | block value: assoc key value: assoc value]
+    self doWithKey: block
 
   /// Return a string representation using Beamtalk syntax.
   ///
@@ -139,11 +147,3 @@ sealed Collection subclass: Dictionary
   /// #{#a => 1} printString                     // => "#{#a => 1}"
   /// ```
   printString -> String => @primitive "printString"
-
-  /// Return a lazy Stream over the dictionary entries as Associations.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (#{#a => 1} stream) asList
-  /// ```
-  stream -> Stream => @primitive "stream"

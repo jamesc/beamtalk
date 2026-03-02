@@ -150,8 +150,6 @@ print_string(X) ->
 -spec print_string_map(map()) -> binary().
 print_string_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
-        'Association' ->
-            beamtalk_association:format_string(X);
         'Set' ->
             ElemStrs = [print_string(E) || E <- maps:get(elements, X, [])],
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
@@ -397,7 +395,6 @@ module_for_value(X) when is_reference(X) -> 'bt@stdlib@reference';
 module_for_value(X) when is_map(X) ->
     case beamtalk_tagged_map:class_of(X) of
         'CompiledMethod' -> 'bt@stdlib@compiled_method';
-        'Association' -> 'bt@stdlib@association';
         'Set' -> 'bt@stdlib@set';
         'Stream' -> 'bt@stdlib@stream';
         'Random' -> 'bt@stdlib@random';

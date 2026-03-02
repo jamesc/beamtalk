@@ -111,24 +111,6 @@ impl CoreErlangGenerator {
                 return self.generate_runtime_method_lookup(receiver, arguments);
             }
 
-            // BT-335: Association creation via `->` binary message
-            if op.as_str() == "->" {
-                if arguments.len() != 1 {
-                    return Err(CodeGenError::Internal(
-                        "-> operator must have exactly one argument".to_string(),
-                    ));
-                }
-                let key_doc = self.expression_doc(receiver)?;
-                let val_doc = self.expression_doc(&arguments[0])?;
-                let doc = docvec![
-                    "~{'$beamtalk_class' => 'Association', 'key' => ",
-                    key_doc,
-                    ", 'value' => ",
-                    val_doc,
-                    "}~"
-                ];
-                return Ok(doc);
-            }
             let doc = self.generate_binary_op(op, receiver, arguments)?;
             return Ok(doc);
         }

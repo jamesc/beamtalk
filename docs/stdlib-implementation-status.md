@@ -77,7 +77,6 @@
 | `fieldAt:put:` | intrinsic | ✅ | 🧪 | Async for actors |
 | `perform:` | intrinsic | ✅ | 🧪 | Dynamic dispatch |
 | `perform:withArgs:` | intrinsic | ✅ | 🧪 | Dynamic dispatch with args |
-| `->` | intrinsic | ✅ | 🧪 | Association creation (key-value pair) |
 | `subclassResponsibility` | pure BT | ✅ | 🧪 | Calls `self error:` — pure Beamtalk method (BT-405) |
 | `error:` | intrinsic | ✅ | 🧪 | Smalltalk-style error signaling |
 | `sealed` | modifier | ✅ | 🧪 | Method modifier preventing override |
@@ -379,7 +378,7 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 
 **Stdlib module:** `stdlib/src/Dictionary.bt` → `beamtalk_dictionary`
 **Helper module:** `beamtalk_map_ops.erl` (complex operations)
-**Methods:** 11 — all implemented
+**Methods:** 12 — all implemented
 
 | Selector | Mechanism | Status | E2E | Pharo Equivalent |
 |----------|-----------|--------|-----|------------------|
@@ -392,7 +391,8 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `includesKey:` | @primitive selector | ✅ | 🧪 | `Dictionary>>includesKey:` |
 | `removeKey:` | @primitive selector | ✅ | 🧪 | `Dictionary>>removeKey:` |
 | `merge:` | @primitive selector | ✅ | 🧪 | `Dictionary>>merge:` |
-| `keysAndValuesDo:` | @primitive selector | ✅ | 🧪 | `Dictionary>>keysAndValuesDo:` |
+| `doWithKey:` | @primitive selector | ✅ | 🧪 | `Dictionary>>doWithKey:` |
+| `keysAndValuesDo:` | pure BT (delegates to `doWithKey:`) | ✅ | 🧪 | `Dictionary>>keysAndValuesDo:` |
 | `describe` | pure BT | ✅ | | `Dictionary>>printString` |
 
 ### Set (`stdlib/src/Set.bt` — BT-73)
@@ -453,19 +453,6 @@ _Note:_ `sealed` is a method **modifier** in Beamtalk (for example, `sealed getV
 | `=:=` | @primitive selector | ✅ | 🧪 | `Symbol>>=` |
 | `/=` | @primitive selector | ✅ | 🧪 | `Symbol>>~=` |
 | `hash` | @primitive selector | ✅ | 🧪 | `Symbol>>hash` |
-
-### Association (`stdlib/src/Association.bt`)
-
-**Class:** `Association` — superclass: `Object` — `@sealed`
-**Methods:** 5/5 implemented (100%)
-
-| Selector | Mechanism | Status | E2E | Pharo Equivalent |
-|----------|-----------|--------|-----|------------------|
-| `key` | @primitive selector | ✅ | 🧪 | `Association>>key` |
-| `value` | @primitive selector | ✅ | 🧪 | `Association>>value` |
-| `asString` | @primitive selector | ✅ | 🧪 | `Association>>printString` |
-| `printString` | pure BT | ✅ | | `Association>>printString` |
-| `describe` | pure BT | ✅ | | N/A |
 
 ### Exception (`stdlib/src/Exception.bt`)
 

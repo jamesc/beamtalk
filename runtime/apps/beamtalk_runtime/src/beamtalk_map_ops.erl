@@ -12,7 +12,7 @@
 %% Replaces the former beamtalk_map.erl hand-written dispatch module.
 -module(beamtalk_map_ops).
 
--export([at_if_absent/3, do/2, includes/2, print_string/1]).
+-export([at_if_absent/3, do/2, do_with_key/2, includes/2, print_string/1]).
 
 %% @doc Get value at key, or evaluate block if absent.
 -spec at_if_absent(map(), term(), fun(() -> term())) -> term().
@@ -26,6 +26,12 @@ at_if_absent(Map, Key, Block) when is_function(Block, 0) ->
 -spec do(map(), fun((term()) -> term())) -> 'nil'.
 do(Map, Block) when is_function(Block, 1) ->
     maps:foreach(fun(_K, V) -> Block(V) end, Map),
+    nil.
+
+%% @doc Iterate over all key-value pairs, calling block with key and value.
+-spec do_with_key(map(), fun((term(), term()) -> term())) -> 'nil'.
+do_with_key(Map, Block) when is_function(Block, 2) ->
+    maps:foreach(fun(K, V) -> Block(K, V) end, Map),
     nil.
 
 %% @doc Test if the dictionary contains the given value.
