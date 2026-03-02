@@ -574,7 +574,7 @@ This is a breaking change. All existing `class methodName => ...` definitions in
 
 The migration is a token-level rename and can be performed with a targeted source transformation. Conceptually:
 
-```
+```beamtalk
 // Before (current syntax)
 class new -> Foo => @primitive "new"
 class pi -> Float => @primitive "pi"
@@ -627,8 +627,9 @@ Object class subclass: TranscriptStream class
 
 Because this is a syntax breaking change, migration must be coordinated with a compiler version increment. The compiler should emit a clear diagnostic for any source file that still uses the old `class methodName` modifier form after the migration deadline:
 
-```
-error: `class` is no longer a method modifier — use `meta methodName` (Option B) or `+ methodName` (Option C)
+```text
+// Option B example diagnostic:
+error: `class` is no longer a method modifier — use `meta methodName`
   --> stdlib/src/Float.bt:12:5
    |
 12 |     class pi -> Float => @primitive "pi"
@@ -636,6 +637,11 @@ error: `class` is no longer a method modifier — use `meta methodName` (Option 
    |
    = note: see ADR 0048 for migration instructions
 ```
+
+The exact diagnostic text is conditional on the option selected. For Option A,
+the message would instead suggest restructuring into an `X class subclass: Y class`
+declaration. The diagnostic is only generated if an option that removes the
+`class` modifier is chosen — Option D (do nothing) emits no diagnostic.
 
 ## References
 
