@@ -134,6 +134,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, return_type: Some("Array".into()), param_types: vec![Some("List".into())] },
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, return_type: Some("Array".into()), param_types: vec![Some("List".into())] },
             ],
             class_variables: vec![],
         },
@@ -456,6 +457,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "/=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![Some("DateTime".into())] },
             ],
             class_methods: vec![
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: false, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "now".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: true, return_type: Some("DateTime".into()), param_types: vec![] },
                 MethodInfo { selector: "monotonicNow".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: true, return_type: Some("Integer".into()), param_types: vec![] },
                 MethodInfo { selector: "year:month:day:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "DateTime".into(), is_sealed: true, return_type: Some("DateTime".into()), param_types: vec![Some("Integer".into()), Some("Integer".into()), Some("Integer".into())] },
@@ -909,6 +911,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![Some("List".into())] },
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "List".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![Some("List".into())] },
             ],
             class_variables: vec![],
         },
@@ -1101,6 +1104,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "nextInteger:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![Some("Integer".into())] },
             ],
             class_methods: vec![
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: false, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "next".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: true, return_type: Some("Float".into()), param_types: vec![] },
                 MethodInfo { selector: "nextInteger:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: true, return_type: Some("Integer".into()), param_types: vec![Some("Integer".into())] },
                 MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Random".into(), is_sealed: true, return_type: Some("Random".into()), param_types: vec![] },
@@ -1149,6 +1153,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
             class_methods: vec![
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: false, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "from:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: true, return_type: Some("Regex".into()), param_types: vec![Some("String".into())] },
                 MethodInfo { selector: "from:options:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Regex".into(), is_sealed: true, return_type: Some("Regex".into()), param_types: vec![Some("String".into()), Some("List".into())] },
             ],
@@ -1202,6 +1207,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, return_type: Some("Set".into()), param_types: vec![Some("List".into())] },
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Set".into(), is_sealed: false, return_type: Some("Set".into()), param_types: vec![Some("List".into())] },
             ],
             class_variables: vec![],
         },
@@ -1259,6 +1265,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
             class_methods: vec![
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: false, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "from:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: true, return_type: Some("Stream".into()), param_types: vec![Some("Integer".into())] },
                 MethodInfo { selector: "from:by:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: true, return_type: Some("Stream".into()), param_types: vec![Some("Integer".into()), Some("Block".into())] },
                 MethodInfo { selector: "on:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Stream".into(), is_sealed: true, return_type: Some("Stream".into()), param_types: vec![None] },
@@ -1565,6 +1572,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tuple".into(), is_sealed: false, return_type: Some("Tuple".into()), param_types: vec![Some("List".into())] },
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tuple".into(), is_sealed: false, return_type: Some("Tuple".into()), param_types: vec![Some("List".into())] },
             ],
             class_variables: vec![],
         },

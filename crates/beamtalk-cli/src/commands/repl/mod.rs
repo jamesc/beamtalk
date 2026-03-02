@@ -1256,7 +1256,7 @@ mod tests {
     fn format_value_array() {
         let _guard = ColorGuard::disabled();
         let value = serde_json::json!([1, 2, 3]);
-        assert_eq!(format_value(&value), "[1, 2, 3]");
+        assert_eq!(format_value(&value), "#(1, 2, 3)");
     }
 
     #[test]

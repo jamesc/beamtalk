@@ -99,9 +99,6 @@ pub type MethodReturnKey = (EcoString, EcoString, bool);
 
 /// Infers return types for all unannotated methods in a module.
 ///
-/// This function walks all instance methods and class methods in the module,
-/// infers the type of each method body, and returns a map of inferred types.
-///
 /// Only returns `InferredType::Known(class_name)` results. `Dynamic` types are
 /// omitted from the map (absence = dynamic, no annotation written back).
 ///
@@ -114,92 +111,8 @@ pub fn infer_method_return_types(
     hierarchy: &ClassHierarchy,
 ) -> HashMap<MethodReturnKey, EcoString> {
     let mut checker = TypeChecker::new();
-    let mut result = HashMap::new();
-
-    for class in &module.classes {
-        let is_abstract = class.is_abstract || hierarchy.is_abstract(&class.name.name);
-
-        for method in &class.methods {
-            if method.return_type.is_some() {
-                continue;
-            }
-            if method
-                .body
-                .iter()
-                .any(|s| matches!(s.expression, crate::ast::Expression::Primitive { .. }))
-            {
-                continue;
-            }
-            let mut env = TypeEnv::new();
-            env.set("self", InferredType::Known(class.name.name.clone()));
-            TypeChecker::set_param_types(&mut env, &method.parameters);
-            let body_type = checker.infer_stmts(&method.body, hierarchy, &mut env, is_abstract);
-            if let InferredType::Known(ref inferred) = body_type {
-                result.insert(
-                    (class.name.name.clone(), method.selector.name(), false),
-                    inferred.clone(),
-                );
-            }
-        }
-
-        for method in &class.class_methods {
-            if method.return_type.is_some() {
-                continue;
-            }
-            if method
-                .body
-                .iter()
-                .any(|s| matches!(s.expression, crate::ast::Expression::Primitive { .. }))
-            {
-                continue;
-            }
-            let mut env = TypeEnv::new();
-            env.in_class_method = true;
-            env.set("self", InferredType::Known(class.name.name.clone()));
-            TypeChecker::set_param_types(&mut env, &method.parameters);
-            let body_type = checker.infer_stmts(&method.body, hierarchy, &mut env, is_abstract);
-            if let InferredType::Known(ref inferred) = body_type {
-                result.insert(
-                    (class.name.name.clone(), method.selector.name(), true),
-                    inferred.clone(),
-                );
-            }
-        }
-    }
-
-    // Standalone (Tonel-style) method definitions: `Counter >> getValue => ...`
-    for standalone in &module.method_definitions {
-        let method = &standalone.method;
-        if method.return_type.is_some() {
-            continue;
-        }
-        if method
-            .body
-            .iter()
-            .any(|s| matches!(s.expression, crate::ast::Expression::Primitive { .. }))
-        {
-            continue;
-        }
-        let class_name = &standalone.class_name.name;
-        let is_abstract = hierarchy.is_abstract(class_name);
-        let mut env = TypeEnv::new();
-        env.in_class_method = standalone.is_class_method;
-        env.set("self", InferredType::Known(class_name.clone()));
-        TypeChecker::set_param_types(&mut env, &method.parameters);
-        let body_type = checker.infer_stmts(&method.body, hierarchy, &mut env, is_abstract);
-        if let InferredType::Known(ref inferred) = body_type {
-            result.insert(
-                (
-                    class_name.clone(),
-                    method.selector.name(),
-                    standalone.is_class_method,
-                ),
-                inferred.clone(),
-            );
-        }
-    }
-
-    result
+    checker.check_module(module, hierarchy);
+    checker.take_method_return_types()
 }
 
 /// Type checking domain service.
@@ -215,6 +128,7 @@ pub fn infer_method_return_types(
 pub struct TypeChecker {
     diagnostics: Vec<Diagnostic>,
     type_map: TypeMap,
+    method_return_types: HashMap<MethodReturnKey, EcoString>,
 }
 
 impl TypeChecker {
@@ -224,6 +138,7 @@ impl TypeChecker {
         Self {
             diagnostics: Vec::new(),
             type_map: TypeMap::new(),
+            method_return_types: HashMap::new(),
         }
     }
 
@@ -253,6 +168,19 @@ impl TypeChecker {
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
                 }
+                if method.return_type.is_none()
+                    && !method
+                        .body
+                        .iter()
+                        .any(|s| matches!(s.expression, Expression::Primitive { .. }))
+                {
+                    if let InferredType::Known(ref inferred) = body_type {
+                        self.method_return_types.insert(
+                            (class.name.name.clone(), method.selector.name(), false),
+                            inferred.clone(),
+                        );
+                    }
+                }
             }
             for method in &class.class_methods {
                 let mut method_env = TypeEnv::new();
@@ -265,6 +193,19 @@ impl TypeChecker {
                 self.check_no_self_in_params(method, &class.name.name);
                 if is_typed {
                     self.check_typed_method_annotations(method, &class.name.name);
+                }
+                if method.return_type.is_none()
+                    && !method
+                        .body
+                        .iter()
+                        .any(|s| matches!(s.expression, Expression::Primitive { .. }))
+                {
+                    if let InferredType::Known(ref inferred) = body_type {
+                        self.method_return_types.insert(
+                            (class.name.name.clone(), method.selector.name(), true),
+                            inferred.clone(),
+                        );
+                    }
                 }
             }
 
@@ -288,6 +229,24 @@ impl TypeChecker {
             );
             self.check_return_type(&standalone.method, &body_type, class_name, hierarchy);
             self.check_no_self_in_params(&standalone.method, class_name);
+            if standalone.method.return_type.is_none()
+                && !standalone
+                    .method
+                    .body
+                    .iter()
+                    .any(|s| matches!(s.expression, Expression::Primitive { .. }))
+            {
+                if let InferredType::Known(ref inferred) = body_type {
+                    self.method_return_types.insert(
+                        (
+                            class_name.clone(),
+                            standalone.method.selector.name(),
+                            standalone.is_class_method,
+                        ),
+                        inferred.clone(),
+                    );
+                }
+            }
         }
     }
 
@@ -1307,6 +1266,17 @@ impl TypeChecker {
     /// Takes ownership of the type map, leaving an empty map.
     pub fn take_type_map(&mut self) -> TypeMap {
         std::mem::take(&mut self.type_map)
+    }
+
+    /// Returns a reference to the method return types collected during checking.
+    #[must_use]
+    pub fn method_return_types(&self) -> &HashMap<MethodReturnKey, EcoString> {
+        &self.method_return_types
+    }
+
+    /// Takes ownership of the method return types map, leaving an empty map.
+    pub fn take_method_return_types(&mut self) -> HashMap<MethodReturnKey, EcoString> {
+        std::mem::take(&mut self.method_return_types)
     }
 }
 
@@ -4076,6 +4046,192 @@ Object subclass: Foo
         assert!(
             dnu_warnings.is_empty(),
             "result.onlyOnC should be valid for multi-level Self, got: {dnu_warnings:?}"
+        );
+    }
+
+    // ── infer_method_return_types / take_method_return_types tests (BT-1042) ─────
+
+    fn make_class_with_methods(
+        name: &str,
+        instance_methods: Vec<MethodDefinition>,
+    ) -> ClassDefinition {
+        ClassDefinition {
+            name: ident(name),
+            superclass: Some(ident("Object")),
+            class_kind: ClassKind::Value,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: instance_methods,
+            class_methods: vec![],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }
+    }
+
+    fn method_unannotated(selector: &str, body: Vec<Expression>) -> MethodDefinition {
+        MethodDefinition {
+            selector: MessageSelector::Unary(selector.into()),
+            parameters: vec![],
+            body: body.into_iter().map(ExpressionStatement::bare).collect(),
+            return_type: None,
+            is_sealed: false,
+            kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }
+    }
+
+    fn method_annotated(
+        selector: &str,
+        return_type: &str,
+        body: Vec<Expression>,
+    ) -> MethodDefinition {
+        MethodDefinition {
+            selector: MessageSelector::Unary(selector.into()),
+            parameters: vec![],
+            body: body.into_iter().map(ExpressionStatement::bare).collect(),
+            return_type: Some(TypeAnnotation::Simple(ident(return_type))),
+            is_sealed: false,
+            kind: MethodKind::Primary,
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }
+    }
+
+    fn primitive_expr() -> Expression {
+        Expression::Primitive {
+            name: "+".into(),
+            is_quoted: true,
+            is_intrinsic: false,
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn infer_method_return_types_collects_instance_methods() {
+        // Unannotated method returning a String literal → should be collected
+        let class = make_class_with_methods(
+            "Greeter",
+            vec![method_unannotated("greeting", vec![str_lit("hello")])],
+        );
+        let module = make_module_with_classes(vec![], vec![class]);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let result = infer_method_return_types(&module, &hierarchy);
+        assert_eq!(
+            result.get(&("Greeter".into(), "greeting".into(), false)),
+            Some(&"String".into()),
+            "unannotated instance method returning String should be collected"
+        );
+    }
+
+    #[test]
+    fn infer_method_return_types_collects_class_methods() {
+        // Unannotated class method returning an Integer literal → should be collected
+        let mut class = make_class_with_methods("Counter", vec![]);
+        class.class_methods = vec![method_unannotated("zero", vec![int_lit(0)])];
+        let module = make_module_with_classes(vec![], vec![class]);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let result = infer_method_return_types(&module, &hierarchy);
+        assert_eq!(
+            result.get(&("Counter".into(), "zero".into(), true)),
+            Some(&"Integer".into()),
+            "unannotated class method returning Integer should be collected"
+        );
+    }
+
+    #[test]
+    fn infer_method_return_types_collects_standalone_methods() {
+        // Standalone (Tonel-style) unannotated method returning a String literal
+        use crate::ast::StandaloneMethodDefinition;
+        let mut module = make_module(vec![]);
+        module.method_definitions = vec![StandaloneMethodDefinition {
+            class_name: ident("Widget"),
+            is_class_method: false,
+            method: method_unannotated("label", vec![str_lit("ok")]),
+            span: span(),
+        }];
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = infer_method_return_types(&module, &hierarchy);
+        assert_eq!(
+            result.get(&("Widget".into(), "label".into(), false)),
+            Some(&"String".into()),
+            "unannotated standalone method returning String should be collected"
+        );
+    }
+
+    #[test]
+    fn infer_method_return_types_excludes_annotated_methods() {
+        // Explicitly annotated method should NOT appear in the result map
+        let class = make_class_with_methods(
+            "Foo",
+            vec![method_annotated("value", "Integer", vec![int_lit(42)])],
+        );
+        let module = make_module_with_classes(vec![], vec![class]);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let result = infer_method_return_types(&module, &hierarchy);
+        assert!(
+            !result.contains_key(&("Foo".into(), "value".into(), false)),
+            "annotated method must not be overridden by inference"
+        );
+    }
+
+    #[test]
+    fn infer_method_return_types_excludes_primitive_methods() {
+        // Method whose body contains @primitive must be excluded
+        let class = make_class_with_methods(
+            "Bar",
+            vec![method_unannotated("add", vec![primitive_expr()])],
+        );
+        let module = make_module_with_classes(vec![], vec![class]);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let result = infer_method_return_types(&module, &hierarchy);
+        assert!(
+            !result.contains_key(&("Bar".into(), "add".into(), false)),
+            "@primitive method must not appear in inferred return types"
+        );
+    }
+
+    #[test]
+    fn infer_method_return_types_excludes_dynamic_results() {
+        // Method body that resolves to Dynamic (unresolvable variable) should not be stored
+        let class = make_class_with_methods(
+            "Baz",
+            vec![method_unannotated("compute", vec![var("unknownVar")])],
+        );
+        let module = make_module_with_classes(vec![], vec![class]);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let result = infer_method_return_types(&module, &hierarchy);
+        assert!(
+            !result.contains_key(&("Baz".into(), "compute".into(), false)),
+            "Dynamic result must not appear in inferred return types"
+        );
+    }
+
+    #[test]
+    fn take_method_return_types_leaves_empty_map() {
+        let class = make_class_with_methods(
+            "Greeter",
+            vec![method_unannotated("greeting", vec![str_lit("hello")])],
+        );
+        let module = make_module_with_classes(vec![], vec![class]);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let first = checker.take_method_return_types();
+        assert!(
+            !first.is_empty(),
+            "first take should have collected entries"
+        );
+        let second = checker.take_method_return_types();
+        assert!(
+            second.is_empty(),
+            "second take should return empty map after drain"
         );
     }
 }

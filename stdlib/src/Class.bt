@@ -63,4 +63,5 @@ sealed Behaviour subclass: Class
   /// ```beamtalk
   /// Object classBuilder name: #Foo; register
   /// ```
-  sealed classBuilder -> ClassBuilder => ClassBuilder spawnWith: #{#superclassRef => self}
+  sealed classBuilder -> ClassBuilder =>
+    ClassBuilder spawnWith: #{#superclassRef => self}

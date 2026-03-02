@@ -30,6 +30,14 @@ sealed typed Collection subclass: List
   /// ```
   class withAll: list: List -> List => @primitive "withAll:"
 
+  /// Create a List from a list. Convenience alias for `withAll:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// List new: #(1, 2, 3)             // => #(1, 2, 3)
+  /// ```
+  class new: elements: List -> List => self withAll: elements
+
   /// Number of elements in the list.
   ///
   /// ## Examples

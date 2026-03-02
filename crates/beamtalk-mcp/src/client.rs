@@ -206,11 +206,19 @@ impl ReplClient {
     }
 
     /// Send a complete operation.
-    pub async fn complete(&self, code: &str) -> Result<ReplResponse, String> {
+    ///
+    /// `code` must already be truncated to `cursor` (i.e. only the text the
+    /// user has typed up to the cursor position). `cursor` is included as a
+    /// field in the JSON request; its presence tells the REPL to use the
+    /// context-aware chain-completion path (`get_context_completions/2`)
+    /// rather than the legacy bare-prefix path. The cursor value itself is not
+    /// used by the current REPL handler — only its presence matters.
+    pub async fn complete(&self, code: &str, cursor: usize) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "complete",
             "id": next_msg_id(),
-            "code": code
+            "code": code,
+            "cursor": cursor
         });
         self.send(&request).await
     }
@@ -780,9 +788,27 @@ mod tests {
     async fn test_complete() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
-        let resp = client.complete("Integer ").await.unwrap();
+        let code = "Integer ";
+        let resp = client.complete(code, code.len()).await.unwrap();
         assert!(!resp.is_error());
         assert!(resp.completions.is_some(), "should return completions list");
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_complete_chain() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie).await?;
+        // Chain completion: "hello" size → should resolve to Integer methods
+        let code = "\"hello\" size ";
+        let resp = client.complete(code, code.len()).await.unwrap();
+        assert!(!resp.is_error());
+        let completions = resp.completions.unwrap_or_default();
+        assert!(
+            completions.iter().any(|c| c == "abs"),
+            "chain completions should include Integer method 'abs': {completions:?}"
+        );
         Ok(())
     }
 
