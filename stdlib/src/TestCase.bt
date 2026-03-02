@@ -17,22 +17,6 @@
 /// ```
 Object subclass: TestCase
 
-  /// Run all test methods in this class and print a summary.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// CounterTest runAll     // prints results to transcript
-  /// ```
-  class runAll => @primitive "runAll"
-
-  /// Run the named test method in this class and print a summary.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// CounterTest run: #testIncrement
-  /// ```
-  class run: testName => @primitive "run:"
-
   /// Prepare the test fixture. Called before each test method.
   /// Override in subclasses to set up shared state or resources.
   setUp -> Nil => nil
@@ -96,3 +80,19 @@ Object subclass: TestCase
   /// self fail: "This branch should not be reached"
   /// ```
   fail: message: String -> Nil => @primitive "fail:"
+
+  /// Run all test methods in this class and print a summary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// CounterTest runAll     // prints results to transcript
+  /// ```
+  class runAll -> String => @primitive "runAll"
+
+  /// Run the named test method in this class and print a summary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// CounterTest run: #testIncrement
+  /// ```
+  class run: testName -> String => @primitive "run:"

@@ -41,7 +41,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter allSuperclasses   // => [Actor, Object, ProtoObject]
   /// ```
-  sealed allSuperclasses => @primitive "classAllSuperclasses"
+  sealed allSuperclasses -> List => @primitive "classAllSuperclasses"
 
   /// Return direct subclasses of the receiver as a list of class objects.
   ///
@@ -49,7 +49,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Object subclasses   // => [Behaviour, Actor, Integer, ...]
   /// ```
-  sealed subclasses => @primitive "classSubclasses"
+  sealed subclasses -> List => @primitive "classSubclasses"
 
   /// Return all subclasses transitively (breadth-first) as class objects.
   ///
@@ -57,7 +57,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Object allSubclasses   // => [Behaviour, Class, Actor, ...]
   /// ```
-  sealed allSubclasses => @primitive "classAllSubclasses"
+  sealed allSubclasses -> List => @primitive "classAllSubclasses"
 
   /// Test whether the receiver strictly inherits from aClass (self not included).
   ///
@@ -68,7 +68,7 @@ abstract Object subclass: Behaviour
   /// Counter inheritsFrom: Actor    // => true
   /// Counter inheritsFrom: Counter  // => false
   /// ```
-  sealed inheritsFrom: aClass => self allSuperclasses includes: aClass
+  sealed inheritsFrom: aClass -> Boolean => self allSuperclasses includes: aClass
 
   /// Test whether aBehaviour is the receiver or one of its ancestors.
   ///
@@ -80,7 +80,7 @@ abstract Object subclass: Behaviour
   /// Counter includesBehaviour: Actor    // => true
   /// Counter includesBehaviour: Integer  // => false
   /// ```
-  sealed includesBehaviour: aBehaviour =>
+  sealed includesBehaviour: aBehaviour -> Boolean =>
     self == aBehaviour ifTrue: [true] ifFalse: [self inheritsFrom: aBehaviour]
 
   // --- Method dictionary ---
@@ -91,7 +91,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter methods   // => [increment, getValue]
   /// ```
-  sealed methods => @primitive "classLocalMethods"
+  sealed methods -> List => @primitive "classLocalMethods"
 
   /// Return all selectors understood by instances, including inherited ones.
   ///
@@ -101,7 +101,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter allMethods   // => [increment, getValue, class, respondsTo:, ...]
   /// ```
-  sealed allMethods => @primitive "classMethods"
+  sealed allMethods -> List => @primitive "classMethods"
 
   /// Test whether instances of the receiver understand the given selector
   /// (checks full inheritance chain).
@@ -114,7 +114,7 @@ abstract Object subclass: Behaviour
   /// Counter canUnderstand: #class      // => true (inherited from ProtoObject)
   /// Counter canUnderstand: #bogus      // => false
   /// ```
-  sealed canUnderstand: selector => self allMethods includes: selector
+  sealed canUnderstand: selector -> Boolean => self allMethods includes: selector
 
   /// Test whether the selector is defined locally in this class
   /// (does not check superclasses).
@@ -124,7 +124,7 @@ abstract Object subclass: Behaviour
   /// Counter includesSelector: #increment  // => true
   /// Counter includesSelector: #class      // => false (defined in ProtoObject)
   /// ```
-  sealed includesSelector: selector => @primitive "classIncludesSelector"
+  sealed includesSelector: selector -> Boolean => @primitive "classIncludesSelector"
 
   /// Walk the hierarchy and return the class that defines the given selector,
   /// or nil if no class defines it.
@@ -149,7 +149,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter fieldNames   // => [value]
   /// ```
-  sealed fieldNames => @primitive "classFieldNames"
+  sealed fieldNames -> List => @primitive "classFieldNames"
 
   /// Return all field names including inherited, in slot order.
   ///
@@ -157,7 +157,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter allFieldNames   // => [value]
   /// ```
-  sealed allFieldNames => @primitive "classAllFieldNames"
+  sealed allFieldNames -> List => @primitive "classAllFieldNames"
 
   // --- Documentation (ADR 0033) ---
 
@@ -176,7 +176,7 @@ abstract Object subclass: Behaviour
   /// Counter doc: "A counter actor"
   /// Counter doc           // => "A counter actor"
   /// ```
-  sealed doc: aString => @primitive "classSetDoc"
+  sealed doc: aString -> Behaviour => @primitive "classSetDoc"
 
   /// Set the documentation string for a specific method. Returns the receiver.
   ///
@@ -185,8 +185,7 @@ abstract Object subclass: Behaviour
   /// Counter setDocForMethod: #increment to: "Increment the counter by 1"
   /// (Counter >> #increment) doc   // => "Increment the counter by 1"
   /// ```
-  sealed setDocForMethod: aSelector to: aString =>
-    @primitive "classSetMethodDoc"
+  sealed setDocForMethod: aSelector to: aString -> Behaviour => @primitive "classSetMethodDoc"
 
   /// Return the documentation string for a specific method, or nil if no doc
   /// is set or the method does not exist.
@@ -207,7 +206,7 @@ abstract Object subclass: Behaviour
   /// Counter isBehaviour   // => true
   /// 42 isBehaviour        // => false
   /// ```
-  sealed isBehaviour => true
+  sealed isBehaviour -> Boolean => true
 
   /// Test whether this is a metaclass. Returns false; overridden in Metaclass.
   ///
@@ -215,7 +214,7 @@ abstract Object subclass: Behaviour
   /// ```beamtalk
   /// Counter isMeta   // => false
   /// ```
-  sealed isMeta => false
+  sealed isMeta -> Boolean => false
 
   /// Test whether this is a Metaclass. Returns false; overridden in Metaclass.
   ///
@@ -224,7 +223,7 @@ abstract Object subclass: Behaviour
   /// Counter isMetaclass   // => false
   /// Integer isMetaclass   // => false
   /// ```
-  sealed isMetaclass => false
+  sealed isMetaclass -> Boolean => false
 
   // --- Source file and reload (ADR 0040 Phase 2) ---
 
@@ -253,7 +252,7 @@ abstract Object subclass: Behaviour
   /// Counter reload              // recompile + hot-swap Counter
   /// Integer reload              // => Error: Integer has no source file — stdlib classes cannot be reloaded
   /// ```
-  sealed reload => @primitive "classReload"
+  sealed reload -> Behaviour => @primitive "classReload"
 
   // --- Class removal ---
 
@@ -274,4 +273,4 @@ abstract Object subclass: Behaviour
   /// Counter removeFromSystem   // => nil (Counter class removed)
   /// Integer removeFromSystem   // => Error: cannot remove stdlib class
   /// ```
-  sealed removeFromSystem => @primitive "classRemoveFromSystem"
+  sealed removeFromSystem -> Nil => @primitive "classRemoveFromSystem"
