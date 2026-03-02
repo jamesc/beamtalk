@@ -91,7 +91,7 @@ pub fn infer_types(module: &Module, hierarchy: &ClassHierarchy) -> TypeMap {
     checker.take_type_map()
 }
 
-/// Key for method return type map: (ClassName, Selector, IsClassMethod)
+/// Key for method return type map: (`ClassName`, Selector, `IsClassMethod`)
 ///
 /// Used by the return-type writeback pass (BT-1005) to track inferred return
 /// types for each method before writing them back into the AST.
@@ -299,7 +299,9 @@ impl TypeChecker {
                             // Bare identifier might be implicit self field access
                             // (e.g., `getValue => value` is sugar for `getValue => self.value`)
                             if let Some(InferredType::Known(class_name)) = env.get("self") {
-                                if let Some(field_type) = hierarchy.state_field_type(&class_name, name) {
+                                if let Some(field_type) =
+                                    hierarchy.state_field_type(&class_name, name)
+                                {
                                     InferredType::Known(field_type)
                                 } else {
                                     InferredType::Dynamic

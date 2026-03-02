@@ -44,8 +44,8 @@ pub use class_hierarchy::ClassHierarchy;
 pub use error::{SemanticError, SemanticErrorKind};
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::extract_pattern_bindings;
-pub use scope::BindingKind;
 pub use return_type_writeback::apply_return_type_writeback;
+pub use scope::BindingKind;
 pub use type_checker::{
     InferredType, MethodReturnKey, TypeChecker, TypeMap, infer_method_return_types, infer_types,
 };

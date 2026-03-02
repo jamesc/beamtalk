@@ -47,8 +47,7 @@ pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarc
             }
             let key = (class.name.name.clone(), method.selector.name(), false);
             if let Some(class_name) = inferred.get(&key) {
-                method.return_type =
-                    Some(TypeAnnotation::simple(class_name.clone(), method.span));
+                method.return_type = Some(TypeAnnotation::simple(class_name.clone(), method.span));
             }
         }
 
@@ -58,8 +57,7 @@ pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarc
             }
             let key = (class.name.name.clone(), method.selector.name(), true);
             if let Some(class_name) = inferred.get(&key) {
-                method.return_type =
-                    Some(TypeAnnotation::simple(class_name.clone(), method.span));
+                method.return_type = Some(TypeAnnotation::simple(class_name.clone(), method.span));
             }
         }
     }
@@ -74,8 +72,10 @@ pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarc
             standalone.is_class_method,
         );
         if let Some(class_name) = inferred.get(&key) {
-            standalone.method.return_type =
-                Some(TypeAnnotation::simple(class_name.clone(), standalone.method.span));
+            standalone.method.return_type = Some(TypeAnnotation::simple(
+                class_name.clone(),
+                standalone.method.span,
+            ));
         }
     }
 }
