@@ -80,6 +80,8 @@ Transcript is workspace-wide (shared across all sessions), matching the Smalltal
 
 The extension owns the REPL session. There is no support for connecting to sessions started outside VSCode — if a user runs `beamtalk repl` in an external terminal, bindings from that session are not shown. Actors and classes are workspace-wide and always visible regardless.
 
+> **Corner case — manual `beamtalk repl` in a VSCode integrated terminal**: If a user opens a VSCode integrated terminal and runs `beamtalk repl` themselves (rather than using the "Start REPL" command), the sidebar sees the workspace (actors, classes) but not their bindings. This is intentional: the extension doesn't know the session ID. A future expansion could monitor the active terminal's output stream for the `[beamtalk] session: <id>` line and adopt the session automatically — the Python extension does this to detect which conda/venv environment a user activates in a terminal, and the Azure CLI extension similarly detects login completions. This would close the gap for power users who prefer manual terminal control without changing the default ownership model.
+
 The extension host manages a single `WorkspaceClient` per VSCode window:
 
 ```
