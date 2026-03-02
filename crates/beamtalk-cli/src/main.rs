@@ -27,8 +27,12 @@ struct Cli {
     #[arg(short, long, action = ArgAction::Count, global = true)]
     verbose: u8,
 
+    /// Print the installation prefix (sysroot) and exit
+    #[arg(long)]
+    print_sysroot: bool,
+
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 /// Available CLI subcommands.
@@ -285,15 +289,25 @@ fn main() {
 
 /// Returns the installation prefix by walking up from the running binary:
 /// `{sysroot}/bin/beamtalk` → `{sysroot}`.
+///
+/// Emits a warning to stderr if the sysroot cannot be derived from the
+/// running binary, falling back to `/usr/local`.
 fn compute_sysroot() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| {
-            exe.parent()
-                .and_then(|bin| bin.parent())
-                .map(ToOwned::to_owned)
-        })
-        .unwrap_or_else(|| PathBuf::from("/usr/local"))
+    match std::env::current_exe() {
+        Ok(exe) => {
+            if let Some(sysroot) = exe.parent().and_then(|bin| bin.parent()) {
+                return sysroot.to_path_buf();
+            }
+            eprintln!(
+                "warning: unable to determine sysroot from '{}'; falling back to /usr/local",
+                exe.display()
+            );
+        }
+        Err(err) => {
+            eprintln!("warning: failed to read executable path: {err}; falling back to /usr/local");
+        }
+    }
+    PathBuf::from("/usr/local")
 }
 
 /// CLI entry point: parse arguments and dispatch to the appropriate subcommand.
@@ -302,13 +316,16 @@ fn compute_sysroot() -> PathBuf {
     reason = "top-level dispatch — each arm is a one-liner"
 )]
 fn run() -> Result<()> {
-    // Handle --print-sysroot before clap parsing: like --version it requires no subcommand.
-    if std::env::args().any(|arg| arg == "--print-sysroot") {
+    let cli = Cli::parse();
+
+    if cli.print_sysroot {
         println!("{}", compute_sysroot().display());
         return Ok(());
     }
 
-    let cli = Cli::parse();
+    let Some(command) = cli.command else {
+        miette::bail!("no subcommand provided. Run `beamtalk --help` for usage.");
+    };
 
     // Initialize tracing when explicitly requested.
     // Default is still no logs to avoid stderr interference with E2E tests.
@@ -344,7 +361,7 @@ fn run() -> Result<()> {
         )
     }))?;
 
-    match cli.command {
+    match command {
         Command::Build {
             path,
             allow_primitives,
