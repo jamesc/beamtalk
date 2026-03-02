@@ -1417,6 +1417,13 @@ parse_receiver_multi_token_three_tokens_test() ->
         beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"counter getValue reversed ">>)
     ).
 
+parse_receiver_leading_whitespace_single_token_test() ->
+    %% Leading whitespace must NOT trigger multi-token expression path
+    ?assertEqual(
+        {<<"Integer">>, <<"s">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"  Integer s">>)
+    ).
+
 %%% walk_chain/2 and walk_chain_class/2 tests (BT-1006)
 
 walk_chain_empty_selectors_test() ->
@@ -1510,18 +1517,15 @@ resolve_chain_type_multi_hop_test() ->
     end.
 
 resolve_chain_type_broken_chain_returns_undefined_test() ->
-    %% Selector with no annotation → undefined
-    Pid = spawn_mock_class_with_return_types('ResolveChainTestB', #{}, #{}),
-    try
-        ?assertEqual(
-            undefined,
-            beamtalk_repl_ops_dev:resolve_chain_type(
-                <<"\"hello\" noSuchAnnotation">>, #{}
-            )
+    %% Unknown selector (not an existing atom) → tokeniser returns error → undefined.
+    %% No mock needed: the receiver is a string literal classified by the real String class,
+    %% and binary_to_existing_atom fails on the unknown selector before reaching the registry.
+    ?assertEqual(
+        undefined,
+        beamtalk_repl_ops_dev:resolve_chain_type(
+            <<"\"hello\" noSuchAnnotation">>, #{}
         )
-    after
-        cleanup_mock_class('ResolveChainTestB', Pid)
-    end.
+    ).
 
 resolve_chain_type_keyword_mid_chain_returns_undefined_test() ->
     %% Keyword sends mid-chain cannot be tokenised — returns undefined

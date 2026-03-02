@@ -366,13 +366,24 @@ parse_receiver_and_prefix(Line) when is_binary(Line) ->
             case ReceiverCharsRev of
                 [] ->
                     {undefined, Prefix};
-                _ when Tail =:= [] ->
-                    %% Single-token receiver — no more content before it
-                    {list_to_binary(lists:reverse(ReceiverCharsRev)), Prefix};
                 _ ->
-                    %% Multi-token receiver expression — return the full expression (BT-1006)
-                    ReceiverExpr = list_to_binary(lists:reverse(ReceiverPartRev)),
-                    {expression, ReceiverExpr, Prefix}
+                    ReceiverToken = list_to_binary(lists:reverse(ReceiverCharsRev)),
+                    %% Check if Tail contains non-whitespace — only then is it multi-token.
+                    %% Leading indentation (e.g. "  Integer s") must not trigger the
+                    %% expression path; Tail would be all-whitespace in that case.
+                    case
+                        lists:any(
+                            fun(C) -> C =/= $\s andalso C =/= $\t end, Tail
+                        )
+                    of
+                        false ->
+                            %% Single-token receiver (possibly with leading whitespace)
+                            {ReceiverToken, Prefix};
+                        true ->
+                            %% Multi-token receiver expression (BT-1006)
+                            ReceiverExpr = list_to_binary(lists:reverse(ReceiverPartRev)),
+                            {expression, ReceiverExpr, Prefix}
+                    end
             end
     end.
 
