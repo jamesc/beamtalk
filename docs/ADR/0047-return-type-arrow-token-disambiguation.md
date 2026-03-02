@@ -86,7 +86,7 @@ binary method name. When the current token is `Arrow` the method selector is `"-
 After consuming `Arrow` and the argument name, `parse_optional_return_type()` is
 called as normal. The two consecutive `Arrow` tokens are now unambiguous:
 
-```
+```text
 Arrow  argName  Arrow  TypeName  FatArrow
   ↑ selector      ↑ return type
 ```

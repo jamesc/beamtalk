@@ -22,7 +22,7 @@ ProtoObject subclass: Object
   /// 42 class              // => Integer
   /// "hello" class         // => String
   /// ```
-  class -> Class => @primitive "class"
+  class => @primitive "class"
 
   /// Create a new instance of the receiver class.
   ///
