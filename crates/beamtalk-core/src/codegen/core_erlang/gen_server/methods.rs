@@ -985,9 +985,9 @@ impl CoreErlangGenerator {
     /// This routes all compiled class registration through the `ClassBuilder`
     /// protocol, which handles both first registration and hot reload.
     ///
-    /// The function is defensive — if `beamtalk_class_builder` is not available
-    /// (e.g., during early module loading), the try/catch returns `ok` to allow
-    /// the module to load.
+    /// If `beamtalk_class_builder:register/1` raises, the exception is re-raised
+    /// via `primop 'raw_raise'` so the BEAM `-on_load` mechanism reports a visible
+    /// load failure rather than silently succeeding with an unregistered class (BT-998).
     ///
     /// # Generated Code
     ///
@@ -1007,7 +1007,8 @@ impl CoreErlangGenerator {
     ///             <{'error', _Err0}> when 'true' -> {'error', _Err0}
     ///         end
     ///         in _Reg0
-    ///     catch <_,_,_> -> 'ok'
+    ///     catch <CatchType, CatchError, CatchStack> ->
+    ///         primop 'raw_raise'(CatchType, CatchError, CatchStack)
     /// ```
     #[allow(clippy::too_many_lines)] // builds class metadata map with methods, fields, and source
     pub(in crate::codegen::core_erlang) fn generate_register_class(
@@ -1430,7 +1431,7 @@ impl CoreErlangGenerator {
                     line(),
                     "of RegResult -> RegResult",
                     line(),
-                    "catch <CatchType, CatchError, CatchStack> -> 'ok'",
+                    "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
                 ]
             ),
             "\n\n",

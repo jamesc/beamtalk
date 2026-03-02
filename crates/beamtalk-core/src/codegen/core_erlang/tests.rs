@@ -3080,6 +3080,12 @@ fn test_class_registration_generation() {
 
     // Check function returns ok
     assert!(code.contains("'ok'"), "Should return 'ok'. Got:\n{code}");
+
+    // BT-998: catch clause must re-raise, not silently swallow errors
+    assert!(
+        code.contains("catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)"),
+        "register_class/0 catch clause must re-raise via primop 'raw_raise' (BT-998). Got:\n{code}"
+    );
 }
 
 #[test]
