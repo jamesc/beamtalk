@@ -391,8 +391,19 @@ get_method_return_type(ClassName, Selector) ->
             case Result of
                 {ok, _} = Found ->
                     Found;
-                not_found ->
+                {error, not_found} ->
                     %% Walk to superclass using the ETS hierarchy table.
+                    case ets:info(beamtalk_class_hierarchy) of
+                        undefined ->
+                            {error, not_found};
+                        _ ->
+                            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
+                                [{_, Super}] -> get_method_return_type(Super, Selector);
+                                [] -> {error, not_found}
+                            end
+                    end;
+                not_found ->
+                    %% Process exited during call — not in this class, walk to superclass.
                     case ets:info(beamtalk_class_hierarchy) of
                         undefined ->
                             {error, not_found};
@@ -429,7 +440,20 @@ get_class_method_return_type(ClassName, Selector) ->
             case Result of
                 {ok, _} = Found ->
                     Found;
+                {error, not_found} ->
+                    case ets:info(beamtalk_class_hierarchy) of
+                        undefined ->
+                            {error, not_found};
+                        _ ->
+                            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
+                                [{_, Super}] ->
+                                    get_class_method_return_type(Super, Selector);
+                                [] ->
+                                    {error, not_found}
+                            end
+                    end;
                 not_found ->
+                    %% Process exited during call — not in this class, walk to superclass.
                     case ets:info(beamtalk_class_hierarchy) of
                         undefined ->
                             {error, not_found};
