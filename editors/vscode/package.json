@@ -17,12 +17,91 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "beamtalk-workspace",
+          "title": "Beamtalk Workspace",
+          "icon": "./images/workspace.svg"
+        }
+      ]
+    },
+    "views": {
+      "beamtalk-workspace": [
+        {
+          "id": "beamtalk.workspaceExplorer",
+          "name": "Workspace Explorer",
+          "icon": "./images/workspace.svg"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "beamtalk.restartServer",
         "title": "Beamtalk: Restart Language Server"
+      },
+      {
+        "command": "beamtalk.refreshWorkspace",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "beamtalk.killActor",
+        "title": "Kill Actor",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "beamtalk.inspectBinding",
+        "title": "Inspect",
+        "icon": "$(search)"
+      },
+      {
+        "command": "beamtalk.reloadClass",
+        "title": "Reload Class",
+        "icon": "$(sync)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "beamtalk.refreshWorkspace",
+          "when": "view == beamtalk.workspaceExplorer",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "beamtalk.killActor",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
+          "group": "inline"
+        },
+        {
+          "command": "beamtalk.killActor",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
+          "group": "beamtalk@1"
+        },
+        {
+          "command": "beamtalk.inspectBinding",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == binding-item",
+          "group": "inline"
+        },
+        {
+          "command": "beamtalk.inspectBinding",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == binding-item",
+          "group": "beamtalk@1"
+        },
+        {
+          "command": "beamtalk.reloadClass",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == class-item",
+          "group": "inline"
+        },
+        {
+          "command": "beamtalk.reloadClass",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == class-item",
+          "group": "beamtalk@1"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "beamtalk",
@@ -62,6 +141,11 @@
           ],
           "default": "off",
           "description": "Trace communication between VS Code and the Beamtalk language server."
+        },
+        "beamtalk.workspace.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "(BT-1024) Auto-connect the Workspace Explorer to a running Beamtalk workspace when a .bt file is opened. Not yet active — wiring is implemented in BT-1024."
         }
       }
     },

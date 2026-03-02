@@ -11,10 +11,12 @@ import {
   RevealOutputChannelOn,
   type ServerOptions,
 } from "vscode-languageclient/node";
+import { WorkspaceTreeDataProvider } from "./workspaceTreeView";
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.LogOutputChannel | undefined;
 let traceOutputChannel: vscode.LogOutputChannel | undefined;
+let workspaceTreeProvider: WorkspaceTreeDataProvider | undefined;
 
 type ResolvedServerPath = {
   serverPath: string;
@@ -272,11 +274,54 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
+  // ─── Workspace Explorer (BT-1023) ──────────────────────────────────────────
+
+  workspaceTreeProvider = new WorkspaceTreeDataProvider();
+  context.subscriptions.push(workspaceTreeProvider);
+
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider("beamtalk.workspaceExplorer", workspaceTreeProvider)
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.refreshWorkspace", () => {
+      void workspaceTreeProvider?.refresh();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.killActor", (_node) => {
+      // Auto-connect + REPL wiring (BT-1024) will implement this fully.
+      void vscode.window.showInformationMessage("Kill actor: not yet connected to a workspace.");
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.inspectBinding", (_node) => {
+      // Auto-connect + REPL wiring (BT-1024) will implement this fully.
+      void vscode.window.showInformationMessage(
+        "Inspect binding: not yet connected to a workspace."
+      );
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.reloadClass", (_node) => {
+      // Auto-connect + REPL wiring (BT-1024) will implement this fully.
+      void vscode.window.showInformationMessage("Reload class: not yet connected to a workspace.");
+    })
+  );
+
   await startClient(context);
 }
 
 export function deactivate(): Thenable<void> | undefined {
   const stop = client?.stop();
+  // workspaceTreeProvider is disposed via context.subscriptions; dispose() is
+  // idempotent so no double-dispose risk, but we detach the client first to
+  // ensure no late push events fire into the disposed emitter.
+  workspaceTreeProvider?.setClient(null);
+  workspaceTreeProvider = undefined;
   outputChannel?.dispose();
   traceOutputChannel?.dispose();
   outputChannel = undefined;
