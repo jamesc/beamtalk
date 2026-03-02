@@ -1,8 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+import * as crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import {
@@ -12,6 +14,7 @@ import {
   type ServerOptions,
 } from "vscode-languageclient/node";
 import { TranscriptViewProvider } from "./transcriptView";
+import { WorkspaceClient } from "./workspaceClient";
 import { WorkspaceTreeDataProvider } from "./workspaceTreeView";
 
 let client: LanguageClient | undefined;
@@ -19,6 +22,11 @@ let outputChannel: vscode.LogOutputChannel | undefined;
 let traceOutputChannel: vscode.LogOutputChannel | undefined;
 let workspaceTreeProvider: WorkspaceTreeDataProvider | undefined;
 let transcriptViewProvider: TranscriptViewProvider | undefined;
+
+/** The active WorkspaceClient, set when a workspace port file is detected. */
+let workspaceWsClient: WorkspaceClient | undefined;
+/** The integrated terminal running `beamtalk repl`, if started by this extension. */
+let replTerminal: vscode.Terminal | undefined;
 
 type ResolvedServerPath = {
   serverPath: string;
@@ -255,6 +263,317 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
   }
 }
 
+// ─── Workspace ID derivation ─────────────────────────────────────────────────
+
+/**
+ * Compute the workspace ID for a project root directory.
+ *
+ * Replicates the Rust implementation in `beamtalk-workspace`:
+ * SHA256 of the canonicalized absolute path, first 12 hex characters.
+ */
+function computeWorkspaceId(projectRoot: string): string | null {
+  try {
+    const canonical = fs.realpathSync(projectRoot);
+    const hash = crypto.createHash("sha256").update(canonical).digest("hex");
+    return hash.slice(0, 12);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find the project root for the current VS Code workspace.
+ * Returns the first workspace folder that contains a `beamtalk.toml`.
+ */
+function findProjectRoot(): string | null {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    return null;
+  }
+  for (const folder of folders) {
+    const tomlPath = path.join(folder.uri.fsPath, "beamtalk.toml");
+    if (fs.existsSync(tomlPath)) {
+      return folder.uri.fsPath;
+    }
+  }
+  return null;
+}
+
+// ─── Auto-connect via port file watcher ──────────────────────────────────────
+
+/**
+ * Connect the WorkspaceClient to the workspace identified by `workspaceId`.
+ * Disposes any existing connection first.
+ */
+function connectWorkspace(workspaceId: string): void {
+  // Always dispose the previous connection — even if the workspace ID matches,
+  // the port number may have changed (workspace restart overwrites the port file).
+  if (workspaceWsClient) {
+    workspaceWsClient.dispose();
+    workspaceWsClient = undefined;
+    workspaceTreeProvider?.setClient(null);
+    transcriptViewProvider?.setClient(null);
+  }
+
+  let newClient: WorkspaceClient;
+  try {
+    newClient = WorkspaceClient.fromFiles(workspaceId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    outputChannel?.warn(`Failed to create WorkspaceClient for workspace ${workspaceId}: ${msg}`);
+    return;
+  }
+
+  workspaceWsClient = newClient;
+  workspaceTreeProvider?.setClient(newClient);
+  transcriptViewProvider?.setClient(newClient);
+  newClient.connect();
+  outputChannel?.info(`Connected to workspace: ${workspaceId}`);
+}
+
+/** Disconnect from the current workspace and show disconnected state. */
+function disconnectWorkspace(reason: "port-removed" | "terminal-close"): void {
+  if (!workspaceWsClient) {
+    return;
+  }
+
+  const id = workspaceWsClient.id;
+  workspaceWsClient.dispose();
+  workspaceWsClient = undefined;
+  workspaceTreeProvider?.setClient(null);
+  transcriptViewProvider?.setClient(null);
+
+  outputChannel?.info(`Disconnected from workspace ${id}: ${reason}`);
+
+  if (reason === "port-removed") {
+    void vscode.window
+      .showInformationMessage("Beamtalk workspace stopped.", "Restart REPL")
+      .then((action) => {
+        if (action === "Restart REPL") {
+          void vscode.commands.executeCommand("beamtalk.startRepl");
+        }
+      });
+  }
+}
+
+/**
+ * Called when a port file appears or changes (workspace started or restarted).
+ *
+ * Debounces the read by a short delay — the Erlang runtime writes the port
+ * and cookie files as separate operations, so the cookie may not exist yet
+ * when the port file watcher fires.
+ */
+let portDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function handlePortFileAppeared(portUri: vscode.Uri): Promise<void> {
+  const config = vscode.workspace.getConfiguration("beamtalk");
+  if (!config.get<boolean>("workspace.autoConnect", true)) {
+    return;
+  }
+
+  // The workspace ID is the directory name containing the port file.
+  const workspaceId = path.basename(path.dirname(portUri.fsPath));
+
+  // Only connect if this workspace matches the open project.
+  const projectRoot = findProjectRoot();
+  if (!projectRoot) {
+    return;
+  }
+  const expectedId = computeWorkspaceId(projectRoot);
+  if (!expectedId || expectedId !== workspaceId) {
+    return;
+  }
+
+  // Debounce: wait briefly for the cookie file to be written before reading.
+  if (portDebounceTimer !== null) {
+    clearTimeout(portDebounceTimer);
+  }
+  portDebounceTimer = setTimeout(() => {
+    portDebounceTimer = null;
+    connectWorkspace(workspaceId);
+  }, 200);
+}
+
+/** Called when a port file is removed (workspace stopped or timed out). */
+function handlePortFileRemoved(portUri: vscode.Uri): void {
+  const workspaceId = path.basename(path.dirname(portUri.fsPath));
+  if (workspaceWsClient?.id !== workspaceId) {
+    return;
+  }
+  disconnectWorkspace("port-removed");
+}
+
+/**
+ * Register a file system watcher for workspace port files and trigger
+ * an immediate connect if a port file already exists.
+ */
+function setupAutoConnect(context: vscode.ExtensionContext): void {
+  const workspacesDir = path.join(os.homedir(), ".beamtalk", "workspaces");
+
+  // Ensure the directory exists so the FileSystemWatcher has something to watch.
+  // On a fresh install, ~/.beamtalk/workspaces/ doesn't exist yet and inotify
+  // (Linux) / FSEvents (macOS) can't watch a non-existent path.
+  fs.mkdirSync(workspacesDir, { recursive: true });
+
+  const pattern = new vscode.RelativePattern(vscode.Uri.file(workspacesDir), "*/port");
+  const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+  context.subscriptions.push(watcher);
+
+  context.subscriptions.push(watcher.onDidCreate((uri) => void handlePortFileAppeared(uri)));
+  // onDidChange covers workspace restarts: the Erlang runtime overwrites the port
+  // file in place, which fires onChange (not onCreate). We need to reconnect with
+  // the new port number.
+  context.subscriptions.push(watcher.onDidChange((uri) => void handlePortFileAppeared(uri)));
+  context.subscriptions.push(watcher.onDidDelete((uri) => handlePortFileRemoved(uri)));
+
+  // Check for a pre-existing port file (workspace already running at activation).
+  const projectRoot = findProjectRoot();
+  if (projectRoot) {
+    const id = computeWorkspaceId(projectRoot);
+    if (id) {
+      const portPath = path.join(workspacesDir, id, "port");
+      if (fs.existsSync(portPath)) {
+        void handlePortFileAppeared(vscode.Uri.file(portPath));
+      }
+    }
+  }
+}
+
+// ─── Session ID capture ───────────────────────────────────────────────────────
+
+const SESSION_ID_PATTERN = /\[beamtalk\] session: (\S+)/;
+
+/**
+ * Read chunks from a shell execution until the REPL session ID is found.
+ * Updates `workspaceTreeProvider` with the captured session ID so bindings
+ * from the REPL session are shown in the sidebar.
+ */
+async function captureReplSessionId(
+  execution: vscode.TerminalShellExecution,
+  terminal: vscode.Terminal
+): Promise<void> {
+  try {
+    for await (const chunk of execution.read()) {
+      const match = SESSION_ID_PATTERN.exec(chunk);
+      if (match) {
+        const sessionId = match[1];
+        outputChannel?.info(`Captured REPL session ID: ${sessionId}`);
+        // Only act if this is still our active REPL terminal.
+        if (replTerminal !== terminal) {
+          break;
+        }
+        workspaceTreeProvider?.setReplSessionId(sessionId);
+        // Don't break — keep reading. The REPL may reconnect and emit a new
+        // session ID (BT-1021); we need to pick up the updated value.
+      }
+    }
+  } catch {
+    // Stream ended (terminal closed or shell integration disconnected) — no-op.
+  }
+}
+
+// ─── Start REPL command ───────────────────────────────────────────────────────
+
+/**
+ * Open an integrated terminal running `beamtalk repl` and capture the session ID
+ * from its output so the Workspace Explorer can show REPL bindings.
+ *
+ * Shell integration is used when available (VS Code 1.93+) to read stdout.
+ * For older VS Code or shells without integration, `sendText` is used as fallback
+ * and session ID capture is attempted via `onDidStartTerminalShellExecution` if
+ * the user's shell later enables integration.
+ */
+function startReplCommand(context: vscode.ExtensionContext): void {
+  // Reuse the existing terminal if it's still alive.
+  if (replTerminal && replTerminal.exitStatus === undefined) {
+    replTerminal.show();
+    return;
+  }
+
+  replTerminal = vscode.window.createTerminal({
+    name: "Beamtalk REPL",
+    iconPath: new vscode.ThemeIcon("beaker"),
+  });
+  replTerminal.show();
+
+  const terminal = replTerminal;
+
+  if (terminal.shellIntegration) {
+    // Shell integration is already active — use executeCommand so we can read output.
+    const execution = terminal.shellIntegration.executeCommand("beamtalk repl");
+    void captureReplSessionId(execution, terminal);
+  } else {
+    // Shell integration not yet ready. Wait for it to become available, or fall
+    // back to sendText after a timeout so the REPL always starts.
+    let started = false;
+    const integrationDisposable = vscode.window.onDidChangeTerminalShellIntegration(
+      ({ terminal: t, shellIntegration }) => {
+        if (t !== terminal || started) {
+          return;
+        }
+        started = true;
+        integrationDisposable.dispose();
+        clearTimeout(fallbackTimer);
+        const execution = shellIntegration.executeCommand("beamtalk repl");
+        void captureReplSessionId(execution, terminal);
+      }
+    );
+    context.subscriptions.push(integrationDisposable);
+
+    // Fallback: start REPL via sendText if shell integration doesn't activate.
+    // Session ID capture will still be attempted via onDidStartTerminalShellExecution.
+    const fallbackTimer = setTimeout(() => {
+      if (!started && replTerminal === terminal) {
+        integrationDisposable.dispose();
+        terminal.sendText("beamtalk repl");
+      }
+    }, 2000);
+    context.subscriptions.push({ dispose: () => clearTimeout(fallbackTimer) });
+  }
+}
+
+// ─── Terminal lifecycle monitoring ────────────────────────────────────────────
+
+/**
+ * Set up listeners for terminal lifecycle and shell execution events.
+ *
+ * - On REPL terminal close: clear session ID and refresh bindings (the workspace
+ *   itself stays up; actors/classes remain visible).
+ * - Corner case: if a user manually runs `beamtalk repl` in any integrated
+ *   terminal, monitor the execution output and adopt the session ID.
+ */
+function setupTerminalMonitoring(context: vscode.ExtensionContext): void {
+  // Detect REPL terminal closure.
+  context.subscriptions.push(
+    vscode.window.onDidCloseTerminal((terminal) => {
+      if (terminal !== replTerminal) {
+        return;
+      }
+      replTerminal = undefined;
+      // Clear REPL session ID — bindings from the closed session are gone.
+      workspaceTreeProvider?.setReplSessionId(null);
+      outputChannel?.info("Beamtalk REPL terminal closed; session bindings cleared.");
+    })
+  );
+
+  // Corner case: capture session ID from any terminal running `beamtalk repl`.
+  context.subscriptions.push(
+    vscode.window.onDidStartTerminalShellExecution(async (event) => {
+      const cmdLine = event.execution.commandLine.value;
+      if (!cmdLine.includes("beamtalk repl")) {
+        return;
+      }
+      // Adopt this terminal as our REPL terminal if we don't already have one.
+      if (!replTerminal || replTerminal.exitStatus !== undefined) {
+        replTerminal = event.terminal;
+      }
+      void captureReplSessionId(event.execution, event.terminal);
+    })
+  );
+}
+
+// ─── Extension activation ─────────────────────────────────────────────────────
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const stdlibProvider = new StdlibContentProvider();
   context.subscriptions.push(
@@ -311,14 +630,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.killActor", (_node) => {
-      // Auto-connect + REPL wiring (BT-1024) will implement this fully.
+      // Rich actor kill requires Phase 2 (inspector panel).
       void vscode.window.showInformationMessage("Kill actor: not yet connected to a workspace.");
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.inspectBinding", (_node) => {
-      // Auto-connect + REPL wiring (BT-1024) will implement this fully.
+      // Rich binding inspector is Phase 2.
       void vscode.window.showInformationMessage(
         "Inspect binding: not yet connected to a workspace."
       );
@@ -327,10 +646,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.reloadClass", (_node) => {
-      // Auto-connect + REPL wiring (BT-1024) will implement this fully.
+      // Class reload requires Phase 2 (method browser).
       void vscode.window.showInformationMessage("Reload class: not yet connected to a workspace.");
     })
   );
+
+  // ─── Start REPL command (BT-1025) ──────────────────────────────────────────
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.startRepl", () => startReplCommand(context))
+  );
+
+  // ─── Auto-connect + terminal monitoring (BT-1025) ──────────────────────────
+
+  setupTerminalMonitoring(context);
+  setupAutoConnect(context);
 
   await startClient(context);
 }
@@ -340,6 +670,9 @@ export function deactivate(): Thenable<void> | undefined {
   // Providers are disposed via context.subscriptions; dispose() is idempotent
   // so no double-dispose risk, but we detach the client first to ensure no
   // late push events fire into disposed providers.
+  workspaceWsClient?.dispose();
+  workspaceWsClient = undefined;
+  replTerminal = undefined;
   workspaceTreeProvider?.setClient(null);
   workspaceTreeProvider = undefined;
   transcriptViewProvider?.setClient(null);
