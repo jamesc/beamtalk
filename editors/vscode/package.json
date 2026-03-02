@@ -168,7 +168,7 @@
         "beamtalk.workspace.autoConnect": {
           "type": "boolean",
           "default": true,
-          "description": "Auto-connect the Workspace Explorer to a running Beamtalk workspace when a workspace port file appears. Disable to connect only via the 'Beamtalk: Start REPL' command."
+          "description": "Auto-connect the Workspace Explorer to a running Beamtalk workspace when a workspace port file appears."
         }
       }
     },

@@ -332,7 +332,7 @@ function connectWorkspace(workspaceId: string): void {
 }
 
 /** Disconnect from the current workspace and show disconnected state. */
-function disconnectWorkspace(reason: "port-removed" | "terminal-close"): void {
+function disconnectWorkspace(reason: "port-removed"): void {
   if (!workspaceWsClient) {
     return;
   }
@@ -413,7 +413,13 @@ function setupAutoConnect(context: vscode.ExtensionContext): void {
   // Ensure the directory exists so the FileSystemWatcher has something to watch.
   // On a fresh install, ~/.beamtalk/workspaces/ doesn't exist yet and inotify
   // (Linux) / FSEvents (macOS) can't watch a non-existent path.
-  fs.mkdirSync(workspacesDir, { recursive: true });
+  try {
+    fs.mkdirSync(workspacesDir, { recursive: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    outputChannel?.warn(`Auto-connect disabled: cannot create ${workspacesDir}: ${msg}`);
+    return;
+  }
 
   const pattern = new vscode.RelativePattern(vscode.Uri.file(workspacesDir), "*/port");
   const watcher = vscode.workspace.createFileSystemWatcher(pattern);
@@ -452,9 +458,13 @@ async function captureReplSessionId(
   execution: vscode.TerminalShellExecution,
   terminal: vscode.Terminal
 ): Promise<void> {
+  // Buffer the tail of the previous chunk to handle session markers split
+  // across arbitrary terminal chunk boundaries.
+  let tail = "";
   try {
     for await (const chunk of execution.read()) {
-      const match = SESSION_ID_PATTERN.exec(chunk);
+      const text = tail + chunk;
+      const match = SESSION_ID_PATTERN.exec(text);
       if (match) {
         const sessionId = match[1];
         outputChannel?.info(`Captured REPL session ID: ${sessionId}`);
@@ -465,6 +475,10 @@ async function captureReplSessionId(
         workspaceTreeProvider?.setReplSessionId(sessionId);
         // Don't break — keep reading. The REPL may reconnect and emit a new
         // session ID (BT-1021); we need to pick up the updated value.
+        tail = "";
+      } else {
+        // Keep the last 80 chars to catch markers spanning chunk boundaries.
+        tail = text.length > 80 ? text.slice(-80) : text;
       }
     }
   } catch {
@@ -506,6 +520,11 @@ function startReplCommand(context: vscode.ExtensionContext): void {
     // Shell integration not yet ready. Wait for it to become available, or fall
     // back to sendText after a timeout so the REPL always starts.
     let started = false;
+    // onDidChangeTerminalShellIntegration requires VS Code 1.93+; guard at runtime.
+    if (!vscode.window.onDidChangeTerminalShellIntegration) {
+      terminal.sendText("beamtalk repl");
+      return;
+    }
     const integrationDisposable = vscode.window.onDidChangeTerminalShellIntegration(
       ({ terminal: t, shellIntegration }) => {
         if (t !== terminal || started) {
@@ -557,6 +576,10 @@ function setupTerminalMonitoring(context: vscode.ExtensionContext): void {
   );
 
   // Corner case: capture session ID from any terminal running `beamtalk repl`.
+  // onDidStartTerminalShellExecution requires VS Code 1.93+; guard at runtime.
+  if (!vscode.window.onDidStartTerminalShellExecution) {
+    return;
+  }
   context.subscriptions.push(
     vscode.window.onDidStartTerminalShellExecution(async (event) => {
       const cmdLine = event.execution.commandLine.value;
@@ -667,6 +690,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): Thenable<void> | undefined {
   const stop = client?.stop();
+  if (portDebounceTimer !== null) {
+    clearTimeout(portDebounceTimer);
+    portDebounceTimer = null;
+  }
   // Providers are disposed via context.subscriptions; dispose() is idempotent
   // so no double-dispose risk, but we detach the client first to ensure no
   // late push events fire into disposed providers.
