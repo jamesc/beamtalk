@@ -26,7 +26,7 @@ The gap is purely in the editor: nothing consumes this rich runtime data to surf
 2. Validates the information architecture (which panels, what data, what interactions) before committing to the larger browser UI project
 3. Shares the same WebSocket protocol — the browser UI is additive, not a replacement
 
-**ADR 0024 Tier 3** describes live workspace augmentation for LSP completions (type information from the running workspace). That is a separate concern; this ADR is about developer visibility and inspection, not completion quality. The two can share the same WebSocket connection in future.
+**ADR 0024 Tier 3** describes live workspace augmentation for LSP completions (type information from the running workspace). That is a separate concern; this ADR is about developer visibility and inspection, not completion quality. Tier 3 uses its own independent workspace WebSocket connection; the sidebar and Tier 3 both speak the same workspace WebSocket protocol but maintain separate, fully autonomous connections.
 
 ### Constraints
 
@@ -38,7 +38,7 @@ The gap is purely in the editor: nothing consumes this rich runtime data to surf
 
 ## Decision
 
-The VSCode extension gains a **Beamtalk Workspace** sidebar container with four views, using a **hybrid TreeView + WebviewView** architecture, connected via a **direct WebSocket** from the extension host.
+The VSCode extension gains a **Beamtalk Workspace** sidebar container with two views (Phase 1), using a **hybrid TreeView + WebviewView** architecture, connected via a **direct WebSocket** from the extension host.
 
 ### Views
 
@@ -46,7 +46,7 @@ The VSCode extension gains a **Beamtalk Workspace** sidebar container with four 
 
 A `TreeDataProvider` showing the live workspace state as a native VSCode tree:
 
-```
+```text
 ▾ WORKSPACE                    [● Connected]
   ▾ Bindings
       counter : Counter         [inspect]
@@ -84,11 +84,11 @@ The extension owns the REPL session. There is no support for connecting to sessi
 
 The extension host manages a single `WorkspaceClient` per VSCode window:
 
-```
+```text
 On "Start REPL" command (or auto-start on .bt file open):
   1. Read beamtalk.toml to find project root
   2. Run `beamtalk repl` in a new integrated terminal
-  3. REPL prints session ID to stdout on connect (e.g. "Session: abc123")
+  3. REPL prints session ID to stdout on connect (e.g. "[beamtalk] session: abc123")
   4. Extension captures session ID from terminal output
   5. Connect WebSocket to workspace, authenticate, subscribe to push channels
   6. Store session ID — used for bindings queries
@@ -107,7 +107,7 @@ Workspace persistence: a Beamtalk workspace (BEAM node) survives REPL disconnect
 
 The extension host opens the WebSocket connection directly, independent of the LSP server:
 
-```
+```text
 VSCode Extension Host
   ├── LanguageClient  →  beamtalk-lsp (stdio)      [editing intelligence]
   └── WorkspaceClient →  ws://127.0.0.1:{port}/ws   [live runtime state]
@@ -117,7 +117,7 @@ The LSP connection and workspace connection are independent. The workspace sideb
 
 **Interaction with ADR 0024 Tier 3:** The LSP opens its own independent WebSocket connection to the workspace for Tier 3. The two connections have different purposes and are fully autonomous:
 
-```
+```text
 VSCode Extension Host
   ├── LanguageClient  →  beamtalk-lsp (stdio)        [editing intelligence]
   └── WorkspaceClient →  ws://127.0.0.1:{port}/ws    [sidebar: session, bindings, actors, transcript]
@@ -301,7 +301,7 @@ Rely on the terminal REPL for all workspace inspection. The REPL already support
 - Event-driven updates — no polling, no background timers
 - TreeView is native VSCode: accessible, themeable, keyboard-navigable, low memory
 - Validates the panel information architecture for ADR 0017 Phase 3 before building the browser UI
-- `WorkspaceClient` is the hook point for ADR 0024 Tier 3 (live LSP completions)
+- The workspace WebSocket protocol is the shared foundation for ADR 0024 Tier 3 — the LSP opens its own `WorkspaceTypeClient` connection independently
 - Fills a genuine gap in the BEAM/Smalltalk ecosystem — no other language server does live workspace inspection in VSCode
 
 ### Negative
@@ -323,7 +323,7 @@ Rely on the terminal REPL for all workspace inspection. The REPL already support
 One runtime-side change:
 
 1. **`class-loaded` push event** (`beamtalk_repl_server.erl`, `beamtalk_ws_handler.erl`)
-   - Broadcast `{"push":"classes","event":"loaded","data":{"class":"Counter"}}` to all WebSocket subscribers when any session loads, reloads, or eval-defines a class
+   - Broadcast `{"push":"class-loaded","class":"Counter"}` to all WebSocket subscribers when any session loads, reloads, or eval-defines a class — flat structure matching the existing `actor-spawned`/`actor-stopped` convention
 
 2. **Session ID on REPL startup** (`beamtalk-cli/src/commands/repl.rs`)
    - REPL prints session ID to stdout on connect, e.g. `[beamtalk] session: abc123`
@@ -378,8 +378,8 @@ One runtime-side change:
 
 - Related ADRs:
   - [ADR 0004: Persistent Workspace Management](0004-persistent-workspace-management.md) — workspace lifecycle, session model
-  - [ADR 0017: Browser Connectivity to Running Workspaces](0017-browser-connectivity-running-workspaces.md) — WebSocket protocol, push channels, Phase 3 browser UI
-  - [ADR 0024: Static-First, Live-Augmented IDE Tooling](0024-static-first-live-augmented-ide-tooling.md) — Tier 3 live augmentation (shares WorkspaceClient connection)
+  - [ADR 0017: Browser Connectivity to Running Workspaces](0017-browser-connectivity-to-running-workspaces.md) — WebSocket protocol, push channels, Phase 3 browser UI
+  - [ADR 0024: Static-First, Live-Augmented IDE Tooling](0024-static-first-live-augmented-ide-tooling.md) — Tier 3 live augmentation (uses an independent LSP-owned workspace connection)
 - Protocol documentation: `docs/repl-protocol.md`
 - VSCode API references:
   - [TreeView API](https://code.visualstudio.com/api/extension-guides/tree-view)
