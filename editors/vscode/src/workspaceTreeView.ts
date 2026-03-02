@@ -102,11 +102,15 @@ export class WorkspaceTreeDataProvider
   private bindings: BindingsMap = {};
   private actors: ActorInfo[] = [];
   private classes: ClassInfo[] = [];
+  private disposed = false;
 
   /** Cached inspect results keyed by "actor:<pid>" or "binding:<name>". */
   private readonly inspectCache = new Map<string, Record<string, unknown>>();
 
   private readonly disposeHandlers: Array<() => void> = [];
+
+  /** Monotonic counter to discard stale class-list fetches. */
+  private classFetchGeneration = 0;
 
   // ─── Public API ──────────────────────────────────────────────────────────
 
@@ -186,6 +190,9 @@ export class WorkspaceTreeDataProvider
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.client = null;
     for (const dispose of this.disposeHandlers) {
       dispose();
     }
@@ -229,11 +236,13 @@ export class WorkspaceTreeDataProvider
         return [BINDINGS_SECTION, ACTORS_SECTION, CLASSES_SECTION];
 
       case "bindings-section":
-        return Object.entries(this.bindings).map(([name, value]) => ({
-          kind: "binding-item" as const,
-          name,
-          value,
-        }));
+        return Object.entries(this.bindings)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([name, value]) => ({
+            kind: "binding-item" as const,
+            name,
+            value,
+          }));
 
       case "actors-section":
         return this.actors.map((info) => ({ kind: "actor-item" as const, info }));
@@ -423,6 +432,11 @@ export class WorkspaceTreeDataProvider
       client.classes(),
     ]);
 
+    // Guard: client may have been detached while the fetches were in-flight.
+    if (this.client !== client) {
+      return;
+    }
+
     if (bindingsResult.status === "fulfilled") {
       this.bindings = bindingsResult.value;
     }
@@ -453,7 +467,11 @@ export class WorkspaceTreeDataProvider
     } else if (event.channel === "classes" && event.event === "loaded") {
       // Re-fetch the full class list — the event only carries the new class name,
       // not the complete list with actor_count metadata.
+      // Use a generation counter to discard stale responses when multiple
+      // class-loaded events arrive in quick succession.
+      const gen = ++this.classFetchGeneration;
       void client.classes().then((classes) => {
+        if (this.client !== client || this.classFetchGeneration !== gen) return;
         this.classes = classes;
         this._onDidChangeTreeData.fire(CLASSES_SECTION);
       });

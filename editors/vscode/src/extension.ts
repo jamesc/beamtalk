@@ -315,7 +315,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): Thenable<void> | undefined {
   const stop = client?.stop();
-  workspaceTreeProvider?.dispose();
+  // workspaceTreeProvider is disposed via context.subscriptions; dispose() is
+  // idempotent so no double-dispose risk, but we detach the client first to
+  // ensure no late push events fire into the disposed emitter.
+  workspaceTreeProvider?.setClient(null);
   workspaceTreeProvider = undefined;
   outputChannel?.dispose();
   traceOutputChannel?.dispose();
