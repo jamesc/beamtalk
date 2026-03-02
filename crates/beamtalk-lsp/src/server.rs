@@ -104,9 +104,10 @@ impl Backend {
         versions.get(&path).copied()
     }
 
-    /// Resolves a URI to a real filesystem path.
+    /// Resolves a URI to an internal path key used by the language service.
     ///
-    /// - For `file://` and `untitled:` URIs: delegates to `uri_to_path`.
+    /// - For `file://` URIs: returns the real filesystem path.
+    /// - For `untitled:` URIs: returns a synthetic `__untitled__/` path key.
     /// - For `beamtalk-stdlib:///ClassName.bt` URIs: looks up the real path
     ///   from `stdlib_paths`. Returns `None` for unknown class names, invalid
     ///   URI form, or ambiguous filenames.
