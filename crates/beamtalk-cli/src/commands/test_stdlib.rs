@@ -960,9 +960,12 @@ fn parse_eunit_output(
 
 /// Find `.btscript` test files from a path (file or directory).
 fn find_test_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    // If path is a single .btscript file, return it directly
-    if path.extension() == Some("btscript") && path.is_file() {
-        return Ok(vec![path.to_owned()]);
+    // If a single file path is provided, require .btscript extension.
+    if path.is_file() {
+        if path.extension() == Some("btscript") {
+            return Ok(vec![path.to_owned()]);
+        }
+        miette::bail!("Expected a .btscript test file, got '{path}'");
     }
 
     let mut files = Vec::new();
@@ -975,7 +978,7 @@ fn find_test_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
         let path = Utf8PathBuf::from_path_buf(entry.path())
             .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", path))?;
 
-        if path.extension() == Some("btscript") {
+        if path.is_file() && path.extension() == Some("btscript") {
             files.push(path);
         }
     }
@@ -1287,9 +1290,11 @@ mod tests {
         std::fs::write(&file_path, "Object subclass: Foo\n").expect("write");
         let utf8_path = Utf8PathBuf::from_path_buf(file_path).expect("utf8");
 
-        // A single .bt file is not .btscript, so find_test_files treats it
-        // as a directory and errors — this is correct (wrong extension).
         let result = find_test_files(&utf8_path);
-        assert!(result.is_err(), "should error for .bt file path");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("Expected a .btscript test file"),
+            "should give clear error for .bt file, got: {err}"
+        );
     }
 }
