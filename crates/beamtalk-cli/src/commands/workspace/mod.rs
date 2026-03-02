@@ -1065,7 +1065,7 @@ mod tests {
             "is_node_running should return true for live node"
         );
 
-        // Verify PID corresponds to a running process using native OS check
+        // Verify PID corresponds to a running BEAM process
         #[cfg(unix)]
         {
             let pid_i = i32::try_from(node_info.pid).expect("node PID should fit in i32");
@@ -1075,6 +1075,19 @@ mod tests {
                 alive,
                 "PID {} should correspond to a running process",
                 node_info.pid
+            );
+        }
+        // On Linux, verify the process is actually a BEAM node via /proc cmdline
+        #[cfg(target_os = "linux")]
+        {
+            let cmdline_path = format!("/proc/{}/cmdline", node_info.pid);
+            let cmdline = fs::read_to_string(&cmdline_path)
+                .unwrap_or_else(|e| panic!("failed to read {cmdline_path}: {e}"));
+            assert!(
+                cmdline.contains("beam") || cmdline.contains("erl"),
+                "PID {} should be a BEAM process, got cmdline: {:?}",
+                node_info.pid,
+                cmdline
             );
         }
     }

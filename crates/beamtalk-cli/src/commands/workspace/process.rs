@@ -836,13 +836,23 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
         }
         // SAFETY: handle is valid, obtained from OpenProcess above.
         let ret = unsafe { TerminateProcess(handle, 1) };
+        // Capture error *before* CloseHandle, which may clobber GetLastError.
+        let term_err = if ret == FALSE {
+            Some(std::io::Error::last_os_error())
+        } else {
+            None
+        };
         unsafe { CloseHandle(handle) };
         if ret != FALSE {
+            Ok(())
+        } else if term_err.as_ref().and_then(|e| e.raw_os_error()) == Some(5) {
+            // ERROR_ACCESS_DENIED (5): process exited between OpenProcess and
+            // TerminateProcess — analogous to Unix ESRCH.
             Ok(())
         } else {
             Err(miette!(
                 "Failed to kill process {pid}: {}",
-                std::io::Error::last_os_error()
+                term_err.expect("term_err is Some when ret == FALSE")
             ))
         }
     }
@@ -851,7 +861,7 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
 /// Check whether a process is alive by PID.
 ///
 /// On Unix: uses `kill(pid, 0)` — signal 0 tests process existence without sending a signal.
-/// On Windows: uses `OpenProcess` to attempt to obtain a handle.
+/// On Windows: uses `OpenProcess` + `GetExitCodeProcess` to check for `STILL_ACTIVE`.
 fn is_process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {

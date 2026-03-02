@@ -1392,13 +1392,23 @@ mod tests {
         }
         #[cfg(windows)]
         {
-            use windows_sys::Win32::Foundation::CloseHandle;
+            use windows_sys::Win32::Foundation::{CloseHandle, FALSE, STILL_ACTIVE};
             use windows_sys::Win32::System::Threading::{
-                OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+                GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
             };
             // SAFETY: Windows API call with documented parameters.
-            let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-            assert!(handle == 0, "Process should have been killed");
+            let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
+            if handle != 0 {
+                let mut exit_code: u32 = 0;
+                // SAFETY: handle is valid.
+                let ok = unsafe { GetExitCodeProcess(handle, &mut exit_code) };
+                unsafe { CloseHandle(handle) };
+                assert!(
+                    ok == FALSE || exit_code != STILL_ACTIVE,
+                    "Process should have been killed"
+                );
+            }
+            // handle == 0 means OpenProcess failed → process no longer exists
         }
     }
 
