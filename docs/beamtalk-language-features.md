@@ -462,6 +462,12 @@ sum: left: Integer with: right: Integer -> Integer => left + right
 // Union type annotations parse (full checking is phased in)
 maybeName: flag: Boolean -> Integer | String =>
   ^flag ifTrue: [1] ifFalse: ["none"]
+
+// Self return type — resolves to the static receiver class at call sites
+// (only valid in return position, not parameters)
+collect: block: Block -> Self =>
+  // When List calls collect:, return type infers to List
+  // When Set calls collect:, return type infers to Set
 ```
 
 ### Current Semantics
@@ -470,6 +476,7 @@ maybeName: flag: Boolean -> Integer | String =>
 - `typed` classes require parameter/return annotations on non-primitive methods.
 - State annotations (`state: value: Integer = 0`) are checked for defaults and `self.field := ...` assignments.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
+- `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
 ---
 

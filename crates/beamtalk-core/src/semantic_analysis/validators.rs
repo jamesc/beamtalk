@@ -395,6 +395,17 @@ pub fn check_stdlib_name_shadowing(module: &Module, diagnostics: &mut Vec<Diagno
             );
             diagnostics.push(diag);
         }
+        // BT-1041: `Self` is reserved as a return type keyword
+        if name == "Self" {
+            diagnostics.push(
+                Diagnostic::error(
+                    "`Self` is reserved as a return type keyword and cannot be used as a class name"
+                        .to_string(),
+                    class.name.span,
+                )
+                .with_category(DiagnosticCategory::Type),
+            );
+        }
     }
 }
 
@@ -1198,6 +1209,22 @@ mod tests {
         check_stdlib_name_shadowing(&module, &mut diagnostics);
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("Integer"));
+    }
+
+    /// BT-1041: A class named `Self` should be rejected.
+    #[test]
+    fn self_as_class_name_is_error() {
+        let tokens = lex_with_eof("Object subclass: Self\n  value => 1");
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_stdlib_name_shadowing(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected error for class named Self, got: {diagnostics:?}"
+        );
+        assert!(diagnostics[0].message.contains("reserved"));
     }
 
     // ── BT-914: Value type slot assignment tests ──────────────────────────────

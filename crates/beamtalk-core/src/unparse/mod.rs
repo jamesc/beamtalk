@@ -1166,6 +1166,7 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
         TypeAnnotation::FalseOr { inner, .. } => {
             docvec![unparse_type_annotation(inner), " | False"]
         }
+        TypeAnnotation::SelfType { .. } => Document::Str("Self"),
     }
 }
 

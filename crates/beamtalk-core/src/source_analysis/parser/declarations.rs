@@ -584,9 +584,14 @@ impl Parser {
     fn parse_single_type_annotation(&mut self) -> TypeAnnotation {
         if let TokenKind::Identifier(name) = self.current_kind() {
             let span = self.current_token().span();
-            let ident = Identifier::new(name.clone(), span);
-            self.advance();
-            TypeAnnotation::Simple(ident)
+            if name.as_str() == "Self" {
+                self.advance();
+                TypeAnnotation::SelfType { span }
+            } else {
+                let ident = Identifier::new(name.clone(), span);
+                self.advance();
+                TypeAnnotation::Simple(ident)
+            }
         } else {
             let span = self.current_token().span();
             self.error("Expected type name");

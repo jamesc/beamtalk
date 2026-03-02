@@ -352,7 +352,7 @@ impl SimpleLanguageService {
             TypeAnnotation::FalseOr { inner, .. } => {
                 Self::find_identifier_in_type_annotation(inner, offset_val)
             }
-            TypeAnnotation::Singleton { .. } => None,
+            TypeAnnotation::Singleton { .. } | TypeAnnotation::SelfType { .. } => None,
         }
     }
 

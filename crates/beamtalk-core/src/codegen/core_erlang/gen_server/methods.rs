@@ -1221,11 +1221,17 @@ impl CoreErlangGenerator {
             }
             let class_method_sigs_doc = Document::Vec(class_method_sig_docs);
 
-            // BT-1002 / ADR 0045: Instance method return-type map (Simple annotations only).
-            // Selectors with None or non-Simple return type are omitted (absence = dynamic).
+            // BT-1002 / ADR 0045: Instance method return-type map (Simple/Self annotations).
+            // Selectors with None or non-Simple/Self return type are omitted (absence = dynamic).
             let mut method_return_type_docs: Vec<Document<'static>> = Vec::new();
             for method in &instance_methods {
-                if let Some(TypeAnnotation::Simple(id)) = &method.return_type {
+                let resolved_name = match &method.return_type {
+                    Some(TypeAnnotation::Simple(id)) => Some(id.name.to_string()),
+                    // Self resolves to the defining class at compile time
+                    Some(TypeAnnotation::SelfType { .. }) => Some(class.name.name.to_string()),
+                    _ => None,
+                };
+                if let Some(type_name) = resolved_name {
                     if !method_return_type_docs.is_empty() {
                         method_return_type_docs.push(Document::Str(", "));
                     }
@@ -1233,7 +1239,7 @@ impl CoreErlangGenerator {
                         "'",
                         Document::String(method.selector.name().to_string()),
                         "' => '",
-                        Document::String(id.name.to_string()),
+                        Document::String(type_name),
                         "'"
                     ]);
                 }
@@ -1244,7 +1250,12 @@ impl CoreErlangGenerator {
                     && !m.is_class_method
                     && m.method.kind == MethodKind::Primary
             }) {
-                if let Some(TypeAnnotation::Simple(id)) = &standalone.method.return_type {
+                let resolved_name = match &standalone.method.return_type {
+                    Some(TypeAnnotation::Simple(id)) => Some(id.name.to_string()),
+                    Some(TypeAnnotation::SelfType { .. }) => Some(class.name.name.to_string()),
+                    _ => None,
+                };
+                if let Some(type_name) = resolved_name {
                     if !method_return_type_docs.is_empty() {
                         method_return_type_docs.push(Document::Str(", "));
                     }
@@ -1252,21 +1263,26 @@ impl CoreErlangGenerator {
                         "'",
                         Document::String(standalone.method.selector.name().to_string()),
                         "' => '",
-                        Document::String(id.name.to_string()),
+                        Document::String(type_name),
                         "'"
                     ]);
                 }
             }
             let method_return_types_doc = Document::Vec(method_return_type_docs);
 
-            // BT-1002 / ADR 0045: Class-side method return-type map (Simple annotations only).
+            // BT-1002 / ADR 0045: Class-side method return-type map (Simple/Self annotations).
             let mut class_method_return_type_docs: Vec<Document<'static>> = Vec::new();
             for method in class
                 .class_methods
                 .iter()
                 .filter(|m| m.kind == MethodKind::Primary)
             {
-                if let Some(TypeAnnotation::Simple(id)) = &method.return_type {
+                let resolved_name = match &method.return_type {
+                    Some(TypeAnnotation::Simple(id)) => Some(id.name.to_string()),
+                    Some(TypeAnnotation::SelfType { .. }) => Some(class.name.name.to_string()),
+                    _ => None,
+                };
+                if let Some(type_name) = resolved_name {
                     if !class_method_return_type_docs.is_empty() {
                         class_method_return_type_docs.push(Document::Str(", "));
                     }
@@ -1274,7 +1290,7 @@ impl CoreErlangGenerator {
                         "'",
                         Document::String(method.selector.name().to_string()),
                         "' => '",
-                        Document::String(id.name.to_string()),
+                        Document::String(type_name),
                         "'"
                     ]);
                 }
@@ -1285,7 +1301,12 @@ impl CoreErlangGenerator {
                     && m.is_class_method
                     && m.method.kind == MethodKind::Primary
             }) {
-                if let Some(TypeAnnotation::Simple(id)) = &standalone.method.return_type {
+                let resolved_name = match &standalone.method.return_type {
+                    Some(TypeAnnotation::Simple(id)) => Some(id.name.to_string()),
+                    Some(TypeAnnotation::SelfType { .. }) => Some(class.name.name.to_string()),
+                    _ => None,
+                };
+                if let Some(type_name) = resolved_name {
                     if !class_method_return_type_docs.is_empty() {
                         class_method_return_type_docs.push(Document::Str(", "));
                     }
@@ -1293,7 +1314,7 @@ impl CoreErlangGenerator {
                         "'",
                         Document::String(standalone.method.selector.name().to_string()),
                         "' => '",
-                        Document::String(id.name.to_string()),
+                        Document::String(type_name),
                         "'"
                     ]);
                 }
