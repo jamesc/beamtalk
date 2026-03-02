@@ -23,7 +23,7 @@ use std::collections::HashSet;
 
 use crate::commands::build::collect_formattable_files_from_dir;
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
-use beamtalk_core::unparse::unparse_module;
+use beamtalk_core::unparse::format_source;
 use camino::Utf8PathBuf;
 use miette::{IntoDiagnostic, Result};
 use similar::TextDiff;
@@ -73,33 +73,28 @@ pub fn run_fmt(paths: &[String], check_only: bool) -> Result<()> {
             .into_diagnostic()
             .map_err(|e| miette::miette!("Failed to read '{}': {e}", file))?;
 
-        let tokens = lex_with_eof(&original);
-        let (module, diags) = parse(tokens);
+        // .btscript files use identity formatting — the `// => X` assertion
+        // comments must remain on separate lines for the btscript test runner
+        // (BT-1016). We only verify that the file parses without errors;
+        // if it's valid, leave the file unchanged without running the unparser.
+        if file.extension() == Some("btscript") {
+            let tokens = lex_with_eof(&original);
+            let (_, diags) = parse(tokens);
+            let has_errors = diags.iter().any(|d| d.severity == Severity::Error);
+            if has_errors {
+                eprintln!("warning: skipping '{file}' (has parse errors)");
+                skipped_files.push(file.clone());
+            }
+            continue;
+        }
 
-        // Skip files with parse errors — formatting a broken file could
-        // corrupt it (the unparser converts Error nodes to comments).
-        let has_errors = diags.iter().any(|d| d.severity == Severity::Error);
-        if has_errors {
+        // For .bt files, run the canonical format pipeline. Returns None if
+        // the source has parse errors — formatting a broken file could corrupt
+        // it (the unparser converts Error nodes to comments).
+        let Some(formatted) = format_source(&original) else {
             eprintln!("warning: skipping '{file}' (has parse errors)");
             skipped_files.push(file.clone());
             continue;
-        }
-
-        // .btscript files use identity formatting — the `// => X` assertion
-        // comments must remain on separate lines for the btscript test runner
-        // (BT-1016). We only verify that the file parses without errors above;
-        // if it's valid, leave the file unchanged without running the unparser.
-        if file.extension() == Some("btscript") {
-            continue;
-        }
-
-        let formatted = unparse_module(&module);
-
-        // Ensure formatted output ends with a newline.
-        let formatted = if formatted.is_empty() || formatted.ends_with('\n') {
-            formatted
-        } else {
-            format!("{formatted}\n")
         };
 
         if formatted == original {

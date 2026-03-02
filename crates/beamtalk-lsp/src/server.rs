@@ -21,8 +21,8 @@ use beamtalk_core::language_service::{
     SimpleLanguageService,
 };
 use beamtalk_core::semantic_analysis::ClassHierarchy;
-use beamtalk_core::source_analysis::{Severity, Span, lex_with_eof, parse};
-use beamtalk_core::unparse::unparse_module;
+use beamtalk_core::source_analysis::{Severity, Span};
+use beamtalk_core::unparse::format_source;
 use camino::Utf8PathBuf;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
@@ -696,29 +696,6 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<TextEdit>>> {
         Ok(self.format_document(&params.text_document.uri))
     }
-}
-
-/// Formats a Beamtalk source string using the unparser.
-///
-/// Returns `None` if the source has parse errors (formatting a broken file
-/// could corrupt it), otherwise returns the formatted string.
-fn format_source(source: &str) -> Option<String> {
-    let tokens = lex_with_eof(source);
-    let (module, diags) = parse(tokens);
-
-    let has_errors = diags.iter().any(|d| d.severity == Severity::Error);
-    if has_errors {
-        return None;
-    }
-
-    let formatted = unparse_module(&module);
-    let formatted = if formatted.is_empty() || formatted.ends_with('\n') {
-        formatted
-    } else {
-        format!("{formatted}\n")
-    };
-
-    Some(formatted)
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {

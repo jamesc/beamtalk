@@ -37,6 +37,7 @@ use crate::ast::{
 };
 use crate::codegen::core_erlang::document::{Document, break_, concat, group, line, nest, nil};
 use crate::docvec;
+use crate::source_analysis::{Severity, lex_with_eof, parse};
 
 // --- Public entry points ---
 
@@ -73,6 +74,35 @@ pub fn unparse_class(class: &ClassDefinition) -> String {
 #[must_use]
 pub fn unparse_method_display_signature(method: &MethodDefinition) -> String {
     unparse_method_display_signature_doc(method).to_pretty_string()
+}
+
+/// Formats a Beamtalk source string using the unparser.
+///
+/// Runs the full pipeline: lex → parse → error-check → unparse → ensure
+/// trailing newline. Returns `None` if the source has any `Severity::Error`
+/// diagnostic (formatting a broken file could corrupt it). Otherwise returns
+/// the formatted string with a guaranteed trailing newline.
+///
+/// This function is idempotent: formatting an already-formatted string
+/// produces the same output.
+#[must_use]
+pub fn format_source(source: &str) -> Option<String> {
+    let tokens = lex_with_eof(source);
+    let (module, diags) = parse(tokens);
+
+    let has_errors = diags.iter().any(|d| d.severity == Severity::Error);
+    if has_errors {
+        return None;
+    }
+
+    let formatted = unparse_module(&module);
+    let formatted = if formatted.is_empty() || formatted.ends_with('\n') {
+        formatted
+    } else {
+        format!("{formatted}\n")
+    };
+
+    Some(formatted)
 }
 
 /// Builds a [`Document`] for a method display signature (no `sealed`, no ` =>`).
@@ -1270,6 +1300,38 @@ mod tests {
 
     fn span() -> Span {
         Span::new(0, 0)
+    }
+
+    // --- format_source ---
+
+    #[test]
+    fn format_source_parse_error_returns_none() {
+        // Source with a parse error must return None.
+        let result = format_source("@@@invalid beamtalk source@@@");
+        assert!(result.is_none(), "parse error should return None");
+    }
+
+    #[test]
+    fn format_source_valid_source_is_formatted() {
+        // Valid source must be returned formatted (with trailing newline).
+        let source = "Object subclass: Foo\n  bar => 42\n";
+        let result = format_source(source);
+        assert!(result.is_some(), "valid source should return Some");
+        let formatted = result.unwrap();
+        assert!(formatted.ends_with('\n'), "output must end with newline");
+        assert!(
+            formatted.contains("bar => 42"),
+            "formatted output must contain the method"
+        );
+    }
+
+    #[test]
+    fn format_source_is_idempotent() {
+        // format_source(format_source(s).unwrap()).unwrap() == format_source(s).unwrap()
+        let source = "Actor subclass: Counter\n  state: value = 0\n\n  getValue => self.value\n";
+        let pass1 = format_source(source).expect("pass1 should succeed");
+        let pass2 = format_source(&pass1).expect("pass2 should succeed");
+        assert_eq!(pass1, pass2, "format_source must be idempotent");
     }
 
     // --- Comment unparsing ---
