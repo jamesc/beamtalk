@@ -1,4 +1,4 @@
-# ADR 0046: Return Type Arrow Token Disambiguation
+# ADR 0047: Return Type Arrow Token Disambiguation
 
 ## Status
 Proposed
@@ -224,7 +224,20 @@ limitation. Remove `->` from Object as part of BT-1017 to eliminate ambiguity 1;
 special-case `class` in parser documentation as a reserved method name.
 Rejected: incomplete fix; leaves the grammar with a known, non-obvious limitation.
 
-### Alternative D: Parenthesise return types to disambiguate
+### Alternative D: Parser-only fix (count arrows in context)
+
+Solve ambiguity 1 without a lexer change: in `parse_method_selector`, when the parser
+sees `BinarySelector("->")` it knows this is the selector. After consuming the
+parameter name, a second `BinarySelector("->")` must be the return type separator
+(binary methods take exactly one parameter). This is deterministic.
+
+Rejected: solves ambiguity 1 but not ambiguity 2 (`class` keyword). Also distributes
+`"->"`-specific logic across multiple parser functions rather than centralising it in
+the token layer. The dedicated token is a cleaner separation of concerns and gives
+downstream consumers (LSP, highlighter) a distinct signal without re-implementing
+the disambiguation logic.
+
+### Alternative E: Parenthesise return types to disambiguate
 
 ```beamtalk
 -> value (-> Association) => @primitive "->"
@@ -244,9 +257,12 @@ parser's internal ambiguity into user-visible syntax.
 
 ### Negative
 - Adds a new `TokenKind::Arrow` variant; all exhaustive `match` statements on
-  `TokenKind` must be updated (compiler enforces this)
-- Parser `parse_method_selector` and `parse_method_definition` become slightly more
-  complex to handle `Arrow` in selector position
+  `TokenKind` must be updated (compiler enforces exhaustiveness but not semantic
+  correctness — each new arm must be reviewed individually)
+- Expression-level binary message parsing (`expressions.rs`) must also handle `Arrow`
+  alongside `BinarySelector` to preserve `x -> y` as an Association-creation send
+- Parser `parse_method_selector`, `parse_method_definition`, and `is_at_method_definition`
+  become slightly more complex to handle `Arrow` in selector position
 
 ### Neutral
 - The `BinarySelector("->")` string value disappears from the token stream; any
@@ -255,25 +271,47 @@ parser's internal ambiguity into user-visible syntax.
 
 ## Implementation
 
-**Phase 1 — Lexer:**
+**Phase 1 — Lexer (`token.rs`, `lexer.rs`):**
 - Add `TokenKind::Arrow` variant to `token.rs`
-- Update the lexer to emit `Arrow` for `->` instead of `BinarySelector("->")`
-- Update all `match` arms on `TokenKind` (compiler will identify them)
+- Implement `is_selector()`, `as_str()` (returns `Some("->")`), and `Display` for `Arrow`
+- Update the lexer to emit `Arrow` for `->` instead of `BinarySelector("->")`.
+  Insert the check in `lex_token_kind()` at the `-` branch: peek ahead for `>`
+  and emit `Arrow`, analogous to how `=` peeks for `>` to emit `FatArrow`.
+  This ensures `->` is intercepted before `lex_binary_selector()` accumulates
+  it as a multi-character binary selector.
+- Update all exhaustive `match` arms on `TokenKind` (compiler will identify them).
+  Note: compiler enforces exhaustiveness but not semantic correctness — each arm
+  must be reviewed for whether `Arrow` should be handled like `BinarySelector`
+  or separately.
 
-**Phase 2 — Parser:**
+**Phase 2 — Parser declarations (`declarations.rs`):**
 - `parse_optional_return_type()`: match `Arrow` instead of `BinarySelector("->")`
 - `is_return_type_then_fat_arrow()`: match `Arrow` instead of `BinarySelector("->")`
+  (three match sites within this function)
+- `is_at_method_definition()`: add `Arrow` alongside `BinarySelector` in the binary
+  method detection branch (line 267), so `-> value -> Association =>` is recognised
+  as a method definition rather than falling through to "end of class body"
 - `parse_method_selector()`: accept `Arrow` as a valid binary method selector name
-- `parse_method_definition()`: add lookahead — if `class Arrow Identifier FatArrow`,
-  treat `class` as the method name, not a modifier
+- `parse_method_definition()`: extend the `class`-as-method-name check (line 619) to
+  also break when `is_return_type_then_fat_arrow(1)` is true, reusing the existing
+  lookahead infrastructure
 
-**Phase 3 — Stdlib annotations:**
+**Phase 3 — Parser expressions (`expressions.rs`):**
+- `parse_binary_with_pratt()` (line 300): extend the `while let BinarySelector`
+  loop to also match `Arrow`, treating it as binary operator `"->"` in expression
+  position
+- `parse_send_continuation()` (line 193): extend binary message detection to match
+  `Arrow` alongside `BinarySelector`
+- Negative number pattern (line 863): no change needed — only matches `"-"`, not `"->"`
+
+**Phase 4 — Stdlib annotations:**
 - Add `-> Association` to `Object.->` in `Object.bt`
 - Add `-> Metaclass` to `sealed class` in `Class.bt`
 - Regenerate `generated_builtins.rs`
 
-**Affected components:** Lexer, parser (`declarations.rs`, `token.rs`), stdlib sources,
-`generated_builtins.rs`. No codegen, runtime, or REPL changes needed.
+**Affected components:** Lexer (`lexer.rs`, `token.rs`), parser (`declarations.rs`,
+`expressions.rs`), stdlib sources, `generated_builtins.rs`. No codegen, runtime,
+or REPL changes needed.
 
 ## References
 
