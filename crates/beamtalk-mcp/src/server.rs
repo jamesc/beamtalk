@@ -180,7 +180,8 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<CompleteParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let cursor = params.cursor.unwrap_or(params.code.len());
+        let code_len = params.code.len();
+        let cursor = params.cursor.unwrap_or(code_len).min(code_len);
         let response = self
             .client
             .complete(&params.code, cursor)
