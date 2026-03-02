@@ -29,6 +29,7 @@
 
 use crate::ast::{ClassDefinition, Expression, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
+use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::queries::erlang_modules;
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
@@ -105,6 +106,18 @@ pub fn compute_completions(
 
     // Determine class context at cursor position
     let context = find_class_context(module, offset);
+
+    // Enrich hierarchy with inferred return types (BT-1014).
+    // This enables chain resolution for methods whose return type is not explicitly
+    // annotated but can be inferred from the method body (BT-1005).
+    let enriched_hierarchy;
+    let hierarchy = match enrich_hierarchy_with_inferred_returns(module, hierarchy) {
+        Some(h) => {
+            enriched_hierarchy = h;
+            &enriched_hierarchy
+        }
+        None => hierarchy,
+    };
 
     // Run type inference to get receiver types at positions
     let type_map = infer_types(module, hierarchy);
@@ -1281,5 +1294,91 @@ mod tests {
         assert_eq!(detect_erlang_module_context("Erlang"), None);
         assert_eq!(detect_erlang_module_context("FooErlang lists"), None);
         assert_eq!(detect_erlang_module_context("Foo_Erlang lists"), None);
+    }
+
+    // --- Chain resolution tests (BT-1014) ---
+    //
+    // Verify that completions are type-filtered when the receiver is a chained
+    // message send whose return type is known (stdlib annotations from BT-1003,
+    // user-defined method annotations, or inferred types from BT-1005).
+
+    #[test]
+    fn chain_resolution_stdlib_single_send_offers_typed_completions() {
+        // `"hello" size ` → cursor after Integer result → should offer Integer methods
+        // "hello" is 7 chars, space, size is 4 chars = 12 chars total. Cursor at 13.
+        let source = r#""hello" size "#;
+        let completions = completions_at(source, Position::new(0, 13));
+        assert!(
+            completions.iter().any(|c| c.label == "abs"),
+            "Should offer Integer#abs after String#size chain. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "negated"),
+            "Should offer Integer#negated after String#size chain. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn chain_resolution_stdlib_two_hop_chain_offers_typed_completions() {
+        // `"hello" size abs ` → Integer#abs -> Integer → should offer Integer methods again
+        // "hello" size abs = 16 chars, space at 16, cursor at 17
+        let source = r#""hello" size abs "#;
+        let completions = completions_at(source, Position::new(0, 17));
+        assert!(
+            completions.iter().any(|c| c.label == "negated"),
+            "Should offer Integer methods after two-hop chain. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "isEven"),
+            "Should offer Integer#isEven after two-hop chain. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn chain_resolution_user_defined_annotated_method() {
+        // A user-defined method with an explicit return type annotation:
+        // `Object subclass: Box\n  value -> Integer => 42`
+        // When completing after `(Box new) value `, completions should include Integer methods
+        let source = "Object subclass: Box\n  value -> Integer => 42\n\nb := Box new\nb value ";
+        // Line 4, col 8 is after "b value "
+        let completions = completions_at(source, Position::new(4, 8));
+        assert!(
+            completions.iter().any(|c| c.label == "abs"),
+            "Should offer Integer#abs for annotated method. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn chain_resolution_user_defined_inferred_method() {
+        // A user-defined method whose return type is inferrable from its body (BT-1005):
+        // `Object subclass: Box\n  value => 42`  ← body is Integer literal → inferred Integer
+        // Completions after `b value ` should include Integer methods
+        let source = "Object subclass: Box\n  value => 42\n\nb := Box new\nb value ";
+        let completions = completions_at(source, Position::new(4, 8));
+        assert!(
+            completions.iter().any(|c| c.label == "abs"),
+            "Should offer Integer#abs for inferred-return-type method. Got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn chain_resolution_detail_shows_receiver_class() {
+        // Completions after `"hello" size ` should have detail showing "on Integer"
+        let source = r#""hello" size "#;
+        let completions = completions_at(source, Position::new(0, 13));
+        let abs = completions.iter().find(|c| c.label == "abs");
+        assert!(abs.is_some(), "Should include abs completion");
+        let abs = abs.unwrap();
+        assert!(
+            abs.detail.as_deref().is_some_and(|d| d.contains("Integer")),
+            "Detail should show receiver class Integer. Got: {:?}",
+            abs.detail
+        );
     }
 }
