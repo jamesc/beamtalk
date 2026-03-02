@@ -320,9 +320,8 @@ sealed Number subclass: Integer
   /// 3 lcm: 5        // => 15
   /// ```
   lcm: other: Integer -> Integer =>
-    (self gcd: other) =:= 0 ifTrue: [
-      0
-    ] ifFalse: [((self abs) div: (self gcd: other)) * other abs]
+    g := self gcd: other
+    g =:= 0 ifTrue: [0] ifFalse: [(self abs div: g) * other abs]
 
   /// Test if the codepoint is a Unicode letter.
   ///
