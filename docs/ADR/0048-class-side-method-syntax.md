@@ -74,17 +74,39 @@ This ADR is drafted for discussion. The three options each represent a distinct 
 
 ### Pharo and Squeak (Smalltalk)
 
-Class-side methods are defined on the metaclass object, reached via a message send:
+Pharo's image-based browser presents "instance" and "class" as two tabs on the class
+definition pane. In expression form (evaluating in the image), class-side methods are
+defined by navigating to the metaclass via a message send:
 
 ```smalltalk
-MyClass class >> #new [
+"Expression syntax — sends the `class` message to reach the metaclass"
+(MyClass class) >> #new      "class side"
+MyClass >> #balance          "instance side"
+```
+
+`class` is a unary message returning the metaclass — not a modifier keyword. There is
+no collision with method names because `class` is only ever a message send.
+
+In text form (Tonel file format), the distinction is carried by a `classSide` attribute
+on the method definition header, not by inline syntax:
+
+```tonel
+{ #category : 'instance creation' }
+MyClass >> balance [
+    ^balance
+]
+
+{ #category : 'instance creation', #classSide : true }
+MyClass >> new [
     ^super new initialize
 ]
 ```
 
-The `class` message is a unary send returning the metaclass. There is no modifier keyword. Class-side and instance-side method definitions look syntactically identical — the only difference is whether the receiver of `>>` is `MyClass` (instance side) or `MyClass class` (class side). This is the cleanest design: no modifier keyword, no collision possible, full object model.
-
-Pharo's image-based browser presents "instance" and "class" as two tabs on the class definition pane, but in text form (Tonel file format) the distinction is carried by a `classSide` attribute on the method definition header, not by inline syntax.
+The receiver in both Tonel entries is `MyClass >>`; the `#classSide : true` attribute
+tells the Tonel loader to install the method on the metaclass rather than the class
+itself. This is an attribute approach — closer in spirit to Option B (`meta` modifier)
+than to a separate metaclass block — but without any syntax collision risk because the
+attribute is in the metadata header, not in the method signature.
 
 ### Newspeak
 
