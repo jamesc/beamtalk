@@ -44,7 +44,7 @@ sealed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class isMeta   // => true
   /// ```
-  sealed isMeta => true
+  sealed isMeta -> Boolean => true
 
   /// Test whether this is a Class (not a Metaclass). Always false.
   ///
@@ -52,7 +52,7 @@ sealed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class isClass   // => false
   /// ```
-  sealed isClass => false
+  sealed isClass -> Boolean => false
 
   /// Test whether this is a Metaclass. Always true.
   ///
@@ -60,7 +60,7 @@ sealed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class isMetaclass   // => true
   /// ```
-  sealed isMetaclass => true
+  sealed isMetaclass -> Boolean => true
 
   // --- Metaclass protocol ---
 
@@ -70,7 +70,7 @@ sealed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class thisClass   // => Integer
   /// ```
-  sealed thisClass => @primitive "metaclassThisClass"
+  sealed thisClass -> Class => @primitive "metaclassThisClass"
 
   /// Return the name of this metaclass (e.g. 'Integer class').
   ///
@@ -78,7 +78,7 @@ sealed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class name   // => 'Integer class'
   /// ```
-  sealed name => (self thisClass name asString) ++ " class"
+  sealed name -> String => (self thisClass name asString) ++ " class"
 
   /// Return a human-readable string representation of this metaclass.
   ///
@@ -86,7 +86,7 @@ sealed Class subclass: Metaclass
   /// ```beamtalk
   /// 42 class class printString   // => 'Integer class'
   /// ```
-  sealed printString => self name
+  sealed printString -> String => self name
 
   /// Return the superclass in the parallel metaclass hierarchy.
   ///
@@ -106,7 +106,7 @@ sealed Class subclass: Metaclass
   /// ```beamtalk
   /// Counter class class classMethods   // => [...]
   /// ```
-  sealed classMethods => @primitive "metaclassClassMethods"
+  sealed classMethods -> List => @primitive "metaclassClassMethods"
 
   /// Return class-side selectors defined locally in the described class.
   ///
@@ -114,7 +114,7 @@ sealed Class subclass: Metaclass
   /// ```beamtalk
   /// Counter class class localClassMethods   // => [...]
   /// ```
-  sealed localClassMethods => @primitive "metaclassLocalClassMethods"
+  sealed localClassMethods -> List => @primitive "metaclassLocalClassMethods"
 
   /// Test whether the described class defines the given class-side selector.
   ///
@@ -122,5 +122,4 @@ sealed Class subclass: Metaclass
   /// ```beamtalk
   /// Integer class class classIncludesSelector: #new   // => true
   /// ```
-  sealed classIncludesSelector: selector =>
-    @primitive "metaclassIncludesSelector"
+  sealed classIncludesSelector: selector -> Boolean => @primitive "metaclassIncludesSelector"
