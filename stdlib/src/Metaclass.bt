@@ -123,15 +123,3 @@ sealed Class subclass: Metaclass
   /// Integer class class classIncludesSelector: #new   // => true
   /// ```
   sealed classIncludesSelector: selector -> Boolean => @primitive "metaclassIncludesSelector"
-
-  // --- Constructor guard ---
-
-  /// Raises an error — metaclasses cannot be constructed directly.
-  ///
-  /// Use `x class class` to obtain a metaclass for a class `x`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Metaclass new   // => Error: 'Use x class class to obtain a metaclass'
-  /// ```
-  class sealed new => @primitive "metaclassNew"
