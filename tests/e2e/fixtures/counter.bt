@@ -11,4 +11,4 @@ Actor subclass: Counter
 
   decrement => self.value := self.value - 1
 
-  getValue => ^self.value
+  getValue => self.value

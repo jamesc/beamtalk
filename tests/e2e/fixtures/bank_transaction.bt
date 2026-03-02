@@ -11,12 +11,12 @@ Object subclass: Transaction
   state: timestamp = nil
   state: status = "pending"
 
-  getAmount => ^self.amount
+  getAmount => self.amount
 
-  getFrom => ^self.from
+  getFrom => self.from
 
-  getTo => ^self.to
+  getTo => self.to
 
-  getTimestamp => ^self.timestamp
+  getTimestamp => self.timestamp
 
-  getStatus => ^self.status
+  getStatus => self.status

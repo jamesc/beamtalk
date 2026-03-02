@@ -23,7 +23,7 @@ Actor subclass: ChatRoom
     self.members do: [:m | m receiveMessage: senderName ++ ": " ++ text!]
 
   // Return current online members (Set of actor refs)
-  online => ^self.members
+  online => self.members
 
   // Return message history (List of formatted strings)
-  getHistory => ^self.history
+  getHistory => self.history

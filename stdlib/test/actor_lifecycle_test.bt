@@ -31,7 +31,7 @@ TestCase subclass: ActorLifecycleTest
     self should: [Counter spawnWith: true] raise: #type_error
 
   testSpawnwithWithBareIdentifierKeys =>
-    // Bare identifier keys in map literals work as implicit symbols
+    // Bare identifier keys in map literals work as implicit symbols (formatter normalizes to #symbol form)
     c3 := Counter spawnWith: #{#value => 10}
     self assert: c3 getValue equals: 10
     self assert: c3 increment equals: 11

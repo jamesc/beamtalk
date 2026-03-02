@@ -15,6 +15,6 @@ ChatMember subclass: Moderator
 
   unmute: memberName => self.muted := self.muted remove: memberName
 
-  isMuted: memberName => ^self.muted includes: memberName
+  isMuted: memberName => self.muted includes: memberName
 
-  getMuted => ^self.muted
+  getMuted => self.muted

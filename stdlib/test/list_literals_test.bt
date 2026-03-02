@@ -26,6 +26,7 @@ TestCase subclass: ListLiteralsTest
     self assert: #(1, 2, 3) first equals: 1
     self assert: #(1, 2, 3) rest equals: #(2, 3)
 
+  // Trailing commas are accepted by the parser and normalized away (formatter removes them)
   testTrailingComma => self assert: #(10, 20, 30) equals: #(10, 20, 30)
 
   testListWithExpressionsParenthesizedForBinaryOps =>
