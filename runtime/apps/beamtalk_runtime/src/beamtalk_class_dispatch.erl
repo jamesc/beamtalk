@@ -396,7 +396,8 @@ superclass_from_ets(ClassName) ->
 
 %% @doc Convert a class method selector to its module function name.
 %% Class methods are generated with a 'class_' prefix, e.g.
-%% `class defaultValue => 42` becomes `class_defaultValue/1`.
+%% `class defaultValue => 42` becomes `class_defaultValue/2`.
+%% (Zero-arg selector: arity 0 + ClassSelf + ClassVars => arity 2.)
 %%
 %% Uses list_to_atom rather than list_to_existing_atom because the class_
 %% prefixed atom may not yet be in the atom table (e.g. when the module is
