@@ -158,6 +158,15 @@ websocket_info({actor_stopped, StopInfo}, State = #ws_state{authenticated = true
         <<"data">> => encode_stop_info(StopInfo)
     }),
     {[{text, Push}], State};
+%% BT-1020: Class-loaded push — broadcast when any session loads or reloads a class
+websocket_info({class_loaded, ClassName}, State = #ws_state{authenticated = true}) ->
+    Push = jsx:encode(#{
+        <<"type">> => <<"push">>,
+        <<"channel">> => <<"classes">>,
+        <<"event">> => <<"loaded">>,
+        <<"data">> => #{<<"class">> => atom_to_binary(ClassName, utf8)}
+    }),
+    {[{text, Push}], State};
 %% Session process died — clean up ETS entry and close WebSocket
 websocket_info(
     {'DOWN', MonRef, process, _Pid, _Reason},
@@ -187,6 +196,8 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
     beamtalk_transcript_stream_primitives:unsubscribe('Transcript'),
     %% Unsubscribe from actor lifecycle push messages (BT-690)
     beamtalk_repl_actors:unsubscribe(),
+    %% Unsubscribe from class-loaded push messages (BT-1020)
+    beamtalk_class_events:unsubscribe(),
     %% Keep session alive for resume — session idle monitor handles cleanup.
     %% Don't delete from ETS or stop the process here.
     ok.
@@ -289,6 +300,7 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                     beamtalk_workspace_meta:update_activity(),
                     beamtalk_transcript_stream_primitives:subscribe('Transcript'),
                     beamtalk_repl_actors:subscribe(),
+                    beamtalk_class_events:subscribe(),
                     InitialActors = actor_snapshot_frames(),
                     AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
                     SessionMsg = jsx:encode(#{
@@ -338,6 +350,7 @@ create_session(SessionId, State) ->
             beamtalk_workspace_meta:update_activity(),
             beamtalk_transcript_stream_primitives:subscribe('Transcript'),
             beamtalk_repl_actors:subscribe(),
+            beamtalk_class_events:subscribe(),
             InitialActors = actor_snapshot_frames(),
             AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
             SessionMsg = jsx:encode(#{

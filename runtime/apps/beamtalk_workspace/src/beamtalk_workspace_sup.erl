@@ -110,6 +110,17 @@ init(Config) ->
             %% WorkspaceInterface's methods query the registry.
         ] ++ singleton_child_specs() ++
             [
+                %% Class-loaded event pub/sub (BT-1020)
+                %% Must start before bootstrap so class load events are captured.
+                #{
+                    id => beamtalk_class_events,
+                    start => {beamtalk_class_events, start_link, [registered]},
+                    restart => permanent,
+                    shutdown => 5000,
+                    type => worker,
+                    modules => [beamtalk_class_events]
+                },
+
                 %% Bootstrap worker — sets singleton class variables (ADR 0019 Phase 2)
                 %% and activates compiled project modules (BT-739).
                 %% Must start after all singletons but before REPL server accepts connections.

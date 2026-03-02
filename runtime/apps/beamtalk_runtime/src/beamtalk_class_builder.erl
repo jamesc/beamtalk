@@ -115,6 +115,7 @@ do_register(ClassName, ClassInfo) ->
             ?LOG_INFO("Registered class via ClassBuilder", #{
                 class => ClassName, module => ?MODULE
             }),
+            notify_class_loaded(ClassName),
             {ok, Pid};
         {error, {already_started, _}} ->
             %% Hot reload path: class already exists, update its metadata.
@@ -123,6 +124,7 @@ do_register(ClassName, ClassInfo) ->
                     ?LOG_INFO("Updated class via ClassBuilder (hot reload)", #{
                         class => ClassName, module => ?MODULE
                     }),
+                    notify_class_loaded(ClassName),
                     {ok, beamtalk_class_registry:whereis_class(ClassName)};
                 {error, Reason} ->
                     ?LOG_WARNING("ClassBuilder update_class failed", #{
@@ -386,4 +388,34 @@ maybe_stop_builder(Pid) when is_pid(Pid) ->
                 exit:timeout -> ok;
                 exit:{noproc, _} -> ok
             end
+    end.
+
+%% @private
+%% @doc Notify class_load_callback module that a class was loaded (BT-1020).
+%% Checks application env `class_load_callback` — same pattern as `actor_spawn_callback`.
+%% Safe to call if the callback module is not running.
+-spec notify_class_loaded(atom()) -> ok.
+notify_class_loaded(ClassName) ->
+    case application:get_env(beamtalk_runtime, class_load_callback) of
+        {ok, Mod} ->
+            try
+                Mod:on_class_loaded(ClassName)
+            catch
+                error:undef ->
+                    %% Callback module doesn't implement on_class_loaded/1
+                    ?LOG_WARNING("Class load callback not implemented", #{
+                        callback => Mod,
+                        class => ClassName
+                    });
+                Kind:Reason ->
+                    %% Unexpected failure in callback — log but don't fail class load
+                    ?LOG_WARNING("Class load callback failed", #{
+                        callback => Mod,
+                        class => ClassName,
+                        kind => Kind,
+                        reason => Reason
+                    })
+            end;
+        undefined ->
+            ok
     end.
