@@ -69,7 +69,7 @@
       {
         "name": "beamtalk",
         "owner": "beamtalk",
-        "fileLocation": "absolute",
+        "fileLocation": "autoDetect",
         "pattern": [
           {
             "regexp": "^\\s*[×⚠]\\s+(.+)$",
@@ -84,33 +84,17 @@
         ]
       }
     ],
-    "tasks": [
+    "taskDefinitions": [
       {
-        "label": "beamtalk: build",
-        "type": "shell",
-        "command": "beamtalk build .",
-        "group": {
-          "kind": "build",
-          "isDefault": true
-        },
-        "problemMatcher": "$beamtalk",
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared"
-        }
-      },
-      {
-        "label": "beamtalk: test",
-        "type": "shell",
-        "command": "beamtalk test",
-        "group": {
-          "kind": "test",
-          "isDefault": true
-        },
-        "problemMatcher": "$beamtalk",
-        "presentation": {
-          "reveal": "always",
-          "panel": "shared"
+        "type": "beamtalk",
+        "required": [
+          "task"
+        ],
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "The Beamtalk task to run (build, test)"
+          }
         }
       }
     ]
