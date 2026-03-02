@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
@@ -34,28 +34,43 @@ function fileExists(pathLike: string): boolean {
 }
 
 /**
- * Locate `beamtalk-lsp` by running `beamtalk --print-sysroot`.
+ * Locate `beamtalk-lsp` by running `beamtalk --print-sysroot` asynchronously.
  *
  * Returns the absolute path to `{sysroot}/bin/beamtalk-lsp[.exe]`, or null
  * if `beamtalk` is not on PATH or the binary is absent from the sysroot.
  */
-function findLspViaSysroot(): string | null {
-  try {
-    const result = spawnSync("beamtalk", ["--print-sysroot"], {
-      encoding: "utf8",
-      timeout: 5000,
+function findLspViaSysroot(): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(
+      "beamtalk",
+      ["--print-sysroot"],
+      { encoding: "utf8", timeout: 5000, windowsHide: true },
+      (error, stdout) => {
+        if (error || !stdout?.trim()) {
+          resolve(null);
+          return;
+        }
+        const sysroot = stdout.trim();
+        const ext = process.platform === "win32" ? ".exe" : "";
+        const lspPath = path.join(sysroot, "bin", `beamtalk-lsp${ext}`);
+        resolve(fs.existsSync(lspPath) ? lspPath : null);
+      }
+    );
+  });
+}
+
+/**
+ * Check if `beamtalk-lsp` is available on PATH, asynchronously.
+ */
+function lspIsOnPath(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = execFile(withPlatformExecutable("beamtalk-lsp"), ["--version"], {
+      timeout: 3000,
       windowsHide: true,
     });
-    if (result.status !== 0 || !result.stdout?.trim()) {
-      return null;
-    }
-    const sysroot = result.stdout.trim();
-    const ext = process.platform === "win32" ? ".exe" : "";
-    const lspPath = path.join(sysroot, "bin", `beamtalk-lsp${ext}`);
-    return fs.existsSync(lspPath) ? lspPath : null;
-  } catch {
-    return null;
-  }
+    child.on("close", () => resolve(true));
+    child.on("error", () => resolve(false));
+  });
 }
 
 /**
@@ -68,7 +83,7 @@ function findLspViaSysroot(): string | null {
  *
  * Returns null if Beamtalk is not installed and no override is configured.
  */
-function resolveServerPath(context: vscode.ExtensionContext): ResolvedServerPath {
+async function resolveServerPath(context: vscode.ExtensionContext): Promise<ResolvedServerPath> {
   const config = vscode.workspace.getConfiguration("beamtalk");
   const override = config.get<string>("server.path", "").trim();
   let warning: string | undefined;
@@ -100,24 +115,18 @@ function resolveServerPath(context: vscode.ExtensionContext): ResolvedServerPath
 
     warning =
       `Configured beamtalk.server.path does not exist: ${override}. ` +
-      "Falling back to PATH discovery.";
+      "Falling back to automatic discovery (sysroot, then PATH).";
     // Path-like override was invalid: warn and fall through.
   }
 
   // 2. Sysroot discovery via `beamtalk --print-sysroot`
-  const sysrootLsp = findLspViaSysroot();
+  const sysrootLsp = await findLspViaSysroot();
   if (sysrootLsp) {
     return { serverPath: sysrootLsp, warning };
   }
 
   // 3. Fall back to bare PATH lookup — only if beamtalk-lsp is available
-  // (spawnSync will report error if not found, so we check upfront)
-  const probe = spawnSync(withPlatformExecutable("beamtalk-lsp"), ["--version"], {
-    encoding: "utf8",
-    timeout: 3000,
-    windowsHide: true,
-  });
-  if (!probe.error) {
+  if (await lspIsOnPath()) {
     return { serverPath: "beamtalk-lsp", warning };
   }
 
@@ -134,7 +143,7 @@ function resolveServerPath(context: vscode.ExtensionContext): ResolvedServerPath
 class StdlibContentProvider implements vscode.TextDocumentContentProvider {
   async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
     if (!client) {
-      return "";
+      return `// ${uri.toString()}\n// Language server is not connected. Install Beamtalk to enable stdlib navigation.\n`;
     }
     try {
       const result = await client.sendRequest<{ content: string }>("beamtalk-lsp/fetchContent", {
@@ -142,8 +151,9 @@ class StdlibContentProvider implements vscode.TextDocumentContentProvider {
       });
       return result.content;
     } catch (err) {
-      outputChannel?.warn(`Failed to fetch stdlib content for ${uri}: ${err}`);
-      return "";
+      const message = err instanceof Error ? err.message : String(err);
+      outputChannel?.warn(`Failed to fetch stdlib content for ${uri}: ${message}`);
+      return `// Failed to load ${uri.toString()}\n// ${message}\n`;
     }
   }
 }
@@ -181,7 +191,7 @@ class BeamtalkTaskProvider implements vscode.TaskProvider {
 
 /** Creates the LSP client and starts it. */
 async function startClient(context: vscode.ExtensionContext): Promise<void> {
-  const resolved = resolveServerPath(context);
+  const resolved = await resolveServerPath(context);
 
   if (!resolved) {
     const action = await vscode.window.showInformationMessage(
