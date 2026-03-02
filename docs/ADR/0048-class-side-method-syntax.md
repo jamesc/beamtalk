@@ -244,7 +244,7 @@ No runtime impact. The class-side/instance-side distinction is purely a compile-
 - **Newcomer**: "When I open a class definition and want to add a factory method, the separate class-side declaration tells me exactly where to put it. I don't have to remember a modifier; the structure of the source file reflects the structure of the object model — just like switching tabs in a browser."
 - **Smalltalk developer**: "This is the honest representation. In Smalltalk, class-side methods are defined on the metaclass, which is a separate object. A separate declaration for the metaclass side acknowledges that truth directly, rather than treating class-side methods as a tagged variant of instance-side methods. The `class` message in `Foo class` is the same `class` message I send in expressions — one concept, not two."
 - **BEAM developer**: "The source structure tells me immediately which functions in `foo.beam` are instance methods and which are class-side. I don't have to mentally filter by modifier. The module has two named sections."
-- **Language designer**: "It eliminates the modifier keyword entirely, which eliminates the entire class of modifier-as-method-name collisions for all time. No `meta` keyword to add to the lexer. No `+` sigil to explain. The object model is the syntax."
+- **Language designer**: "It eliminates the `class` modifier keyword specifically, which is the one that collides with a real method name. `sealed` and `override` are not plausible method names, so their collision risk is negligible and they can remain as modifiers. The object model provides the syntax for the one case that mattered."
 
 **Honest tensions:**
 
@@ -292,58 +292,70 @@ No runtime impact. The class-side/instance-side distinction is purely a compile-
 
 ## Alternatives Considered
 
-### Option A: Separate Class-Side Declaration
+### Option A: `SuperClass class subclass: Foo class` Declaration
 
-Class-side methods are placed in a separate top-level declaration, distinct from the
-instance-side `subclass:` body. This mirrors the Pharo browser's two-tab model and
-the Smalltalk object model, but must be expressed in Beamtalk's actual syntax — which
-has no block delimiters (`[...]`). Beamtalk class bodies are open-ended: methods
-continue until the next top-level declaration or EOF.
-
-**The syntax is an open design question.** One candidate:
+Class-side methods are placed in a second `subclass:` declaration in the same `.bt`
+file, using `X class subclass: Y class` to declare the metaclass side alongside the
+instance side. Both declarations live in the same file — no file split required.
 
 ```beamtalk
-// Instance-side declaration — unchanged
+// Float.bt — instance side and class side in the same file
+
+Number subclass: Float
+    state: value = 0.0
+
+    + other -> Float => @primitive "+"
+    sqrt -> Float => @primitive "sqrt"
+    abs -> Float => @primitive "abs"
+
+Number class subclass: Float class
+    pi -> Float => @primitive "pi"
+    nan -> Float => @primitive "nan"
+```
+
+The first declaration ends when the parser sees the second `subclass:` header — the
+same rule that already terminates any class body. No new terminator syntax is needed.
+
+The `X class subclass: Y class` form uses only existing tokens and the existing
+`subclass:` keyword. The one new parser rule: when both the superclass and the class
+name in a `subclass:` header carry a trailing `class` message, register the methods
+on the metaclass of `Y` rather than on `Y` itself. The metaclass inheritance
+(`Float class` inheriting from `Number class`) is made explicit — and it is real.
+
+For a class with both instance and class sides:
+
+```beamtalk
+// TranscriptStream.bt
+
 Object subclass: TranscriptStream
     classVar: uniqueInstance = nil
 
     class -> Metaclass => @primitive "classClass"   // unambiguous: method named `class`
     show: text => self.buffer := self.buffer ++ #(text)
 
-// Class-side declaration — `extend ... class` as a new top-level form
-extend TranscriptStream class
+Object class subclass: TranscriptStream class
     new => self error: 'Use uniqueInstance instead'
     uniqueInstance =>
         self.uniqueInstance ifNil: [self.uniqueInstance := super new].
         self.uniqueInstance
-
-// Next top-level declaration implicitly ends the class-side block
-Object subclass: Point
-    ...
 ```
 
-The parser knows the class-side block ends at the next top-level keyword (`class`,
-`extend`, EOF) — the same rule that terminates the current instance-side body. No new
-terminator syntax is needed. However this requires a new top-level declaration form
-(`extend Foo class`) with its own parsing rules, and clear documentation that
-`subclass:` and `extend ... class` for the same class must appear in a defined order.
+For a class with only instance-side methods (the common case), no second declaration
+is needed — nothing changes.
 
-**Unresolved questions for Option A:**
-- What is the exact syntax? (`extend Foo class`, `class Foo class`, something else?)
-- Where do `classVar:` declarations go? Instance-side body, class-side body, or either?
-- Can there be more than one class-side declaration per class (e.g., across files)?
-- What does `self` mean inside the class-side body — the class object or the metaclass?
-
-**In stdlib migration terms:** The 57 class-side method definitions would be extracted
-into separate `extend Foo class` declarations. Classes with both instance and class-side
-methods are split into two top-level declarations.
+**In stdlib migration terms:** The 57 class-side method definitions are extracted into
+a second `X class subclass: Y class` declaration in the same file. The instance-side
+declaration is unchanged.
 
 **Tradeoffs:**
-- Most faithful to the Smalltalk object model; `class` message has one meaning throughout.
+- Reuses `subclass:` entirely — no new syntax form, no new keywords, no new tokens.
+- `class` has one meaning throughout: the metaclass-navigation message.
 - Eliminates all modifier keyword collision, present and future.
-- Highest design cost: new top-level declaration form, unresolved questions above.
-- Requires splitting classes with mixed instance/class-side methods across two declarations.
-- The open-ended body termination rule requires careful documentation to avoid confusion.
+- Makes metaclass inheritance explicit and correct (`Float class` inherits from `Number class`).
+- Both sides live in the same file; termination uses the existing open-ended body rule.
+- `classVar:` naturally stays in the instance-side declaration (class variables belong
+  to the class object, not the metaclass).
+- Requires one new parser recognition rule for `X class subclass: Y class` headers.
 
 ### Option B: `meta` Modifier Keyword
 
@@ -424,25 +436,25 @@ The consequences below are conditional on the option selected.
 ### Option A Consequences
 
 **Positive:**
-- Eliminates the modifier keyword entirely; `class` has one meaning throughout the language.
-- Source file structure mirrors the object model structure: two distinct declaration sides.
-- No modifier-as-method-name collision possible, now or in future.
+- Reuses `subclass:` entirely — no new keywords, no new tokens, no new syntax form.
+- `class` has one meaning throughout the language: the metaclass-navigation message.
+- Eliminates the `class`-modifier collision; `sealed` and `override` remain as modifiers
+  on individual methods within either declaration and are unaffected.
+- Makes metaclass inheritance explicit and structurally correct.
+- Both sides live in the same file; no forced file split.
+- `classVar:` placement is naturally resolved: instance-side declaration, as now.
 
 **Negative:**
-- Beamtalk has no block delimiters — the class-side declaration form and its termination
-  rule must be designed from scratch. This is the highest design cost of any option.
-- Multiple open questions (syntax, `classVar:` placement, `self` semantics, cross-file
-  ordering) must be resolved before implementation can begin — this ADR cannot be
-  accepted until those questions are answered.
-- Classes with mixed instance/class-side methods are split across two top-level
-  declarations, which may obscure the relationship between `new` (class-side) and
+- Classes with both instance and class-side methods require two `subclass:` declarations
+  in the same file, which may obscure the relationship between `new` (class-side) and
   `initialize` (instance-side).
-- Migration requires structural reorganisation, not a mechanical token rename.
+- One new parser recognition rule for `X class subclass: Y class` headers.
+- Migration requires extracting class-side methods into a new declaration, not just a
+  token rename.
 
 **Neutral:**
-- `sealed` and `override` modifiers on class-side methods remain applicable; grammar unchanged.
-- The open-ended body termination rule (ends at next top-level keyword or EOF) is
-  consistent with the current class body rule — no new terminator syntax required.
+- The open-ended body termination rule is unchanged; the second `subclass:` header
+  terminates the first declaration exactly as any other `subclass:` would today.
 
 ### Option B Consequences
 
