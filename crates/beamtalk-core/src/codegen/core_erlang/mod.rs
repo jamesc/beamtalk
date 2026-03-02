@@ -446,6 +446,13 @@ pub fn generate_module_with_warnings(
     // parents are defined in other files.
     hierarchy.add_external_superclasses(&options.class_superclass_index);
 
+    // BT-1005: Writeback inferred return types into the AST before codegen so
+    // that unannotated methods appear in the emitted `method_return_types` map.
+    // We clone to avoid mutating the caller's Module.
+    let mut module_with_writeback = module.clone();
+    crate::semantic_analysis::apply_return_type_writeback(&mut module_with_writeback, &hierarchy);
+    let module = &module_with_writeback;
+
     // BT-213: Route based on whether class is actor or value type
     let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?
