@@ -77,10 +77,8 @@ start_test_class(ClassName, Module) ->
 dispatch_undef_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
-            {"module not loaded returns class_not_found error",
-                fun test_module_not_loaded/0},
-            {"method not found returns does_not_understand error",
-                fun test_method_not_found/0}
+            {"module not loaded returns class_not_found error", fun test_module_not_loaded/0},
+            {"method not found returns does_not_understand error", fun test_method_not_found/0}
         ]
     end}.
 

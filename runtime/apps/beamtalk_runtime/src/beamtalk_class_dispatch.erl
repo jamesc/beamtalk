@@ -241,41 +241,43 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                 error:undef:ST ->
                     case is_dispatch_undef(DefiningModule, FunName, ST) of
                         {true, module_not_loaded} ->
-                            Hint = case ClassName =:= DefiningClass of
-                                true ->
-                                    iolist_to_binary(
-                                        io_lib:format(
-                                            "Class '~s' is not registered - the module '~s' may have failed to load",
-                                            [ClassName, DefiningModule]
+                            Hint =
+                                case ClassName =:= DefiningClass of
+                                    true ->
+                                        iolist_to_binary(
+                                            io_lib:format(
+                                                "Class '~s' is not registered - the module '~s' may have failed to load",
+                                                [ClassName, DefiningModule]
+                                            )
+                                        );
+                                    false ->
+                                        iolist_to_binary(
+                                            io_lib:format(
+                                                "Class '~s' inherits this method from '~s' - that class's module '~s' may have failed to load",
+                                                [ClassName, DefiningClass, DefiningModule]
+                                            )
                                         )
-                                    );
-                                false ->
-                                    iolist_to_binary(
-                                        io_lib:format(
-                                            "Class '~s' inherits this method from '~s' - that class's module '~s' may have failed to load",
-                                            [ClassName, DefiningClass, DefiningModule]
-                                        )
-                                    )
-                            end,
+                                end,
                             Error = beamtalk_error:new(class_not_found, ClassName, Selector, Hint),
                             {reply, {error, Error}, ClassVars};
                         {true, method_not_found} ->
-                            Hint = case ClassName =:= DefiningClass of
-                                true ->
-                                    iolist_to_binary(
-                                        io_lib:format(
-                                            "Class method '~s' not found on '~s' (arity mismatch or undefined selector)",
-                                            [Selector, ClassName]
+                            Hint =
+                                case ClassName =:= DefiningClass of
+                                    true ->
+                                        iolist_to_binary(
+                                            io_lib:format(
+                                                "Class method '~s' not found on '~s' (arity mismatch or undefined selector)",
+                                                [Selector, ClassName]
+                                            )
+                                        );
+                                    false ->
+                                        iolist_to_binary(
+                                            io_lib:format(
+                                                "Class method '~s' inherited from '~s' not found on '~s' (arity mismatch or undefined selector)",
+                                                [Selector, DefiningClass, ClassName]
+                                            )
                                         )
-                                    );
-                                false ->
-                                    iolist_to_binary(
-                                        io_lib:format(
-                                            "Class method '~s' inherited from '~s' not found on '~s' (arity mismatch or undefined selector)",
-                                            [Selector, DefiningClass, ClassName]
-                                        )
-                                    )
-                            end,
+                                end,
                             Error = beamtalk_error:new(
                                 does_not_understand, ClassName, Selector, Hint
                             ),
