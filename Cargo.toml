@@ -74,6 +74,9 @@ stacker = "0.1"
 tungstenite = "0.28"
 tokio-tungstenite = "0.28"
 
+# Windows process management (native replacement for sysinfo, BT-1039)
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 # Diff generation (for beamtalk fmt-check unified diff output)
 similar = "2"
 

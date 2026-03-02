@@ -54,6 +54,10 @@ tungstenite.workspace = true
 # why: unified diff output for beamtalk fmt-check (BT-978)
 similar.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# why: native process kill and liveness checks on Windows (BT-1039)
+windows-sys.workspace = true
+
 [dev-dependencies]
 serial_test = "3"
 
