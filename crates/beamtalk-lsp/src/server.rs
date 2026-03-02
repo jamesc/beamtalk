@@ -1747,12 +1747,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn resolve_path_for_uri_file_uri_still_works() {
         let (service, _socket) = tower_lsp::LspService::new(Backend::new);
         let backend: &Backend = service.inner();
 
         let uri = Url::parse("file:///some/project/main.bt").expect("valid URI");
         let result = backend.resolve_path_for_uri(&uri);
-        assert_eq!(result, Some(Utf8PathBuf::from("/some/project/main.bt")),);
+        assert_eq!(result, Some(Utf8PathBuf::from("/some/project/main.bt")));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resolve_path_for_uri_file_uri_still_works() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let uri = Url::parse("file:///C:/project/main.bt").expect("valid URI");
+        let result = backend.resolve_path_for_uri(&uri);
+        assert_eq!(result, Some(Utf8PathBuf::from("C:/project/main.bt")));
     }
 }
