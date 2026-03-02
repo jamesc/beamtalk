@@ -76,7 +76,7 @@ sealed typed Collection subclass: Tuple
       self isError ifTrue: [
         self error: "Called unwrap on error tuple: {self at: 2}"
       ] ifFalse: [
-        self error: "unwrap requires \{ok, Value\} or \{error, Reason\} tuple"
+        self error: "unwrap requires an ok or error result tuple"
       ]
     ]
 

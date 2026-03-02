@@ -296,9 +296,11 @@ sealed Number subclass: Integer
   /// 0 factorial     // => 1
   /// ```
   factorial -> Integer =>
-    (self < 0) ifTrue: [
-      self error: "Factorial is undefined for negative integers"
-    ] ifFalse: [(self =:= 0) ifTrue: [1] ifFalse: [self * (self - 1) factorial]]
+    self match: [
+      _ when: [self < 0] -> (self error: "Factorial is undefined for negative integers");
+      _ when: [self =:= 0] -> 1;
+      _ -> self * (self - 1) factorial
+    ]
 
   /// Greatest common divisor of the receiver and `other`.
   ///

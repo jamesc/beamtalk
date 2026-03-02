@@ -70,7 +70,11 @@ abstract typed Value subclass: Number
   /// 0 sign            // => 0
   /// ```
   sign -> Integer =>
-    (self > 0) ifTrue: [1] ifFalse: [(self < 0) ifTrue: [-1] ifFalse: [0]]
+    self match: [
+      _ when: [self > 0] -> 1;
+      _ when: [self < 0] -> -1;
+      _ -> 0
+    ]
 
   /// Test if the receiver is between `min` and `max` (inclusive).
   ///
