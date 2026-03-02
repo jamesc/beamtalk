@@ -110,12 +110,14 @@
     "format:check": "biome format src/"
   },
   "dependencies": {
-    "vscode-languageclient": "^9.0.1"
+    "vscode-languageclient": "^9.0.1",
+    "ws": "^8.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.82.0",
+    "@types/ws": "^8.0.0",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.25.0",
     "typescript": "^5.0.0"
