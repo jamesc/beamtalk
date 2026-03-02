@@ -176,7 +176,7 @@ abstract Object subclass: Behaviour
   /// Counter doc: "A counter actor"
   /// Counter doc           // => "A counter actor"
   /// ```
-  sealed doc: aString -> Nil => @primitive "classSetDoc"
+  sealed doc: aString -> Behaviour => @primitive "classSetDoc"
 
   /// Set the documentation string for a specific method. Returns the receiver.
   ///
@@ -185,7 +185,7 @@ abstract Object subclass: Behaviour
   /// Counter setDocForMethod: #increment to: "Increment the counter by 1"
   /// (Counter >> #increment) doc   // => "Increment the counter by 1"
   /// ```
-  sealed setDocForMethod: aSelector to: aString -> Nil => @primitive "classSetMethodDoc"
+  sealed setDocForMethod: aSelector to: aString -> Behaviour => @primitive "classSetMethodDoc"
 
   /// Return the documentation string for a specific method, or nil if no doc
   /// is set or the method does not exist.
@@ -252,7 +252,7 @@ abstract Object subclass: Behaviour
   /// Counter reload              // recompile + hot-swap Counter
   /// Integer reload              // => Error: Integer has no source file — stdlib classes cannot be reloaded
   /// ```
-  sealed reload -> Nil => @primitive "classReload"
+  sealed reload -> Behaviour => @primitive "classReload"
 
   // --- Class removal ---
 
