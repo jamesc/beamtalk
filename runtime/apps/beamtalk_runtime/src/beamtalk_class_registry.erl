@@ -383,7 +383,10 @@ get_method_return_type(ClassName, Selector) ->
                     gen_server:call(Pid, {get_method_return_type, Selector}, 5000)
                 catch
                     exit:{timeout, _} -> not_found;
-                    exit:{noproc, _} -> not_found
+                    exit:{noproc, _} -> not_found;
+                    exit:{normal, _} -> not_found;
+                    exit:{shutdown, _} -> not_found;
+                    exit:{{shutdown, _}, _} -> not_found
                 end,
             case Result of
                 {ok, _} = Found ->
@@ -418,7 +421,10 @@ get_class_method_return_type(ClassName, Selector) ->
                     gen_server:call(Pid, {get_class_method_return_type, Selector}, 5000)
                 catch
                     exit:{timeout, _} -> not_found;
-                    exit:{noproc, _} -> not_found
+                    exit:{noproc, _} -> not_found;
+                    exit:{normal, _} -> not_found;
+                    exit:{shutdown, _} -> not_found;
+                    exit:{{shutdown, _}, _} -> not_found
                 end,
             case Result of
                 {ok, _} = Found ->
