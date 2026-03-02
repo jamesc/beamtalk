@@ -1398,13 +1398,13 @@ mod tests {
             };
             // SAFETY: Windows API call with documented parameters.
             let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
-            if handle != 0 {
+            if !handle.is_null() {
                 let mut exit_code: u32 = 0;
                 // SAFETY: handle is valid.
                 let ok = unsafe { GetExitCodeProcess(handle, &mut exit_code) };
                 unsafe { CloseHandle(handle) };
                 assert!(
-                    ok == FALSE || exit_code != STILL_ACTIVE,
+                    ok == FALSE || exit_code != STILL_ACTIVE as u32,
                     "Process should have been killed"
                 );
             }

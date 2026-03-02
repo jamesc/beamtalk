@@ -824,7 +824,7 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
 
         // SAFETY: Windows API call with documented parameters.
         let handle = unsafe { OpenProcess(PROCESS_TERMINATE, FALSE, pid) };
-        if handle == 0 {
+        if handle.is_null() {
             let err = std::io::Error::last_os_error();
             // ERROR_INVALID_PARAMETER (87) means the process no longer exists.
             if err.raw_os_error() == Some(87) {
@@ -887,14 +887,14 @@ fn is_process_alive(pid: u32) -> bool {
 
         // SAFETY: Windows API call with documented parameters.
         let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
-        if handle == 0 {
+        if handle.is_null() {
             return false;
         }
         let mut exit_code: u32 = 0;
         // SAFETY: handle is valid.
         let ok = unsafe { GetExitCodeProcess(handle, &mut exit_code) };
         unsafe { CloseHandle(handle) };
-        ok != FALSE && exit_code == STILL_ACTIVE
+        ok != FALSE && exit_code == STILL_ACTIVE as u32
     }
 }
 
