@@ -51,7 +51,7 @@
         "beamtalk.server.path": {
           "type": "string",
           "default": "",
-          "description": "Override path to the beamtalk-lsp binary. Leave empty to use the bundled server."
+          "description": "Override path to the beamtalk-lsp binary. Leave empty to use automatic discovery via 'beamtalk --print-sysroot'."
         },
         "beamtalk.trace.server": {
           "type": "string",
@@ -62,14 +62,42 @@
           ],
           "default": "off",
           "description": "Trace communication between VS Code and the Beamtalk language server."
-        },
-        "beamtalk.stdlib.sourceDir": {
-          "type": "string",
-          "default": "",
-          "description": "Optional path to stdlib .bt sources for navigation fallback. Can be absolute, or relative to the Beamtalk project root (directory containing beamtalk.toml)."
         }
       }
-    }
+    },
+    "problemMatchers": [
+      {
+        "name": "beamtalk",
+        "owner": "beamtalk",
+        "fileLocation": "autoDetect",
+        "pattern": [
+          {
+            "regexp": "^\\s*[×⚠]\\s+(.+)$",
+            "message": 1
+          },
+          {
+            "regexp": "^\\s*╭─\\[(.+?):(\\d+):(\\d+)\\]",
+            "file": 1,
+            "line": 2,
+            "column": 3
+          }
+        ]
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "beamtalk",
+        "required": [
+          "task"
+        ],
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "The Beamtalk task to run (build, test)"
+          }
+        }
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run bundle",

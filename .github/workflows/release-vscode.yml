@@ -3,8 +3,11 @@
 #
 # VS Code Extension Release Pipeline
 # ====================================
-# Builds platform-specific beamtalk-lsp binaries, packages per-platform .vsix
-# files, and publishes to the VS Code Marketplace.
+# Packages a single universal .vsix file and publishes to the VS Code Marketplace.
+#
+# The extension no longer bundles a platform-specific beamtalk-lsp binary.
+# Instead, it discovers beamtalk-lsp at runtime via `beamtalk --print-sysroot`,
+# requiring users to have Beamtalk installed on their PATH.
 #
 # This workflow is separate from the compiler/runtime release (release.yml) because:
 #   1. VS Code Marketplace is a different distribution channel
@@ -17,7 +20,7 @@
 #     (e.g., LSP-only bugfix without a full compiler release)
 #
 # Related: release.yml (compiler/runtime distribution)
-# Issue: BT-717
+# Issue: BT-1013
 
 name: Release VS Code Extension
 
@@ -25,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: 'Publish to VS Code Marketplace (otherwise just build .vsix artifacts)'
+        description: 'Publish to VS Code Marketplace (otherwise just build .vsix artifact)'
         required: false
         type: boolean
         default: false
@@ -48,64 +51,10 @@ permissions:
   contents: read
 
 jobs:
-  # ─── Cross-compile beamtalk-lsp for per-platform VS Code extensions ───
-  build-lsp:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            rust-target: x86_64-unknown-linux-gnu
-            vsce-target: linux-x64
-          - os: macos-15-intel
-            rust-target: x86_64-apple-darwin
-            vsce-target: darwin-x64
-          - os: macos-latest
-            rust-target: aarch64-apple-darwin
-            vsce-target: darwin-arm64
-          - os: windows-latest
-            rust-target: x86_64-pc-windows-msvc
-            vsce-target: win32-x64
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust-target }}
-
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-${{ matrix.rust-target }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.rust-target }}-cargo-release-
-
-      - name: Build beamtalk-lsp
-        run: cargo build --release --bin beamtalk-lsp --target ${{ matrix.rust-target }}
-        shell: bash
-
-      - name: Upload LSP binary
-        uses: actions/upload-artifact@v7
-        with:
-          name: lsp-${{ matrix.vsce-target }}
-          path: target/${{ matrix.rust-target }}/release/beamtalk-lsp${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-          retention-days: 1
-
-  # ─── Package per-platform VS Code extensions ──────────────────────────
+  # ─── Package universal VS Code extension ──────────────────────────────
   package-vscode:
-    needs: build-lsp
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      matrix:
-        vsce-target: [linux-x64, darwin-x64, darwin-arm64, win32-x64]
     steps:
       - uses: actions/checkout@v6
 
@@ -114,36 +63,23 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Download LSP binary
-        uses: actions/download-artifact@v8
-        with:
-          name: lsp-${{ matrix.vsce-target }}
-          path: editors/vscode/bin
-
-      - name: Prepare binary
-        run: |
-          ls -la editors/vscode/bin/
-          chmod +x editors/vscode/bin/beamtalk-lsp* || true
-        shell: bash
-
       - name: Build extension
         run: |
           cd editors/vscode
           npm install --quiet
-          npm run compile
+          npm run bundle
           ln -sf ../../LICENSE LICENSE
-          npx --yes @vscode/vsce package --target ${{ matrix.vsce-target }} --out ../../beamtalk-${{ matrix.vsce-target }}.vsix
+          npx --yes @vscode/vsce package --out ../../beamtalk.vsix
           rm -f LICENSE
-          rm -rf bin
 
       - name: Upload VSIX
         uses: actions/upload-artifact@v7
         with:
-          name: vsix-${{ matrix.vsce-target }}
-          path: beamtalk-${{ matrix.vsce-target }}.vsix
+          name: vsix
+          path: beamtalk.vsix
           retention-days: 7
 
-  # ─── Publish VS Code extensions to marketplace ────────────────────────
+  # ─── Publish VS Code extension to marketplace ─────────────────────────
   publish-vscode:
     needs: package-vscode
     runs-on: ubuntu-latest
@@ -152,11 +88,10 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.publish) ||
       (github.event_name == 'workflow_call' && inputs.publish)
     steps:
-      - name: Download all VSIXs
+      - name: Download VSIX
         uses: actions/download-artifact@v8
         with:
-          pattern: vsix-*
-          merge-multiple: true
+          name: vsix
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -166,9 +101,4 @@ jobs:
       - name: Publish to VS Code Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: |
-          npx --yes @vscode/vsce publish --packagePath \
-            beamtalk-linux-x64.vsix \
-            beamtalk-darwin-x64.vsix \
-            beamtalk-darwin-arm64.vsix \
-            beamtalk-win32-x64.vsix
+        run: npx --yes @vscode/vsce publish --packagePath beamtalk.vsix
