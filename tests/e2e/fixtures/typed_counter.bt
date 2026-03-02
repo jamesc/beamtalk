@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Typed counter actor for chain-resolution completion e2e tests (BT-1007).
+// The getValue method has a return type annotation so REPL chain completion
+// can resolve `tc getValue <TAB>` → Integer methods.
+Actor subclass: TypedCounter
+  state: value = 0
+
+  getValue -> Integer => self.value
+  increment => self.value := self.value + 1

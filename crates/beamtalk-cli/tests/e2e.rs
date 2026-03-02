@@ -961,6 +961,37 @@ impl ReplClient {
         Ok(entries.join("\n"))
     }
 
+    /// Request completions for `code` (cursor at end) and return a comma-separated
+    /// sorted list of completion strings.  Returns an empty string for no completions.
+    ///
+    /// A trailing space is appended to `code` to simulate pressing TAB after the
+    /// last token — the btscript parser trims trailing whitespace, but chain
+    /// resolution (BT-1006) requires the space to distinguish "complete methods on
+    /// the *result* of `size`" from "complete String methods *starting with* `size`".
+    fn get_completions(&mut self, code: &str) -> Result<String, String> {
+        let code_with_space = format!("{code} ");
+        let cursor = code_with_space.len();
+        let response = self.send_op(&serde_json::json!({
+            "op": "complete",
+            "id": format!("e2e-complete-{cursor}"),
+            "params": {
+                "code": code_with_space,
+                "cursor": cursor
+            }
+        }))?;
+        let mut completions: Vec<String> = response
+            .get("completions")
+            .and_then(|c| c.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        completions.sort();
+        Ok(completions.join(","))
+    }
+
     /// Load a file or directory and return a formatted string for test assertions.
     fn load_and_report(&mut self, path: &str) -> Result<String, String> {
         self.load_and_report_with_verb(path, "Loaded")
@@ -1386,6 +1417,9 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
         } else if case.expression.starts_with(":unload ") {
             let module = case.expression.strip_prefix(":unload ").unwrap().trim();
             client.unload_module(module)
+        } else if case.expression.starts_with(":complete ") {
+            let code = case.expression.strip_prefix(":complete ").unwrap();
+            client.get_completions(code)
         } else {
             client.eval(&case.expression)
         };
@@ -1404,6 +1438,18 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                         failures.push(format!(
                             "{file_name}:{}: `{}` expected warning containing `{}`, got warnings: {:?}",
                             case.line, case.expression, expected_warning, client.last_warnings
+                        ));
+                    }
+                } else if case.expected.starts_with("INCLUDES:") {
+                    // INCLUDES:<item> — comma-separated result must contain the item
+                    let expected_item = case.expected.strip_prefix("INCLUDES:").unwrap().trim();
+                    let items: Vec<&str> = result.split(',').map(str::trim).collect();
+                    if items.contains(&expected_item) {
+                        pass_count += 1;
+                    } else {
+                        failures.push(format!(
+                            "{file_name}:{}: `{}` expected completions to include `{}`, got `{}`",
+                            case.line, case.expression, expected_item, result
                         ));
                     }
                 } else if matches_pattern(&case.expected, &result) {
