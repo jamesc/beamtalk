@@ -112,7 +112,9 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
       this.view.webview.postMessage({ command: "append", text });
     } else {
       this.pendingChunks.push(text);
-      this.pendingLineCount += (text.match(/\n/g) || []).length;
+      // Count at least 1 per chunk so newline-free chunks (e.g. a long single
+      // line) still advance the counter and keep the buffer bounded.
+      this.pendingLineCount += Math.max(1, (text.match(/\n/g) || []).length);
       // Apply the same MAX_LINES cap to the pre-resolve buffer to bound memory
       // if a runaway actor writes to Transcript before the panel is opened.
       if (this.pendingLineCount > MAX_LINES) {
@@ -208,8 +210,9 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
       window.addEventListener('message', (event) => {
         const msg = event.data;
         if (msg.command === 'append') {
-          const newlines = (msg.text.match(/\n/g) || []).length;
-          lineCount += newlines;
+          // Count at least 1 per chunk so newline-free chunks still advance
+          // the counter and keep the DOM bounded.
+          lineCount += Math.max(1, (msg.text.match(/\n/g) || []).length);
           output.appendChild(document.createTextNode(msg.text));
 
           // Enforce max-lines cap: trim to TRIM_TO lines when cap is exceeded.
