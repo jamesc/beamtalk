@@ -80,7 +80,7 @@ sealed Object subclass: Future
   /// ```beamtalk
   /// future whenResolved: [:value | Transcript show: value printString].
   /// ```
-  whenResolved: block: Block => @primitive "whenResolved:"
+  whenResolved: block: Block -> Symbol => @primitive "whenResolved:"
 
   /// Register a callback to run when the future is rejected.
   ///
@@ -92,7 +92,7 @@ sealed Object subclass: Future
   /// ```beamtalk
   /// future whenRejected: [:err | Transcript show: err printString].
   /// ```
-  whenRejected: block: Block => @primitive "whenRejected:"
+  whenRejected: block: Block -> Symbol => @primitive "whenRejected:"
 
   /// Return a developer-readable string representation.
   ///

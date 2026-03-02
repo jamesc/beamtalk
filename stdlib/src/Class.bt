@@ -25,7 +25,7 @@ sealed Behaviour subclass: Class
   /// Counter name   // => #Counter
   /// Integer name   // => #Integer
   /// ```
-  sealed name => @primitive "className"
+  sealed name -> Symbol => @primitive "className"
 
   /// Return a human-readable string representation.
   ///
@@ -33,7 +33,7 @@ sealed Behaviour subclass: Class
   /// ```beamtalk
   /// Counter printString   // => "Counter"
   /// ```
-  sealed printString => self name asString
+  sealed printString -> String => self name asString
 
   /// Test whether this is a Class (not a Metaclass).
   ///
@@ -41,7 +41,7 @@ sealed Behaviour subclass: Class
   /// ```beamtalk
   /// Counter isClass   // => true
   /// ```
-  sealed isClass => true
+  sealed isClass -> Boolean => true
 
   /// Return the metaclass sentinel.
   ///
@@ -63,4 +63,4 @@ sealed Behaviour subclass: Class
   /// ```beamtalk
   /// Object classBuilder name: #Foo; register
   /// ```
-  sealed classBuilder => ClassBuilder spawnWith: #{#superclassRef => self}
+  sealed classBuilder -> ClassBuilder => ClassBuilder spawnWith: #{#superclassRef => self}

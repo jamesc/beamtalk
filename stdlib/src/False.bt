@@ -28,7 +28,7 @@ sealed Boolean subclass: False
   /// ```beamtalk
   /// false ifTrue: ["yes"]      // => false
   /// ```
-  ifTrue: _trueBlock: Block => self
+  ifTrue: _trueBlock: Block -> False => self
 
   /// If false, evaluate `falseBlock`. Returns block result.
   ///
