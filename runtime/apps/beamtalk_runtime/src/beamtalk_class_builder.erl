@@ -304,15 +304,23 @@ build_compiled_class_info(
                     class_method_signatures,
                     maps:get(classMethodSignatures, BuilderState, undefined),
                     maybe_put(
-                        class_state,
-                        maps:get(classState, BuilderState, undefined),
+                        method_return_types,
+                        maps:get(methodReturnTypes, BuilderState, undefined),
                         maybe_put(
-                            doc,
-                            maps:get(classDoc, BuilderState, undefined),
+                            class_method_return_types,
+                            maps:get(classMethodReturnTypes, BuilderState, undefined),
                             maybe_put(
-                                method_docs,
-                                maps:get(methodDocs, BuilderState, undefined),
-                                Base
+                                class_state,
+                                maps:get(classState, BuilderState, undefined),
+                                maybe_put(
+                                    doc,
+                                    maps:get(classDoc, BuilderState, undefined),
+                                    maybe_put(
+                                        method_docs,
+                                        maps:get(methodDocs, BuilderState, undefined),
+                                        Base
+                                    )
+                                )
                             )
                         )
                     )

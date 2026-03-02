@@ -81,6 +81,9 @@
     method_signatures = #{} :: #{selector() => binary()},
     %% BT-990: Class-side method display signatures for :help command
     class_method_signatures = #{} :: #{selector() => binary()},
+    %% BT-1002 / ADR 0045: Machine-readable return-type map for chain resolution
+    method_return_types = #{} :: #{selector() => atom()},
+    class_method_return_types = #{} :: #{selector() => atom()},
     %% ADR 0033: Runtime-embedded documentation
     doc = none :: binary() | none,
     method_docs = #{} :: #{selector() => binary()}
@@ -287,6 +290,8 @@ init({ClassName, ClassInfo}) ->
         method_source = maps:get(method_source, ClassInfo, #{}),
         method_signatures = maps:get(method_signatures, ClassInfo, #{}),
         class_method_signatures = maps:get(class_method_signatures, ClassInfo, #{}),
+        method_return_types = maps:get(method_return_types, ClassInfo, #{}),
+        class_method_return_types = maps:get(class_method_return_types, ClassInfo, #{}),
         doc = maps:get(doc, ClassInfo, none),
         method_docs = maps:get(method_docs, ClassInfo, #{})
     },
@@ -362,6 +367,25 @@ handle_call(
                 nil
         end,
     {reply, Result, State};
+%% BT-1002 / ADR 0045: Local return-type lookup (no chain walk — that is done in the registry).
+handle_call(
+    {get_method_return_type, Selector},
+    _From,
+    #class_state{method_return_types = MRT} = State
+) ->
+    case maps:find(Selector, MRT) of
+        {ok, Type} -> {reply, {ok, Type}, State};
+        error -> {reply, not_found, State}
+    end;
+handle_call(
+    {get_class_method_return_type, Selector},
+    _From,
+    #class_state{class_method_return_types = CMRT} = State
+) ->
+    case maps:find(Selector, CMRT) of
+        {ok, Type} -> {reply, {ok, Type}, State};
+        error -> {reply, not_found, State}
+    end;
 %% BT-990: Return CompiledMethod-like map for class-side methods.
 %% Walks superclass chain for inherited class methods (mirrors dispatch behaviour).
 handle_call(
@@ -396,10 +420,12 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
     %% Dispatch finds the new method via chain walk on the next call.
     %% BT-988: Remove stale display signature — dynamically-defined methods
     %% have no AST, so the fallback to selector atom is correct.
+    %% BT-1002: Also clear stale return-type entry for the same reason.
     NewState = State#class_state{
         instance_methods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
         method_source = maps:put(Selector, Source, State#class_state.method_source),
-        method_signatures = maps:remove(Selector, State#class_state.method_signatures)
+        method_signatures = maps:remove(Selector, State#class_state.method_signatures),
+        method_return_types = maps:remove(Selector, State#class_state.method_return_types)
     },
     {reply, ok, NewState};
 %% BT-572: Update class metadata after redefinition (hot reload).
@@ -568,6 +594,12 @@ apply_class_info(State, ClassInfo) ->
         ),
         class_method_signatures = maps:get(
             class_method_signatures, ClassInfo, State#class_state.class_method_signatures
+        ),
+        method_return_types = maps:get(
+            method_return_types, ClassInfo, State#class_state.method_return_types
+        ),
+        class_method_return_types = maps:get(
+            class_method_return_types, ClassInfo, State#class_state.class_method_return_types
         ),
         is_constructible = maps:get(is_constructible, ClassInfo, undefined),
         doc = maps:get(doc, ClassInfo, State#class_state.doc),
