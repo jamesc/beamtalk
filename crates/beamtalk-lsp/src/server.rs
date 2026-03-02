@@ -1088,11 +1088,12 @@ mod tests {
 
     #[test]
     fn configured_stdlib_falls_back_to_sysroot_when_none() {
-        // When no explicit stdlibSourceDir is configured, the function should
-        // attempt sysroot discovery instead of returning empty.  In test
-        // environment the sysroot path won't exist, so the result is empty.
+        // When no explicit stdlibSourceDir is configured, configured_stdlib_source_dirs
+        // falls back to sysroot auto-discovery. Assert against the actual sysroot
+        // result so the test is deterministic whether or not the binary is installed.
+        let expected: Vec<PathBuf> = sysroot_stdlib_source_dir().into_iter().collect();
         let dirs = configured_stdlib_source_dirs(None, &[PathBuf::from("/tmp/project")]);
-        assert!(dirs.is_empty());
+        assert_eq!(dirs, expected);
     }
 
     #[test]
