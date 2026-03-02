@@ -503,8 +503,9 @@ impl Token {
         false
     }
 
-    /// Returns `true` if there is a blank line (two or more consecutive
-    /// newlines) **before the first comment** in the leading trivia.
+    /// Returns `true` if the whitespace trivia before the first comment
+    /// contains two or more `\n` characters (a blank line) in the leading
+    /// trivia.
     ///
     /// Unlike [`has_preceding_blank_line`] this stops as soon as it sees any
     /// non-whitespace trivia (i.e., the first comment), so a blank line that
@@ -812,6 +813,76 @@ mod tests {
             vec![],
         );
         assert!(blank_then_comment.has_preceding_blank_line());
+    }
+
+    #[test]
+    fn token_blank_line_before_first_comment() {
+        let span = Span::new(0, 1);
+        let kind = TokenKind::Identifier("x".into());
+
+        // No trivia at all → false
+        let empty = Token::with_trivia(kind.clone(), span, vec![], vec![]);
+        assert!(!empty.has_blank_line_before_first_comment());
+
+        // Single newline before a comment → not a blank line
+        let one_newline_then_comment = Token::with_trivia(
+            kind.clone(),
+            span,
+            vec![
+                Trivia::Whitespace("\n".into()),
+                Trivia::LineComment("// assertion".into()),
+            ],
+            vec![],
+        );
+        assert!(!one_newline_then_comment.has_blank_line_before_first_comment());
+
+        // Two newlines before a comment → blank line (true)
+        let two_newlines_then_comment = Token::with_trivia(
+            kind.clone(),
+            span,
+            vec![
+                Trivia::Whitespace("\n\n".into()),
+                Trivia::LineComment("// description".into()),
+            ],
+            vec![],
+        );
+        assert!(two_newlines_then_comment.has_blank_line_before_first_comment());
+
+        // Comment first, then blank line → false (blank line is after first comment)
+        let comment_then_blank = Token::with_trivia(
+            kind.clone(),
+            span,
+            vec![
+                Trivia::LineComment("// assertion".into()),
+                Trivia::Whitespace("\n\n".into()),
+            ],
+            vec![],
+        );
+        assert!(!comment_then_blank.has_blank_line_before_first_comment());
+
+        // Blank line between two comments → false (stops at first comment)
+        let blank_between_comments = Token::with_trivia(
+            kind.clone(),
+            span,
+            vec![
+                Trivia::Whitespace("\n".into()),
+                Trivia::LineComment("// => 7".into()),
+                Trivia::Whitespace("\n\n".into()),
+                Trivia::LineComment("// description".into()),
+                Trivia::Whitespace("\n".into()),
+            ],
+            vec![],
+        );
+        assert!(!blank_between_comments.has_blank_line_before_first_comment());
+
+        // Two newlines with no comment → true (blank line before token itself)
+        let two_newlines_no_comment = Token::with_trivia(
+            kind.clone(),
+            span,
+            vec![Trivia::Whitespace("\n\n  ".into())],
+            vec![],
+        );
+        assert!(two_newlines_no_comment.has_blank_line_before_first_comment());
     }
 
     #[test]

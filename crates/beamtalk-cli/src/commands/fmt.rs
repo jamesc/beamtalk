@@ -340,19 +340,22 @@ mod tests {
     fn fmt_btscript_assertion_comments_preserved_idempotent() {
         // .btscript files use identity formatting — the file is never rewritten,
         // only checked for parse errors. Both passes must leave the file unchanged
-        // and pass1 must equal pass2 (BT-1016).
+        // and pass1 must equal the original source (BT-1016).
         let source = "3 + 4\n// => 7\n\n10 - 3\n// => 7\n";
         let (_dir, path) = write_temp_btscript(source);
 
-        // Format once — file must not change.
+        // Format once — file must not change (identity formatting).
         run_fmt_single(path.as_str(), false).expect("fmt pass 1");
         let pass1 = std::fs::read_to_string(path.as_std_path()).expect("read pass1");
+        assert_eq!(
+            pass1, source,
+            "first fmt pass must not change .btscript file content"
+        );
 
-        // Format again — must not change.
+        // Format again — must also not change.
         let (_dir2, path2) = write_temp_btscript(&pass1);
         run_fmt_single(path2.as_str(), false).expect("fmt pass 2");
         let pass2 = std::fs::read_to_string(path2.as_std_path()).expect("read pass2");
-
         assert_eq!(
             pass1, pass2,
             "formatter must be idempotent on .btscript files"
@@ -365,20 +368,27 @@ mod tests {
 
     #[test]
     fn fmt_btscript_directory_scan_includes_btscript_files() {
-        // When pointing fmt at a directory, .btscript files must be included.
+        // When pointing fmt at a directory, .btscript files must be included in
+        // the scan. To make inclusion observable: give the .btscript file a parse
+        // error and run fmt-check — if .btscript files are scanned, fmt-check
+        // must report a "could not be checked" failure; if they are silently
+        // ignored, fmt-check would succeed (false pass).
         let dir = tempfile::tempdir().expect("temp dir");
         let bt_path = dir.path().join("foo.bt");
         let btscript_path = dir.path().join("bar.btscript");
+        // Valid .bt file — must not affect the outcome.
         std::fs::write(&bt_path, "x := 1\n").expect("write bt");
-        std::fs::write(&btscript_path, "x := 1\n// => 1\n").expect("write btscript");
+        // Intentionally invalid .btscript — triggers a parse error if scanned.
+        std::fs::write(&btscript_path, "@@@invalid syntax@@@\n").expect("write btscript");
 
         let dir_str = Utf8PathBuf::from_path_buf(dir.path().to_path_buf())
             .expect("utf8 path")
             .to_string();
-        let result = run_fmt(&[dir_str], false);
+        let result = run_fmt(&[dir_str], true);
+        let err_msg = format!("{}", result.unwrap_err());
         assert!(
-            result.is_ok(),
-            "fmt on directory must succeed with mixed .bt/.btscript files; got: {result:?}"
+            err_msg.contains("could not be checked"),
+            "fmt-check must report parse error from .btscript file; got: {err_msg:?}"
         );
     }
 }
