@@ -146,6 +146,10 @@ One small addition to the existing protocol:
 
 No `bindings` session param is needed: the extension owns the REPL session and queries its own session's bindings directly. The `complete` op's session param pattern already exists and works the same way.
 
+**Phase 2 addition — `methods(className)` op** (`beamtalk_ws_handler.erl`):
+- Returns the method list for a loaded class: `[{name, selector, side}]` where `side` is `instance` or `class`
+- Enables method browser nodes in the TreeView and source navigation via LSP
+
 ### Information Architecture (Informing ADR-0017 Phase 3)
 
 This sidebar defines the panel structure that ADR 0017 Phase 3 should implement in the browser:
@@ -191,7 +195,7 @@ The Elixir community uses Observer (standalone Wx GUI) or LiveDashboard (browser
 - The Workspace Explorer is a simplified System Browser — classes, instances, live state
 - Transcript in the sidebar is familiar (Pharo has a Transcript window)
 - The inspector is the Smalltalk Inspector — drill into object state by clicking
-- The absence of a method browser is notable (the class browser shows loaded classes but not methods). This is Phase 2 scope.
+- The absence of inline method browsing in Phase 1 is notable — the class browser shows loaded classes but not their methods. Phase 2 adds expandable method nodes (click → navigate to source via LSP).
 - **Risk**: Smalltalk developers expect to be able to edit code in the inspector and send it to an object. That is REPL-native today; the sidebar is read-only inspection for now.
 
 ### Erlang/BEAM Developer
@@ -359,7 +363,15 @@ One runtime-side change:
    - `menus/view/item/context`: kill, inspect, reload commands
    - `configuration`: `beamtalk.workspace.autoConnect` (default: true)
 
-### Phase 2: Rich Inspector (M effort)
+### Phase 2: Method Browser + Rich Inspector (M effort)
+
+**Method browser** (TreeView extension):
+- Expand a class node in the tree to list its methods (instance and class-side)
+- Click a method → navigate to source via LSP go-to-definition (works for both user classes and stdlib via BT-1011 virtual URIs)
+- Requires a new `methods(className)` protocol op returning `[{name, selector, side}]` — small addition to `beamtalk_ws_handler.erl`
+- Context menu: "Reload Class" on class node triggers eval of the source file
+
+**Rich inspector** (WebviewPanel):
 - WebviewPanel for expanded object inspection (show Dictionary, List, Array contents with formatting)
 - Triggered by clicking "Inspect" on a binding or actor — opens a panel in the editor area
 - Value rendering: syntax-highlighted Beamtalk-like display of nested structures
