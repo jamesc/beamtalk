@@ -509,16 +509,7 @@ fn wait_for_tcp_ready(
     // Check whether the BEAM node is still alive to give a more actionable error.
     // If the process is gone it crashed during startup; if it's still running
     // it is either stuck initializing or the WebSocket stack failed to come up.
-    let node_alive = {
-        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-        let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
-            true,
-            ProcessRefreshKind::nothing(),
-        );
-        system.process(Pid::from_u32(pid)).is_some()
-    };
+    let node_alive = is_process_alive(pid);
 
     // Only mention the log file if we actually opened it (log_path is Some).
     let log_suffix = log_path
@@ -795,11 +786,9 @@ pub(super) fn wait_for_workspace_exit(host: &str, port: u16, timeout_secs: u64) 
 
 /// Force-kill a process by PID.
 ///
-/// Cross-platform: uses `sysinfo` for reliable process termination (ADR 0027).
+/// Cross-platform: uses `libc::kill(SIGKILL)` on Unix and `TerminateProcess` on Windows.
 /// Used as fallback when TCP graceful shutdown fails or times out.
 pub(super) fn force_kill_process(pid: u32) -> Result<()> {
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-
     // PID 0 is sentinel for when PID tracking is unavailable
     if pid == 0 {
         return Err(miette!(
@@ -808,24 +797,89 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
         ));
     }
 
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
-        true,
-        ProcessRefreshKind::nothing(),
-    );
+    #[cfg(unix)]
+    {
+        let pid_i = i32::try_from(pid).map_err(|_| miette!("PID {pid} too large for platform"))?;
+        // SAFETY: kill(2) is safe to call with a valid pid and signal number.
+        let ret = unsafe { libc::kill(pid_i, libc::SIGKILL) };
+        if ret == 0 {
+            return Ok(());
+        }
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ESRCH) {
+            // Process already exited — the goal of ensuring it is not running is achieved.
+            // This is the expected outcome when graceful shutdown succeeds just after a
+            // wait_for_workspace_exit timeout (race: BEAM exits naturally before we SIGKILL).
+            return Ok(());
+        }
+        Err(miette!("Failed to kill process {pid}: {err}"))
+    }
 
-    if let Some(process) = system.process(Pid::from_u32(pid)) {
-        if process.kill() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, FALSE};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_TERMINATE, TerminateProcess,
+        };
+
+        // SAFETY: Windows API call with documented parameters.
+        let handle = unsafe { OpenProcess(PROCESS_TERMINATE, FALSE, pid) };
+        if handle == 0 {
+            let err = std::io::Error::last_os_error();
+            // ERROR_INVALID_PARAMETER (87) means the process no longer exists.
+            if err.raw_os_error() == Some(87) {
+                return Ok(());
+            }
+            return Err(miette!(
+                "Failed to open process {pid} for termination: {err}"
+            ));
+        }
+        // SAFETY: handle is valid, obtained from OpenProcess above.
+        let ret = unsafe { TerminateProcess(handle, 1) };
+        unsafe { CloseHandle(handle) };
+        if ret != FALSE {
             Ok(())
         } else {
-            Err(miette!("Failed to kill process {pid}"))
+            Err(miette!(
+                "Failed to kill process {pid}: {}",
+                std::io::Error::last_os_error()
+            ))
         }
-    } else {
-        // Process already exited — the goal of ensuring it is not running is achieved.
-        // This is the expected outcome when graceful shutdown succeeds just after a
-        // wait_for_workspace_exit timeout (race: BEAM exits naturally before we SIGKILL).
-        Ok(())
+    }
+}
+
+/// Check whether a process is alive by PID.
+///
+/// On Unix: uses `kill(pid, 0)` — signal 0 tests process existence without sending a signal.
+/// On Windows: uses `OpenProcess` to attempt to obtain a handle.
+fn is_process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        let Ok(pid_i) = i32::try_from(pid) else {
+            return false;
+        };
+        // SAFETY: kill(2) with signal 0 is a standard existence check.
+        let ret = unsafe { libc::kill(pid_i, 0) };
+        ret == 0
+    }
+
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, FALSE, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+
+        // SAFETY: Windows API call with documented parameters.
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
+        if handle == 0 {
+            return false;
+        }
+        let mut exit_code: u32 = 0;
+        // SAFETY: handle is valid.
+        let ok = unsafe { GetExitCodeProcess(handle, &mut exit_code) };
+        unsafe { CloseHandle(handle) };
+        ok != FALSE && exit_code == STILL_ACTIVE
     }
 }
 

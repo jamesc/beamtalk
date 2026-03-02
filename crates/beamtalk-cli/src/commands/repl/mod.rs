@@ -1225,7 +1225,6 @@ mod tests {
     use color::ColorGuard;
     use process::DEFAULT_REPL_PORT;
     use serial_test::serial;
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
     #[test]
     #[serial(color)]
@@ -1383,17 +1382,24 @@ mod tests {
         // Give it a moment to clean up
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        // Verify the process is no longer running using sysinfo
-        let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
-            true,
-            ProcessRefreshKind::nothing(),
-        );
-        assert!(
-            system.process(Pid::from_u32(pid)).is_none(),
-            "Process should have been killed"
-        );
+        // Verify the process is no longer running using native OS liveness check
+        #[cfg(unix)]
+        {
+            let pid_i = i32::try_from(pid).expect("pid should fit in i32");
+            // SAFETY: kill(2) with signal 0 is a standard existence check.
+            let alive = unsafe { libc::kill(pid_i, 0) } == 0;
+            assert!(!alive, "Process should have been killed");
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Foundation::CloseHandle;
+            use windows_sys::Win32::System::Threading::{
+                OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            };
+            // SAFETY: Windows API call with documented parameters.
+            let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+            assert!(handle == 0, "Process should have been killed");
+        }
     }
 
     #[test]

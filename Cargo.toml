@@ -74,9 +74,6 @@ stacker = "0.1"
 tungstenite = "0.28"
 tokio-tungstenite = "0.28"
 
-# Process management (ADR 0027 — Windows PID discovery)
-sysinfo = "0.38"
-
 # Diff generation (for beamtalk fmt-check unified diff output)
 similar = "2"
 

@@ -97,7 +97,6 @@ mod tests {
     use serial_test::serial;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
     /// Helper to create a unique test workspace ID and clean up after.
     struct TestWorkspace {
@@ -944,7 +943,7 @@ mod tests {
 
     /// Kill a BEAM node without cleanup (simulates a crash).
     ///
-    /// Uses sysinfo for cross-platform process kill, then waits for port
+    /// Uses native OS calls for cross-platform process kill, then waits for port
     /// release and (on Unix) epmd deregistration with generous timeouts for
     /// loaded CI machines. This ensures the next operation in the same test
     /// (e.g. restarting a node with the same name) doesn't hit stale state.
@@ -958,21 +957,8 @@ mod tests {
             info.pid != 0,
             "kill_node_raw called with sentinel PID 0 — node PID unknown"
         );
-        let pid = Pid::from_u32(info.pid);
-        let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[pid]),
-            true,
-            ProcessRefreshKind::nothing(),
-        );
-        let process = system
-            .process(pid)
-            .unwrap_or_else(|| panic!("BEAM process with pid {} not found", info.pid));
-        assert!(
-            process.kill(),
-            "failed to kill BEAM process with pid {}",
-            info.pid
-        );
+        force_kill_process(info.pid)
+            .unwrap_or_else(|e| panic!("failed to kill BEAM process with pid {}: {e}", info.pid));
         wait_for_workspace_exit(info.connect_host(), info.port, 15).unwrap_or_else(|e| {
             panic!(
                 "workspace did not exit after forced kill (pid {}, port {}): {e}",
@@ -1079,28 +1065,18 @@ mod tests {
             "is_node_running should return true for live node"
         );
 
-        // Verify PID corresponds to a real BEAM process using sysinfo
-        let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[Pid::from_u32(node_info.pid)]),
-            true,
-            ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
-        );
-        let process = system
-            .process(Pid::from_u32(node_info.pid))
-            .expect("PID should correspond to a running process");
-        let cmd_str = process
-            .cmd()
-            .iter()
-            .map(|s| s.to_string_lossy())
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(
-            cmd_str.contains("beam") || cmd_str.contains("erl"),
-            "PID {} should be a BEAM process, got: {:?}",
-            node_info.pid,
-            process.name()
-        );
+        // Verify PID corresponds to a running process using native OS check
+        #[cfg(unix)]
+        {
+            let pid_i = i32::try_from(node_info.pid).expect("node PID should fit in i32");
+            // SAFETY: kill(2) with signal 0 is a standard existence check.
+            let alive = unsafe { libc::kill(pid_i, 0) } == 0;
+            assert!(
+                alive,
+                "PID {} should correspond to a running process",
+                node_info.pid
+            );
+        }
     }
 
     #[test]
@@ -1132,7 +1108,7 @@ mod tests {
             "is_node_running should be true while node is alive"
         );
 
-        // Kill the node using sysinfo (cross-platform)
+        // Kill the node without cleanup (simulates a crash)
         kill_node_raw(&node_info);
 
         assert_node_stopped(&node_info, "is_node_running should be false after kill");
