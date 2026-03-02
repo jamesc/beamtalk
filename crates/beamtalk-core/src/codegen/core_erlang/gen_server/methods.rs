@@ -1007,6 +1007,7 @@ impl CoreErlangGenerator {
     ///             <{'error', _Err0}> when 'true' -> {'error', _Err0}
     ///         end
     ///         in _Reg0
+    ///     of RegResult -> RegResult
     ///     catch <CatchType, CatchError, CatchStack> ->
     ///         primop 'raw_raise'(CatchType, CatchError, CatchStack)
     /// ```
