@@ -3979,12 +3979,13 @@ mod tests {
     #[test]
     fn test_self_resolves_to_receiver_class_in_instance_send() {
         // List collect: [...] should infer return type List (not Collection or Self)
+        // Use `first` which is List-specific (not on Collection) to prove resolution
         let source = "
 Object subclass: Foo
   test =>
     list := #(1, 2, 3)
     result := list collect: [:x | x]
-    result size
+    result first
 ";
         let tokens = crate::source_analysis::lex_with_eof(source);
         let (module, parse_diags) = crate::source_analysis::parse(tokens);
@@ -3992,8 +3993,7 @@ Object subclass: Foo
         let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
-        // `result size` should be valid — result is inferred as List (from Self resolution)
-        // No unknown-selector warning expected
+        // `result first` should be valid — `first` is List-specific, proving Self resolved to List
         let dnu_warnings: Vec<_> = checker
             .diagnostics()
             .iter()
@@ -4001,18 +4001,19 @@ Object subclass: Foo
             .collect();
         assert!(
             dnu_warnings.is_empty(),
-            "result.size should be valid when collect: returns List via Self, got: {dnu_warnings:?}"
+            "result.first should be valid when collect: returns List via Self, got: {dnu_warnings:?}"
         );
     }
 
     #[test]
     fn test_self_resolves_to_receiver_class_in_class_send() {
         // List withAll: #(1,2,3) should infer return type List (not Collection or Self)
+        // Use `first` which is List-specific (not on Collection) to prove resolution
         let source = "
 Object subclass: Foo
   test =>
     result := List withAll: #(1, 2, 3)
-    result size
+    result first
 ";
         let tokens = crate::source_analysis::lex_with_eof(source);
         let (module, parse_diags) = crate::source_analysis::parse(tokens);
@@ -4020,7 +4021,7 @@ Object subclass: Foo
         let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
-        // No unknown-selector warning expected
+        // `result first` should be valid — proves Self resolved to List, not Collection
         let dnu_warnings: Vec<_> = checker
             .diagnostics()
             .iter()
@@ -4028,7 +4029,7 @@ Object subclass: Foo
             .collect();
         assert!(
             dnu_warnings.is_empty(),
-            "result.size should be valid when List withAll: returns List via Self, got: {dnu_warnings:?}"
+            "result.first should be valid when List withAll: returns List via Self, got: {dnu_warnings:?}"
         );
     }
 
@@ -4041,8 +4042,8 @@ Object subclass: Foo
 
     #[test]
     fn test_self_resolves_through_multi_level_inheritance() {
-        // A defines -> Self, B extends A, C extends B.
-        // A call on C should resolve Self to C.
+        // A defines -> Self, B extends A, C extends B with a unique method.
+        // A call on C should resolve Self to C (not A or B).
         let source = "
 Object subclass: A
   clone -> Self => self
@@ -4050,12 +4051,13 @@ Object subclass: A
 A subclass: B
 
 B subclass: C
+  onlyOnC => 42
 
 Object subclass: Foo
   test =>
     c := C new
     result := c clone
-    result class
+    result onlyOnC
 ";
         let tokens = crate::source_analysis::lex_with_eof(source);
         let (module, parse_diags) = crate::source_analysis::parse(tokens);
@@ -4065,7 +4067,7 @@ Object subclass: Foo
             .unwrap();
         let mut checker = TypeChecker::new();
         checker.check_module(&module, &hierarchy);
-        // result.class should be valid — result is inferred as C (from Self resolution through B to A)
+        // result.onlyOnC should be valid — proves Self resolved to C (not A or B)
         let dnu_warnings: Vec<_> = checker
             .diagnostics()
             .iter()
@@ -4073,7 +4075,7 @@ Object subclass: Foo
             .collect();
         assert!(
             dnu_warnings.is_empty(),
-            "result.class should be valid for multi-level Self, got: {dnu_warnings:?}"
+            "result.onlyOnC should be valid for multi-level Self, got: {dnu_warnings:?}"
         );
     }
 }
