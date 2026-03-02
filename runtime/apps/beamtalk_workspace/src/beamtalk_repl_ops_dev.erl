@@ -554,7 +554,8 @@ complete_instance_methods(ClassName, Prefix) ->
 
 %% @private
 %% @doc Get method selectors for a given receiver token.
-%% For class-name receivers (uppercase), returns class-side methods.
+%% For class-name receivers (uppercase), returns class-side methods (via hierarchy
+%% walk) and instance methods (what instances of that class respond to).
 %% For instance receivers (literals, bindings), returns instance methods.
 -spec get_methods_for_receiver(binary(), map()) -> [atom()].
 get_methods_for_receiver(Receiver, Bindings) when is_binary(Receiver) ->
@@ -562,8 +563,10 @@ get_methods_for_receiver(Receiver, Bindings) when is_binary(Receiver) ->
         undefined ->
             [];
         {class, ClassName} ->
-            %% Class-object receiver: complete class-side methods + built-in class methods
-            collect_all_class_methods(ClassName, 0) ++ builtin_class_methods();
+            %% Class-object receiver: class-side methods (via hierarchy walk) and
+            %% instance methods (users commonly want to see what instances respond to).
+            collect_all_class_methods(ClassName, 0) ++
+                collect_all_methods(ClassName, 0);
         {instance, ClassName} ->
             collect_all_methods(ClassName, 0)
     end.
@@ -702,12 +705,6 @@ get_workspace_bindings() ->
     catch
         _:_ -> #{}
     end.
-
-%% @private
-%% @doc The built-in class-side methods available on every concrete class.
--spec builtin_class_methods() -> [atom()].
-builtin_class_methods() ->
-    [spawn, new, 'new:', 'spawnWith:', 'subclass:'].
 
 %% @private
 %% @doc Collect all class-side method selectors for a class by walking the superclass chain.

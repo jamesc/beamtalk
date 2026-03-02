@@ -18,6 +18,10 @@ sealed Value subclass: DateTime
 
   // ===== Class Methods — Construction =====
 
+  /// Use 'DateTime year: y month: m day: d', 'DateTime fromTimestamp: ts', or 'DateTime fromString: str' to create a DateTime.
+  class new: _ =>
+    self error: "Use 'DateTime year: y month: m day: d', 'DateTime fromTimestamp: ts', or 'DateTime fromString: str' to create a DateTime"
+
   /// Current UTC time.
   ///
   /// ## Examples

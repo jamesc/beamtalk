@@ -15,6 +15,10 @@
 /// ```
 sealed Object subclass: Stream
 
+  /// Use 'Stream on: collection' or 'Stream from: start' to create a Stream.
+  class new: _ =>
+    self error: "Use 'Stream on: collection' or 'Stream from: start' to create a Stream"
+
   /// Create an infinite Stream starting from `start`, incrementing by 1.
   ///
   /// ## Examples

@@ -1035,28 +1035,29 @@ mod tests {
         paths
     }
 
+    /// Start a detached BEAM node for integration tests using default parameters.
+    ///
+    /// Creates a `TestWorkspace` with the given prefix, creates the workspace
+    /// directory, starts a node with standard test defaults (port 0, idle timeout
+    /// 60 s, no extra code paths), and wraps it in a `NodeGuard` for automatic
+    /// cleanup. Returns all three for use in the test body.
+    fn start_test_node(prefix: &str) -> (TestWorkspace, NodeInfo, NodeGuard) {
+        let tw = TestWorkspace::new(prefix);
+        let project_path = std::env::current_dir().unwrap();
+        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+        let paths = beam_dirs_for_tests();
+        let node_info =
+            start_detached_node(&tw.id, 0, &paths, &[], false, Some(60), None, None, None)
+                .expect("start_detached_node should succeed");
+        let guard = NodeGuard::new(&node_info);
+        (tw, node_info, guard)
+    }
+
     #[test]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_start_detached_node_integration() {
-        let tw = TestWorkspace::new("integ_start");
-        let project_path = std::env::current_dir().unwrap();
-        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
-
-        let paths = beam_dirs_for_tests();
-        let node_info = start_detached_node(
-            &tw.id,
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None, // ssl_dist_optfile
-            None, // web_port
-        )
-        .expect("start_detached_node should succeed");
-        let _guard = NodeGuard::new(&node_info);
+        let (tw, node_info, _guard) = start_test_node("integ_start");
 
         // Verify node.info was written with correct fields
         let saved = get_node_info(&tw.id)
@@ -1107,24 +1108,7 @@ mod tests {
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_is_node_running_true_then_false_integration() {
-        let tw = TestWorkspace::new("integ_running");
-        let project_path = std::env::current_dir().unwrap();
-        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
-
-        let paths = beam_dirs_for_tests();
-        let node_info = start_detached_node(
-            &tw.id,
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None, // ssl_dist_optfile
-            None, // web_port
-        )
-        .expect("start_detached_node should succeed");
-        let _guard = NodeGuard::new(&node_info);
+        let (_tw, node_info, _guard) = start_test_node("integ_running");
 
         // True case: node is running
         assert!(
@@ -1463,24 +1447,7 @@ mod tests {
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_list_workspaces_running_node_integration() {
-        let tw = TestWorkspace::new("integ_list_running");
-        let project_path = std::env::current_dir().unwrap();
-        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
-
-        let paths = beam_dirs_for_tests();
-        let node_info = start_detached_node(
-            &tw.id,
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None, // ssl_dist_optfile
-            None, // web_port
-        )
-        .expect("start_detached_node should succeed");
-        let _guard = NodeGuard::new(&node_info);
+        let (tw, node_info, _guard) = start_test_node("integ_list_running");
 
         let workspaces = list_workspaces().unwrap();
         let found = workspaces
@@ -1535,24 +1502,7 @@ mod tests {
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_workspace_status_running_integration() {
-        let tw = TestWorkspace::new("integ_ws_status");
-        let project_path = std::env::current_dir().unwrap();
-        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
-
-        let paths = beam_dirs_for_tests();
-        let node_info = start_detached_node(
-            &tw.id,
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None, // ssl_dist_optfile
-            None, // web_port
-        )
-        .expect("start_detached_node should succeed");
-        let _guard = NodeGuard::new(&node_info);
+        let (tw, node_info, _guard) = start_test_node("integ_ws_status");
 
         let detail = workspace_status(Some(&tw.id)).unwrap();
         assert_eq!(detail.workspace_id, tw.id);
@@ -1574,24 +1524,7 @@ mod tests {
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_stop_workspace_graceful_integration() {
-        let tw = TestWorkspace::new("integ_stop_graceful");
-        let project_path = std::env::current_dir().unwrap();
-        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
-
-        let paths = beam_dirs_for_tests();
-        let node_info = start_detached_node(
-            &tw.id,
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None, // ssl_dist_optfile
-            None, // web_port
-        )
-        .expect("start_detached_node should succeed");
-        let _guard = NodeGuard::new(&node_info);
+        let (tw, node_info, _guard) = start_test_node("integ_stop_graceful");
 
         // Graceful stop (force=false) uses TCP shutdown + init:stop(),
         // which should succeed for detached BEAM nodes
@@ -1610,26 +1543,9 @@ mod tests {
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_stop_workspace_force_integration() {
-        let tw = TestWorkspace::new("integ_stop_force");
-        let project_path = std::env::current_dir().unwrap();
-        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
-
-        let paths = beam_dirs_for_tests();
-        let node_info = start_detached_node(
-            &tw.id,
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None, // ssl_dist_optfile
-            None, // web_port
-        )
-        .expect("start_detached_node should succeed");
         // Safety net: NodeGuard ensures cleanup if test fails before stop_workspace runs.
         // NodeGuard is a no-op for already-dead PIDs, so it won't conflict with stop_workspace.
-        let _guard = NodeGuard::new(&node_info);
+        let (tw, node_info, _guard) = start_test_node("integ_stop_force");
 
         // Verify node is running before we stop it
         assert!(

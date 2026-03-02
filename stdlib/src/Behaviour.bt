@@ -68,7 +68,8 @@ abstract Object subclass: Behaviour
   /// Counter inheritsFrom: Actor    // => true
   /// Counter inheritsFrom: Counter  // => false
   /// ```
-  sealed inheritsFrom: aClass -> Boolean => self allSuperclasses includes: aClass
+  sealed inheritsFrom: aClass -> Boolean =>
+    self allSuperclasses includes: aClass
 
   /// Test whether aBehaviour is the receiver or one of its ancestors.
   ///
@@ -114,7 +115,8 @@ abstract Object subclass: Behaviour
   /// Counter canUnderstand: #class      // => true (inherited from ProtoObject)
   /// Counter canUnderstand: #bogus      // => false
   /// ```
-  sealed canUnderstand: selector -> Boolean => self allMethods includes: selector
+  sealed canUnderstand: selector -> Boolean =>
+    self allMethods includes: selector
 
   /// Test whether the selector is defined locally in this class
   /// (does not check superclasses).
@@ -124,7 +126,8 @@ abstract Object subclass: Behaviour
   /// Counter includesSelector: #increment  // => true
   /// Counter includesSelector: #class      // => false (defined in ProtoObject)
   /// ```
-  sealed includesSelector: selector -> Boolean => @primitive "classIncludesSelector"
+  sealed includesSelector: selector -> Boolean =>
+    @primitive "classIncludesSelector"
 
   /// Walk the hierarchy and return the class that defines the given selector,
   /// or nil if no class defines it.
@@ -185,7 +188,8 @@ abstract Object subclass: Behaviour
   /// Counter setDocForMethod: #increment to: "Increment the counter by 1"
   /// (Counter >> #increment) doc   // => "Increment the counter by 1"
   /// ```
-  sealed setDocForMethod: aSelector to: aString -> Behaviour => @primitive "classSetMethodDoc"
+  sealed setDocForMethod: aSelector to: aString -> Behaviour =>
+    @primitive "classSetMethodDoc"
 
   /// Return the documentation string for a specific method, or nil if no doc
   /// is set or the method does not exist.

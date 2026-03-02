@@ -316,21 +316,49 @@ handle_call(
     #class_state{
         name = ClassName,
         module = Module,
-        is_constructible = IsConstructible0
+        is_constructible = IsConstructible0,
+        class_methods = ClassMethods,
+        class_state = ClassVars
     } = State
 ) ->
-    case
-        beamtalk_class_instantiation:handle_new(
-            Args,
-            ClassName,
-            Module,
-            IsConstructible0
-        )
-    of
-        {ok, Result, IsConstructible} ->
-            {reply, {ok, Result}, State#class_state{is_constructible = IsConstructible}};
-        {error, Error, IsConstructible} ->
-            {reply, {error, Error}, State#class_state{is_constructible = IsConstructible}}
+    %% When Args is non-empty and the class (or any ancestor) has a user-defined
+    %% `class new:` method, route the `new:` call through dispatch instead of the
+    %% generic field-initialisation constructor.
+    %% This lets `List new: #(1,2,3)` call `List class new:` rather than the
+    %% `Object.new:` dict-initialiser (which would error on a non-map argument).
+    %%
+    %% Note: the `classMethods` metadata includes auto-generated `new:` for all
+    %% classes, so `is_map_key/2` alone cannot distinguish user-defined from
+    %% auto-generated. We check `erlang:function_exported/3` on each module in the
+    %% superclass chain, which is true only when the BEAM module contains an
+    %% explicit `class_new:` function — correctly supporting inherited constructors.
+    case Args =/= [] andalso has_class_new_in_chain(ClassName, Module) of
+        true ->
+            case
+                beamtalk_class_dispatch:handle_class_method_call(
+                    'new:', Args, ClassName, Module, ClassMethods, ClassVars
+                )
+            of
+                {reply, Result, NewClassVars} ->
+                    {reply, Result, State#class_state{class_state = NewClassVars}};
+                {error, not_found} ->
+                    Err = beamtalk_error:new(does_not_understand, ClassName, 'new:'),
+                    {reply, {error, Err}, State}
+            end;
+        false ->
+            case
+                beamtalk_class_instantiation:handle_new(
+                    Args,
+                    ClassName,
+                    Module,
+                    IsConstructible0
+                )
+            of
+                {ok, Result, IsConstructible} ->
+                    {reply, {ok, Result}, State#class_state{is_constructible = IsConstructible}};
+                {error, Error, IsConstructible} ->
+                    {reply, {error, Error}, State#class_state{is_constructible = IsConstructible}}
+            end
     end;
 %% ADR 0032 Phase 1: Returns local (non-inherited) method selectors only.
 %% Full hierarchy walk is done by Behaviour.methods in Phase 2.
@@ -568,6 +596,54 @@ find_inherited_class_method(Selector, SuperName) ->
             catch
                 exit:{timeout, _} -> nil;
                 exit:{noproc, _} -> nil
+            end
+    end.
+
+%% @private Check whether `class_new:/3` is exported anywhere in the superclass chain.
+%%
+%% Walks the ETS hierarchy table from `ClassName` upward.  Returns `true` as soon as
+%% a module exporting `class_new:'/3` is found, `false` if none is found in the chain.
+%% This correctly supports inherited `class new:` constructors: a subclass that does
+%% not override `class new:` will still route through the parent's implementation.
+%%
+%% We use `function_exported/3` rather than checking the `classMethods` metadata map
+%% because the metadata includes auto-generated `new:` entries for all classes,
+%% making it impossible to distinguish user-defined from auto-generated with a map
+%% key check alone.
+-spec has_class_new_in_chain(class_name(), atom()) -> boolean().
+has_class_new_in_chain(ClassName, Module) ->
+    has_class_new_in_chain(ClassName, Module, 0).
+
+-spec has_class_new_in_chain(class_name(), atom(), non_neg_integer()) -> boolean().
+has_class_new_in_chain(_ClassName, _Module, Depth) when Depth > 50 ->
+    false;
+has_class_new_in_chain(ClassName, Module, Depth) ->
+    case erlang:function_exported(Module, 'class_new:', 3) of
+        true ->
+            true;
+        false ->
+            SuperName =
+                case ets:lookup(beamtalk_class_hierarchy, ClassName) of
+                    [{_, S}] -> S;
+                    [] -> none
+                end,
+            case SuperName of
+                none ->
+                    false;
+                _ ->
+                    case beamtalk_class_registry:whereis_class(SuperName) of
+                        undefined ->
+                            false;
+                        SuperPid when SuperPid =:= self() ->
+                            false;
+                        SuperPid ->
+                            try
+                                SuperModule = module_name(SuperPid),
+                                has_class_new_in_chain(SuperName, SuperModule, Depth + 1)
+                            catch
+                                _:_ -> false
+                            end
+                    end
             end
     end.
 
