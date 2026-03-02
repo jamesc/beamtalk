@@ -31,9 +31,8 @@ use crate::ast::{ClassDefinition, Expression, Module};
 use crate::language_service::{Completion, CompletionKind, Position};
 use crate::queries::erlang_modules;
 use crate::semantic_analysis::type_checker::TypeMap;
-use crate::semantic_analysis::{
-    ClassHierarchy, InferredType, infer_method_return_types, infer_types,
-};
+use crate::queries::enrich_hierarchy_with_inferred_returns;
+use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -108,20 +107,16 @@ pub fn compute_completions(
     // Determine class context at cursor position
     let context = find_class_context(module, offset);
 
-    // Enrich hierarchy with inferred return types for user-defined methods (BT-1014).
+    // Enrich hierarchy with inferred return types (BT-1014).
     // This enables chain resolution for methods whose return type is not explicitly
     // annotated but can be inferred from the method body (BT-1005).
-    let inferred = infer_method_return_types(module, hierarchy);
     let enriched_hierarchy;
-    let hierarchy = if inferred.is_empty() {
-        hierarchy
-    } else {
-        enriched_hierarchy = {
-            let mut h = hierarchy.clone();
-            h.apply_inferred_return_types(&inferred);
-            h
-        };
-        &enriched_hierarchy
+    let hierarchy = match enrich_hierarchy_with_inferred_returns(module, hierarchy) {
+        Some(h) => {
+            enriched_hierarchy = h;
+            &enriched_hierarchy
+        }
+        None => hierarchy,
     };
 
     // Run type inference to get receiver types at positions

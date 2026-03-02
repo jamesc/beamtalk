@@ -31,9 +31,8 @@ use crate::ast::{
 };
 use crate::language_service::{HoverInfo, Position};
 use crate::semantic_analysis::type_checker::TypeMap;
-use crate::semantic_analysis::{
-    ClassHierarchy, InferredType, infer_method_return_types, infer_types,
-};
+use crate::queries::enrich_hierarchy_with_inferred_returns;
+use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use crate::source_analysis::Span;
 
 /// Computes hover information at a given position.
@@ -78,20 +77,16 @@ pub fn compute_hover(
     // Find the class context at this position for self-type hover
     let class_context = find_hover_class_context(module, offset_val);
 
-    // Enrich hierarchy with inferred return types for user-defined methods (BT-1014).
+    // Enrich hierarchy with inferred return types (BT-1014).
     // This enables chain-resolved hover for methods whose return type is not explicitly
     // annotated but can be inferred from the method body (BT-1005).
-    let inferred = infer_method_return_types(module, hierarchy);
     let enriched_hierarchy;
-    let hierarchy = if inferred.is_empty() {
-        hierarchy
-    } else {
-        enriched_hierarchy = {
-            let mut h = hierarchy.clone();
-            h.apply_inferred_return_types(&inferred);
-            h
-        };
-        &enriched_hierarchy
+    let hierarchy = match enrich_hierarchy_with_inferred_returns(module, hierarchy) {
+        Some(h) => {
+            enriched_hierarchy = h;
+            &enriched_hierarchy
+        }
+        None => hierarchy,
     };
 
     // Run type inference to get types at positions

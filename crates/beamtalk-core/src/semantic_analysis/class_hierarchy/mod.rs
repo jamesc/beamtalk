@@ -657,7 +657,8 @@ impl ClassHierarchy {
     /// but whose return type was inferred by [`crate::semantic_analysis::infer_method_return_types`].
     ///
     /// This enriches the hierarchy so that type-aware completions and hover can
-    /// resolve receiver types for chains involving user-defined methods (BT-1014).
+    /// resolve receiver types for chains involving methods on any class, including
+    /// built-ins (BT-1014).
     /// Only methods without an existing `return_type` are updated (explicit annotations
     /// are never overwritten).
     ///
