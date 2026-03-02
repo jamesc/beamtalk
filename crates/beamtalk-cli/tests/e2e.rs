@@ -8,7 +8,7 @@
 //!
 //! # Test Case Format
 //!
-//! Test cases are `.bt` files with expected output annotations. Each expression
+//! Test cases are `.btscript` files with expected output annotations. Each expression
 //! is followed by a comment showing the expected result:
 //!
 //! ```text
@@ -1506,7 +1506,7 @@ fn e2e_language_tests() {
             "E2E test cases directory not found: {}",
             cases_dir.display()
         );
-        eprintln!("Skipping E2E tests. Create test cases in tests/e2e/cases/*.bt");
+        eprintln!("Skipping E2E tests. Create test cases in tests/e2e/cases/*.btscript");
         return;
     }
 
@@ -1529,7 +1529,7 @@ fn e2e_language_tests() {
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "bt") {
+            if path.extension().is_some_and(|ext| ext == "btscript") {
                 Some(path)
             } else {
                 None
@@ -1540,7 +1540,7 @@ fn e2e_language_tests() {
 
     if test_files.is_empty() {
         eprintln!("No test files found in {}", cases_dir.display());
-        eprintln!("Create test cases with .bt extension");
+        eprintln!("Create test cases with .btscript extension");
         return;
     }
 

@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** CLI / Test System
 //!
-//! Compiles `.bt` test files with `// =>` assertions into `EUnit` test modules.
+//! Compiles `.btscript` test files with `// =>` assertions into `EUnit` test modules.
 //! Each expression is compiled through the normal pipeline, then wrapped in
 //! an `EUnit` test that calls the compiled eval function and asserts the result.
 //!
@@ -53,7 +53,7 @@ struct ParsedTestFile {
     warnings: Vec<String>,
 }
 
-/// Parse test cases from a `.bt` file.
+/// Parse test cases from a `.btscript` file.
 ///
 /// Extracts `// =>` assertion pairs and `// @load` directives.
 fn parse_test_file(content: &str) -> ParsedTestFile {
@@ -403,7 +403,7 @@ struct CompiledTestFile {
 
 /// Run stdlib tests.
 ///
-/// Finds all `.bt` files in the given path (file or directory), parses
+/// Finds all `.btscript` files in the given path (file or directory), parses
 /// `// =>` assertions, compiles expressions to Core Erlang, generates
 /// `EUnit` wrappers, and runs all tests in a single BEAM process.
 #[instrument(skip_all)]
@@ -415,10 +415,10 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
         miette::bail!("Test path '{}' not found", test_path);
     }
 
-    // Find all .bt test files
+    // Find all .btscript test files
     let test_files = find_test_files(&test_path)?;
     if test_files.is_empty() {
-        println!("No .bt test files found in '{test_path}'");
+        println!("No .btscript test files found in '{test_path}'");
         return Ok(());
     }
 
@@ -575,7 +575,7 @@ struct CompilationResult {
     fixture_modules: Vec<String>,
 }
 
-/// Compile a single `.bt` test file into Core Erlang modules + `EUnit` wrapper.
+/// Compile a single `.btscript` test file into Core Erlang modules + `EUnit` wrapper.
 ///
 /// Does NOT execute — just produces files ready for batch compilation and execution.
 fn compile_single_test_file(
@@ -958,10 +958,10 @@ fn parse_eunit_output(
     }
 }
 
-/// Find `.bt` test files from a path (file or directory).
+/// Find `.btscript` test files from a path (file or directory).
 fn find_test_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    // If path is a single .bt file, return it directly
-    if path.extension() == Some("bt") && path.is_file() {
+    // If path is a single .btscript file, return it directly
+    if path.extension() == Some("btscript") && path.is_file() {
         return Ok(vec![path.to_owned()]);
     }
 
@@ -975,7 +975,7 @@ fn find_test_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
         let path = Utf8PathBuf::from_path_buf(entry.path())
             .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", path))?;
 
-        if path.extension() == Some("bt") {
+        if path.extension() == Some("btscript") {
             files.push(path);
         }
     }
