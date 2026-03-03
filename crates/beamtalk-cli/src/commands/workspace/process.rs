@@ -123,11 +123,11 @@ pub fn is_node_running(info: &NodeInfo, workspace_id: Option<&str>) -> bool {
             // Fast path: read port file directly from the known workspace directory.
             // Verify the port matches before using the nonce — if the port file
             // belongs to a different startup, comparing nonces is meaningless.
-            read_port_file(id).ok().flatten().and_then(
-                |(port, nonce)| {
-                    if port == info.port { nonce } else { None }
-                },
-            )
+            match read_port_file(id).ok().flatten() {
+                Some((port, _)) if port != info.port => return false, // stale node.info
+                Some((_, nonce)) => nonce,
+                None => None,
+            }
         } else {
             // Fallback: scan all workspace directories (O(N))
             read_port_file_nonce(info.port)
