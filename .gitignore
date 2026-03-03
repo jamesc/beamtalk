@@ -109,6 +109,7 @@ _rel/
 # Lint stamp files (track fingerprints for pre-push hook)
 .lint-erlang-stamp
 .lint-js-stamp
+.lint-beamtalk-stamp
 
 # Session and temporary files
 *.tmp
