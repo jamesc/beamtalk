@@ -10,8 +10,7 @@
 
 TestCase subclass: AccountTest
 
-  testInitialBalanceIsZero =>
-    self assert: Account spawn balance equals: 0
+  testInitialBalanceIsZero => self assert: Account spawn balance equals: 0
 
   testDeposit =>
     acct := Account spawn
@@ -63,8 +62,7 @@ TestCase subclass: AccountTest
     acct setOwner: "Alice"
     self assert: acct getOwner equals: "Alice"
 
-  testDefaultOwnerIsEmpty =>
-    self assert: Account spawn getOwner equals: ""
+  testDefaultOwnerIsEmpty => self assert: Account spawn getOwner equals: ""
 
   testBalanceUnaffectedByOwnerChange =>
     acct := Account spawn
