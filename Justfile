@@ -161,7 +161,10 @@ test-examples: build-stdlib
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js
+lint: lint-rust lint-erlang lint-js lint-beamtalk
+
+# Lint Beamtalk: formatting check
+lint-beamtalk: fmt-check-beamtalk
 
 # Lint Rust: clippy + formatting check
 lint-rust: clippy fmt-check-rust
@@ -188,15 +191,15 @@ fmt-check-rust:
     cargo fmt --all -- --check
 
 # Check all code formatting
-fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js
+fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js fmt-check-beamtalk
 
 # Format all Rust code
 fmt-rust:
     @echo "✨ Formatting Rust code..."
     cargo fmt --all
 
-# Format all code (Rust + Erlang + JS)
-fmt: fmt-rust fmt-erlang fmt-js
+# Format all code (Rust + Erlang + JS + Beamtalk stdlib/test sources)
+fmt: fmt-rust fmt-erlang fmt-js fmt-beamtalk
 
 # Check JS/TS formatting (Biome)
 [working-directory: 'editors/vscode']
