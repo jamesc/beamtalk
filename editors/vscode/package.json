@@ -47,7 +47,7 @@
     "commands": [
       {
         "command": "beamtalk.startRepl",
-        "title": "Beamtalk: Start REPL",
+        "title": "Beamtalk: Start Session",
         "icon": "$(terminal-bash)"
       },
       {

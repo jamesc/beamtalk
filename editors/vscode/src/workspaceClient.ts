@@ -418,6 +418,12 @@ export class WorkspaceClient {
         event: "loaded",
         data: { class: String(data.class ?? "") },
       });
+    } else if (channel === "bindings" && event === "changed" && data) {
+      this._emitPush({
+        channel: "bindings",
+        event: "changed",
+        data: { session: String(data.session ?? "") },
+      });
     }
   }
 
