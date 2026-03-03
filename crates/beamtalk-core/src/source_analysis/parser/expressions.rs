@@ -228,7 +228,8 @@ impl Parser {
             return receiver;
         }
         if self.current_token().has_leading_newline()
-            && !matches!(receiver, Expression::Parenthesized { .. })
+            && (!matches!(&receiver, Expression::Parenthesized { .. })
+                || self.is_at_method_definition())
         {
             return receiver;
         }
