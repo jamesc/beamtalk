@@ -4,14 +4,13 @@
 /// Exception — Base class for all exceptions.
 ///
 /// Wraps `#beamtalk_error{}` records as first-class Beamtalk objects.
-/// Exception objects are value types (tagged maps), not actors.
 ///
 /// ## Examples
 /// ```beamtalk
 /// [1 / 0] on: Exception do: [:e | e message]
 /// Exception signal: "something went wrong"
 /// ```
-Value subclass: Exception
+Object subclass: Exception
 
   /// Return the error message string.
   ///

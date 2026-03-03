@@ -29,7 +29,7 @@
 /// rng := Random seed: 42
 /// rng next                     // => deterministic value
 /// ```
-sealed Value subclass: Random
+sealed Object subclass: Random
 
   /// Use 'Random seed: integer' for a seeded instance, or 'Random new' for a random seed.
   class new: _ =>
@@ -81,9 +81,9 @@ sealed Value subclass: Random
 
   /// Return a random float from the instance state.
   ///
-  /// Note: Random instances are immutable value types. Calling `next`
+  /// Note: the instance holds an explicit seed snapshot. Calling `next`
   /// repeatedly on the same instance returns the same value.
-  /// For sequences, use class-side `Random next` (process dictionary).
+  /// For advancing sequences, use class-side `Random next` (process dictionary).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -94,9 +94,9 @@ sealed Value subclass: Random
 
   /// Return a random integer between 1 and max from the instance state.
   ///
-  /// Note: Random instances are immutable value types. Calling `nextInteger:`
+  /// Note: the instance holds an explicit seed snapshot. Calling `nextInteger:`
   /// repeatedly on the same instance returns the same value.
-  /// For sequences, use class-side `Random nextInteger:` (process dictionary).
+  /// For advancing sequences, use class-side `Random nextInteger:` (process dictionary).
   ///
   /// ## Examples
   /// ```beamtalk

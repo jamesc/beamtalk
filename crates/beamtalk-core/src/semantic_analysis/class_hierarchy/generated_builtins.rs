@@ -369,11 +369,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Collection".into(),
         ClassInfo {
             name: "Collection".into(),
-            superclass: Some("Value".into()),
+            superclass: Some("Object".into()),
             is_sealed: false,
             is_abstract: true,
             is_typed: true,
-            is_value: true,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -561,11 +561,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Exception".into(),
         ClassInfo {
             name: "Exception".into(),
-            superclass: Some("Value".into()),
+            superclass: Some("Object".into()),
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
-            is_value: true,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -653,11 +653,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "FileHandle".into(),
         ClassInfo {
             name: "FileHandle".into(),
-            superclass: Some("Value".into()),
+            superclass: Some("Object".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
-            is_value: true,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
@@ -1092,11 +1092,11 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "Random".into(),
         ClassInfo {
             name: "Random".into(),
-            superclass: Some("Value".into()),
+            superclass: Some("Object".into()),
             is_sealed: true,
             is_abstract: false,
             is_typed: false,
-            is_value: true,
+            is_value: false,
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
