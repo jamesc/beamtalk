@@ -10,7 +10,18 @@ plus a VS Code extension for the integrated development experience.
   - Windows: download from [erlang.org/downloads](https://www.erlang.org/downloads).
 - **VS Code 1.85+** — required for the extension (optional for CLI-only use).
 
-## Install from release archive
+## Quick install (Linux and macOS)
+
+The easiest way to install Beamtalk is with the install script:
+
+```
+curl -fsSL https://beamtalk.dev/install.sh | sh
+```
+
+This downloads the latest release for your platform, extracts it to
+`~/.beamtalk`, and adds `~/.beamtalk/bin` to your shell's PATH.
+
+## Manual install from release archive
 
 Download the latest release for your platform from the
 [GitHub Releases](https://github.com/jamesc/beamtalk/releases) page.
