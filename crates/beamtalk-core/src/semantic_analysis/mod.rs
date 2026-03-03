@@ -293,6 +293,8 @@ fn analyse_full(
     );
     // BT-955: Warn on literal boolean conditions (always true / always false)
     validators::check_literal_boolean_condition(module, &mut result.diagnostics);
+    // BT-1052: Error on -> Nil return type on Value instance methods
+    validators::check_value_nil_return(module, &result.class_hierarchy, &mut result.diagnostics);
 
     // BT-951/BT-979: Lint on effect-free statements (suppressed during normal compile).
     // Module-level expressions are checked by default; set skip_module_expression_lint

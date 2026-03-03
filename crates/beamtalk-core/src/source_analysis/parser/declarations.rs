@@ -290,7 +290,7 @@ impl Parser {
     /// Used to detect `class` as a method name (not a modifier) at three sites:
     /// `is_class_method` in `parse_class_body`, `is_at_method_definition`, and
     /// `parse_method_definition`.
-    fn is_fat_arrow_or_return_type(&self, offset: usize) -> bool {
+    pub(super) fn is_fat_arrow_or_return_type(&self, offset: usize) -> bool {
         matches!(self.peek_at(offset), Some(TokenKind::FatArrow))
             || self.is_return_type_then_fat_arrow(offset)
     }
