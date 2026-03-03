@@ -1215,20 +1215,30 @@ pub(crate) fn check_value_nil_return(
 }
 
 /// Returns `true` if the method body contains a `self subclassResponsibility`
-/// call, marking it as an abstract placeholder that should be exempt from
-/// the value `-> Nil` lint.
+/// call anywhere (including inside `^ self subclassResponsibility`, cascades,
+/// or other wrapped forms), marking it as an abstract placeholder that should
+/// be exempt from the value `-> Nil` lint.
 fn is_subclass_responsibility(method: &MethodDefinition) -> bool {
-    method.body.iter().any(|stmt| {
-        matches!(
-            &stmt.expression,
-            Expression::MessageSend {
-                receiver,
-                selector: MessageSelector::Unary(sel),
-                ..
-            } if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
-                && sel.as_str() == "subclassResponsibility"
-        )
-    })
+    let mut found = false;
+    for stmt in &method.body {
+        walk_expression(&stmt.expression, &mut |e| {
+            if found {
+                return;
+            }
+            if matches!(
+                e,
+                Expression::MessageSend {
+                    receiver,
+                    selector: MessageSelector::Unary(sel),
+                    ..
+                } if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+                    && sel.as_str() == "subclassResponsibility"
+            ) {
+                found = true;
+            }
+        });
+    }
+    found
 }
 
 /// Check a single method for `-> Nil` on a value type and push an error diagnostic.
@@ -2450,6 +2460,46 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected no error for subclassResponsibility placeholder, got: {diagnostics:?}"
+        );
+    }
+
+    /// `^ self subclassResponsibility` (early-return form) is also exempt.
+    #[test]
+    fn value_subclass_responsibility_early_return_is_exempt() {
+        let src = "Value subclass: MyVal\n  doSomething -> Nil => ^ self subclassResponsibility";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_nil_return(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error for ^ self subclassResponsibility, got: {diagnostics:?}"
+        );
+    }
+
+    /// Standalone (Tonel-style) Value method with `-> Nil` is also an error.
+    #[test]
+    fn standalone_value_method_nil_return_is_error() {
+        let src = "Value subclass: MyVal\n  doSomething => nil\nMyVal >> doVoid -> Nil => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_nil_return(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for standalone -> Nil on value type, got: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics[0].message.contains("doVoid"),
+            "Expected selector in message, got: {:?}",
+            diagnostics[0].message
         );
     }
 }
