@@ -15,6 +15,8 @@
     get_bindings/1,
     set_bindings/2,
     clear_bindings/1,
+    get_injected_ws_keys/1,
+    set_injected_ws_keys/2,
     get_eval_counter/1,
     increment_eval_counter/1,
     get_loaded_modules/1,
@@ -36,6 +38,9 @@
     listen_socket :: gen_tcp:socket() | undefined,
     port :: inet:port_number(),
     bindings :: map(),
+    %% Keys last injected from workspace (singletons + bind:as: names).
+    %% Used by get_bindings to compute a fresh view after bind:as:/unbind: changes.
+    injected_ws_keys :: [atom()],
     eval_counter :: non_neg_integer(),
     loaded_modules :: [atom()],
     actor_registry :: pid() | undefined,
@@ -58,6 +63,7 @@ new(ListenSocket, Port, _Options) ->
         listen_socket = ListenSocket,
         port = Port,
         bindings = #{},
+        injected_ws_keys = [],
         eval_counter = 0,
         loaded_modules = [],
         actor_registry = undefined,
@@ -75,10 +81,20 @@ get_bindings(#state{bindings = Bindings}) ->
 set_bindings(Bindings, State) ->
     State#state{bindings = Bindings}.
 
-%% @doc Clear all variable bindings.
+%% @doc Clear all variable bindings and reset workspace injection state.
 -spec clear_bindings(state()) -> state().
 clear_bindings(State) ->
-    State#state{bindings = #{}}.
+    State#state{bindings = #{}, injected_ws_keys = []}.
+
+%% @doc Get the set of binding keys last injected from workspace.
+-spec get_injected_ws_keys(state()) -> [atom()].
+get_injected_ws_keys(#state{injected_ws_keys = Keys}) ->
+    Keys.
+
+%% @doc Set the set of binding keys injected from workspace.
+-spec set_injected_ws_keys([atom()], state()) -> state().
+set_injected_ws_keys(Keys, State) ->
+    State#state{injected_ws_keys = Keys}.
 
 %% @doc Get current eval counter.
 -spec get_eval_counter(state()) -> non_neg_integer().

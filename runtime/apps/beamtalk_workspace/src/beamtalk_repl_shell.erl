@@ -124,6 +124,7 @@ init(SessionId) ->
     %% as session bindings so they resolve from the bindings map.
     Bindings0 = inject_workspace_bindings(#{}),
     State0b = beamtalk_repl_state:set_bindings(Bindings0, State0),
+    State0c = beamtalk_repl_state:set_injected_ws_keys(maps:keys(Bindings0), State0b),
 
     %% Get workspace-wide actor registry
     %% The registry is registered globally in the workspace
@@ -135,7 +136,7 @@ init(SessionId) ->
             Pid ->
                 Pid
         end,
-    State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0b),
+    State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0c),
 
     {ok, {SessionId, State1, undefined}}.
 
@@ -178,7 +179,9 @@ handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
     %% so that singletons and bind:as: names remain available.
     Bindings = inject_workspace_bindings(#{}),
     NewState = beamtalk_repl_state:set_bindings(Bindings, State),
-    {reply, ok, {SessionId, NewState, Worker}};
+    NewState1 = beamtalk_repl_state:set_injected_ws_keys(maps:keys(Bindings), NewState),
+    beamtalk_bindings_events:on_bindings_changed(SessionId),
+    {reply, ok, {SessionId, NewState1, Worker}};
 handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
     case beamtalk_repl_eval:handle_load(Path, State) of
         {ok, LoadedModules, NewState} ->
@@ -268,8 +271,11 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, _State, {WorkerPid, Mo
     case Result of
         {ok, Value, Output, Warnings, NewState} ->
             reply_eval(From, {eval_done, Value, Output, Warnings}),
+            %% Refresh session workspace bindings to reflect any bind:as:/unbind: changes
+            %% made during this eval. Keeps session-local vars, replaces ws-injected keys.
+            FinalState = refresh_ws_bindings(NewState),
             beamtalk_bindings_events:on_bindings_changed(SessionId),
-            {noreply, {SessionId, NewState, undefined}};
+            {noreply, {SessionId, FinalState, undefined}};
         {error, Reason, Output, Warnings, NewState} ->
             reply_eval(From, {eval_error, Reason, Output, Warnings}),
             {noreply, {SessionId, NewState, undefined}}
@@ -315,6 +321,20 @@ code_change(_OldVsn, State, _Extra) ->
 %% Beamtalk, Workspace) plus any user-registered bind:as: names.
 inject_workspace_bindings(Bindings) ->
     maps:merge(Bindings, beamtalk_workspace_interface:get_session_bindings()).
+
+%% @private Refresh workspace bindings in session state after an eval.
+%% Removes stale workspace-injected keys and overlays fresh ETS bindings,
+%% so that bind:as:/unbind: changes are reflected immediately in the next eval
+%% and in get_bindings queries.
+-spec refresh_ws_bindings(beamtalk_repl_state:state()) -> beamtalk_repl_state:state().
+refresh_ws_bindings(State) ->
+    InjectedWsKeys = beamtalk_repl_state:get_injected_ws_keys(State),
+    FreshWs = beamtalk_workspace_interface:get_session_bindings(),
+    CurrentBindings = beamtalk_repl_state:get_bindings(State),
+    WithoutStaleWs = maps:without(InjectedWsKeys, CurrentBindings),
+    FreshBindings = maps:merge(FreshWs, WithoutStaleWs),
+    State1 = beamtalk_repl_state:set_bindings(FreshBindings, State),
+    beamtalk_repl_state:set_injected_ws_keys(maps:keys(FreshWs), State1).
 
 %% @private BT-696: Dispatch eval result to sync caller or async subscriber.
 reply_eval({async, Subscriber}, Msg) ->

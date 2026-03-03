@@ -379,7 +379,20 @@ tcp_integration_test_() ->
             {"HTML serves workspace page with static JS", fun() ->
                 http_index_has_websocket_js_test(Port)
             end},
-            {"GET /ws without upgrade returns error", fun() -> http_ws_no_upgrade_test(Port) end}
+            {"GET /ws without upgrade returns error", fun() -> http_ws_no_upgrade_test(Port) end},
+            %% bind:as: / unbind: session refresh
+            {"bind:as: appears in bindings immediately", fun() ->
+                tcp_bind_as_updates_bindings_test(Port)
+            end},
+            {"unbind: removes from bindings immediately", fun() ->
+                tcp_unbind_removes_from_bindings_test(Port)
+            end},
+            {"bind:as: value available in next eval", fun() ->
+                tcp_bind_as_available_in_next_eval_test(Port)
+            end},
+            {"unbind: makes binding unavailable in next eval", fun() ->
+                tcp_unbind_unavailable_in_next_eval_test(Port)
+            end}
         ]
     end}.
 
@@ -556,6 +569,15 @@ ws_recv_with_buf(Sock, Buf) ->
         % skip other frames
         _ ->
             ws_recv_with_buf(Sock, Rest3)
+    end.
+
+%% Receive a text frame, skipping any server-initiated push events.
+%% Use when you want the response to a specific request and push events may interleave.
+ws_recv_response(Sock) ->
+    {ok, Data} = ws_recv(Sock),
+    case jsx:decode(Data, [return_maps]) of
+        #{<<"type">> := <<"push">>} -> ws_recv_response(Sock);
+        Msg -> {ok, jsx:encode(Msg)}
     end.
 
 %% Read exactly N bytes: first from Buf, then from socket if needed.
@@ -860,15 +882,134 @@ tcp_multi_request_same_conn_test(Port) ->
     %% Send first request
     Msg1 = jsx:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mr1">>}),
     ws_send(Ws, Msg1),
-    {ok, Data1} = ws_recv(Ws),
+    {ok, Data1} = ws_recv_response(Ws),
     Resp1 = jsx:decode(Data1, [return_maps]),
     ?assertMatch(#{<<"id">> := <<"mr1">>}, Resp1),
     %% Send second request on same connection
     Msg2 = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"mr2">>}),
     ws_send(Ws, Msg2),
-    {ok, Data2} = ws_recv(Ws),
+    {ok, Data2} = ws_recv_response(Ws),
     Resp2 = jsx:decode(Data2, [return_maps]),
     ?assertMatch(#{<<"id">> := <<"mr2">>}, Resp2),
+    ws_close(Ws).
+
+%%% bind:as: / unbind: session refresh tests
+
+%% Test: Workspace bind:as: during eval makes binding appear in bindings query immediately.
+%% Regression test: before the fix, the binding only appeared after reconnect.
+tcp_bind_as_updates_bindings_test(Port) ->
+    {Ws, _Welcome} = ws_connect(Port),
+    EvalMsg = jsx:encode(#{
+        <<"op">> => <<"eval">>,
+        <<"id">> => <<"bau1">>,
+        <<"code">> => <<"Workspace bind: 42 as: #btBindUpdate">>
+    }),
+    ws_send(Ws, EvalMsg),
+    {ok, _} = ws_recv_response(Ws),
+    %% bindings op on the same connection — btBindUpdate must appear without reconnect
+    BindMsg = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"bau2">>}),
+    ws_send(Ws, BindMsg),
+    {ok, BindData} = ws_recv_response(Ws),
+    BindResp = jsx:decode(BindData, [return_maps]),
+    Bindings = maps:get(<<"bindings">>, BindResp, #{}),
+    ?assert(maps:is_key(<<"btBindUpdate">>, Bindings)),
+    %% Cleanup
+    CleanMsg = jsx:encode(#{
+        <<"op">> => <<"eval">>,
+        <<"id">> => <<"bau3">>,
+        <<"code">> => <<"Workspace unbind: #btBindUpdate">>
+    }),
+    ws_send(Ws, CleanMsg),
+    {ok, _} = ws_recv_response(Ws),
+    ws_close(Ws).
+
+%% Test: Workspace unbind: during eval removes binding from bindings query immediately.
+%% Regression test: before the fix, the binding persisted in :bindings until reconnect.
+tcp_unbind_removes_from_bindings_test(Port) ->
+    {Ws, _Welcome} = ws_connect(Port),
+    BindMsg = jsx:encode(#{
+        <<"op">> => <<"eval">>,
+        <<"id">> => <<"urb1">>,
+        <<"code">> => <<"Workspace bind: 99 as: #btUnbindRemove">>
+    }),
+    ws_send(Ws, BindMsg),
+    {ok, _} = ws_recv_response(Ws),
+    UnbindMsg = jsx:encode(#{
+        <<"op">> => <<"eval">>,
+        <<"id">> => <<"urb2">>,
+        <<"code">> => <<"Workspace unbind: #btUnbindRemove">>
+    }),
+    ws_send(Ws, UnbindMsg),
+    {ok, _} = ws_recv_response(Ws),
+    %% bindings op — btUnbindRemove must be gone without reconnect
+    QueryMsg = jsx:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"urb3">>}),
+    ws_send(Ws, QueryMsg),
+    {ok, QueryData} = ws_recv_response(Ws),
+    QueryResp = jsx:decode(QueryData, [return_maps]),
+    Bindings = maps:get(<<"bindings">>, QueryResp, #{}),
+    ?assertNot(maps:is_key(<<"btUnbindRemove">>, Bindings)),
+    ws_close(Ws).
+
+%% Test: value registered via bind:as: is usable in the next eval on the same session.
+tcp_bind_as_available_in_next_eval_test(Port) ->
+    {Ws, _Welcome} = ws_connect(Port),
+    BindMsg = jsx:encode(#{
+        <<"op">> => <<"eval">>,
+        <<"id">> => <<"bae1">>,
+        <<"code">> => <<"Workspace bind: 42 as: #btBindNextEval">>
+    }),
+    ws_send(Ws, BindMsg),
+    {ok, _} = ws_recv_response(Ws),
+    %% Next eval references the bound name — must succeed (not DNU)
+    EvalMsg = jsx:encode(#{
+        <<"op">> => <<"eval">>,
+        <<"id">> => <<"bae2">>,
+        <<"code">> => <<"btBindNextEval">>
+    }),
+    ws_send(Ws, EvalMsg),
+    {ok, EvalData} = ws_recv_response(Ws),
+    EvalResp = jsx:decode(EvalData, [return_maps]),
+    ?assert(maps:is_key(<<"value">>, EvalResp)),
+    ?assertNot(maps:is_key(<<"error">>, EvalResp)),
+    %% Cleanup
+    CleanMsg = jsx:encode(#{
+        <<"op">> => <<"eval">>,
+        <<"id">> => <<"bae3">>,
+        <<"code">> => <<"Workspace unbind: #btBindNextEval">>
+    }),
+    ws_send(Ws, CleanMsg),
+    {ok, _} = ws_recv_response(Ws),
+    ws_close(Ws).
+
+%% Test: after unbind:, the binding is no longer available in subsequent evals.
+%% Regression test: before the fix, unbind: only removed from ETS but the session
+%% in-memory state still had the old value, so the binding kept working.
+tcp_unbind_unavailable_in_next_eval_test(Port) ->
+    {Ws, _Welcome} = ws_connect(Port),
+    BindMsg = jsx:encode(#{
+        <<"op">> => <<"eval">>,
+        <<"id">> => <<"une1">>,
+        <<"code">> => <<"Workspace bind: 99 as: #btUnbindNextEval">>
+    }),
+    ws_send(Ws, BindMsg),
+    {ok, _} = ws_recv_response(Ws),
+    UnbindMsg = jsx:encode(#{
+        <<"op">> => <<"eval">>,
+        <<"id">> => <<"une2">>,
+        <<"code">> => <<"Workspace unbind: #btUnbindNextEval">>
+    }),
+    ws_send(Ws, UnbindMsg),
+    {ok, _} = ws_recv_response(Ws),
+    %% Next eval referencing the now-unbound name must fail
+    EvalMsg = jsx:encode(#{
+        <<"op">> => <<"eval">>,
+        <<"id">> => <<"une3">>,
+        <<"code">> => <<"btUnbindNextEval">>
+    }),
+    ws_send(Ws, EvalMsg),
+    {ok, EvalData} = ws_recv_response(Ws),
+    EvalResp = jsx:decode(EvalData, [return_maps]),
+    ?assert(maps:is_key(<<"error">>, EvalResp)),
     ws_close(Ws).
 
 %%% BT-523: Connection error handling tests
