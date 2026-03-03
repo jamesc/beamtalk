@@ -175,7 +175,9 @@ register_module(Module, SourcePath) when is_atom(Module) ->
                     _ -> undefined
                 end;
             S when is_list(S) ->
-                S
+                S;
+            _ ->
+                undefined
         end,
     try
         gen_server:cast(?MODULE, {register_module, Module, NormalizedPath})
@@ -404,7 +406,12 @@ load_metadata_from_disk(State) ->
 
                     %% Restore loaded_modules with source paths (atoms persist across restarts).
                     %% Handles both old format ([binary()]) and new format ([#{name,source}]).
-                    Modules = maps:get(<<"loaded_modules">>, Map, []),
+                    ModulesRaw = maps:get(<<"loaded_modules">>, Map, []),
+                    Modules =
+                        case ModulesRaw of
+                            ModList when is_list(ModList) -> ModList;
+                            _ -> []
+                        end,
                     ModuleAtoms = lists:filtermap(
                         fun
                             (Bin) when is_binary(Bin) ->
