@@ -41,7 +41,6 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "File"
             | "FileHandle"
             | "Float"
-            | "Future"
             | "InstantiationError"
             | "Integer"
             | "JSON"
@@ -725,30 +724,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "e".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
                 MethodInfo { selector: "infinity".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
             ],
-            class_variables: vec![],
-        },
-    );
-
-    classes.insert(
-        "Future".into(),
-        ClassInfo {
-            name: "Future".into(),
-            superclass: Some("Object".into()),
-            is_sealed: true,
-            is_abstract: false,
-            is_typed: false,
-            is_value: false,
-            state: vec![],
-            state_types: HashMap::new(),
-            methods: vec![
-                MethodInfo { selector: "await".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: None, param_types: vec![] },
-                MethodInfo { selector: "await:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: None, param_types: vec![Some("Integer".into())] },
-                MethodInfo { selector: "awaitForever".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: None, param_types: vec![] },
-                MethodInfo { selector: "whenResolved:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: Some("Symbol".into()), param_types: vec![Some("Block".into())] },
-                MethodInfo { selector: "whenRejected:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: Some("Symbol".into()), param_types: vec![Some("Block".into())] },
-                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
-            ],
-            class_methods: vec![],
             class_variables: vec![],
         },
     );

@@ -26,6 +26,9 @@ use crate::commands::protocol::ProtocolClient;
 /// TCP connect timeout for exit probe in milliseconds.
 const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
 
+/// How long to wait for port release after a forced kill, in seconds.
+const FORCE_KILL_WAIT_TIMEOUT_SECS: u64 = 5;
+
 /// Send a WebSocket shutdown message to a workspace (BT-611, ADR 0020).
 ///
 /// Connects to the workspace's WebSocket endpoint, authenticates with the
@@ -157,6 +160,22 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
     }
 }
 
+/// Force-kill a process and wait for it to release its port.
+///
+/// Combines `force_kill_process` and `wait_for_workspace_exit` into a single
+/// operation used in multiple shutdown fallback paths.
+fn force_kill_and_wait(pid: u32, host: &str, port: u16, timeout_secs: u64) -> Result<()> {
+    force_kill_process(pid)?;
+    wait_for_workspace_exit(host, port, timeout_secs).map_err(|_| {
+        miette!(
+            "Workspace did not release port {} within {}s after forced stop. \
+             It may still be shutting down; retry shortly.",
+            port,
+            timeout_secs
+        )
+    })
+}
+
 /// Stop a workspace by name or ID.
 ///
 /// If `name_or_id` is `None`, attempts to find the workspace for the current directory.
@@ -204,15 +223,8 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
                          Use graceful shutdown instead (omit --force)."
                     ));
                 }
-                force_kill_process(info.pid)?;
                 // Ensure the node has actually released its port before returning.
-                wait_for_workspace_exit(host, info.port, 5).map_err(|_| {
-                    miette!(
-                        "Workspace did not release port {} within 5s after forced stop. \
-                         It may still be shutting down; retry shortly.",
-                        info.port
-                    )
-                })?;
+                force_kill_and_wait(info.pid, host, info.port, FORCE_KILL_WAIT_TIMEOUT_SECS)?;
             } else {
                 eprintln!(
                     "Stopping workspace '{workspace_id}' (port {})...",
@@ -237,14 +249,12 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
                                 ));
                             }
                             eprintln!("Graceful shutdown timed out, force-killing...");
-                            force_kill_process(info.pid)?;
-                            wait_for_workspace_exit(host, info.port, 5).map_err(|_| {
-                                miette!(
-                                    "Workspace did not release port {} within 5s after forced stop. \
-                                     It may still be shutting down; retry shortly.",
-                                    info.port
-                                )
-                            })?;
+                            force_kill_and_wait(
+                                info.pid,
+                                host,
+                                info.port,
+                                FORCE_KILL_WAIT_TIMEOUT_SECS,
+                            )?;
                         }
                     }
                     Err(e) => {
@@ -258,14 +268,12 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
                             ));
                         }
                         eprintln!("TCP shutdown failed ({e}), force-killing...");
-                        force_kill_process(info.pid)?;
-                        wait_for_workspace_exit(host, info.port, 5).map_err(|_| {
-                            miette!(
-                                "Workspace did not release port {} within 5s after forced stop. \
-                                 It may still be shutting down; retry shortly.",
-                                info.port
-                            )
-                        })?;
+                        force_kill_and_wait(
+                            info.pid,
+                            host,
+                            info.port,
+                            FORCE_KILL_WAIT_TIMEOUT_SECS,
+                        )?;
                     }
                 }
             }
