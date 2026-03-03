@@ -269,6 +269,13 @@ pub struct CodegenOptions {
     /// This survives workspace restarts and is the definitive source of truth
     /// for `Behaviour >> sourceFile`. Absent for stdlib and `ClassBuilder` classes.
     source_path: Option<String>,
+    /// Whether this module is being compiled in stdlib mode (BT-791).
+    ///
+    /// When true, the generated `register_class/0` emits `stdlibMode => true` in
+    /// the builder state map, which tells `beamtalk_class_builder:register/1` to
+    /// bypass the sealed-superclass check. This allows stdlib classes like Character
+    /// (which extends sealed Integer) to load correctly via their `on_load` hooks.
+    stdlib_mode: bool,
 }
 
 impl CodegenOptions {
@@ -282,6 +289,7 @@ impl CodegenOptions {
             class_module_index: std::collections::HashMap::new(),
             class_superclass_index: std::collections::HashMap::new(),
             source_path: None,
+            stdlib_mode: false,
         }
     }
 
@@ -353,6 +361,14 @@ impl CodegenOptions {
     #[must_use]
     pub fn with_source_path_opt(mut self, path: Option<&str>) -> Self {
         self.source_path = path.map(String::from);
+        self
+    }
+
+    /// Enables stdlib mode (BT-791): generated `register_class/0` emits `stdlibMode => true`
+    /// so the runtime bypasses the sealed-superclass check for stdlib loading.
+    #[must_use]
+    pub fn with_stdlib_mode(mut self, enabled: bool) -> Self {
+        self.stdlib_mode = enabled;
         self
     }
 }
@@ -432,6 +448,7 @@ pub fn generate_module_with_warnings(
     };
     generator.source_text = options.source_text;
     generator.workspace_mode = options.workspace_mode;
+    generator.stdlib_mode = options.stdlib_mode;
     generator.class_module_index = options.class_module_index;
     generator.source_path = options.source_path;
 
@@ -751,6 +768,10 @@ pub(super) struct CoreErlangGenerator {
     /// session bindings or class registry. When false (batch compile),
     /// class references go directly to the class registry.
     workspace_mode: bool,
+    /// BT-791: Whether this module is being compiled in stdlib mode.
+    /// When true, `generate_register_class` emits `stdlibMode => true` in the builder
+    /// state so the runtime can bypass the sealed-superclass check for stdlib loading.
+    stdlib_mode: bool,
     /// BT-426: Whether we're currently generating a class-side method body.
     /// When true, field access/assignment should produce a compile error.
     in_class_method: bool,
@@ -837,6 +858,7 @@ impl CoreErlangGenerator {
             current_method_params: Vec::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             workspace_mode: false,
+            stdlib_mode: false,
             in_class_method: false,
             class_var_names: std::collections::HashSet::new(),
             class_method_selectors: std::collections::HashSet::new(),
@@ -871,6 +893,7 @@ impl CoreErlangGenerator {
             current_method_params: Vec::new(),
             sealed_method_selectors: std::collections::HashSet::new(),
             workspace_mode: false,
+            stdlib_mode: false,
             in_class_method: false,
             class_var_names: std::collections::HashSet::new(),
             class_method_selectors: std::collections::HashSet::new(),

@@ -1454,6 +1454,14 @@ impl CoreErlangGenerator {
                         } else {
                             Document::Nil
                         },
+                        // BT-791: Emit stdlibMode flag for stdlib compilations so the
+                        // runtime can bypass the sealed-superclass check in register/1.
+                        // Character (extends sealed Integer) needs this to load correctly.
+                        if self.stdlib_mode {
+                            docvec![",", line(), "'stdlibMode' => 'true'"]
+                        } else {
+                            Document::Nil
+                        },
                     ]
                 ),
                 line(),
