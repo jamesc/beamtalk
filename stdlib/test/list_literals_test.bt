@@ -36,8 +36,6 @@ TestCase subclass: ListLiteralsTest
     self assert: (List new: #(1, 2, 3)) equals: #(1, 2, 3)
     self assert: (List new: #()) equals: #()
 
-  testSetNewFromList =>
-    self assert: (Set new: #(1, 2, 2, 3)) size equals: 3
+  testSetNewFromList => self assert: (Set new: #(1, 2, 2, 3)) size equals: 3
 
-  testTupleNewFromList =>
-    self assert: (Tuple new: #(1, 2, 3)) size equals: 3
+  testTupleNewFromList => self assert: (Tuple new: #(1, 2, 3)) size equals: 3
