@@ -900,65 +900,6 @@ fn is_process_alive(pid: u32) -> bool {
     }
 }
 
-/// Wait for a node name to be deregistered from `epmd`.
-///
-/// After force-killing a BEAM node, `epmd` may still hold the registration
-/// briefly. This polls `epmd -names` until the node name disappears or
-/// timeout is reached. Returns `Ok(())` once deregistered, or `Err` on timeout.
-#[cfg(all(unix, test))]
-pub(super) fn wait_for_epmd_deregistration(node_name: &str, timeout_secs: u64) -> Result<()> {
-    // Extract the short name (before '@') for epmd lookup
-    let short_name = node_name.split('@').next().unwrap_or(node_name);
-
-    let interval = Duration::from_millis(100);
-    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
-
-    while std::time::Instant::now() < deadline {
-        let output = Command::new("epmd")
-            .args(["-names"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output();
-
-        match output {
-            Ok(out) => {
-                // If epmd exits with a non-success status, keep polling
-                // rather than treating empty stdout as "deregistered".
-                if !out.status.success() {
-                    std::thread::sleep(interval);
-                    continue;
-                }
-
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                // Match exact node name in epmd output format:
-                //   "name <node_short_name> at port <N>"
-                // Using token-level matching to avoid false positives
-                // (e.g. "foo" matching "foobar").
-                let still_registered = stdout.lines().any(|line| {
-                    let mut parts = line.split_whitespace();
-                    matches!(parts.next(), Some("name"))
-                        && matches!(parts.next(), Some(name) if name == short_name)
-                });
-
-                if !still_registered {
-                    return Ok(());
-                }
-            }
-            Err(_) => {
-                // epmd not available — nothing to wait for
-                return Ok(());
-            }
-        }
-        std::thread::sleep(interval);
-    }
-
-    Err(miette!(
-        "Node '{}' still registered in epmd after {}s",
-        short_name,
-        timeout_secs
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

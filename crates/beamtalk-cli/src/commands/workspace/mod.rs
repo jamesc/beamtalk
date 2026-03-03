@@ -52,6 +52,8 @@
 pub mod cli;
 /// Project root discovery and workspace auto-detection.
 pub mod discovery;
+/// epmd client: TCP NAMES_REQ protocol, deregistration polling, conflict detection.
+mod epmd;
 /// Workspace lifecycle operations: create, start, stop, list, status.
 mod lifecycle;
 /// Process management for workspace BEAM nodes.
@@ -82,9 +84,8 @@ pub fn workspace_id_for_project(
 
 #[cfg(test)]
 mod tests {
+    use super::epmd::wait_for_epmd_deregistration;
     use super::lifecycle::{WorkspaceStatus, find_workspace_by_project_path, resolve_workspace_id};
-    #[cfg(unix)]
-    use super::process::wait_for_epmd_deregistration;
     use super::process::{force_kill_process, start_detached_node, wait_for_workspace_exit};
     #[cfg(target_os = "linux")]
     use super::storage::read_proc_start_time;
@@ -924,7 +925,6 @@ mod tests {
                 }
             }
             // Wait for epmd deregistration so the next test can reuse node names.
-            #[cfg(unix)]
             if let Err(e) = wait_for_epmd_deregistration(&self.info.node_name, 5) {
                 if std::thread::panicking() {
                     eprintln!(
@@ -967,7 +967,6 @@ mod tests {
         });
         // Wait for epmd deregistration so a subsequent node with the same name
         // doesn't get rejected by epmd.
-        #[cfg(unix)]
         wait_for_epmd_deregistration(&info.node_name, 5).unwrap_or_else(|e| {
             panic!(
                 "epmd did not deregister '{}' after kill: {e}",
@@ -1128,7 +1127,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_get_or_start_workspace_lifecycle_integration() {
