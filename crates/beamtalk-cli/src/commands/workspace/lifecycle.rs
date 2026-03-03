@@ -8,7 +8,7 @@
 use std::fs;
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use beamtalk_cli::repl_startup::BeamPaths;
 
@@ -16,6 +16,10 @@ use miette::{IntoDiagnostic, Result, miette};
 use serde::Serialize;
 
 use super::discovery;
+use super::epmd::{
+    EPMD_CONFLICT_DEREGISTER_TIMEOUT_SECS, EPMD_CONFLICT_MAX_RETRIES,
+    EPMD_CONFLICT_RETRY_INTERVAL_MS, is_epmd_name_conflict, wait_for_epmd_deregistration,
+};
 use super::process::{
     force_kill_process, is_node_running, start_detached_node, tcp_send_shutdown,
     wait_for_workspace_exit,
@@ -122,19 +126,54 @@ pub fn get_or_start_workspace(
         cleanup_stale_node_info(&workspace_id)?;
     }
 
-    // Start new detached node (under lock — released after node_info is written)
-    let node_info = start_detached_node(
-        &workspace_id,
-        port,
-        beam_paths,
-        extra_code_paths,
-        auto_cleanup,
-        max_idle_seconds,
-        bind_addr,
-        ssl_dist_optfile,
-        web_port,
-    )?;
-    Ok((node_info, true, workspace_id)) // New node started
+    // Start new detached node, retrying if epmd still holds a stale registration
+    // from a recently-killed node with the same name.
+    //
+    // When a BEAM node is force-killed, epmd may retain its name registration
+    // for a short period. Erlang rejects the new node startup in that case and
+    // exits immediately (the PID file is never written). We detect this via the
+    // startup.log, wait for epmd to clear the stale entry using TCP NAMES_REQ,
+    // and retry — avoiding a spurious 15-second timeout failure.
+    let mut last_err = None;
+    for attempt in 0..=EPMD_CONFLICT_MAX_RETRIES {
+        if attempt > 0 {
+            // Wait for epmd to release the old registration before retrying.
+            // Best-effort: proceed even if the wait times out.
+            let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
+            let _ = wait_for_epmd_deregistration(&node_name, EPMD_CONFLICT_DEREGISTER_TIMEOUT_SECS);
+            std::thread::sleep(Duration::from_millis(EPMD_CONFLICT_RETRY_INTERVAL_MS));
+        }
+
+        match start_detached_node(
+            &workspace_id,
+            port,
+            beam_paths,
+            extra_code_paths,
+            auto_cleanup,
+            max_idle_seconds,
+            bind_addr,
+            ssl_dist_optfile,
+            web_port,
+        ) {
+            Ok(node_info) => return Ok((node_info, true, workspace_id)),
+            Err(e) => {
+                if attempt < EPMD_CONFLICT_MAX_RETRIES && is_epmd_name_conflict(&workspace_id) {
+                    eprintln!(
+                        "epmd name conflict for workspace '{workspace_id}' \
+                         (attempt {}/{EPMD_CONFLICT_MAX_RETRIES}), retrying...",
+                        attempt + 1
+                    );
+                    last_err = Some(e);
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| {
+        miette!("Failed to start workspace node after {EPMD_CONFLICT_MAX_RETRIES} attempts")
+    }))
 }
 
 /// Summary of a workspace for listing purposes.

@@ -104,6 +104,8 @@ export class WorkspaceTreeDataProvider
   private actors: ActorInfo[] = [];
   private classes: ClassInfo[] = [];
   private disposed = false;
+  /** REPL session ID captured from terminal output; used to query REPL bindings. */
+  private replSessionId: string | null = null;
 
   /** Cached inspect results keyed by "actor:<pid>". */
   private readonly inspectCache = new Map<string, Record<string, unknown>>();
@@ -119,6 +121,19 @@ export class WorkspaceTreeDataProvider
   // ─── Public API ──────────────────────────────────────────────────────────
 
   /**
+   * Set the REPL session ID captured from `beamtalk repl` stdout.
+   * This session ID is used for bindings queries so the sidebar shows
+   * the REPL's variables rather than the extension's own (empty) session.
+   * Pass null to clear (e.g. when the REPL terminal is closed).
+   */
+  setReplSessionId(id: string | null): void {
+    this.replSessionId = id;
+    if (this.client && this.connectionState === "connected") {
+      void this.refreshBindings();
+    }
+  }
+
+  /**
    * Attach a WorkspaceClient and begin listening for push events.
    * Pass null to detach and show a disconnected tree.
    */
@@ -132,6 +147,7 @@ export class WorkspaceTreeDataProvider
     this.client = client;
 
     if (!client) {
+      this.replSessionId = null;
       this._resetState("disconnected");
       return;
     }
@@ -173,17 +189,21 @@ export class WorkspaceTreeDataProvider
       return;
     }
     const activeClient = this.client;
-    const sessionId = activeClient.currentSessionId;
+    // Prefer the REPL session ID (for the user's variables) over the extension's
+    // own WS session (which has no bindings — no code is eval'd through it).
+    const sessionId = this.replSessionId ?? activeClient.currentSessionId;
     if (!sessionId) {
       return;
     }
     try {
       const nextBindings = await activeClient.bindings(sessionId);
-      // Guard: client, session, or connection may have changed while awaiting.
+      // Guard: client or connection may have changed while awaiting.
+      // Re-derive the effective session ID to check for staleness.
+      const currentEffective = this.replSessionId ?? activeClient.currentSessionId;
       if (
         this.client !== activeClient ||
         this.connectionState !== "connected" ||
-        activeClient.currentSessionId !== sessionId
+        currentEffective !== sessionId
       ) {
         return;
       }
@@ -447,7 +467,8 @@ export class WorkspaceTreeDataProvider
   /** Fetch bindings, actors, and classes from a newly-connected client. */
   private async _fetchInitialData(client: WorkspaceClient): Promise<void> {
     const gen = ++this.initialFetchGeneration;
-    const sessionId = client.currentSessionId;
+    // Prefer the REPL session ID (for the user's variables) over the extension's own WS session.
+    const sessionId = this.replSessionId ?? client.currentSessionId;
     const [bindingsResult, actorsResult, classesResult] = await Promise.allSettled([
       sessionId ? client.bindings(sessionId) : Promise.resolve<BindingsMap>({}),
       client.actors(),
@@ -460,7 +481,14 @@ export class WorkspaceTreeDataProvider
     }
 
     if (bindingsResult.status === "fulfilled") {
-      this.bindings = bindingsResult.value;
+      // Only apply bindings if the effective session ID hasn't changed while we
+      // were awaiting. If setReplSessionId() was called during the fetch, a
+      // refreshBindings() call has already applied the correct bindings; applying
+      // these (stale, empty-session) results would overwrite them incorrectly.
+      const currentEffectiveSession = this.replSessionId ?? client.currentSessionId;
+      if (currentEffectiveSession === sessionId) {
+        this.bindings = bindingsResult.value;
+      }
     }
     if (actorsResult.status === "fulfilled") {
       this.actors = actorsResult.value;
