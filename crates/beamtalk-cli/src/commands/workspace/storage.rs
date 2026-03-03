@@ -131,7 +131,12 @@ pub fn get_workspace_metadata(workspace_id: &str) -> Result<WorkspaceMetadata> {
             metadata_path.display()
         ));
     }
-    serde_json::from_str(&content).into_diagnostic()
+    serde_json::from_str(&content).map_err(|err| {
+        miette!(
+            "workspace metadata file is empty or corrupt: {} ({err})",
+            metadata_path.display()
+        )
+    })
 }
 
 /// Save workspace metadata.
@@ -315,6 +320,50 @@ pub(super) fn acquire_workspace_lock(workspace_id: &str) -> Result<fs::File> {
 mod tests {
     use super::*;
 
+    /// Verify that `get_workspace_metadata` returns a clear error for an empty file (BT-1058).
+    #[test]
+    fn test_get_workspace_metadata_empty_file_returns_error() {
+        let ws_id = format!("test_empty_metadata_{}", std::process::id());
+        let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
+        fs::create_dir_all(&ws_dir).unwrap();
+        fs::write(ws_dir.join("metadata.json"), b"").unwrap();
+
+        let result = get_workspace_metadata(&ws_id);
+        assert!(
+            result.is_err(),
+            "expected error for empty metadata.json, got Ok"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("empty or corrupt"),
+            "expected 'empty or corrupt' in error message, got: {msg}"
+        );
+
+        let _ = fs::remove_dir_all(&ws_dir);
+    }
+
+    /// Verify that `get_workspace_metadata` returns a clear error for a whitespace-only file.
+    #[test]
+    fn test_get_workspace_metadata_whitespace_file_returns_error() {
+        let ws_id = format!("test_ws_metadata_{}", std::process::id());
+        let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
+        fs::create_dir_all(&ws_dir).unwrap();
+        fs::write(ws_dir.join("metadata.json"), b"   \n  ").unwrap();
+
+        let result = get_workspace_metadata(&ws_id);
+        assert!(
+            result.is_err(),
+            "expected error for whitespace metadata.json"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("empty or corrupt"),
+            "expected 'empty or corrupt' in error message, got: {msg}"
+        );
+
+        let _ = fs::remove_dir_all(&ws_dir);
+    }
+
     /// Verify that `remove_stale_runtime_files` removes all known runtime files
     /// including the `starting` tombstone introduced in BT-969.
     #[test]
@@ -340,54 +389,6 @@ mod tests {
         // Cleanup
         let _ = fs::remove_dir_all(&ws_dir);
     }
-
-    /// Verify that `get_workspace_metadata` returns a clear error for an empty file (BT-1058).
-    #[test]
-    fn test_get_workspace_metadata_empty_file_returns_error() {
-        let ws_id = format!("test_empty_metadata_{}", std::process::id());
-        let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
-        fs::create_dir_all(&ws_dir).unwrap();
-        // Write an empty metadata.json
-        fs::write(ws_dir.join("metadata.json"), b"").unwrap();
-
-        let result = get_workspace_metadata(&ws_id);
-        assert!(
-            result.is_err(),
-            "expected error for empty metadata.json, got Ok"
-        );
-        let err = result.unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("empty or corrupt"),
-            "expected 'empty or corrupt' in error message, got: {msg}"
-        );
-
-        let _ = fs::remove_dir_all(&ws_dir);
-    }
-
-    /// Verify that `get_workspace_metadata` returns a clear error for a whitespace-only file.
-    #[test]
-    fn test_get_workspace_metadata_whitespace_file_returns_error() {
-        let ws_id = format!("test_ws_metadata_{}", std::process::id());
-        let ws_dir = workspaces_base_dir().unwrap().join(&ws_id);
-        fs::create_dir_all(&ws_dir).unwrap();
-        fs::write(ws_dir.join("metadata.json"), b"   \n  ").unwrap();
-
-        let result = get_workspace_metadata(&ws_id);
-        assert!(
-            result.is_err(),
-            "expected error for whitespace metadata.json"
-        );
-        let err = result.unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("empty or corrupt"),
-            "expected 'empty or corrupt' in error message, got: {msg}"
-        );
-
-        let _ = fs::remove_dir_all(&ws_dir);
-    }
-
     /// Verify that `remove_stale_runtime_files` is idempotent — calling it when
     /// the files are already absent (e.g. after a clean shutdown) must not error.
     #[test]
