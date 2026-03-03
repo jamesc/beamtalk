@@ -70,10 +70,11 @@ TestCase subclass: DictionaryTest
     // Works for multi-entry dictionary
     self assert: (#{#a => 1, #b => 2} doWithKey: [:k :v | nil]) equals: nil
     // Block receives correct key (#a) and value (99) — raises if wrong values passed
-    self assert: (#{#a => 99} doWithKey: [:k :v |
-      (k =:= #a) ifFalse: [k error: "unexpected key"]
-      (v =:= 99) ifFalse: [v error: "unexpected value"]
-    ]) equals: nil
+    self assert: (#{#a => 99}
+      doWithKey: [:k :v |
+        (k =:= #a) ifFalse: [k error: "unexpected key"]
+        (v =:= 99) ifFalse: [v error: "unexpected value"]
+      ]) equals: nil
 
   testKeysandvaluesdo =>
     // keysAndValuesDo: delegates to doWithKey:
@@ -81,10 +82,11 @@ TestCase subclass: DictionaryTest
     // Works for empty dictionary
     self assert: (#{} keysAndValuesDo: [:k :v | nil]) equals: nil
     // Block receives correct key and value
-    self assert: (#{#a => 99} keysAndValuesDo: [:k :v |
-      (k =:= #a) ifFalse: [k error: "unexpected key"]
-      (v =:= 99) ifFalse: [v error: "unexpected value"]
-    ]) equals: nil
+    self assert: (#{#a => 99}
+      keysAndValuesDo: [:k :v |
+        (k =:= #a) ifFalse: [k error: "unexpected key"]
+        (v =:= 99) ifFalse: [v error: "unexpected value"]
+      ]) equals: nil
 
   testNestedDictionaries =>
     // Nested dictionaries display correctly

@@ -15,10 +15,12 @@ Actor subclass: MutationReturnValues
   // inject:into: should return the accumulator result
   // Block receives (accumulator, element) matching Beamtalk convention (BT-820)
   sumViaInject: items =>
-    items inject: 0 into: [:acc :elem |
-      self.value := self.value + elem
-      acc + elem
-    ]
+    items
+      inject: 0
+      into: [:acc :elem |
+        self.value := self.value + elem
+        acc + elem
+      ]
 
   // on:do: should return the try body result on success
   safeAdd: n =>
@@ -32,10 +34,12 @@ Actor subclass: MutationReturnValues
     [
       self.value := self.value + (1 / 0)
       self.value
-    ] on: Exception do: [:e |
-      self.value := self.value + 100
-      -999
     ]
+      on: Exception
+      do: [:e |
+        self.value := self.value + 100
+        -999
+      ]
 
   // ensure: should return the try body result
   addWithCleanup: n =>

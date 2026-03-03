@@ -36,10 +36,11 @@ Actor subclass: ActorCollectCounter
 
   // collect: with field assignment in block — direct field mutation
   doubleAllWithFieldMutation: items =>
-    items collect: [:item |
-      self.count := self.count + 1
-      item * 2
-    ]
+    items
+      collect: [:item |
+        self.count := self.count + 1
+        item * 2
+      ]
 
   // collect: as last expression (no ^) — uses last-expression handler.
   // Same intentional self-capture pattern as doubleAll:.

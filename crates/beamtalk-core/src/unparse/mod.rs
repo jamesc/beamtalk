@@ -734,6 +734,31 @@ fn unparse_identifier(id: &Identifier) -> Document<'static> {
 
 // --- Message send unparsing ---
 
+/// Returns `true` if this expression is a block that will always render
+/// across multiple lines — either because it contains multiple statements,
+/// or because a single statement carries a trailing line comment (which
+/// forces the closing `]` to its own line).
+///
+/// Used by `unparse_message_send` to decide whether keyword messages should
+/// break each keyword to its own indented line.
+fn block_renders_multiline(expr: &Expression) -> bool {
+    let Expression::Block(block) = expr else {
+        return false;
+    };
+    match block.body.as_slice() {
+        // Multi-statement blocks always break.
+        [_, _, ..] => true,
+        // Single-statement block: only forced-multiline when it has a trailing
+        // LINE comment (which would otherwise land inside the `// …` text).
+        [single] => matches!(
+            single.comments.trailing.as_ref().map(|c| c.kind),
+            Some(CommentKind::Line)
+        ),
+        // Empty block `[]` stays inline.
+        [] => false,
+    }
+}
+
 fn unparse_message_send(
     receiver: &Expression,
     selector: &MessageSelector,
@@ -752,16 +777,35 @@ fn unparse_message_send(
             docvec![recv_doc, " ", Document::String(op.to_string()), " ", arg]
         }
         MessageSelector::Keyword(parts) => {
-            let mut docs: Vec<Document<'static>> = vec![recv_doc];
-            for (i, part) in parts.iter().enumerate() {
-                docs.push(Document::Str(" "));
-                docs.push(unparse_keyword_part(part));
-                if i < arguments.len() {
-                    docs.push(Document::Str(" "));
-                    docs.push(unparse_expression(&arguments[i]));
+            // When any argument is a block that always renders multi-line,
+            // break every keyword to its own line (2-space indent from receiver).
+            // Otherwise use the compact inline form.
+            let any_multiline = arguments.iter().any(block_renders_multiline);
+
+            if any_multiline {
+                let mut kw_docs: Vec<Document<'static>> = Vec::new();
+                for (i, part) in parts.iter().enumerate() {
+                    kw_docs.push(line());
+                    let part_doc = unparse_keyword_part(part);
+                    if i < arguments.len() {
+                        kw_docs.push(docvec![part_doc, " ", unparse_expression(&arguments[i])]);
+                    } else {
+                        kw_docs.push(part_doc);
+                    }
                 }
+                docvec![recv_doc, nest(2, concat(kw_docs))]
+            } else {
+                let mut docs: Vec<Document<'static>> = vec![recv_doc];
+                for (i, part) in parts.iter().enumerate() {
+                    docs.push(Document::Str(" "));
+                    docs.push(unparse_keyword_part(part));
+                    if i < arguments.len() {
+                        docs.push(Document::Str(" "));
+                        docs.push(unparse_expression(&arguments[i]));
+                    }
+                }
+                concat(docs)
             }
-            concat(docs)
         }
     };
 
@@ -2276,7 +2320,61 @@ mod tests {
     }
 
     #[test]
+    fn identity_fixture_keyword_blocks() {
+        assert_identity(include_str!("fixtures/keyword_blocks.bt"));
+    }
+
+    #[test]
     fn identity_empty_source() {
         assert_identity("");
+    }
+
+    // --- Keyword message formatting with block arguments (BT-1064) ---
+
+    #[test]
+    fn keyword_single_stmt_block_stays_inline() {
+        // Single-statement block: keyword stays on the same line as receiver.
+        let source = "Object subclass: A\n  m => x ifTrue: [^42]\n";
+        let module = parse_source(source);
+        let out = unparse_module(&module);
+        assert!(
+            out.contains("x ifTrue: [^42]"),
+            "single-stmt block should stay inline: {out}"
+        );
+    }
+
+    #[test]
+    fn keyword_multi_stmt_block_breaks_keywords() {
+        // Multi-statement block: all keywords break to their own indented lines.
+        let source = "Object subclass: A\n  m =>\n    flag\n      ifTrue: [\n        a traceCr: \"x\"\n        b traceCr: \"y\"\n      ]\n      ifFalse: [nil]\n";
+        let module = parse_source(source);
+        let out = unparse_module(&module);
+        assert!(
+            out.contains("flag\n      ifTrue: ["),
+            "receiver should be on its own line before ifTrue: {out}"
+        );
+        assert!(
+            out.contains("      ifFalse: [nil]"),
+            "ifFalse: should be on its own indented line: {out}"
+        );
+    }
+
+    #[test]
+    fn keyword_multi_stmt_block_idempotent() {
+        assert_idempotent(
+            "Object subclass: A\n  m =>\n    flag\n      ifTrue: [\n        self traceCr: \"yes\"\n        self traceCr: \"done\"\n      ]\n      ifFalse: [nil]\n",
+        );
+    }
+
+    #[test]
+    fn keyword_single_keyword_multi_stmt_breaks() {
+        // Single keyword with a multi-statement block: keyword breaks to own line.
+        let source = "Object subclass: A\n  m =>\n    coll\n      do: [\n        self traceCr: \"a\"\n        self traceCr: \"b\"\n      ]\n";
+        let module = parse_source(source);
+        let out = unparse_module(&module);
+        assert!(
+            out.contains("coll\n      do: ["),
+            "receiver should be on its own line before do: {out}"
+        );
     }
 }
