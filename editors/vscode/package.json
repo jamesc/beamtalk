@@ -168,7 +168,7 @@
         "beamtalk.workspace.autoConnect": {
           "type": "boolean",
           "default": true,
-          "description": "Auto-connect the Workspace Explorer to a running Beamtalk workspace when a workspace port file appears."
+          "description": "Auto-connect the Workspace Explorer to a running Beamtalk workspace when a workspace port file appears. When disabled, the Workspace Explorer will not auto-connect."
         }
       }
     },

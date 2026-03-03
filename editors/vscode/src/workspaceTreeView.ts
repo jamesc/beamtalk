@@ -481,7 +481,14 @@ export class WorkspaceTreeDataProvider
     }
 
     if (bindingsResult.status === "fulfilled") {
-      this.bindings = bindingsResult.value;
+      // Only apply bindings if the effective session ID hasn't changed while we
+      // were awaiting. If setReplSessionId() was called during the fetch, a
+      // refreshBindings() call has already applied the correct bindings; applying
+      // these (stale, empty-session) results would overwrite them incorrectly.
+      const currentEffectiveSession = this.replSessionId ?? client.currentSessionId;
+      if (currentEffectiveSession === sessionId) {
+        this.bindings = bindingsResult.value;
+      }
     }
     if (actorsResult.status === "fulfilled") {
       this.actors = actorsResult.value;

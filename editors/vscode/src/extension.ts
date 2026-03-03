@@ -273,7 +273,14 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
  */
 function computeWorkspaceId(projectRoot: string): string | null {
   try {
-    const canonical = fs.realpathSync(projectRoot);
+    let canonical = fs.realpathSync(projectRoot);
+    // On Windows, fs.realpathSync() returns plain paths (e.g. "C:\foo") while
+    // Rust's std::fs::canonicalize() prepends the UNC extended-path prefix
+    // "\\?\" (e.g. "\\?\C:\foo"). Add the prefix here so both sides hash the
+    // same string and auto-connect works on Windows.
+    if (process.platform === "win32" && !canonical.startsWith("\\\\?\\")) {
+      canonical = `\\\\?\\${canonical}`;
+    }
     const hash = crypto.createHash("sha256").update(canonical).digest("hex");
     return hash.slice(0, 12);
   } catch {
