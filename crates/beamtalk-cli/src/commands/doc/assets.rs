@@ -284,11 +284,13 @@ body {
 a { color: inherit; text-decoration: none; }
 a:hover { color: inherit; }
 
-/* Underline links only in running prose text, not in lists or navigation */
+/* Underline links in running prose text and in tables (e.g. ADR index) */
 .main-content p a,
 .method-doc p a,
 .class-doc p a,
-.readme p a { text-decoration: underline; }
+.readme p a,
+.main-content table a,
+.prose-content table a { text-decoration: underline; }
 
 h1 {
   font-size: 1.875rem;
