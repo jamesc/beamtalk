@@ -42,3 +42,14 @@ TestCase subclass: ActorLifecycleTest
     self assert: c2 printString equals: "a Counter"
     // Class object printString returns class name
     self assert: Counter printString equals: "Counter"
+
+  testNewRaisesInstantiationError =>
+    // Counter new raises InstantiationError (BT-1056: class-side new)
+    self should: [Counter new] raise: #instantiation_error
+    // Counter new: raises InstantiationError (BT-1056: class-side new:)
+    self should: [Counter new: #{}] raise: #instantiation_error
+
+  testNewIsCatchableAsInstantiationError =>
+    // Counter new is catchable via on: InstantiationError do: (BT-1056)
+    result := [Counter new] on: InstantiationError do: [:_e | #caught]
+    self assert: result equals: #caught

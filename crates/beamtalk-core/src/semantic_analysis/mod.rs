@@ -1792,8 +1792,15 @@ mod tests {
                 .class_hierarchy
                 .resolves_selector("Counter", "increment")
         );
-        // Inherited from Actor
-        assert!(result.class_hierarchy.resolves_selector("Counter", "spawn"));
+        // spawn is class-side on Actor — verify via all_class_methods
+        assert!(
+            result
+                .class_hierarchy
+                .all_class_methods("Counter")
+                .iter()
+                .any(|m| m.selector.as_str() == "spawn"),
+            "Counter should inherit class-side spawn from Actor"
+        );
     }
 
     #[test]

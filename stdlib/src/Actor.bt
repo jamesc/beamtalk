@@ -22,7 +22,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// c := Counter spawn
   /// ```
-  sealed spawn => @intrinsic actorSpawn
+  class sealed spawn => @intrinsic actorSpawn
 
   /// Spawn a new actor process with initialization arguments.
   ///
@@ -30,23 +30,25 @@ Object subclass: Actor
   /// ```beamtalk
   /// c := Counter spawnWith: #{#count => 10}
   /// ```
-  sealed spawnWith: initArgs => @intrinsic actorSpawnWith
+  class sealed spawnWith: initArgs => @intrinsic actorSpawnWith
 
-  /// Raises an error — actors must use `spawn`, not `new`.
+  /// Raises an InstantiationError — actors must use `spawn`, not `new`.
   ///
   /// ## Examples
   /// ```beamtalk
   /// Counter new   // => ERROR: instantiation_error
   /// ```
-  sealed new => self error: "Actors must use spawn, not new"
+  class sealed new =>
+    InstantiationError new signal: "Actors must use spawn, not new"
 
-  /// Raises an error — actors must use `spawnWith:`, not `new:`.
+  /// Raises an InstantiationError — actors must use `spawnWith:`, not `new:`.
   ///
   /// ## Examples
   /// ```beamtalk
   /// Counter new: #{}   // => ERROR: instantiation_error
   /// ```
-  sealed new: _initArgs => self error: "Actors must use spawnWith:, not new:"
+  class sealed new: _initArgs =>
+    InstantiationError new signal: "Actors must use spawnWith:, not new:"
 
   /// Gracefully stop this actor (gen_server:stop).
   ///

@@ -89,25 +89,10 @@ ensure_pg_started() ->
     end.
 
 %% @doc Ensure the class hierarchy ETS table exists.
-%% Stores {ClassName, SuperclassName | none} pairs for O(1) hierarchy queries.
-%% Public named_table so any process can read; written only during class init.
-%% Uses try/catch to handle concurrent creation race (TOCTOU safe).
+%% Delegates to beamtalk_class_hierarchy_table (BT-1062).
 -spec ensure_hierarchy_table() -> ok.
 ensure_hierarchy_table() ->
-    case ets:info(beamtalk_class_hierarchy) of
-        undefined ->
-            try
-                ets:new(
-                    beamtalk_class_hierarchy,
-                    [set, public, named_table, {read_concurrency, true}]
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _ ->
-            ok
-    end.
+    beamtalk_class_hierarchy_table:new().
 
 %% @doc Ensure the class collision warnings ETS table exists.
 %% BT-737: Stores collision warnings keyed by class name (atom).
@@ -273,15 +258,10 @@ inherits_from(none, _Ancestor) ->
 inherits_from(ClassName, Ancestor) when ClassName =:= Ancestor ->
     true;
 inherits_from(ClassName, Ancestor) ->
-    case ets:info(beamtalk_class_hierarchy) of
-        undefined ->
-            false;
-        _ ->
-            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
-                [{_, none}] -> false;
-                [{_, SuperclassName}] -> inherits_from(SuperclassName, Ancestor);
-                [] -> false
-            end
+    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+        not_found -> false;
+        {ok, none} -> false;
+        {ok, SuperclassName} -> inherits_from(SuperclassName, Ancestor)
     end.
 
 %% @doc Return sorted list of direct subclass names for a given class.
@@ -290,13 +270,7 @@ inherits_from(ClassName, Ancestor) ->
 %% matches the given class name. Returns sorted atom list for deterministic output.
 -spec direct_subclasses(class_name()) -> [class_name()].
 direct_subclasses(ClassName) ->
-    case ets:info(beamtalk_class_hierarchy) of
-        undefined ->
-            [];
-        _ ->
-            Matches = ets:match(beamtalk_class_hierarchy, {'$1', ClassName}),
-            lists:sort([Name || [Name] <- Matches])
-    end.
+    lists:sort(beamtalk_class_hierarchy_table:match_subclasses(ClassName)).
 
 %% @doc Return sorted list of all subclass names recursively.
 %%
@@ -392,26 +366,16 @@ get_method_return_type(ClassName, Selector) ->
                 {ok, _} = Found ->
                     Found;
                 {error, not_found} ->
-                    %% Walk to superclass using the ETS hierarchy table.
-                    case ets:info(beamtalk_class_hierarchy) of
-                        undefined ->
-                            {error, not_found};
-                        _ ->
-                            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
-                                [{_, Super}] -> get_method_return_type(Super, Selector);
-                                [] -> {error, not_found}
-                            end
+                    %% Walk to superclass using the hierarchy table.
+                    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                        not_found -> {error, not_found};
+                        {ok, Super} -> get_method_return_type(Super, Selector)
                     end;
                 not_found ->
                     %% Process exited during call — not in this class, walk to superclass.
-                    case ets:info(beamtalk_class_hierarchy) of
-                        undefined ->
-                            {error, not_found};
-                        _ ->
-                            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
-                                [{_, Super}] -> get_method_return_type(Super, Selector);
-                                [] -> {error, not_found}
-                            end
+                    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                        not_found -> {error, not_found};
+                        {ok, Super} -> get_method_return_type(Super, Selector)
                     end
             end
     end.
@@ -441,29 +405,15 @@ get_class_method_return_type(ClassName, Selector) ->
                 {ok, _} = Found ->
                     Found;
                 {error, not_found} ->
-                    case ets:info(beamtalk_class_hierarchy) of
-                        undefined ->
-                            {error, not_found};
-                        _ ->
-                            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
-                                [{_, Super}] ->
-                                    get_class_method_return_type(Super, Selector);
-                                [] ->
-                                    {error, not_found}
-                            end
+                    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                        not_found -> {error, not_found};
+                        {ok, Super} -> get_class_method_return_type(Super, Selector)
                     end;
                 not_found ->
                     %% Process exited during call — not in this class, walk to superclass.
-                    case ets:info(beamtalk_class_hierarchy) of
-                        undefined ->
-                            {error, not_found};
-                        _ ->
-                            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
-                                [{_, Super}] ->
-                                    get_class_method_return_type(Super, Selector);
-                                [] ->
-                                    {error, not_found}
-                            end
+                    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                        not_found -> {error, not_found};
+                        {ok, Super} -> get_class_method_return_type(Super, Selector)
                     end
             end
     end.
