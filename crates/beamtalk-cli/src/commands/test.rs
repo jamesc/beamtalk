@@ -25,6 +25,9 @@ use tracing::{debug, info, instrument, warn};
 
 use super::manifest;
 
+/// Per-package class module indexes: package root → (`class_module_index`, `class_superclass_index`).
+type PkgClassIndexes = HashMap<Utf8PathBuf, (HashMap<String, String>, HashMap<String, String>)>;
+
 // ──────────────────────────────────────────────────────────────────────────
 // Test discovery from AST
 // ──────────────────────────────────────────────────────────────────────────
@@ -631,6 +634,37 @@ fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
     }
 }
 
+/// Return the effective class module index for a test file.
+///
+/// Uses the per-package index for the file's owning package (if found), so test
+/// files only see their own package's class names — not class names from other
+/// packages that happen to be compiled in the same `beamtalk test` run. Fixture
+/// classes are merged on top. Falls back to the merged combined index for files
+/// that don't belong to any discovered package.
+fn class_index_for_file(
+    test_file: &Utf8Path,
+    pkg_class_indexes: &PkgClassIndexes,
+    fixture_class_index: &HashMap<String, String>,
+    merged_class_index: &HashMap<String, String>,
+    merged_super_index: &HashMap<String, String>,
+) -> (HashMap<String, String>, HashMap<String, String>) {
+    let (base_class, base_super) = find_package_root(test_file)
+        .as_ref()
+        .and_then(|r| pkg_class_indexes.get(r))
+        .map_or_else(
+            || (merged_class_index.clone(), merged_super_index.clone()),
+            |(c, s)| (c.clone(), s.clone()),
+        );
+
+    let mut effective = base_class;
+    effective.extend(
+        fixture_class_index
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone())),
+    );
+    (effective, base_super)
+}
+
 /// Recursively collect `.bt` files from `dir` into `files`.
 fn find_test_files_recursive(dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Result<()> {
     for entry in fs::read_dir(dir)
@@ -956,8 +990,12 @@ pub fn run_tests(path: &str) -> Result<()> {
         pkgs
     };
 
-    // Build combined class module index from all packages' src/ directories so
-    // test files can resolve cross-file references to package classes.
+    // Build per-package class indexes and a merged combined index.
+    // Per-package indexes let each test file see only its own package's classes,
+    // preventing false cross-package class name collisions when running tests
+    // from a parent directory containing multiple packages. The merged index is
+    // used for fixture compilation (which can reference any package's classes).
+    let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
     let mut class_module_index: HashMap<String, String> = HashMap::new();
     let mut class_superclass_index: HashMap<String, String> = HashMap::new();
     for (pkg_root, pkg) in &discovered_packages {
@@ -969,6 +1007,10 @@ pub fn run_tests(path: &str) -> Result<()> {
                 source_root.as_deref(),
                 &pkg.name,
             ) {
+                pkg_class_indexes.insert(
+                    pkg_root.clone(),
+                    (pkg_class_map.clone(), pkg_super_map.clone()),
+                );
                 class_module_index.extend(pkg_class_map);
                 class_superclass_index.extend(pkg_super_map);
             }
@@ -993,14 +1035,16 @@ pub fn run_tests(path: &str) -> Result<()> {
             .unwrap_or_default()
     };
 
-    // Extend the class module index with fixture class → module name mappings so
-    // that both fixture files (referencing each other) and test files (referencing
-    // fixture classes in subdirectories) resolve to the correct module names.
-    if fixtures_dir.is_dir() {
+    // Build the fixture class index separately so it can be merged per-file in
+    // Phase 1. Also merge into the combined index for Phase 0 fixture compilation,
+    // where cross-package and cross-fixture references are allowed.
+    let fixture_class_index: HashMap<String, String> = if fixtures_dir.is_dir() {
         let fixture_files = find_test_files(&fixtures_dir)?;
-        let fixture_index = build_fixture_class_module_index(&fixture_files)?;
-        class_module_index.extend(fixture_index);
-    }
+        build_fixture_class_module_index(&fixture_files)?
+    } else {
+        HashMap::new()
+    };
+    class_module_index.extend(fixture_class_index.clone());
 
     let precompiled = compile_fixtures_directory(
         &fixtures_dir,
@@ -1017,6 +1061,17 @@ pub fn run_tests(path: &str) -> Result<()> {
     let mut fixture_modules_by_name: HashMap<String, Utf8PathBuf> = HashMap::new();
 
     for test_file in &test_files {
+        // Build per-file effective class index: own package's classes + fixtures.
+        // This prevents class name collisions between packages when running tests
+        // from a common parent directory.
+        let (file_class_index, file_super_index) = class_index_for_file(
+            test_file,
+            &pkg_class_indexes,
+            &fixture_class_index,
+            &class_module_index,
+            &class_superclass_index,
+        );
+
         let (test_classes, load_files) = discover_test_classes(test_file)?;
 
         // Handle deprecated @load directives as fallback.
@@ -1073,8 +1128,8 @@ pub fn run_tests(path: &str) -> Result<()> {
             let module_name = compile_fixture(
                 &fixture_path,
                 &build_dir,
-                &class_module_index,
-                &class_superclass_index,
+                &file_class_index,
+                &file_super_index,
             )?;
             all_fixture_modules.push(module_name);
         }
@@ -1086,8 +1141,8 @@ pub fn run_tests(path: &str) -> Result<()> {
                 test_file,
                 &test_class.module_name,
                 &build_dir,
-                &class_module_index,
-                &class_superclass_index,
+                &file_class_index,
+                &file_super_index,
             )?;
 
             // Generate EUnit wrapper
@@ -1111,8 +1166,8 @@ pub fn run_tests(path: &str) -> Result<()> {
         let doc_results = discover_and_compile_doc_tests(
             test_file,
             &build_dir,
-            &class_module_index,
-            &class_superclass_index,
+            &file_class_index,
+            &file_super_index,
         )?;
         for dr in doc_results {
             all_erl_files.push(dr.erl_file);
@@ -1463,6 +1518,121 @@ mod tests {
 
         let result = find_package_root(&dir);
         assert_eq!(result, Some(dir));
+    }
+
+    #[test]
+    fn test_class_index_for_file_uses_own_package() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Two packages, each defining a class named "Counter"
+        let pkg_a = dir.join("pkg_a");
+        let pkg_b = dir.join("pkg_b");
+        fs::create_dir_all(pkg_a.join("test")).unwrap();
+        fs::create_dir_all(pkg_b.join("test")).unwrap();
+        fs::write(
+            pkg_a.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_a\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            pkg_b.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_b\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let mut index_a: HashMap<String, String> = HashMap::new();
+        index_a.insert("Counter".to_string(), "bt@pkg_a@counter".to_string());
+        let mut index_b: HashMap<String, String> = HashMap::new();
+        index_b.insert("Counter".to_string(), "bt@pkg_b@counter".to_string());
+
+        let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
+        pkg_class_indexes.insert(pkg_a.clone(), (index_a.clone(), HashMap::new()));
+        pkg_class_indexes.insert(pkg_b.clone(), (index_b.clone(), HashMap::new()));
+
+        // Merged index has pkg_b's entry (inserted last, overwrites pkg_a's)
+        let mut merged: HashMap<String, String> = HashMap::new();
+        merged.extend(index_a);
+        merged.extend(index_b); // overwrites Counter
+
+        let fixture_index: HashMap<String, String> = HashMap::new();
+        let merged_super: HashMap<String, String> = HashMap::new();
+
+        // Test file in pkg_a should get pkg_a's Counter, not pkg_b's
+        let test_file_a = pkg_a.join("test/counter_test.bt");
+        fs::write(&test_file_a, "").unwrap();
+        let (class_idx, _) = class_index_for_file(
+            &test_file_a,
+            &pkg_class_indexes,
+            &fixture_index,
+            &merged,
+            &merged_super,
+        );
+        assert_eq!(
+            class_idx.get("Counter").map(String::as_str),
+            Some("bt@pkg_a@counter")
+        );
+
+        // Test file in pkg_b should get pkg_b's Counter
+        let test_file_b = pkg_b.join("test/counter_test.bt");
+        fs::write(&test_file_b, "").unwrap();
+        let (class_idx, _) = class_index_for_file(
+            &test_file_b,
+            &pkg_class_indexes,
+            &fixture_index,
+            &merged,
+            &merged_super,
+        );
+        assert_eq!(
+            class_idx.get("Counter").map(String::as_str),
+            Some("bt@pkg_b@counter")
+        );
+    }
+
+    #[test]
+    fn test_class_index_for_file_fixture_classes_available() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let pkg_a = dir.join("pkg_a");
+        fs::create_dir_all(pkg_a.join("test")).unwrap();
+        fs::write(
+            pkg_a.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_a\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let mut pkg_a_class_index: HashMap<String, String> = HashMap::new();
+        pkg_a_class_index.insert("Counter".to_string(), "bt@pkg_a@counter".to_string());
+
+        let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
+        pkg_class_indexes.insert(pkg_a.clone(), (pkg_a_class_index, HashMap::new()));
+
+        let mut fixture_index: HashMap<String, String> = HashMap::new();
+        fixture_index.insert("MockHelper".to_string(), "bt@mock_helper".to_string());
+
+        let merged: HashMap<String, String> = HashMap::new();
+        let merged_super: HashMap<String, String> = HashMap::new();
+
+        let test_file = pkg_a.join("test/my_test.bt");
+        fs::write(&test_file, "").unwrap();
+        let (class_idx, _) = class_index_for_file(
+            &test_file,
+            &pkg_class_indexes,
+            &fixture_index,
+            &merged,
+            &merged_super,
+        );
+        // Own class is accessible
+        assert_eq!(
+            class_idx.get("Counter").map(String::as_str),
+            Some("bt@pkg_a@counter")
+        );
+        // Fixture class is also accessible
+        assert_eq!(
+            class_idx.get("MockHelper").map(String::as_str),
+            Some("bt@mock_helper")
+        );
     }
 
     #[test]
