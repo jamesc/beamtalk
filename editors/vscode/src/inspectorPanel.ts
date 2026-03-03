@@ -43,6 +43,8 @@ export class InspectorPanel {
   private _target: InspectTarget;
   private _client: WorkspaceClient | null;
   private _disposed = false;
+  /** Monotonic counter — incremented on each _refetch() call to discard stale responses. */
+  private _refreshGeneration = 0;
 
   private constructor(
     panel: vscode.WebviewPanel,
@@ -71,9 +73,11 @@ export class InspectorPanel {
   /**
    * Open (or reveal) the inspector panel for the given target.
    *
-   * If a panel already exists for this target it is revealed and refreshed
-   * with the latest value. Otherwise a new panel is created in the editor
-   * area (ViewColumn.Two to keep the tree view visible).
+   * If a panel already exists for this target it is revealed and its content
+   * is refreshed: bindings are re-rendered with the latest value passed in;
+   * actor panels trigger a live re-fetch from the workspace. Otherwise a new
+   * panel is created in the editor area (ViewColumn.Two to keep the tree
+   * view visible).
    */
   static show(client: WorkspaceClient | null, target: InspectTarget): void {
     const key = InspectorPanel._targetKey(target);
@@ -81,14 +85,14 @@ export class InspectorPanel {
 
     if (existing) {
       existing._client = client;
-      // For bindings, update to the latest value that was passed in.
-      if (target.kind === "binding") {
-        existing._target = target;
-      }
       existing._panel.reveal(vscode.ViewColumn.Two);
-      // Re-render with fresh value (binding) or stale state (actor, refresh separately).
       if (target.kind === "binding") {
+        // Update to the latest value passed in and re-render immediately.
+        existing._target = target;
         existing._postContent(renderValue(target.value));
+      } else {
+        // Actor: re-fetch live state so the panel is always up to date on reveal.
+        void existing._refetch();
       }
       return;
     }
@@ -172,15 +176,16 @@ export class InspectorPanel {
   private async _refetch(): Promise<void> {
     if (this._disposed) return;
 
+    const generation = ++this._refreshGeneration;
     this._postContent(renderLoading());
 
     try {
       const content = await this._fetchContent();
-      if (!this._disposed) {
+      if (!this._disposed && generation === this._refreshGeneration) {
         this._postContent(content);
       }
     } catch (err) {
-      if (!this._disposed) {
+      if (!this._disposed && generation === this._refreshGeneration) {
         const message = err instanceof Error ? err.message : String(err);
         this._postContent(renderError(message));
       }

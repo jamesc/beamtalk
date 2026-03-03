@@ -676,7 +676,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("beamtalk.inspectBinding", (node: BindingItemNode) => {
+    vscode.commands.registerCommand("beamtalk.inspectBinding", (node?: BindingItemNode) => {
+      if (!node || node.kind !== "binding-item") {
+        void vscode.window.showInformationMessage("Select a binding in Workspace Explorer first.");
+        return;
+      }
       const sessionId =
         workspaceTreeProvider?.currentReplSessionId ?? workspaceWsClient?.currentSessionId ?? null;
       InspectorPanel.show(workspaceWsClient ?? null, {
@@ -689,7 +693,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("beamtalk.inspectActor", (node: ActorItemNode) => {
+    vscode.commands.registerCommand("beamtalk.inspectActor", (node?: ActorItemNode) => {
+      if (!node || node.kind !== "actor-item") {
+        void vscode.window.showInformationMessage("Select an actor in Workspace Explorer first.");
+        return;
+      }
       InspectorPanel.show(workspaceWsClient ?? null, {
         kind: "actor",
         info: node.info,
