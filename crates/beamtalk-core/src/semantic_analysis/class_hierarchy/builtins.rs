@@ -9,9 +9,9 @@
 //! `Integer`, `String`, etc.) that form the foundation of the Beamtalk type
 //! hierarchy. These are registered before any user-defined classes.
 //!
-//! Most class definitions are auto-generated from `lib/*.bt` by `beamtalk build-stdlib`.
+//! Most class definitions are auto-generated from `stdlib/src/*.bt` by `beamtalk build-stdlib`.
 //! Only runtime-only classes without `.bt` source files (e.g., `Future`, `Value`) are
-//! defined manually here.
+//! defined manually here. `Future` has no source file by design (BT-1057); see BT-507.
 
 use super::ClassInfo;
 #[cfg(test)]
@@ -53,13 +53,13 @@ pub(super) fn is_builtin_class(name: &str) -> bool {
 
 /// Returns true if the given class name has runtime shadowing protection.
 ///
-/// Only classes with the `bt@stdlib@` module prefix are protected at runtime
-/// (via `is_stdlib_module` in `beamtalk_object_class`). This excludes
-/// runtime-only built-ins like `Future` that lack this prefix (BT-750).
+/// Includes both generated stdlib classes and runtime-only built-ins
+/// (e.g., `Future`, `Value`) that are protected from user shadowing.
 ///
-/// Used by `check_stdlib_name_shadowing` to avoid inaccurate warnings.
+/// Used by `check_stdlib_name_shadowing` to warn when user code tries to
+/// define a class with a name that shadows a protected built-in.
 pub(super) fn is_runtime_protected_class(name: &str) -> bool {
-    generated::is_generated_builtin_class(name)
+    name == "Future" || name == "Value" || generated::is_generated_builtin_class(name)
 }
 
 /// Returns all built-in class definitions.
@@ -69,9 +69,10 @@ pub(super) fn is_runtime_protected_class(name: &str) -> bool {
 pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
     let mut classes = generated::generated_builtin_classes();
 
-    // Future — runtime-only class (no lib/Future.bt exists).
-    // If lib/Future.bt is ever created, remove this manual entry and let
-    // the generated code handle it.
+    // Future — runtime-only class (no stdlib/src/Future.bt source).
+    // The stub was removed in BT-1057; the real design is tracked in BT-507.
+    // When BT-507 is resolved and a proper Future.bt is created, remove this
+    // manual entry and let the generated code handle it.
     classes.insert(
         "Future".into(),
         ClassInfo {
@@ -110,4 +111,79 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn builtin_set_includes_future() {
+        assert!(super::is_builtin_class("Future"));
+    }
+
+    #[test]
+    fn builtin_set_includes_value() {
+        assert!(super::is_builtin_class("Value"));
+    }
+
+    #[test]
+    fn builtin_set_includes_generated_classes() {
+        assert!(super::is_builtin_class("Integer"));
+        assert!(super::is_builtin_class("Object"));
+        assert!(super::is_builtin_class("Array"));
+    }
+
+    #[test]
+    fn builtin_set_excludes_user_classes() {
+        assert!(!super::is_builtin_class("MyCustomClass"));
+        assert!(!super::is_builtin_class("Person"));
+    }
+
+    #[test]
+    fn protected_set_includes_runtime_only_classes() {
+        assert!(super::is_runtime_protected_class("Future"));
+        assert!(super::is_runtime_protected_class("Value"));
+    }
+
+    #[test]
+    fn protected_set_includes_generated_classes() {
+        assert!(super::is_runtime_protected_class("Integer"));
+        assert!(super::is_runtime_protected_class("String"));
+    }
+
+    #[test]
+    fn protected_set_excludes_user_classes() {
+        assert!(!super::is_runtime_protected_class("MyCustomClass"));
+    }
+
+    #[test]
+    fn builtin_classes_contains_future() {
+        let classes = super::builtin_classes();
+        assert!(
+            classes.contains_key("Future"),
+            "Future should be in builtin_classes()"
+        );
+    }
+
+    #[test]
+    fn builtin_classes_contains_value() {
+        let classes = super::builtin_classes();
+        assert!(
+            classes.contains_key("Value"),
+            "Value should be in builtin_classes()"
+        );
+    }
+
+    #[test]
+    fn future_is_sealed() {
+        let classes = super::builtin_classes();
+        let future = &classes["Future"];
+        assert!(future.is_sealed, "Future should be marked as sealed");
+    }
+
+    #[test]
+    fn value_is_not_sealed() {
+        let classes = super::builtin_classes();
+        let value = &classes["Value"];
+        assert!(!value.is_sealed, "Value should not be sealed");
+    }
 }

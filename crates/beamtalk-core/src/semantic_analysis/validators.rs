@@ -1286,7 +1286,7 @@ mod tests {
     use crate::source_analysis::Severity;
     use crate::source_analysis::parse;
 
-    /// Future is now a real stdlib class (stdlib/src/Future.bt exists).
+    /// Future is a runtime-only built-in class (BT-1057 removed the stub).
     /// User-defined `Future` classes should trigger a stdlib shadowing warning.
     #[test]
     fn future_class_triggers_shadowing_warning() {
