@@ -31,7 +31,6 @@
 %% BT-1045: Export internals for white-box testing of the binding-lookup pipeline.
 -ifdef(TEST).
 -export([
-    resolve_binding_session/2,
     get_session_bindings/1
 ]).
 -endif.
@@ -72,7 +71,7 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
                 %% so instance-method completions work for bound actor variables.
                 %% BT-1045: session is decoded into Msg by the protocol layer and stripped
                 %% from Params — use get_session(Msg), NOT maps:get(<<"session">>, Params).
-                BindingPid = resolve_binding_session(
+                BindingPid = beamtalk_session_table:resolve_pid(
                     beamtalk_repl_protocol:get_session(Msg), SessionPid
                 ),
                 SessionBindings = get_session_bindings(BindingPid),
@@ -706,30 +705,6 @@ maybe_class(ClassName) ->
     of
         undefined -> undefined;
         _Pid -> ClassName
-    end.
-
-%% @private
-%% @doc Resolve which session PID to use for binding lookups.
-%%
-%% The completion client runs on a separate WebSocket connection. When it provides
-%% the main REPL session ID, we look up that session's PID from the ETS table and
-%% use its bindings instead of the (empty) completion session's bindings.
--spec resolve_binding_session(binary() | undefined, pid()) -> pid().
-resolve_binding_session(undefined, Default) ->
-    Default;
-resolve_binding_session(SessionId, Default) when is_binary(SessionId) ->
-    try
-        case ets:lookup(beamtalk_sessions, SessionId) of
-            [{_, Pid}] when is_pid(Pid) ->
-                case is_process_alive(Pid) of
-                    true -> Pid;
-                    false -> Default
-                end;
-            _ ->
-                Default
-        end
-    catch
-        _:_ -> Default
     end.
 
 %% @private
