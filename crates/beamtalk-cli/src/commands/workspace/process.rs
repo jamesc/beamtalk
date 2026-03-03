@@ -842,10 +842,11 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
         } else {
             None
         };
+        // SAFETY: handle is valid, obtained from OpenProcess above.
         unsafe { CloseHandle(handle) };
         if ret != FALSE {
             Ok(())
-        } else if term_err.as_ref().and_then(|e| e.raw_os_error()) == Some(5) {
+        } else if term_err.as_ref().and_then(std::io::Error::raw_os_error) == Some(5) {
             // ERROR_ACCESS_DENIED (5): process exited between OpenProcess and
             // TerminateProcess — analogous to Unix ESRCH.
             Ok(())
@@ -891,8 +892,9 @@ fn is_process_alive(pid: u32) -> bool {
             return false;
         }
         let mut exit_code: u32 = 0;
-        // SAFETY: handle is valid.
-        let ok = unsafe { GetExitCodeProcess(handle, &mut exit_code) };
+        // SAFETY: handle is valid, exit_code is a local variable.
+        let ok = unsafe { GetExitCodeProcess(handle, &raw mut exit_code) };
+        // SAFETY: handle is valid, obtained from OpenProcess above.
         unsafe { CloseHandle(handle) };
         ok != FALSE && exit_code == STILL_ACTIVE as u32
     }

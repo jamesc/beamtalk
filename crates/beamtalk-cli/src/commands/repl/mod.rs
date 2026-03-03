@@ -1400,8 +1400,9 @@ mod tests {
             let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
             if !handle.is_null() {
                 let mut exit_code: u32 = 0;
-                // SAFETY: handle is valid.
-                let ok = unsafe { GetExitCodeProcess(handle, &mut exit_code) };
+                // SAFETY: handle is valid, exit_code is a local variable.
+                let ok = unsafe { GetExitCodeProcess(handle, &raw mut exit_code) };
+                // SAFETY: handle is valid, obtained from OpenProcess above.
                 unsafe { CloseHandle(handle) };
                 assert!(
                     ok == FALSE || exit_code != STILL_ACTIVE as u32,
