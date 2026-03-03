@@ -617,6 +617,7 @@ impl ClassHierarchy {
     ) -> Option<(EcoString, MethodInfo)> {
         let mut current = Some(start_class.to_string());
         let mut visited = HashSet::new();
+        let mut fell_back_to_object = false;
         while let Some(name) = current {
             if !visited.insert(name.clone()) {
                 break;
@@ -635,7 +636,15 @@ impl ClassHierarchy {
                     .as_ref()
                     .map(std::string::ToString::to_string);
             } else {
-                break;
+                // Unknown/external class: fall back to Object to ensure we check
+                // Object's sealed methods, then stop. This prevents sealed overrides
+                // from being bypassed when an external class is in the inheritance chain.
+                current = if fell_back_to_object {
+                    None
+                } else {
+                    fell_back_to_object = true;
+                    Some("Object".to_string())
+                };
             }
         }
         None
@@ -650,6 +659,7 @@ impl ClassHierarchy {
     ) -> Option<(EcoString, MethodInfo)> {
         let mut current = Some(start_class.to_string());
         let mut visited = HashSet::new();
+        let mut fell_back_to_object = false;
         while let Some(name) = current {
             if !visited.insert(name.clone()) {
                 break;
@@ -668,7 +678,15 @@ impl ClassHierarchy {
                     .as_ref()
                     .map(std::string::ToString::to_string);
             } else {
-                break;
+                // Unknown/external class: fall back to Object to ensure we check
+                // Object's sealed methods, then stop. This prevents sealed overrides
+                // from being bypassed when an external class is in the inheritance chain.
+                current = if fell_back_to_object {
+                    None
+                } else {
+                    fell_back_to_object = true;
+                    Some("Object".to_string())
+                };
             }
         }
         None
