@@ -12,6 +12,7 @@
 use std::fmt::Write as FmtWrite;
 
 use super::document::{Document, concat};
+use super::intrinsics::validate_block_arity_exact;
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
@@ -1025,19 +1026,29 @@ impl CoreErlangGenerator {
     /// the method body, ending with `in ` so the caller's next `body_part` provides the
     /// continuation.  This makes the updated locals visible to all subsequent expressions.
     fn generate_value_type_do_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
-        let (receiver, body) = match expr {
+        let (receiver, block_expr, body) = match expr {
             Expression::MessageSend {
                 receiver,
                 arguments,
                 ..
             } if matches!(arguments.first(), Some(Expression::Block(_))) => {
+                let block_arg = arguments.first().expect("checked above");
                 let Some(Expression::Block(b)) = arguments.first() else {
                     return Ok(Document::Nil);
                 };
-                (receiver.as_ref(), b)
+                (receiver.as_ref(), block_arg, b)
             }
             _ => return Ok(Document::Nil),
         };
+
+        // BT-1053 / Copilot review: validate that the block has exactly 1 parameter,
+        // matching the check in the normal generate_list_do path.
+        validate_block_arity_exact(
+            block_expr,
+            1,
+            "do:",
+            "The do: block must take exactly one argument: [:each | ...]",
+        )?;
 
         let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
 
