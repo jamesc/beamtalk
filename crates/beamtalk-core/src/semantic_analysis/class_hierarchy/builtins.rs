@@ -10,7 +10,7 @@
 //! hierarchy. These are registered before any user-defined classes.
 //!
 //! Most class definitions are auto-generated from `stdlib/src/*.bt` by `beamtalk build-stdlib`.
-//! Only runtime-only classes without `.bt` source files (e.g., `Future`, `Value`) are
+//! Only runtime-only classes without `.bt` source files (e.g., `Future`) are
 //! defined manually here. `Future` has no source file by design (BT-1057); see BT-507.
 
 use super::ClassInfo;
@@ -21,7 +21,7 @@ use crate::ast::MethodKind;
 use ecow::EcoString;
 use std::collections::HashMap;
 
-// Auto-generated stdlib class definitions from lib/*.bt
+// Auto-generated stdlib class definitions from stdlib/src/*.bt
 #[path = "generated_builtins.rs"]
 mod generated;
 
@@ -44,27 +44,30 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
 /// This is a fast O(1) check using a static set, suitable for hot paths
 /// like `merge()`, `remove_classes()`, and project index filtering.
 ///
-/// Includes both generated stdlib classes (from `lib/*.bt`) and runtime-only
+/// Includes both generated stdlib classes (from `stdlib/src/*.bt`) and runtime-only
 /// built-ins like `Future`.
 pub(super) fn is_builtin_class(name: &str) -> bool {
-    // Runtime-only classes (no lib/*.bt source file)
-    name == "Future" || name == "Value" || generated::is_generated_builtin_class(name)
+    // Future is the only runtime-only built-in (no stdlib/src/Future.bt source; see BT-507).
+    // All other built-ins (including Value) are in the generated set.
+    name == "Future" || generated::is_generated_builtin_class(name)
 }
 
 /// Returns true if the given class name has runtime shadowing protection.
 ///
 /// Includes both generated stdlib classes and runtime-only built-ins
-/// (e.g., `Future`, `Value`) that are protected from user shadowing.
+/// (e.g., `Future`) that are protected from user shadowing.
 ///
 /// Used by `check_stdlib_name_shadowing` to warn when user code tries to
 /// define a class with a name that shadows a protected built-in.
 pub(super) fn is_runtime_protected_class(name: &str) -> bool {
-    name == "Future" || name == "Value" || generated::is_generated_builtin_class(name)
+    // Future is runtime-only (not in the generated set); all other protected
+    // classes (including Value) are covered by is_generated_builtin_class.
+    name == "Future" || generated::is_generated_builtin_class(name)
 }
 
 /// Returns all built-in class definitions.
 ///
-/// Combines auto-generated definitions from `lib/*.bt` with runtime-only
+/// Combines auto-generated definitions from `stdlib/src/*.bt` with runtime-only
 /// classes that have no source file (e.g., `Future`).
 pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
     let mut classes = generated::generated_builtin_classes();
