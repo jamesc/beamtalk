@@ -20,14 +20,11 @@ Object subclass: ValueTypeBuilder
 
   // Setter that assigns multiple fields sequentially (BT-833: sequential threading)
   setX: newX y: newY =>
-    self.x := newX
-    self.y := newY
-    self
+    (self withX: newX) withY: newY
 
   // Read-then-write: reads current field value, adds delta, writes back (BT-833)
   incrementX: delta =>
-    self.x := self.x + delta
-    self
+    self withX: self.x + delta
 
   // Getters
   getX => self.x
