@@ -630,6 +630,11 @@ mod tests {
         )
         .unwrap();
         fs::write(
+            docs_dir.join("beamtalk-installation.md"),
+            "# Installation\n\nInstall Beamtalk from a release archive.",
+        )
+        .unwrap();
+        fs::write(
             docs_dir.join("beamtalk-language-features.md"),
             "# Language Features\n\nBeamtalk syntax overview.",
         )
