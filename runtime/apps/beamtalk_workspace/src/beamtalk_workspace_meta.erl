@@ -22,7 +22,7 @@
 %% Public API
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([register_actor/1, unregister_actor/1, supervised_actors/0]).
--export([register_module/1, loaded_modules/0]).
+-export([register_module/1, register_module/2, loaded_modules/0]).
 -export([get_package_name/0]).
 % Alias for get_metadata/0
 -export([get/0]).
@@ -50,7 +50,7 @@
     node_name :: atom(),
     repl_port :: inet:port_number() | undefined,
     supervised_actors :: [pid()],
-    loaded_modules :: [atom()],
+    loaded_modules :: #{atom() => string() | undefined},
     metadata_path :: string(),
     persist_timer :: reference() | undefined,
     monitor_refs :: #{pid() => reference()}
@@ -156,18 +156,23 @@ supervised_actors() ->
             {error, not_started}
     end.
 
-%% @doc Register a loaded module.
+%% @doc Register a loaded module with no source path.
 -spec register_module(atom()) -> ok.
-register_module(Module) when is_atom(Module) ->
+register_module(Module) ->
+    register_module(Module, undefined).
+
+%% @doc Register a loaded module with its .bt source file path.
+-spec register_module(atom(), string() | undefined) -> ok.
+register_module(Module, SourcePath) when is_atom(Module) ->
     try
-        gen_server:cast(?MODULE, {register_module, Module})
+        gen_server:cast(?MODULE, {register_module, Module, SourcePath})
     catch
         exit:{noproc, _} ->
             ok
     end.
 
-%% @doc Get list of loaded modules.
--spec loaded_modules() -> {ok, [atom()]} | {error, not_started}.
+%% @doc Get list of loaded modules with their source paths.
+-spec loaded_modules() -> {ok, [{atom(), string() | undefined}]} | {error, not_started}.
 loaded_modules() ->
     try
         gen_server:call(?MODULE, loaded_modules)
@@ -229,7 +234,7 @@ init(InitialMetadata) ->
         node_name = node(),
         repl_port = ReplPort,
         supervised_actors = [],
-        loaded_modules = [],
+        loaded_modules = #{},
         metadata_path = MetadataPath,
         persist_timer = undefined,
         monitor_refs = #{}
@@ -254,7 +259,7 @@ handle_call(get_metadata, _From, State) ->
         node_name => State#state.node_name,
         repl_port => State#state.repl_port,
         supervised_actors => State#state.supervised_actors,
-        loaded_modules => State#state.loaded_modules
+        loaded_modules => maps:keys(State#state.loaded_modules)
     },
     {reply, {ok, Metadata}, State};
 handle_call(get_package_name, _From, State) ->
@@ -264,7 +269,7 @@ handle_call(get_last_activity, _From, State) ->
 handle_call(supervised_actors, _From, State) ->
     {reply, {ok, State#state.supervised_actors}, State};
 handle_call(loaded_modules, _From, State) ->
-    {reply, {ok, State#state.loaded_modules}, State};
+    {reply, {ok, maps:to_list(State#state.loaded_modules)}, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -304,13 +309,15 @@ handle_cast({unregister_actor, Pid}, State) ->
     },
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
-handle_cast({register_module, Module}, State) ->
+handle_cast({register_module, Module, NewSource}, State) ->
     Modules = State#state.loaded_modules,
-    State2 =
-        case lists:member(Module, Modules) of
-            true -> State;
-            false -> State#state{loaded_modules = [Module | Modules]}
+    %% Preserve an existing non-undefined source if the new registration has none.
+    EffectiveSource =
+        case NewSource of
+            undefined -> maps:get(Module, Modules, undefined);
+            _ -> NewSource
         end,
+    State2 = State#state{loaded_modules = maps:put(Module, EffectiveSource, Modules)},
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast(_Msg, State) ->
@@ -382,15 +389,35 @@ load_metadata_from_disk(State) ->
                     %% not valid across node restarts. The monitor-based cleanup
                     %% handles tracking for the current session only.
 
-                    %% Restore loaded_modules (atoms persist across restarts)
+                    %% Restore loaded_modules with source paths (atoms persist across restarts).
+                    %% Handles both old format ([binary()]) and new format ([#{name,source}]).
                     Modules = maps:get(<<"loaded_modules">>, Map, []),
-                    ModuleAtoms = [
-                        Atom
-                     || Bin <- Modules,
-                        is_binary(Bin),
-                        Atom <- [safe_existing_atom(Bin)],
-                        Atom =/= undefined
-                    ],
+                    ModuleAtoms = lists:filtermap(
+                        fun
+                            (Bin) when is_binary(Bin) ->
+                                %% Old format: just the module name
+                                case safe_existing_atom(Bin) of
+                                    undefined -> false;
+                                    Atom -> {true, {Atom, undefined}}
+                                end;
+                            (#{<<"name">> := NameBin} = Entry) ->
+                                %% New format: #{name, source}
+                                case safe_existing_atom(NameBin) of
+                                    undefined ->
+                                        false;
+                                    Atom ->
+                                        Source =
+                                            case maps:get(<<"source">>, Entry, null) of
+                                                null -> undefined;
+                                                S when is_binary(S) -> binary_to_list(S)
+                                            end,
+                                        {true, {Atom, Source}}
+                                end;
+                            (_) ->
+                                false
+                        end,
+                        Modules
+                    ),
 
                     %% Restore timestamps and project path if present
                     CreatedAt =
@@ -415,7 +442,7 @@ load_metadata_from_disk(State) ->
                         last_activity = LastActive,
                         % Always start fresh
                         supervised_actors = [],
-                        loaded_modules = ModuleAtoms
+                        loaded_modules = maps:from_list(ModuleAtoms)
                     }
             catch
                 % Failed to parse, use default
@@ -458,8 +485,15 @@ persist_metadata_to_disk(State) ->
          || P <- State#state.supervised_actors
         ],
         <<"loaded_modules">> => [
-            atom_to_binary(M, utf8)
-         || M <- State#state.loaded_modules
+            #{
+                <<"name">> => atom_to_binary(M, utf8),
+                <<"source">> =>
+                    case S of
+                        undefined -> null;
+                        _ -> list_to_binary(S)
+                    end
+            }
+         || {M, S} <- maps:to_list(State#state.loaded_modules)
         ]
     },
 

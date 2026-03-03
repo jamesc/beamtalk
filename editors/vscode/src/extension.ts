@@ -16,7 +16,12 @@ import {
 import { InspectorPanel } from "./inspectorPanel";
 import { TranscriptViewProvider } from "./transcriptView";
 import { WorkspaceClient } from "./workspaceClient";
-import type { ActorItemNode, BindingItemNode, MethodItemNode } from "./workspaceTreeView";
+import type {
+  ActorItemNode,
+  BindingItemNode,
+  ClassItemNode,
+  MethodItemNode,
+} from "./workspaceTreeView";
 import { WorkspaceTreeDataProvider } from "./workspaceTreeView";
 
 let client: LanguageClient | undefined;
@@ -728,9 +733,41 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("beamtalk.reloadClass", (_node) => {
-      // Class reload requires Phase 2 (method browser).
-      void vscode.window.showInformationMessage("Reload class: not yet connected to a workspace.");
+    vscode.commands.registerCommand("beamtalk.openClassSource", async (node?: ClassItemNode) => {
+      const sourceFile = node?.info.source_file;
+      if (!sourceFile || sourceFile === "unknown") {
+        await vscode.window.showInformationMessage("Source not available for this class.");
+        return;
+      }
+      const uri = vscode.Uri.file(sourceFile);
+      try {
+        await vscode.window.showTextDocument(uri);
+      } catch {
+        await vscode.window.showInformationMessage(`Could not open source: ${sourceFile}`);
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.reloadClass", async (node?: ClassItemNode) => {
+      if (!workspaceWsClient) {
+        await vscode.window.showInformationMessage("Not connected to a Beamtalk workspace.");
+        return;
+      }
+      const sourceFile = node?.info.source_file;
+      if (!sourceFile || sourceFile === "unknown") {
+        await vscode.window.showInformationMessage("Source not available for this class.");
+        return;
+      }
+      try {
+        const result = await workspaceWsClient.reload(sourceFile);
+        const names = result.classes.map((c) => c.name).join(", ");
+        const warningText = result.warnings.length > 0 ? ` (${result.warnings.join("; ")})` : "";
+        await vscode.window.showInformationMessage(`Reloaded: ${names}${warningText}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await vscode.window.showErrorMessage(`Reload failed: ${msg}`);
+      }
     })
   );
 

@@ -305,7 +305,7 @@ register_module_test() ->
 
     {ok, Modules} = beamtalk_workspace_meta:loaded_modules(),
     ?assertEqual(InitialCount + 1, length(Modules)),
-    ?assert(lists:member(ModuleName, Modules)),
+    ?assert(lists:keymember(ModuleName, 1, Modules)),
 
     %% Registering same module again should not duplicate
     ok = beamtalk_workspace_meta:register_module(ModuleName),
@@ -390,6 +390,7 @@ persist_and_restore_modules_test() ->
         created_at => 1000000
     }),
     ok = beamtalk_workspace_meta:register_module(lists),
+    ok = beamtalk_workspace_meta:register_module(maps, "/tmp/src/maps_test.bt"),
     %% Wait for debounce timer to fire
     timer:sleep(2500),
     gen_server:stop(Pid1),
@@ -406,7 +407,11 @@ persist_and_restore_modules_test() ->
     }),
 
     {ok, Modules} = beamtalk_workspace_meta:loaded_modules(),
-    ?assert(lists:member(lists, Modules)),
+    ?assert(lists:keymember(lists, 1, Modules)),
+    %% Source path should survive the persist/restore round-trip
+    ?assertEqual({maps, "/tmp/src/maps_test.bt"}, lists:keyfind(maps, 1, Modules)),
+    %% Module registered without source should have undefined
+    ?assertEqual({lists, undefined}, lists:keyfind(lists, 1, Modules)),
 
     %% Actors should NOT be restored (always fresh)
     ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
@@ -499,9 +504,9 @@ debounce_coalesces_rapid_changes_test() ->
     %% All 3 should be in state immediately
     timer:sleep(50),
     {ok, Modules} = beamtalk_workspace_meta:loaded_modules(),
-    ?assert(lists:member(Mod1, Modules)),
-    ?assert(lists:member(Mod2, Modules)),
-    ?assert(lists:member(Mod3, Modules)),
+    ?assert(lists:keymember(Mod1, 1, Modules)),
+    ?assert(lists:keymember(Mod2, 1, Modules)),
+    ?assert(lists:keymember(Mod3, 1, Modules)),
 
     %% Wait for debounce to fire (2s from LAST change, not first)
     timer:sleep(2500),
@@ -511,9 +516,10 @@ debounce_coalesces_rapid_changes_test() ->
     {ok, Binary} = file:read_file(MetaFile),
     Map = jsx:decode(Binary, [return_maps]),
     PersistedModules = maps:get(<<"loaded_modules">>, Map, []),
-    ?assert(lists:member(atom_to_binary(Mod1, utf8), PersistedModules)),
-    ?assert(lists:member(atom_to_binary(Mod2, utf8), PersistedModules)),
-    ?assert(lists:member(atom_to_binary(Mod3, utf8), PersistedModules)),
+    PersistedNames = [maps:get(<<"name">>, E) || E <- PersistedModules, is_map(E)],
+    ?assert(lists:member(atom_to_binary(Mod1, utf8), PersistedNames)),
+    ?assert(lists:member(atom_to_binary(Mod2, utf8), PersistedNames)),
+    ?assert(lists:member(atom_to_binary(Mod3, utf8), PersistedNames)),
 
     %% Cleanup
     gen_server:stop(Pid),
