@@ -246,6 +246,17 @@ pub(super) fn generate_adr_docs(
         return Ok(Vec::new());
     }
 
+    // Build intra-ADR "ADR NNNN" → link pairs (same directory — no ../adr/ prefix).
+    let intra_links: Vec<(String, String)> = adrs
+        .iter()
+        .map(|a| {
+            (
+                format!("ADR {}", a.number),
+                format!("[ADR {}]({})", a.number, a.output_file),
+            )
+        })
+        .collect();
+
     // Render each ADR page
     for adr in &adrs {
         let source_path = adr_source.join(format!("{}.md", adr.slug));
@@ -253,7 +264,11 @@ pub(super) fn generate_adr_docs(
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to read ADR '{}'", adr.slug))?;
         // Rewrite within-ADR links: sibling .md → .html (same directory)
-        let content = rewrite_adr_internal_links(&content, &adrs);
+        let mut content = rewrite_adr_internal_links(&content, &adrs);
+        // Rewrite "ADR NNNN" references to links (outside code fences and brackets)
+        for (source, dest) in &intra_links {
+            content = rewrite_outside_code_fences(&content, source, dest);
+        }
         render_adr_page(adr, &adrs, &content, &adr_output)?;
     }
 
