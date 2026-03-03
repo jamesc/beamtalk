@@ -117,21 +117,33 @@ pub(super) fn wait_for_epmd_deregistration(node_name: &str, timeout_secs: u64) -
     let short_name = node_name.split('@').next().unwrap_or(node_name);
     let interval = Duration::from_millis(100);
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+    let mut last_query_err: Option<String> = None;
 
     while std::time::Instant::now() < deadline {
         match query_epmd_names() {
             Ok(names) if !names.iter().any(|n| n == short_name) => return Ok(()),
-            Ok(_) => {}
-            Err(_) => return Ok(()), // unexpected error — assume epmd gone
+            Ok(_) => {
+                last_query_err = None;
+            }
+            Err(e) => {
+                // Transient error (e.g. TCP reset) — keep polling rather than
+                // treating the failure as absence. Only explicit absence is success.
+                last_query_err = Some(e.to_string());
+            }
         }
         std::thread::sleep(interval);
     }
 
-    Err(miette!(
-        "Node '{}' still registered in epmd after {}s",
-        short_name,
-        timeout_secs
-    ))
+    if let Some(e) = last_query_err {
+        Err(miette!(
+            "Timed out waiting for '{short_name}' to deregister from epmd after \
+             {timeout_secs}s (last query error: {e})"
+        ))
+    } else {
+        Err(miette!(
+            "Node '{short_name}' still registered in epmd after {timeout_secs}s"
+        ))
+    }
 }
 
 /// Check whether a workspace's startup log indicates an epmd name-conflict failure.

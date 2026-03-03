@@ -1402,10 +1402,21 @@ mod tests {
                 let mut exit_code: u32 = 0;
                 // SAFETY: handle is valid, exit_code is a local variable.
                 let ok = unsafe { GetExitCodeProcess(handle, &raw mut exit_code) };
+                // Capture the OS error *before* CloseHandle, which may clobber GetLastError.
+                let query_err = if ok == FALSE {
+                    Some(std::io::Error::last_os_error())
+                } else {
+                    None
+                };
                 // SAFETY: handle is valid, obtained from OpenProcess above.
                 unsafe { CloseHandle(handle) };
                 assert!(
-                    ok == FALSE || exit_code != STILL_ACTIVE as u32,
+                    query_err.is_none(),
+                    "GetExitCodeProcess failed: {}",
+                    query_err.unwrap()
+                );
+                assert_ne!(
+                    exit_code, STILL_ACTIVE as u32,
                     "Process should have been killed"
                 );
             }
