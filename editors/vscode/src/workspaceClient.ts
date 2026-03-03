@@ -241,6 +241,29 @@ export class WorkspaceClient {
     return resp.sessions ?? [];
   }
 
+  /**
+   * Reload a class from its source file.
+   *
+   * Sends `{ op: "reload", path }` which recompiles the file and hot-reloads
+   * any running actors of the affected class(es).
+   *
+   * @param sourcePath  Absolute path to the `.bt` source file.
+   */
+  async reload(sourcePath: string): Promise<{ classes: ClassInfo[]; warnings: string[] }> {
+    const resp = (await this._request({ op: "reload", path: sourcePath })) as {
+      classes?: Array<{ name: string; source_file?: string; actor_count?: number }>;
+      warnings?: string[];
+    };
+    return {
+      classes: (resp.classes ?? []).map((c) => ({
+        name: c.name,
+        source_file: c.source_file,
+        actor_count: c.actor_count,
+      })),
+      warnings: resp.warnings ?? [],
+    };
+  }
+
   // ─── Events ──────────────────────────────────────────────────────────────
 
   /**

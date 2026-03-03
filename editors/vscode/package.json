@@ -89,6 +89,11 @@
         "command": "beamtalk.navigateToMethod",
         "title": "Go to Definition",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "beamtalk.openClassSource",
+        "title": "Open Source",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
@@ -141,14 +146,19 @@
           "group": "beamtalk@1"
         },
         {
-          "command": "beamtalk.reloadClass",
+          "command": "beamtalk.openClassSource",
           "when": "view == beamtalk.workspaceExplorer && viewItem == class-item",
           "group": "inline"
         },
         {
-          "command": "beamtalk.reloadClass",
+          "command": "beamtalk.openClassSource",
           "when": "view == beamtalk.workspaceExplorer && viewItem == class-item",
           "group": "beamtalk@1"
+        },
+        {
+          "command": "beamtalk.reloadClass",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == class-item",
+          "group": "beamtalk@2"
         },
         {
           "command": "beamtalk.navigateToMethod",
@@ -254,6 +264,8 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "biome lint src/",
     "format": "biome format --write src/",
     "format:check": "biome format src/"
@@ -269,6 +281,7 @@
     "@types/ws": "^8.0.0",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.25.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
   }
 }

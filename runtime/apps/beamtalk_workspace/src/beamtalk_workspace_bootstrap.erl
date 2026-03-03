@@ -363,13 +363,29 @@ activate_project_module(ModuleName) ->
     case code:ensure_loaded(ModuleName) of
         {module, ModuleName} ->
             try_register_class(ModuleName),
-            beamtalk_workspace_meta:register_module(ModuleName),
+            SourcePath = extract_source_path(ModuleName),
+            beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
             ?LOG_DEBUG("Bootstrap: activated project module", #{module => ModuleName});
         {error, Reason} ->
             ?LOG_WARNING(
                 "Bootstrap: failed to load project module",
                 #{module => ModuleName, reason => Reason}
             )
+    end.
+
+%% @private Extract the .bt source file path from the module's beamtalk_source attribute.
+%% The compiler embeds `beamtalk_source = ["path/to/file.bt"]` in every user module
+%% (BT-845/BT-860). Returns undefined for stdlib modules or older compiled modules.
+-spec extract_source_path(module()) -> string() | undefined.
+extract_source_path(ModuleName) ->
+    try
+        Attrs = ModuleName:module_info(attributes),
+        case proplists:get_value(beamtalk_source, Attrs) of
+            [Path] when is_list(Path) -> Path;
+            _ -> undefined
+        end
+    catch
+        _:_ -> undefined
     end.
 
 %% @private Call register_class/0 on a module if it exports one.

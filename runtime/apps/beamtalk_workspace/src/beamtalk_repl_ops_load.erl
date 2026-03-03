@@ -146,8 +146,40 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
         end,
         TrackedModules
     ),
+    %% Merge workspace-level classes (bootstrap-activated) that are not in the
+    %% session tracker. These are loaded at startup via beamtalk_workspace_bootstrap
+    %% and registered in workspace_meta but never added to any session tracker.
+    WorkspaceExtra =
+        case beamtalk_workspace_meta:loaded_modules() of
+            {ok, WsMods} ->
+                TrackedSet = maps:from_list([{N, true} || {N, _} <- TrackedModules]),
+                lists:filtermap(
+                    fun({ModName, SourcePath}) ->
+                        case maps:is_key(ModName, TrackedSet) of
+                            true ->
+                                false;
+                            false ->
+                                Info = #{
+                                    name => atom_to_binary(ModName, utf8),
+                                    source_file =>
+                                        case SourcePath of
+                                            undefined -> "unknown";
+                                            _ -> SourcePath
+                                        end,
+                                    actor_count => 0,
+                                    load_time => 0,
+                                    time_ago => "startup"
+                                },
+                                {true, {ModName, Info}}
+                        end
+                    end,
+                    WsMods
+                );
+            _ ->
+                []
+        end,
     beamtalk_repl_protocol:encode_modules(
-        ModulesWithInfo, Msg, fun beamtalk_repl_json:term_to_json/1
+        ModulesWithInfo ++ WorkspaceExtra, Msg, fun beamtalk_repl_json:term_to_json/1
     ).
 
 %%% Internal helpers
