@@ -224,10 +224,12 @@ actor_methods_test_() ->
 
                 ActorClassPid = beamtalk_class_registry:whereis_class('Actor'),
 
-                %% spawn/spawnWith: are class-side methods (BT-1056)
+                %% spawn/spawnWith:/new/new: are class-side methods (BT-1056)
                 ClassMethods = beamtalk_object_class:local_class_methods(ActorClassPid),
                 ?assert(lists:member('spawn', ClassMethods)),
                 ?assert(lists:member('spawnWith:', ClassMethods)),
+                ?assert(lists:member('new', ClassMethods)),
+                ?assert(lists:member('new:', ClassMethods)),
 
                 %% stop/kill/isAlive are instance-side methods
                 InstanceMethods = beamtalk_object_class:methods(ActorClassPid),
@@ -235,8 +237,11 @@ actor_methods_test_() ->
                 ?assert(lists:member('kill', InstanceMethods)),
                 ?assert(lists:member('isAlive', InstanceMethods)),
 
-                %% spawn must NOT appear in instance methods
-                ?assertNot(lists:member('spawn', InstanceMethods))
+                %% spawn/spawnWith:/new/new: must NOT appear in instance methods
+                ?assertNot(lists:member('spawn', InstanceMethods)),
+                ?assertNot(lists:member('spawnWith:', InstanceMethods)),
+                ?assertNot(lists:member('new', InstanceMethods)),
+                ?assertNot(lists:member('new:', InstanceMethods))
             end)
         ]
     end}.
