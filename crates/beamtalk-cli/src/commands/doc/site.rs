@@ -114,6 +114,10 @@ fn prose_nav(active_file: &str, prose_pages: &[(&str, &str, &str)]) -> String {
 
 /// Rewrite cross-references between prose docs from `.md` to `.html`.
 ///
+/// When the source filename is used as both the link text and href
+/// (e.g. `[beamtalk-foo.md](beamtalk-foo.md)`), the display text is replaced
+/// with the human-readable page title instead of leaving `.html` visible.
+///
 /// Also applies `extra_links` rewrites (e.g. ADR source paths → rendered URLs).
 fn rewrite_prose_links(
     markdown: &str,
@@ -121,13 +125,43 @@ fn rewrite_prose_links(
     extra_links: &[(String, String)],
 ) -> String {
     let mut result = markdown.to_string();
-    for &(source_file, output_file, _) in prose_pages {
+    for &(source_file, output_file, title) in prose_pages {
+        // Replace full markdown links first so the display text becomes the title
+        let md_link = format!("[{source_file}]({source_file})");
+        let titled_link = format!("[{title}]({output_file})");
+        result = result.replace(&md_link, &titled_link);
+        // Replace any remaining bare filename references (e.g. in hrefs)
         result = result.replace(source_file, output_file);
     }
+    // Apply extra_links (e.g. ADR paths and ADR number references) only outside
+    // fenced code blocks, to avoid corrupting code examples.
     for (source, dest) in extra_links {
-        result = result.replace(source.as_str(), dest.as_str());
+        result = rewrite_outside_code_fences(&result, source, dest);
     }
     result
+}
+
+/// Replace `source` with `dest` in `text`, skipping content inside fenced code blocks.
+fn rewrite_outside_code_fences(text: &str, source: &str, dest: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_fence = false;
+    for line in text.split('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_fence = !in_fence;
+            out.push_str(line);
+        } else if in_fence {
+            out.push_str(line);
+        } else {
+            out.push_str(&line.replace(source, dest));
+        }
+        out.push('\n');
+    }
+    // split('\n') on a string not ending in '\n' adds an extra empty segment
+    if !text.ends_with('\n') && out.ends_with('\n') {
+        out.pop();
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +176,8 @@ struct AdrInfo {
     slug: String,
     /// Human title extracted from the H1, e.g. `"No Compound Assignment in Beamtalk"`.
     title: String,
+    /// Status line extracted from the `## Status` section, e.g. `"Implemented (2026-02-08)"`.
+    status: String,
     /// Output HTML filename, e.g. `"0001-no-compound-assignment.html"`.
     output_file: String,
 }
@@ -191,15 +227,20 @@ pub(super) fn generate_adr_docs(
 
     // Return link-rewriting pairs for prose doc rendering.
     // Prose pages live in /docs/, so the relative path to /adr/ is ../adr/.
-    let links = adrs
-        .iter()
-        .map(|a| {
-            (
-                format!("ADR/{}.md", a.slug),
-                format!("../adr/{}", a.output_file),
-            )
-        })
-        .collect();
+    // Two pairs per ADR:
+    //   1. Full filename (e.g. "ADR/0004-slug.md") → relative HTML path
+    //   2. Short reference (e.g. "ADR 0004") → markdown link with title
+    let mut links = Vec::new();
+    for a in &adrs {
+        links.push((
+            format!("ADR/{}.md", a.slug),
+            format!("../adr/{}", a.output_file),
+        ));
+        links.push((
+            format!("ADR {}", a.number),
+            format!("[ADR {}](../adr/{})", a.number, a.output_file),
+        ));
+    }
     Ok(links)
 }
 
@@ -224,10 +265,12 @@ fn discover_adrs(adr_source: &Utf8Path) -> Result<Vec<AdrInfo>> {
             }
             let content = fs::read_to_string(&path).ok()?;
             let title = extract_adr_title(&content);
+            let status = extract_adr_status(&content);
             Some(AdrInfo {
                 number,
                 slug: stem,
                 title,
+                status,
                 output_file: format!("{}.html", path.file_stem()?),
             })
         })
@@ -255,6 +298,28 @@ fn extract_adr_title(content: &str) -> String {
         }
     }
     String::from("Untitled ADR")
+}
+
+/// Extract the status from an ADR's `## Status` section (first non-empty line after it).
+fn extract_adr_status(content: &str) -> String {
+    let mut in_status = false;
+    for line in content.lines() {
+        if line.trim() == "## Status" {
+            in_status = true;
+            continue;
+        }
+        if in_status {
+            if line.starts_with('#') {
+                break;
+            }
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                // Return only up to the first " — " to keep it concise
+                return trimmed.split(" — ").next().unwrap_or(trimmed).to_string();
+            }
+        }
+    }
+    String::from("Unknown")
 }
 
 /// Rewrite sibling ADR links within an ADR page (`.md` → `.html`, same dir).
@@ -319,17 +384,26 @@ fn render_adr_index(adrs: &[AdrInfo], adr_output: &Utf8Path) -> Result<()> {
         "<p>Key design decisions with context, alternatives considered, \
          and consequences.</p>\n",
     );
-    html.push_str("<ul class=\"adr-list\">\n");
+    html.push_str(
+        "<table>\n\
+         <colgroup>\
+         <col style=\"width:5ch\">\
+         <col>\
+         <col style=\"width:18ch\">\
+         </colgroup>\n\
+         <thead>\n<tr><th>#</th><th>Decision</th><th>Status</th></tr>\n</thead>\n<tbody>\n",
+    );
     for adr in adrs {
         let _ = writeln!(
             html,
-            "<li><a href=\"{file}\">{num} — {title}</a></li>",
+            "<tr><td>{num}</td><td><a href=\"{file}\">{title}</a></td><td>{status}</td></tr>",
             file = adr.output_file,
             num = html_escape(&adr.number),
             title = html_escape(&adr.title),
+            status = html_escape(&adr.status),
         );
     }
-    html.push_str("</ul>\n");
+    html.push_str("</tbody>\n</table>\n");
     html.push_str("</main>\n");
     html.push_str(&page_footer_simple());
 
@@ -447,10 +521,10 @@ const LANDING_CODE_SNIPPET: &str = "Actor subclass: Counter
   increment => self.value := self.value + 1
   value => self.value
 
-c := Counter spawn.
-c increment.
-c increment.
-c value. \"=> 2\"";
+c := Counter spawn
+c increment
+c increment
+c value \"=> 2\"";
 
 /// Generate the site landing page at the root.
 pub(super) fn write_site_landing_page(
@@ -469,7 +543,12 @@ pub(super) fn write_site_landing_page(
 
     // Left column
     html.push_str("<div class=\"landing-hero-text\">\n");
-    html.push_str("<h1>Beamtalk</h1>\n");
+    html.push_str(
+        "<picture class=\"landing-logo\">\
+         <source srcset=\"images/beamtalk-logo-dark.svg\" media=\"(prefers-color-scheme: dark)\">\
+         <img src=\"images/beamtalk-logo-light.svg\" alt=\"Beamtalk\" height=\"64\">\
+         </picture>\n",
+    );
     html.push_str(
         "<p class=\"landing-tagline\">A live, message-based language built on the \
          BEAM VM. Smalltalk semantics, Erlang reliability, compiled to native \

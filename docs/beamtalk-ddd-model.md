@@ -104,80 +104,80 @@ A bounded context is an explicit boundary within which a domain model is defined
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         DEVELOPER MACHINE                            │
-│                                                                       │
+│                         DEVELOPER MACHINE                           │
+│                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐  │
-│  │              LANGUAGE SERVICE CONTEXT (Rust)                   │  │
+│  │              LANGUAGE SERVICE CONTEXT (Rust)                   │ │
 │  │  - Queries: Completions, Hover, Diagnostics                   │  │
 │  │  - Incremental: File cache, Query cache                       │  │
 │  │  - IDE Integration: LSP Protocol                              │  │
 │  └───────────────────────────────────────────────────────────────┘  │
-│                              ▲                                        │
-│                              │ uses                                   │
+│                              ▲                                      │
+│                              │ uses                                 │
 │  ┌───────────────────────────┴───────────────────────────────────┐  │
-│  │              COMPILER CONTEXT (Rust)                           │  │
-│  │  ┌────────────────┐  ┌────────────────┐  ┌─────────────────┐ │  │
-│  │  │ SOURCE         │→ │ SEMANTIC       │→ │ CODE            │ │  │
-│  │  │ ANALYSIS       │  │ ANALYSIS       │  │ GENERATION      │ │  │
-│  │  │ (Lexer/Parser) │  │ (Type/Name)    │  │ (Core Erlang)   │ │  │
-│  │  └────────────────┘  └────────────────┘  └─────────────────┘ │  │
+│  │              COMPILER CONTEXT (Rust)                           │ │
+│  │  ┌────────────────┐  ┌────────────────┐  ┌─────────────────┐ │   │
+│  │  │ SOURCE         │→ │ SEMANTIC       │→ │ CODE            │ │   │
+│  │  │ ANALYSIS       │  │ ANALYSIS       │  │ GENERATION      │ │   │
+│  │  │ (Lexer/Parser) │  │ (Type/Name)    │  │ (Core Erlang)   │ │   │
+│  │  └────────────────┘  └────────────────┘  └─────────────────┘ │   │
 │  └───────────────────────────────────────────────────────────────┘  │
-│                              │ produces                              │
-│                              ▼                                        │
-│                      [ .beam bytecode ]                               │
-└───────────────────────────────┼───────────────────────────────────────┘
+│                              │ produces                             │
+│                              ▼                                      │
+│                      [ .beam bytecode ]                             │
+└──────────────────────────────┼──────────────────────────────────────┘
                                 │ hot loads into
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         BEAM RUNTIME                                 │
-│                                                                       │
+│                         BEAM RUNTIME                                │
+│                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐  │
-│  │              OBJECT SYSTEM CONTEXT (Erlang)                    │  │
+│  │              OBJECT SYSTEM CONTEXT (Erlang)                    │ │
 │  │  - Class Registry: Global class metadata                      │  │
 │  │  - Instance Tracking: ETS-based instance registry             │  │
 │  │  - Method Dispatch: Super dispatch, DNU handling              │  │
 │  └───────────────────────────────────────────────────────────────┘  │
-│                              ▲                                        │
-│                              │ uses                                   │
+│                              ▲                                      │
+│                              │ uses                                 │
 │  ┌───────────────────────────┴───────────────────────────────────┐  │
-│  │              ACTOR SYSTEM CONTEXT (Erlang)                     │  │
-│  │  - Actor Lifecycle: spawn, init, terminate                     │  │
+│  │              ACTOR SYSTEM CONTEXT (Erlang)                     │ │
+│  │  - Actor Lifecycle: spawn, init, terminate                     │ │
 │  │  - Message Dispatch: async/sync routing                       │  │
 │  │  - State Management: Field maps with migration                │  │
 │  └───────────────────────────────────────────────────────────────┘  │
-│                              ▲                                        │
-│                              │ uses                                   │
+│                              ▲                                      │
+│                              │ uses                                 │
 │  ┌───────────────────────────┴───────────────────────────────────┐  │
-│  │              CONCURRENCY CONTEXT (Erlang)                      │  │
-│  │  - Future/Promise: Async result handling                       │  │
-│  │  - Process Monitors: Lifecycle tracking                        │  │
-│  │  - Supervision: Restart strategies                             │  │
+│  │              CONCURRENCY CONTEXT (Erlang)                      │ │
+│  │  - Future/Promise: Async result handling                       │ │
+│  │  - Process Monitors: Lifecycle tracking                        │ │
+│  │  - Supervision: Restart strategies                             │ │
 │  └───────────────────────────────────────────────────────────────┘  │
-│                                                                       │
+│                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐  │
-│  │              HOT RELOAD CONTEXT (Erlang)                       │  │
+│  │              HOT RELOAD CONTEXT (Erlang)                       │ │
 │  │  - Code Loading: BEAM code upgrade                            │  │
 │  │  - State Migration: code_change/3 callbacks                   │  │
 │  │  - Version Coexistence: Old/new code                          │  │
 │  └───────────────────────────────────────────────────────────────┘  │
-│                                                                       │
+│                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐  │
-│  │              WORKSPACE CONTEXT (Erlang)                        │  │
+│  │              WORKSPACE CONTEXT (Erlang)                        │ │
 │  │  - Lifecycle: detached BEAM node, idle cleanup                │  │
 │  │  - Supervision: ActorSupervisor, SessionSupervisor            │  │
 │  │  - Metadata: workspace_id, project_path, last_activity        │  │
 │  └───────────────────────────────────────────────────────────────┘  │
-│                              ▲                                        │
-│                              │ hosts                                  │
+│                              ▲                                      │
+│                              │ hosts                                │
 │  ┌───────────────────────────┴───────────────────────────────────┐  │
-│  │              REPL SESSION CONTEXT (Erlang)                     │  │
+│  │              REPL SESSION CONTEXT (Erlang)                     │ │
 │  │  - Expression Evaluation: On-demand compilation               │  │
 │  │  - Binding Management: Per-session variable state             │  │
 │  │  - Protocol: WebSocket JSON (nREPL-inspired)                  │  │
 │  └───────────────────────────────────────────────────────────────┘  │
-│                                                                       │
+│                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐  │
-│  │              BEAMTALK GLOBAL CONTEXT (Erlang)                  │  │
+│  │              BEAMTALK GLOBAL CONTEXT (Erlang)                  │ │
 │  │  - Façade over Workspace + Object System for user code        │  │
 │  │  - Runtime introspection: actors, modules, sessions           │  │
 │  │  - Project metadata: version, nodeName, projectPath           │  │
