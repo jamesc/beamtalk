@@ -5,16 +5,15 @@ import type * as vscode from "vscode";
 import type { PushEvent, WorkspaceClient } from "./workspaceClient";
 
 const MAX_LINES = 10_000;
-/** Trim the pre-resolve buffer to this many lines when MAX_LINES is exceeded. */
-const BUFFER_TRIM_TO = Math.floor(MAX_LINES * 0.9);
+const TRIM_TO = Math.floor(MAX_LINES * 0.9);
 
 /**
  * TranscriptViewProvider implements a sidebar WebviewView that streams live
  * Transcript output from the Beamtalk workspace (ADR 0046).
  *
- * Renders as an auto-scrolling `<pre>` with a clear button. Enforces a
- * max-lines cap of 10,000 lines to prevent unbounded DOM growth from runaway
- * actors writing to Transcript.
+ * Uses webview.html reassignment instead of postMessage to work correctly with
+ * workspace extensions in remote (WSL) environments where postMessage from the
+ * extension host to the webview is not bridged.
  *
  * Usage:
  *   const provider = new TranscriptViewProvider();
@@ -25,18 +24,13 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
   static readonly viewType = "beamtalk.transcript";
 
   private view: vscode.WebviewView | undefined;
-  /** Text chunks buffered before the WebviewView is first resolved. */
-  private readonly pendingChunks: string[] = [];
+  private accumText = "";
+  private lineCount = 0;
   private readonly disposeHandlers: Array<() => void> = [];
   private disposed = false;
 
   // ─── WebviewViewProvider ─────────────────────────────────────────────────
 
-  /**
-   * Called by VSCode when the view becomes visible for the first time (or is
-   * shown after being hidden). Initialises the webview HTML and replays any
-   * transcript output buffered while the view was not yet visible.
-   */
   resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext<unknown>,
@@ -46,26 +40,6 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
     webviewView.webview.options = { enableScripts: true };
     webviewView.webview.html = this._buildHtml();
 
-    // Replay any chunks buffered before the view was resolved.
-    if (this.pendingChunks.length > 0) {
-      const buffered = this.pendingChunks.join("");
-      this.pendingChunks.length = 0;
-      this.pendingLineCount = 0;
-      webviewView.webview.postMessage({ command: "append", text: buffered });
-    }
-
-    webviewView.webview.onDidReceiveMessage((msg: unknown) => {
-      if (
-        typeof msg === "object" &&
-        msg !== null &&
-        (msg as { command?: unknown }).command === "clear"
-      ) {
-        // The webview has already cleared its own DOM; just clear our buffer.
-        this.pendingChunks.length = 0;
-        this.pendingLineCount = 0;
-      }
-    });
-
     webviewView.onDidDispose(() => {
       this.view = undefined;
     });
@@ -73,10 +47,6 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
 
   // ─── Public API ──────────────────────────────────────────────────────────
 
-  /**
-   * Attach a WorkspaceClient to receive `transcript` push events.
-   * Pass null to detach (e.g. on workspace disconnect).
-   */
   setClient(client: WorkspaceClient | null): void {
     for (const d of this.disposeHandlers) d();
     this.disposeHandlers.length = 0;
@@ -91,11 +61,12 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
     this.disposeHandlers.push(dispose);
   }
 
-  /** Clear the transcript display and the internal pre-resolve buffer. */
   clear(): void {
-    this.pendingChunks.length = 0;
-    this.pendingLineCount = 0;
-    this.view?.webview.postMessage({ command: "clear" });
+    this.accumText = "";
+    this.lineCount = 0;
+    if (this.view) {
+      this.view.webview.html = this._buildHtml();
+    }
   }
 
   dispose(): void {
@@ -107,34 +78,30 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
 
   // ─── Private ─────────────────────────────────────────────────────────────
 
-  private pendingLineCount = 0;
-
   private _appendText(text: string): void {
+    this.accumText += text;
+    this.lineCount += (text.match(/\n/g) ?? []).length;
+
+    if (this.lineCount > MAX_LINES) {
+      const lines = this.accumText.split("\n");
+      const start = lines.length > TRIM_TO ? lines.length - TRIM_TO : 0;
+      const kept = lines.slice(start);
+      this.accumText = kept.join("\n");
+      this.lineCount = kept.length - 1;
+    }
+
     if (this.view) {
-      this.view.webview.postMessage({ command: "append", text });
-    } else {
-      this.pendingChunks.push(text);
-      // Count at least 1 per chunk so newline-free chunks (e.g. a long single
-      // line) still advance the counter and keep the buffer bounded.
-      this.pendingLineCount += Math.max(1, (text.match(/\n/g) || []).length);
-      // Apply the MAX_LINES cap to the pre-resolve buffer to bound extension-host
-      // memory if a runaway actor writes to Transcript before the panel is opened.
-      // Trim to BUFFER_TRIM_TO (90%) to amortise repeated join/split rebuilds.
-      if (this.pendingLineCount > MAX_LINES) {
-        const allLines = this.pendingChunks.join("").split("\n");
-        const startIdx = allLines.length > BUFFER_TRIM_TO ? allLines.length - BUFFER_TRIM_TO : 0;
-        const keep = allLines.slice(startIdx);
-        this.pendingChunks.length = 0;
-        this.pendingChunks.push(keep.join("\n"));
-        this.pendingLineCount = Math.max(0, keep.length - 1);
-      }
+      this.view.webview.html = this._buildHtml();
     }
   }
 
+  private _escapeHtml(text: string): string {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
   private _buildHtml(): string {
-    // MAX_LINES is inlined so the webview JS doesn't need a separate channel.
-    const maxLines = MAX_LINES;
-    const trimTo = Math.floor(maxLines * 0.9);
+    const content = this._escapeHtml(this.accumText);
+    const isEmpty = this.accumText.length === 0;
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -154,23 +121,6 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
       background: var(--vscode-sideBar-background);
       color: var(--vscode-sideBar-foreground);
     }
-    #toolbar {
-      display: flex;
-      justify-content: flex-end;
-      padding: 4px 6px;
-      border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
-      flex-shrink: 0;
-    }
-    button {
-      background: transparent;
-      border: 1px solid var(--vscode-button-border, transparent);
-      color: var(--vscode-icon-foreground);
-      cursor: pointer;
-      padding: 2px 6px;
-      border-radius: 2px;
-      font-size: 11px;
-    }
-    button:hover { background: var(--vscode-toolbar-hoverBackground); }
     #output {
       flex: 1;
       overflow-y: auto;
@@ -178,64 +128,26 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
       white-space: pre-wrap;
       word-break: break-all;
     }
-    #output:empty::before {
-      content: 'No transcript output yet.';
+    .empty {
       color: var(--vscode-disabledForeground);
       font-style: italic;
     }
   </style>
 </head>
 <body>
-  <div id="toolbar">
-    <button id="clearBtn" title="Clear transcript">Clear</button>
-  </div>
-  <pre id="output"></pre>
+  <pre id="output">${isEmpty ? '<span class="empty">No transcript output yet.</span>' : content}</pre>
   <script>
     (function () {
-      const vscode = acquireVsCodeApi();
-      const output = document.getElementById('output');
-      const MAX_LINES = ${maxLines};
-      const TRIM_TO = ${trimTo};
-      let lineCount = 0;
-      let autoScroll = true;
-
-      output.addEventListener('scroll', () => {
-        const atBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 10;
-        autoScroll = atBottom;
-      });
-
-      document.getElementById('clearBtn').addEventListener('click', () => {
-        output.textContent = '';
-        lineCount = 0;
-        autoScroll = true;
-        vscode.postMessage({ command: 'clear' });
-      });
-
-      window.addEventListener('message', (event) => {
-        const msg = event.data;
-        if (msg.command === 'append') {
-          // Count at least 1 per chunk so newline-free chunks still advance
-          // the counter and keep the DOM bounded.
-          lineCount += Math.max(1, (msg.text.match(/\n/g) || []).length);
-          output.appendChild(document.createTextNode(msg.text));
-
-          // Enforce max-lines cap: trim to TRIM_TO lines when cap is exceeded.
-          // Using a trim-to threshold amortises the cost of full DOM rebuilds.
-          if (lineCount > MAX_LINES) {
-            const allLines = output.textContent.split('\n');
-            const startIdx = allLines.length > TRIM_TO ? allLines.length - TRIM_TO : 0;
-            output.textContent = allLines.slice(startIdx).join('\n');
-            lineCount = TRIM_TO;
-          }
-
-          if (autoScroll) {
-            output.scrollTop = output.scrollHeight;
-          }
-        } else if (msg.command === 'clear') {
-          output.textContent = '';
-          lineCount = 0;
-          autoScroll = true;
-        }
+      const el = document.getElementById('output');
+      // Restore scroll: only auto-scroll if user was already at the bottom
+      // (or hasn't scrolled yet). Preserves the ability to scroll up to inspect.
+      const atBottom = sessionStorage.getItem('scrollAtBottom') !== 'false';
+      if (atBottom) {
+        el.scrollTop = el.scrollHeight;
+      }
+      el.addEventListener('scroll', () => {
+        const near = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
+        sessionStorage.setItem('scrollAtBottom', near ? 'true' : 'false');
       });
     }());
   </script>
