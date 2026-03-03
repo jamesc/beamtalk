@@ -37,16 +37,25 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
     // Re-check under lock — another process may have created the workspace
     // while we were waiting for the lock.
     if workspace_exists(workspace_id)? {
-        return get_workspace_metadata(workspace_id);
+        // If metadata is valid, return it. If it is corrupted/empty (e.g. from a
+        // crashed write), fall through to recreate the workspace metadata.
+        if let Ok(metadata) = get_workspace_metadata(workspace_id) {
+            return Ok(metadata);
+        }
     }
 
     // Create workspace directory
     let dir = workspace_dir(workspace_id)?;
     fs::create_dir_all(&dir).into_diagnostic()?;
 
-    // Generate and save cookie
-    let cookie = generate_cookie();
-    save_workspace_cookie(workspace_id, &cookie)?;
+    // Only generate a new cookie when one doesn't already exist. Preserving the
+    // existing cookie is important when recovering from corrupt metadata: a live
+    // node still holds the old cookie in memory, so overwriting it would break
+    // reconnection / authentication.
+    if !dir.join("cookie").exists() {
+        let cookie = generate_cookie();
+        save_workspace_cookie(workspace_id, &cookie)?;
+    }
 
     // Create metadata
     let now = SystemTime::now()

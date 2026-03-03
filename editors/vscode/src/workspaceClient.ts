@@ -44,6 +44,7 @@ export type PushEvent =
   | { channel: "actors"; event: "spawned"; data: ActorInfo }
   | { channel: "actors"; event: "stopped"; data: ActorStoppedInfo }
   | { channel: "classes"; event: "loaded"; data: { class: string } }
+  | { channel: "bindings"; event: "changed"; data: { session: string } }
   | { channel: "transcript"; text: string };
 
 // ─── WebSocket abstraction for testability ───────────────────────────────────
@@ -416,6 +417,12 @@ export class WorkspaceClient {
         channel: "classes",
         event: "loaded",
         data: { class: String(data.class ?? "") },
+      });
+    } else if (channel === "bindings" && event === "changed" && data) {
+      this._emitPush({
+        channel: "bindings",
+        event: "changed",
+        data: { session: String(data.session ?? "") },
       });
     }
   }

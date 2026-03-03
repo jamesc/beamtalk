@@ -120,8 +120,8 @@ export class WorkspaceTreeDataProvider
   private actors: ActorInfo[] = [];
   private classes: ClassInfo[] = [];
   private disposed = false;
-  /** REPL session ID captured from terminal output; used to query REPL bindings. */
-  private replSessionId: string | null = null;
+  /** Active session ID captured from terminal output; used to query session bindings. */
+  private sessionId: string | null = null;
 
   /** Cached inspect results keyed by "actor:<pid>". */
   private readonly inspectCache = new Map<string, Record<string, unknown>>();
@@ -139,20 +139,26 @@ export class WorkspaceTreeDataProvider
 
   // ─── Public API ──────────────────────────────────────────────────────────
 
-  /** The active REPL session ID, or null if no REPL session is running. */
-  get currentReplSessionId(): string | null {
-    return this.replSessionId;
+  /** The active session ID, or null if no session is running. */
+  get currentSessionId(): string | null {
+    return this.sessionId;
   }
 
   /**
-   * Set the REPL session ID captured from `beamtalk repl` stdout.
+   * Set the session ID captured from `beamtalk repl` stdout.
    * This session ID is used for bindings queries so the sidebar shows
-   * the REPL's variables rather than the extension's own (empty) session.
-   * Pass null to clear (e.g. when the REPL terminal is closed).
+   * the session's variables rather than the extension's own (empty) session.
+   * Pass null to clear (e.g. when the session terminal is closed).
    */
-  setReplSessionId(id: string | null): void {
-    this.replSessionId = id;
+  setSessionId(id: string | null): void {
+    const wasAttached = this.sessionId !== null;
+    this.sessionId = id;
     if (this.client && this.connectionState === "connected") {
+      const isAttached = id !== null;
+      if (isAttached !== wasAttached) {
+        // Bindings section appears or disappears — refresh the whole root.
+        this._onDidChangeTreeData.fire(CONNECTED_ROOT);
+      }
       void this.refreshBindings();
     }
   }
@@ -171,7 +177,7 @@ export class WorkspaceTreeDataProvider
     this.client = client;
 
     if (!client) {
-      this.replSessionId = null;
+      this.sessionId = null;
       this._resetState("disconnected");
       return;
     }
@@ -213,9 +219,9 @@ export class WorkspaceTreeDataProvider
       return;
     }
     const activeClient = this.client;
-    // Prefer the REPL session ID (for the user's variables) over the extension's
+    // Prefer the active session ID (for the user's variables) over the extension's
     // own WS session (which has no bindings — no code is eval'd through it).
-    const sessionId = this.replSessionId ?? activeClient.currentSessionId;
+    const sessionId = this.sessionId ?? activeClient.currentSessionId;
     if (!sessionId) {
       return;
     }
@@ -223,7 +229,7 @@ export class WorkspaceTreeDataProvider
       const nextBindings = await activeClient.bindings(sessionId);
       // Guard: client or connection may have changed while awaiting.
       // Re-derive the effective session ID to check for staleness.
-      const currentEffective = this.replSessionId ?? activeClient.currentSessionId;
+      const currentEffective = this.sessionId ?? activeClient.currentSessionId;
       if (
         this.client !== activeClient ||
         this.connectionState !== "connected" ||
@@ -296,7 +302,11 @@ export class WorkspaceTreeDataProvider
 
     switch (element.kind) {
       case "connected-root":
-        return [BINDINGS_SECTION, ACTORS_SECTION, CLASSES_SECTION];
+        return [
+          ...(this.sessionId !== null ? [BINDINGS_SECTION] : []),
+          ACTORS_SECTION,
+          CLASSES_SECTION,
+        ];
 
       case "bindings-section":
         return Object.entries(this.bindings)
@@ -569,8 +579,8 @@ export class WorkspaceTreeDataProvider
   /** Fetch bindings, actors, and classes from a newly-connected client. */
   private async _fetchInitialData(client: WorkspaceClient): Promise<void> {
     const gen = ++this.initialFetchGeneration;
-    // Prefer the REPL session ID (for the user's variables) over the extension's own WS session.
-    const sessionId = this.replSessionId ?? client.currentSessionId;
+    // Prefer the active session ID (for the user's variables) over the extension's own WS session.
+    const sessionId = this.sessionId ?? client.currentSessionId;
     const [bindingsResult, actorsResult, classesResult] = await Promise.allSettled([
       sessionId ? client.bindings(sessionId) : Promise.resolve<BindingsMap>({}),
       client.actors(),
@@ -584,10 +594,10 @@ export class WorkspaceTreeDataProvider
 
     if (bindingsResult.status === "fulfilled") {
       // Only apply bindings if the effective session ID hasn't changed while we
-      // were awaiting. If setReplSessionId() was called during the fetch, a
+      // were awaiting. If setSessionId() was called during the fetch, a
       // refreshBindings() call has already applied the correct bindings; applying
       // these (stale, empty-session) results would overwrite them incorrectly.
-      const currentEffectiveSession = this.replSessionId ?? client.currentSessionId;
+      const currentEffectiveSession = this.sessionId ?? client.currentSessionId;
       if (currentEffectiveSession === sessionId) {
         this.bindings = bindingsResult.value;
       }
@@ -603,7 +613,14 @@ export class WorkspaceTreeDataProvider
   }
 
   private _handlePush(event: PushEvent, client: WorkspaceClient): void {
-    if (event.channel === "actors") {
+    if (event.channel === "bindings" && event.event === "changed") {
+      // Server emits this after every successful eval — refresh only if the event
+      // belongs to the session we're currently tracking.
+      const effectiveSession = this.sessionId ?? client.currentSessionId;
+      if (!effectiveSession || event.data.session === effectiveSession) {
+        void this.refreshBindings();
+      }
+    } else if (event.channel === "actors") {
       if (event.event === "spawned") {
         // Guard against duplicate spawned events
         if (!this.actors.some((a) => a.pid === event.data.pid)) {

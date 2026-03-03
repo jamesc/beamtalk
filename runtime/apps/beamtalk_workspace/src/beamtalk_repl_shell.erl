@@ -268,6 +268,7 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, _State, {WorkerPid, Mo
     case Result of
         {ok, Value, Output, Warnings, NewState} ->
             reply_eval(From, {eval_done, Value, Output, Warnings}),
+            beamtalk_bindings_events:on_bindings_changed(SessionId),
             {noreply, {SessionId, NewState, undefined}};
         {error, Reason, Output, Warnings, NewState} ->
             reply_eval(From, {eval_error, Reason, Output, Warnings}),

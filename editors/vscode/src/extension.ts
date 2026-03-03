@@ -292,7 +292,11 @@ function computeWorkspaceId(projectRoot: string): string | null {
 
 /**
  * Find the project root for the current VS Code workspace.
- * Returns the first workspace folder that contains a `beamtalk.toml`.
+ * Prefers a workspace folder containing `beamtalk.toml`; falls back to the
+ * first workspace folder so the Workspace Explorer connects even in projects
+ * that haven't created a beamtalk.toml yet (e.g. when just running the REPL).
+ * The workspace ID hash check in handlePortFileAppeared still guards against
+ * connecting to an unrelated workspace.
  */
 function findProjectRoot(): string | null {
   const folders = vscode.workspace.workspaceFolders;
@@ -305,7 +309,7 @@ function findProjectRoot(): string | null {
       return folder.uri.fsPath;
     }
   }
-  return null;
+  return folders[0].uri.fsPath;
 }
 
 // ─── Auto-connect via port file watcher ──────────────────────────────────────
@@ -467,11 +471,11 @@ function setupAutoConnect(context: vscode.ExtensionContext): void {
 const SESSION_ID_PATTERN = /\[beamtalk\] session: (\S+)/;
 
 /**
- * Read chunks from a shell execution until the REPL session ID is found.
+ * Read chunks from a shell execution until the session ID is found.
  * Updates `workspaceTreeProvider` with the captured session ID so bindings
- * from the REPL session are shown in the sidebar.
+ * from the session are shown in the sidebar.
  */
-async function captureReplSessionId(
+async function captureSessionId(
   execution: vscode.TerminalShellExecution,
   terminal: vscode.Terminal
 ): Promise<void> {
@@ -484,12 +488,12 @@ async function captureReplSessionId(
       const match = SESSION_ID_PATTERN.exec(text);
       if (match) {
         const sessionId = match[1];
-        outputChannel?.info(`Captured REPL session ID: ${sessionId}`);
+        outputChannel?.info(`Captured session ID: ${sessionId}`);
         // Only act if this is still our active REPL terminal.
         if (replTerminal !== terminal) {
           break;
         }
-        workspaceTreeProvider?.setReplSessionId(sessionId);
+        workspaceTreeProvider?.setSessionId(sessionId);
         // Don't break — keep reading. The REPL may reconnect and emit a new
         // session ID (BT-1021); we need to pick up the updated value.
         tail = "";
@@ -532,7 +536,7 @@ function startReplCommand(context: vscode.ExtensionContext): void {
   if (terminal.shellIntegration) {
     // Shell integration is already active — use executeCommand so we can read output.
     const execution = terminal.shellIntegration.executeCommand("beamtalk repl");
-    void captureReplSessionId(execution, terminal);
+    void captureSessionId(execution, terminal);
   } else {
     // Shell integration not yet ready. Wait for it to become available, or fall
     // back to sendText after a timeout so the REPL always starts.
@@ -551,7 +555,7 @@ function startReplCommand(context: vscode.ExtensionContext): void {
         integrationDisposable.dispose();
         clearTimeout(fallbackTimer);
         const execution = shellIntegration.executeCommand("beamtalk repl");
-        void captureReplSessionId(execution, terminal);
+        void captureSessionId(execution, terminal);
       }
     );
     context.subscriptions.push(integrationDisposable);
@@ -586,8 +590,8 @@ function setupTerminalMonitoring(context: vscode.ExtensionContext): void {
         return;
       }
       replTerminal = undefined;
-      // Clear REPL session ID — bindings from the closed session are gone.
-      workspaceTreeProvider?.setReplSessionId(null);
+      // Clear session ID — bindings from the closed session are gone.
+      workspaceTreeProvider?.setSessionId(null);
       outputChannel?.info("Beamtalk REPL terminal closed; session bindings cleared.");
     })
   );
@@ -607,7 +611,7 @@ function setupTerminalMonitoring(context: vscode.ExtensionContext): void {
       if (!replTerminal || replTerminal.exitStatus !== undefined) {
         replTerminal = event.terminal;
       }
-      void captureReplSessionId(event.execution, event.terminal);
+      void captureSessionId(event.execution, event.terminal);
     })
   );
 }
@@ -682,7 +686,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
       const sessionId =
-        workspaceTreeProvider?.currentReplSessionId ?? workspaceWsClient?.currentSessionId ?? null;
+        workspaceTreeProvider?.currentSessionId ?? workspaceWsClient?.currentSessionId ?? null;
       InspectorPanel.show(workspaceWsClient ?? null, {
         kind: "binding",
         name: node.name,
