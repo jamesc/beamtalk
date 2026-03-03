@@ -5,14 +5,14 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Generates code for counted loop constructs: `repeat`, `timesRepeat:`,
-//! `to:do:`, and `to:by:do:`.
+//! Generates code for counted loop constructs: `repeat`, and mutation-threading
+//! variants of `timesRepeat:`, `to:do:`, and `to:by:do:`.
+//! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods (BT-1054).
 
 use std::fmt::Write;
 
 use super::super::document::Document;
-use super::super::intrinsics::validate_block_arity_exact;
-use super::super::{CoreErlangGenerator, Result, block_analysis};
+use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Block, Expression};
 use crate::docvec;
 
@@ -36,71 +36,6 @@ impl CoreErlangGenerator {
             body_code,
             format!(" in let _ = apply {body_var} () in apply '{loop_fn}'/0 () "),
             format!("in apply '{loop_fn}'/0 ()"),
-        ])
-    }
-
-    pub(in crate::codegen::core_erlang) fn generate_times_repeat(
-        &mut self,
-        receiver: &Expression,
-        body: &Expression,
-    ) -> Result<Document<'static>> {
-        // BT-493: Validate body block arity (must be 0-arg)
-        validate_block_arity_exact(
-            body,
-            0,
-            "timesRepeat:",
-            "Fix: Use a zero-arg block. If you need the iteration index, use to:do: instead:\n\
-             \x20 3 timesRepeat: [self doSomething]\n\
-             \x20 1 to: 3 do: [:i | self doSomethingWith: i]",
-        )?;
-
-        // Check if body is a literal block (enables mutation analysis)
-        if let Expression::Block(body_block) = body {
-            // Use mutations version if there are any writes (local or field)
-            // BT-153: Include local_writes only in REPL mode
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_times_repeat_with_mutations(receiver, body_block);
-            }
-        }
-
-        // Simple case: no mutations
-        self.generate_times_repeat_simple(receiver, body)
-    }
-
-    pub(in crate::codegen::core_erlang) fn generate_times_repeat_simple(
-        &mut self,
-        receiver: &Expression,
-        body: &Expression,
-    ) -> Result<Document<'static>> {
-        // Generate: let N = <receiver> in
-        //           let BodyFun = <body> in
-        //           letrec 'repeat'/1 = fun (I) ->
-        //               case call 'erlang':'=<'(I, N) of
-        //                 'true' -> let _ = apply BodyFun () in
-        //                           apply 'repeat'/1 (I+1)
-        //                 'false' -> 'nil'
-        //               end
-        //           in apply 'repeat'/1 (1)
-
-        let n_var = self.fresh_temp_var("temp");
-        let body_var = self.fresh_temp_var("BodyFun");
-        let receiver_code = self.expression_doc(receiver)?;
-        let body_code = self.expression_doc(body)?;
-
-        Ok(docvec![
-            format!("let {n_var} = "),
-            receiver_code,
-            format!(" in let {body_var} = "),
-            body_code,
-            " in letrec 'repeat'/1 = fun (I) -> ",
-            format!("case call 'erlang':'=<'(I, {n_var}) of "),
-            format!(
-                "<'true'> when 'true' -> let _ = apply {body_var} () in apply 'repeat'/1 (call 'erlang':'+'(I, 1)) "
-            ),
-            "<'false'> when 'true' -> 'nil' ",
-            "end ",
-            "in apply 'repeat'/1 (1)",
         ])
     }
 
@@ -264,77 +199,6 @@ impl CoreErlangGenerator {
         self.in_loop_body = previous_in_loop_body;
         self.set_state_version(saved_state_version);
         Ok((Document::Vec(docs), final_state_version))
-    }
-
-    pub(in crate::codegen::core_erlang) fn generate_to_do(
-        &mut self,
-        receiver: &Expression,
-        limit: &Expression,
-        body: &Expression,
-    ) -> Result<Document<'static>> {
-        // BT-493: Validate body block arity (must be 1-arg for iteration index)
-        validate_block_arity_exact(
-            body,
-            1,
-            "to:do:",
-            "Fix: The body block must take one argument (the iteration index):\n\
-             \x20 1 to: 10 do: [:i | i printString]",
-        )?;
-
-        // Check if body is a literal block (enables mutation analysis)
-        if let Expression::Block(body_block) = body {
-            // Use mutations version if there are any writes (local or field)
-            // BT-153: Include local_writes only in REPL mode
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_to_do_with_mutations(receiver, limit, body_block);
-            }
-        }
-
-        // Simple case: no mutations
-        self.generate_to_do_simple(receiver, limit, body)
-    }
-
-    pub(in crate::codegen::core_erlang) fn generate_to_do_simple(
-        &mut self,
-        receiver: &Expression,
-        limit: &Expression,
-        body: &Expression,
-    ) -> Result<Document<'static>> {
-        // Generate: let Start = <receiver> in let End = <limit> in
-        //           letrec 'loop'/1 = fun (I) ->
-        //               case I =< End of
-        //                 'true' -> let _ = apply <body>/1 (I) in
-        //                          apply 'loop'/1 (I+1)
-        //                 'false' -> 'nil'
-        //               end
-        //           in apply 'loop'/1 (Start)
-
-        let start_var = self.fresh_temp_var("temp");
-        let receiver_code = self.expression_doc(receiver)?;
-
-        let end_var = self.fresh_temp_var("temp");
-        let limit_code = self.expression_doc(limit)?;
-
-        let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
-
-        Ok(docvec![
-            format!("let {start_var} = "),
-            receiver_code,
-            format!(" in let {end_var} = "),
-            limit_code,
-            format!(" in let {body_var} = "),
-            body_code,
-            " in letrec 'loop'/1 = fun (I) -> ",
-            format!("case call 'erlang':'=<'(I, {end_var}) of "),
-            "<'true'> when 'true' -> ",
-            format!("let _ = apply {body_var} (I) in "),
-            "apply 'loop'/1 (call 'erlang':'+'(I, 1)) ",
-            "<'false'> when 'true' -> 'nil' ",
-            "end ",
-            format!("in apply 'loop'/1 ({start_var})"),
-        ])
     }
 
     pub(in crate::codegen::core_erlang) fn generate_to_do_with_mutations(
@@ -522,102 +386,6 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         Ok((Document::Vec(docs), final_state_version))
-    }
-
-    /// Generates code for `to:by:do:` iteration with custom step.
-    ///
-    /// Handles both positive and negative steps:
-    /// - Positive step: iterate while I <= End
-    /// - Negative step: iterate while I >= End
-    /// - Step of 0: Returns 'nil' immediately (prevents infinite loop)
-    ///
-    /// # Safety
-    ///
-    /// The generated condition ensures that a step of 0 will not execute,
-    /// preventing infinite loops.
-    pub(in crate::codegen::core_erlang) fn generate_to_by_do(
-        &mut self,
-        receiver: &Expression,
-        limit: &Expression,
-        step: &Expression,
-        body: &Expression,
-    ) -> Result<Document<'static>> {
-        // BT-493: Validate body block arity (must be 1-arg for iteration index)
-        validate_block_arity_exact(
-            body,
-            1,
-            "to:by:do:",
-            "Fix: The body block must take one argument (the iteration index):\n\
-             \x20 1 to: 10 by: 2 do: [:i | i printString]",
-        )?;
-
-        // Check if body is a literal block (enables mutation analysis)
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_to_by_do_with_mutations(receiver, limit, step, body_block);
-            }
-        }
-
-        // Simple case: no mutations
-        self.generate_to_by_do_simple(receiver, limit, step, body)
-    }
-
-    pub(in crate::codegen::core_erlang) fn generate_to_by_do_simple(
-        &mut self,
-        receiver: &Expression,
-        limit: &Expression,
-        step: &Expression,
-        body: &Expression,
-    ) -> Result<Document<'static>> {
-        // Generate: let Start = <receiver> in let End = <limit> in let Step = <step> in
-        //           letrec 'loop'/1 = fun (I) ->
-        //               case (Step > 0 andalso I =< End) orelse (Step < 0 andalso I >= End) of
-        //                 'true' -> let _ = apply <body>/1 (I) in
-        //                          apply 'loop'/1 (I + Step)
-        //                 'false' -> 'nil'
-        //               end
-        //           in apply 'loop'/1 (Start)
-
-        let start_var = self.fresh_temp_var("temp");
-        let receiver_code = self.expression_doc(receiver)?;
-
-        let end_var = self.fresh_temp_var("temp");
-        let limit_code = self.expression_doc(limit)?;
-
-        let step_var = self.fresh_temp_var("temp");
-        let step_code = self.expression_doc(step)?;
-
-        let body_var = self.fresh_temp_var("temp");
-        let body_code = self.expression_doc(body)?;
-
-        // Generate condition: (Step > 0 andalso I =< End) orelse (Step < 0 andalso I >= End)
-        // Use nested case statements since andalso/orelse aren't BIFs
-        Ok(docvec![
-            format!("let {start_var} = "),
-            receiver_code,
-            format!(" in let {end_var} = "),
-            limit_code,
-            format!(" in let {step_var} = "),
-            step_code,
-            format!(" in let {body_var} = "),
-            body_code,
-            " in letrec 'loop'/1 = fun (I) -> ",
-            format!("let Continue = case call 'erlang':'>'({step_var}, 0) of "),
-            format!("<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "),
-            "<'false'> when 'true' -> ",
-            format!("case call 'erlang':'<'({step_var}, 0) of "),
-            format!("<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "),
-            "<'false'> when 'true' -> 'false' ",
-            "end ",
-            "end in case Continue of ",
-            "<'true'> when 'true' -> ",
-            format!("let _ = apply {body_var} (I) in "),
-            format!("apply 'loop'/1 (call 'erlang':'+'(I, {step_var})) "),
-            "<'false'> when 'true' -> 'nil' ",
-            "end ",
-            format!("in apply 'loop'/1 ({start_var})"),
-        ])
     }
 
     pub(in crate::codegen::core_erlang) fn generate_to_by_do_with_mutations(
