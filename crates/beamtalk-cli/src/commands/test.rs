@@ -628,6 +628,16 @@ fn canonical_path(p: &Utf8Path) -> Utf8PathBuf {
         .unwrap_or_else(|| p.to_owned())
 }
 
+/// Walk from `path` to its package root (via `find_package_root`) and return the
+/// canonical (absolute, symlink-resolved) form of that root.
+///
+/// All map keys in `pkg_class_indexes` and `pkg_root_to_name` are canonicalized at
+/// build time, so every lookup into those maps must go through this function to
+/// guarantee path-shape consistency (relative vs absolute, symlinked paths).
+fn canonical_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
+    find_package_root(path).map(|r| canonical_path(&r))
+}
+
 /// Walk up from `path` to find the nearest ancestor directory containing `beamtalk.toml`.
 ///
 /// If `path` is a file, starts at its parent directory. If `path` is a directory,
@@ -659,9 +669,8 @@ fn class_index_for_file(
     merged_class_index: &HashMap<String, String>,
     merged_super_index: &HashMap<String, String>,
 ) -> (HashMap<String, String>, HashMap<String, String>) {
-    let (base_class, base_super) = find_package_root(test_file)
-        .as_ref()
-        .and_then(|r| pkg_class_indexes.get(r))
+    let (base_class, base_super) = canonical_package_root(test_file)
+        .and_then(|r| pkg_class_indexes.get(&r))
         .map_or_else(
             || (merged_class_index.clone(), merged_super_index.clone()),
             |(c, s)| (c.clone(), s.clone()),
@@ -989,8 +998,7 @@ pub fn run_tests(path: &str) -> Result<()> {
 
         // Walk up from each test file to find its package root
         for test_file in &test_files {
-            if let Some(root) = find_package_root(test_file) {
-                let root = canonical_path(&root);
+            if let Some(root) = canonical_package_root(test_file) {
                 if seen.insert(root.clone()) {
                     roots.push(root);
                 }
@@ -1107,9 +1115,8 @@ pub fn run_tests(path: &str) -> Result<()> {
         // Single-package runs are unaffected (no prefix added when only one package
         // is discovered), preserving backwards-compatible module names.
         if discovered_packages.len() > 1 {
-            let pkg_name_slug = find_package_root(test_file)
-                .as_ref()
-                .and_then(|r| pkg_root_to_name.get(r))
+            let pkg_name_slug = canonical_package_root(test_file)
+                .and_then(|r| pkg_root_to_name.get(&r))
                 .map(|n| beamtalk_core::codegen::core_erlang::to_module_name(n));
 
             if let Some(ref prefix) = pkg_name_slug {
@@ -1791,9 +1798,8 @@ mod tests {
             assert_eq!(test_classes[0].module_name, "bt@smoke_test");
 
             // Apply multi-package prefix (mirrors run_tests logic)
-            let pkg_name_slug = find_package_root(file)
-                .as_ref()
-                .and_then(|r| pkg_root_to_name.get(r))
+            let pkg_name_slug = canonical_package_root(file)
+                .and_then(|r| pkg_root_to_name.get(&r))
                 .map(|n| beamtalk_core::codegen::core_erlang::to_module_name(n));
 
             if let Some(ref prefix) = pkg_name_slug {
