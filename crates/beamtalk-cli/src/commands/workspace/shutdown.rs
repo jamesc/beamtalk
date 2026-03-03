@@ -18,8 +18,8 @@ use miette::{IntoDiagnostic, Result, miette};
 use super::discovery;
 use super::node_state::{TCP_READ_TIMEOUT_MS, is_node_running};
 use super::storage::{
-    cleanup_stale_node_info, generate_workspace_id, get_node_info, read_workspace_cookie,
-    workspace_exists,
+    acquire_workspace_lock, cleanup_stale_node_info, generate_workspace_id, get_node_info,
+    read_workspace_cookie, workspace_exists,
 };
 use crate::commands::protocol::ProtocolClient;
 
@@ -174,6 +174,12 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
         super::lifecycle::find_workspace_by_project_path(&project_root)?
             .unwrap_or(generate_workspace_id(&project_root)?)
     };
+
+    // Serialize stop with create/start operations on the same workspace.
+    // Prevents a concurrent get_or_start_workspace from observing "not running"
+    // and starting a new node while stop is still draining or cleaning up.
+    // Released when `_lock` is dropped at end of scope (including error paths).
+    let _lock = acquire_workspace_lock(&workspace_id)?;
 
     if !workspace_exists(&workspace_id)? {
         return Err(match name_or_id {
