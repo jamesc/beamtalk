@@ -54,18 +54,25 @@ pub mod cli;
 pub mod discovery;
 /// epmd client: TCP NAMES_REQ protocol, deregistration polling, conflict detection.
 mod epmd;
-/// Workspace lifecycle operations: create, start, stop, list, status.
+/// Workspace lifecycle operations: create, start, list, status.
 mod lifecycle;
-/// Process management for workspace BEAM nodes.
+/// Node liveness queries: OS process checks, port-file nonce validation, health probes.
+mod node_state;
+/// Workspace node startup sequence.
 mod process;
+/// Workspace shutdown orchestration: graceful TCP shutdown, force-kill, exit polling.
+mod shutdown;
+/// BEAM node command construction for workspace startup.
+mod startup_command;
 /// File I/O operations for workspace metadata, cookies, and node information.
 pub mod storage;
 
 pub use lifecycle::{
     WorkspaceStatus, WorkspaceSummary, create_workspace, get_or_start_workspace, list_workspaces,
-    resolve_workspace_id, stop_workspace, workspace_status,
+    resolve_workspace_id, workspace_status,
 };
-pub use process::is_node_running;
+pub use node_state::is_node_running;
+pub use shutdown::stop_workspace;
 pub use storage::{
     cleanup_stale_node_info, get_node_info, get_workspace_metadata, read_workspace_cookie,
     workspace_exists, workspace_id_for,
@@ -86,7 +93,8 @@ pub fn workspace_id_for_project(
 mod tests {
     use super::epmd::wait_for_epmd_deregistration;
     use super::lifecycle::{WorkspaceStatus, find_workspace_by_project_path, resolve_workspace_id};
-    use super::process::{force_kill_process, start_detached_node, wait_for_workspace_exit};
+    use super::process::start_detached_node;
+    use super::shutdown::{force_kill_process, wait_for_workspace_exit};
     #[cfg(target_os = "linux")]
     use super::storage::read_proc_start_time;
     use super::storage::{

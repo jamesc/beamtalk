@@ -20,15 +20,13 @@ use super::epmd::{
     EPMD_CONFLICT_DEREGISTER_TIMEOUT_SECS, EPMD_CONFLICT_MAX_RETRIES,
     EPMD_CONFLICT_RETRY_INTERVAL_MS, is_epmd_name_conflict, wait_for_epmd_deregistration,
 };
-use super::process::{
-    force_kill_process, is_node_running, start_detached_node, tcp_send_shutdown,
-    wait_for_workspace_exit,
-};
+use super::node_state::is_node_running;
+use super::process::start_detached_node;
 use super::storage::{
     NodeInfo, WorkspaceMetadata, acquire_workspace_lock, cleanup_stale_node_info, generate_cookie,
-    generate_workspace_id, get_node_info, get_workspace_metadata, read_workspace_cookie,
-    save_workspace_cookie, save_workspace_metadata, validate_workspace_name, workspace_dir,
-    workspace_exists, workspace_id_for, workspaces_base_dir,
+    generate_workspace_id, get_node_info, get_workspace_metadata, save_workspace_cookie,
+    save_workspace_metadata, validate_workspace_name, workspace_dir, workspace_exists,
+    workspace_id_for, workspaces_base_dir,
 };
 
 /// Inner logic for workspace creation, called under an already-held lock.
@@ -273,123 +271,6 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
     summaries.sort_unstable_by(|a, b| a.workspace_id.cmp(&b.workspace_id));
 
     Ok(summaries)
-}
-
-/// Stop a workspace by name or ID.
-///
-/// If `name_or_id` is `None`, attempts to find the workspace for the current directory.
-///
-/// Uses TCP shutdown (graceful OTP teardown via `init:stop()`) as primary
-/// mechanism. Falls back to OS-level force-kill if `force` is true or if
-/// graceful shutdown times out.
-pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
-    // Resolve workspace ID
-    let workspace_id = if let Some(name) = name_or_id {
-        resolve_workspace_id(name)?
-    } else {
-        let cwd = std::env::current_dir().into_diagnostic()?;
-        let project_root = discovery::discover_project_root(&cwd);
-        find_workspace_by_project_path(&project_root)?
-            .unwrap_or(generate_workspace_id(&project_root)?)
-    };
-
-    if !workspace_exists(&workspace_id)? {
-        return Err(match name_or_id {
-            Some(name) => miette!("Workspace '{name}' does not exist"),
-            None => miette!(
-                "No workspace found for current directory. Specify a name: beamtalk workspace stop <name>"
-            ),
-        });
-    }
-
-    let node_info = get_node_info(&workspace_id)?;
-
-    match node_info {
-        Some(info) if is_node_running(&info, Some(&workspace_id)) => {
-            let host = info.connect_host();
-            if force {
-                // Force-kill: skip graceful shutdown, go straight to OS kill.
-                // On Windows PID may be 0 (sentinel) — fall back to graceful.
-                if info.pid == 0 {
-                    return Err(miette!(
-                        "Force-kill is not available (process ID unknown). \
-                         Use graceful shutdown instead (omit --force)."
-                    ));
-                }
-                force_kill_process(info.pid)?;
-                // Ensure the node has actually released its port before returning.
-                wait_for_workspace_exit(host, info.port, 5).map_err(|_| {
-                    miette!(
-                        "Workspace did not release port {} within 5s after forced stop. \
-                         It may still be shutting down; retry shortly.",
-                        info.port
-                    )
-                })?;
-            } else {
-                eprintln!(
-                    "Stopping workspace '{workspace_id}' (port {})...",
-                    info.port
-                );
-
-                // Try graceful TCP shutdown first
-                let cookie = read_workspace_cookie(&workspace_id)?;
-                match tcp_send_shutdown(host, info.port, &cookie) {
-                    Ok(()) => {
-                        // Wait for the workspace to actually exit.
-                        // OTP init:stop() does orderly application teardown which
-                        // can take 10+ seconds under CI load.
-                        if wait_for_workspace_exit(host, info.port, 30).is_err() {
-                            // Graceful shutdown acknowledged but process didn't exit
-                            // Fall back to force-kill (if PID available)
-                            if info.pid == 0 {
-                                return Err(miette!(
-                                    "Graceful shutdown timed out. Cannot force-kill \
-                                     (process ID unknown). Please manually stop \
-                                     the BEAM process or retry."
-                                ));
-                            }
-                            eprintln!("Graceful shutdown timed out, force-killing...");
-                            force_kill_process(info.pid)?;
-                            wait_for_workspace_exit(host, info.port, 5).map_err(|_| {
-                                miette!(
-                                    "Workspace did not release port {} within 5s after forced stop. \
-                                     It may still be shutting down; retry shortly.",
-                                    info.port
-                                )
-                            })?;
-                        }
-                    }
-                    Err(e) => {
-                        // TCP shutdown failed (e.g. connection refused, auth error)
-                        // Fall back to force-kill (if PID available)
-                        if info.pid == 0 {
-                            return Err(miette!(
-                                "TCP shutdown failed ({e}). Cannot force-kill \
-                                 (process ID unknown). Please manually stop \
-                                 the BEAM process or retry."
-                            ));
-                        }
-                        eprintln!("TCP shutdown failed ({e}), force-killing...");
-                        force_kill_process(info.pid)?;
-                        wait_for_workspace_exit(host, info.port, 5).map_err(|_| {
-                            miette!(
-                                "Workspace did not release port {} within 5s after forced stop. \
-                                 It may still be shutting down; retry shortly.",
-                                info.port
-                            )
-                        })?;
-                    }
-                }
-            }
-
-            // Clean up node.info after process has exited
-            cleanup_stale_node_info(&workspace_id)?;
-
-            println!("Workspace '{workspace_id}' stopped");
-            Ok(())
-        }
-        _ => Err(miette!("Workspace '{}' is not running", workspace_id)),
-    }
 }
 
 /// Detailed status information for a workspace.
