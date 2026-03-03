@@ -1,17 +1,14 @@
 Object subclass: Main
 
-  class run =>
-    self new run
+  class run => self new run
 
   run =>
-
     reader := SchemeReader new
-    ev := SchemeEval new 
+    ev := SchemeEval new
     printer := SchemePrinter new
     env := ev defaultEnv
-    
-    eval := [:src |
-        printer print: (ev eval: (reader read: src) in: env)] 
+
+    eval := [:src | printer print: (ev eval: (reader read: src) in: env)]
     (WorkspaceInterface current) bind: eval as: #eval
 
     self traceCr: "Run: eval value: ""(* 6 7)""."

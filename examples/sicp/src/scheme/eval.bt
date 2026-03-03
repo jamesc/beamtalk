@@ -42,25 +42,27 @@ Object subclass: SchemeEval
   defaultEnv =>
     SchemeEnv spawnWith: #{
       #bindings => #{
-        "+"     => [:args | (args at: 1) + (args at: 2)],
-        "-"     => [:args | (args at: 1) - (args at: 2)],
-        "*"     => [:args | (args at: 1) * (args at: 2)],
-        "/"     => [:args | (args at: 1) div: (args at: 2)],
-        "="     => [:args | (args at: 1) =:= (args at: 2)],
-        "<"     => [:args | (args at: 1) < (args at: 2)],
-        ">"     => [:args | (args at: 1) > (args at: 2)],
-        "<="    => [:args | (args at: 1) <= (args at: 2)],
-        ">="    => [:args | (args at: 1) >= (args at: 2)],
-        "car"   => [:args | (args at: 1) first],
-        "cdr"   => [:args | (args at: 1) rest],
-        "cons"  => [:args | (#() add: (args at: 1)) ++ (args at: 2)],
-        "list"  => [:args | args],
-        "not"   => [:args | (args at: 1) not],
+        "+" => [:args | (args at: 1) + (args at: 2)],
+        "-" => [:args | (args at: 1) - (args at: 2)],
+        "*" => [:args | (args at: 1) * (args at: 2)],
+        "/" => [:args | (args at: 1) div: (args at: 2)],
+        "=" => [:args | (args at: 1) =:= (args at: 2)],
+        "<" => [:args | (args at: 1) < (args at: 2)],
+        ">" => [:args | (args at: 1) > (args at: 2)],
+        "<=" => [:args | (args at: 1) <= (args at: 2)],
+        ">=" => [:args | (args at: 1) >= (args at: 2)],
+        "car" => [:args | (args at: 1) first],
+        "cdr" => [:args | (args at: 1) rest],
+        "cons" => [:args | (#() add: (args at: 1)) ++ (args at: 2)],
+        "list" => [:args | args],
+        "not" => [:args | (args at: 1) not],
         "null?" => [:args |
           v := args at: 1
-          v isNil or: [v class =:= List and: [v isEmpty]]]
+          v isNil or: [v class =:= List and: [v isEmpty]]
+        ]
       },
-      #parent => nil}
+      #parent => nil
+    }
 
   /// Evaluate `expr` in `env` and return the result.
   ///
@@ -77,11 +79,12 @@ Object subclass: SchemeEval
   /// ```
   eval: expr in: env =>
     // Self-evaluating atomic types
-    (expr isNil or: [#(Integer, True, False, String) includes: expr class]) ifTrue: [^expr]
+    (expr isNil or: [
+      #(Integer, True, False, String) includes: expr class
+    ]) ifTrue: [^expr]
 
     // Symbol: look up the name in the environment
-    (expr class =:= SchemeSymbol) ifTrue: [
-      ^(env lookup: expr name)]
+    (expr class =:= SchemeSymbol) ifTrue: [^(env lookup: expr name)]
 
     // Must be a list — special form or function application
     (expr class =:= List) ifFalse: [^self error: "Unknown expression type"]
@@ -92,7 +95,8 @@ Object subclass: SchemeEval
 
     // Special form dispatch (symbols) or function application
     (head class =:= SchemeSymbol) ifTrue: [
-      ^self evalSpecialOrApply: head tail: tail in: env]
+      ^self evalSpecialOrApply: head tail: tail in: env
+    ]
     self evalApply: head tail: tail in: env
 
   /// Dispatch `head` as a special form or function application.
@@ -101,27 +105,32 @@ Object subclass: SchemeEval
     sym := head name
     sym match: [
       // (quote expr) — return unevaluated
-      "quote"  -> tail first;
+      "quote" -> tail first;
 
       // (define name expr) — bind name in the current environment
       "define" -> [
         varName := (tail at: 1) name
-        defVal  := self eval: (tail at: 2) in: env
+        defVal := self eval: (tail at: 2) in: env
         env define: varName value: defVal
-        nil] value;
+        nil
+      ] value;
 
       // (lambda (params...) body) — create a closure
       "lambda" -> [
         params := (tail at: 1) collect: [:p | p name]
-        SchemeLambda withParams: params body: (tail at: 2) env: env] value;
+        SchemeLambda withParams: params body: (tail at: 2) env: env
+      ] value;
 
       // (if test then else?) — conditional branch
       "if" -> [
         condVal := self eval: (tail at: 1) in: env
         isFalsy := self isFalsy: condVal
         isFalsy ifTrue: [
-          (tail size > 2) ifTrue: [self eval: (tail at: 3) in: env] ifFalse: [nil]] ifFalse: [
-          self eval: (tail at: 2) in: env]] value;
+          (tail size > 2) ifTrue: [
+            self eval: (tail at: 3) in: env
+          ] ifFalse: [nil]
+        ] ifFalse: [self eval: (tail at: 2) in: env]
+      ] value;
 
       // (cond (test expr) ... (else expr))
       "cond" -> self evalCond: tail in: env;
@@ -134,19 +143,21 @@ Object subclass: SchemeEval
 
       // (let ((var expr) ...) body) — local bindings
       "let" -> [
-        binds    := tail at: 1
-        letBody  := tail at: 2
-        params   := binds collect: [:b | (b at: 1) name]
-        argVals  := binds collect: [:b | self eval: (b at: 2) in: env]
+        binds := tail at: 1
+        letBody := tail at: 2
+        params := binds collect: [:b | (b at: 1) name]
+        argVals := binds collect: [:b | self eval: (b at: 2) in: env]
         childEnv := env extend: params values: argVals
-        self eval: letBody in: childEnv] value;
+        self eval: letBody in: childEnv
+      ] value;
 
       // Not a special form — evaluate head as a function and apply
-      _ -> [self evalApply: head tail: tail in: env] value]
+      _ -> [self evalApply: head tail: tail in: env] value
+    ]
 
   /// Evaluate `head` as a procedure and apply it to the evaluated `tail` args.
   evalApply: head tail: tail in: env =>
-    func     := self eval: head in: env
+    func := self eval: head in: env
     evalArgs := tail collect: [:a | self eval: a in: env]
     self apply: func args: evalArgs in: env
 
@@ -165,27 +176,29 @@ Object subclass: SchemeEval
   apply: func args: args in: _env =>
     (func class =:= SchemeLambda) ifTrue: [
       childEnv := func closureEnv extend: func params values: args
-      ^self eval: func body in: childEnv]
+      ^self eval: func body in: childEnv
+    ]
     (func class =:= Block) ifFalse: [
-      ^self error: "Not a procedure: " ++ func printString]
+      ^self error: "Not a procedure: " ++ func printString
+    ]
     // Built-in: block takes the full args list as its single argument
     func value: args
 
   /// Return true if `val` is Scheme-falsy (i.e. `false` or `nil`).
-  isFalsy: val =>
-    val == false or: [val isNil]
+  isFalsy: val => val == false or: [val isNil]
 
   /// Evaluate `cond` clauses in order; return the first truthy branch.
   /// An `else` clause always matches. Returns `nil` if all tests fail.
   evalCond: clauses in: env =>
     clauses isEmpty ifTrue: [^nil]
     clause := clauses first
-    ((clause first class =:= SchemeSymbol) and: [clause first name =:= "else"]) ifTrue: [
-      ^self eval: clause last in: env]
+    ((clause first class =:= SchemeSymbol) and: [
+      clause first name =:= "else"
+    ]) ifTrue: [^self eval: clause last in: env]
     condVal := self eval: clause first in: env
     (self isFalsy: condVal) ifTrue: [
-      self evalCond: clauses rest in: env] ifFalse: [
-      self eval: clause last in: env]
+      self evalCond: clauses rest in: env
+    ] ifFalse: [self eval: clause last in: env]
 
   /// Evaluate `(and ...)` — return `false` on the first falsy value,
   /// otherwise return the last value.
