@@ -28,6 +28,12 @@ export interface ClassInfo {
   actor_count?: number;
 }
 
+export interface MethodInfo {
+  name: string;
+  selector: string;
+  side: "instance" | "class";
+}
+
 export type BindingsMap = Record<string, unknown>;
 
 export interface SessionInfo {
@@ -216,6 +222,14 @@ export class WorkspaceClient {
       state?: Record<string, unknown>;
     };
     return resp.state ?? {};
+  }
+
+  /** List all methods for a loaded class (instance and class-side). */
+  async methods(className: string): Promise<MethodInfo[]> {
+    const resp = (await this._request({ op: "methods", class: className })) as {
+      methods?: Array<{ name: string; selector: string; side: "instance" | "class" }>;
+    };
+    return resp.methods ?? [];
   }
 
   /** List all active sessions in the workspace. */

@@ -77,6 +77,11 @@
         "command": "beamtalk.reloadClass",
         "title": "Reload Class",
         "icon": "$(sync)"
+      },
+      {
+        "command": "beamtalk.navigateToMethod",
+        "title": "Go to Definition",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
@@ -121,6 +126,16 @@
         {
           "command": "beamtalk.reloadClass",
           "when": "view == beamtalk.workspaceExplorer && viewItem == class-item",
+          "group": "beamtalk@1"
+        },
+        {
+          "command": "beamtalk.navigateToMethod",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == method-item",
+          "group": "inline"
+        },
+        {
+          "command": "beamtalk.navigateToMethod",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == method-item",
           "group": "beamtalk@1"
         }
       ]
