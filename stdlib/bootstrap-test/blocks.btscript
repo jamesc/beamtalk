@@ -1,0 +1,77 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Bootstrap tests for block expressions (BT-986).
+// Covers the syntax patterns used in the formatter identity fixtures.
+
+// ===========================================================================
+// BLOCK VALUE — calling a no-argument block
+// ===========================================================================
+
+// Empty block returns nil
+[] value
+// => nil
+
+// Block returning a literal
+[42] value
+// => 42
+
+// Block with arithmetic
+[3 + 4] value
+// => 7
+
+// ===========================================================================
+// BLOCK VALUE: — calling a single-argument block
+// ===========================================================================
+
+// Block with one parameter
+[:x | x + 1] value: 5
+// => 6
+
+// Block with one parameter returning the argument unchanged
+[:x | x] value: 99
+// => 99
+
+// Block with two parameters
+[:a :b | a + b] value: 3 value: 4
+// => 7
+
+// ===========================================================================
+// BLOCKS WITH CONDITIONALS — ifTrue: / ifFalse:
+// ===========================================================================
+
+// Inline block in ifTrue:
+true ifTrue: [42]
+// => 42
+
+// Inline block in ifFalse:
+false ifFalse: [99]
+// => 99
+
+// Block with parameter in ifTrue:ifFalse:
+(3 > 2) ifTrue: [100] ifFalse: [0]
+// => 100
+
+// Nested blocks in conditional
+(1 < 2) ifTrue: [[7 * 6] value] ifFalse: [0]
+// => 42
+
+// ===========================================================================
+// BLOCKS AS ARGUMENTS — inject:into:
+// ===========================================================================
+
+// Sum a list using inject:into:
+#(1, 2, 3) inject: 0 into: [:acc :x | acc + x]
+// => 6
+
+// Product using inject:into:
+#(1, 2, 3, 4) inject: 1 into: [:acc :x | acc * x]
+// => 24
+
+// ===========================================================================
+// NESTED BLOCKS
+// ===========================================================================
+
+// Outer block calls inner block
+[[:x | x * 2] value: 7] value
+// => 14

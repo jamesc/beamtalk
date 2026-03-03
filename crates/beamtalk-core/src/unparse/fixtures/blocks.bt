@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A class demonstrating block expression formatting — canonical formatter fixture.
+///
+/// Demonstrates: short inline blocks, long broken blocks,
+/// multi-statement blocks, and blocks with parameters.
+Object subclass: BlockExamples
+
+  /// Short inline block: fits within 80 columns.
+  shortBlock => self ifTrue: [42]
+
+  /// Block with a parameter: inline.
+  eachItem: coll => coll do: [:x | x println]
+
+  /// Multi-statement block: always breaks across lines.
+  multiStatement =>
+    [
+      self traceCr: "first"
+      self traceCr: "second"
+    ] value
+
+  /// Long block that breaks to multi-line due to width.
+  longBlock: aVeryLongVariableNameThatExceedsTheEightyColumnLineWidthLimit =>
+    aVeryLongVariableNameThatExceedsTheEightyColumnLineWidthLimit ifTrue: [
+      self traceCr: "yes"
+    ]

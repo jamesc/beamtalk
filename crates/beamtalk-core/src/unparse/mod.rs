@@ -2030,6 +2030,22 @@ mod tests {
         );
     }
 
+    /// Assert that `source` is already in canonical format: the first format
+    /// pass must be a no-op (`format_source(source) == source`).
+    ///
+    /// Use this for fixture files that are pre-formatted so regressions are
+    /// caught immediately — any formatter change that silently alters
+    /// already-canonical code will fail here.
+    #[track_caller]
+    fn assert_identity(source: &str) {
+        let formatted = format_source(source)
+            .expect("format_source must succeed for canonical source (no parse errors)");
+        assert_eq!(
+            formatted, source,
+            "formatter changed already-canonical source.\n\noriginal:\n{source}\n\nformatted:\n{formatted}"
+        );
+    }
+
     // --- Idempotency tests with realistic source strings ---
 
     #[test]
@@ -2186,5 +2202,76 @@ mod tests {
         assert_idempotent(include_str!(
             "../../../../examples/getting-started/src/point.bt"
         ));
+    }
+
+    // --- Identity tests: first-pass must be a no-op on canonical source ---
+
+    #[test]
+    fn identity_hello_bt() {
+        assert_identity(include_str!(
+            "../../../../examples/getting-started/src/hello.bt"
+        ));
+    }
+
+    #[test]
+    fn identity_hanoi_bt() {
+        assert_identity(include_str!(
+            "../../../../examples/getting-started/src/hanoi.bt"
+        ));
+    }
+
+    #[test]
+    fn identity_point_bt() {
+        assert_identity(include_str!(
+            "../../../../examples/getting-started/src/point.bt"
+        ));
+    }
+
+    #[test]
+    fn identity_counter_bt() {
+        assert_identity(include_str!(
+            "../../../../examples/getting-started/src/counter.bt"
+        ));
+    }
+
+    #[test]
+    fn identity_logging_counter_bt() {
+        assert_identity(include_str!(
+            "../../../../examples/getting-started/src/logging_counter.bt"
+        ));
+    }
+
+    #[test]
+    fn identity_protoobject_proxy_bt() {
+        assert_identity(include_str!(
+            "../../../../examples/getting-started/src/protoobject_proxy.bt"
+        ));
+    }
+
+    // --- Identity tests: fixture files ---
+
+    #[test]
+    fn identity_fixture_value_class() {
+        assert_identity(include_str!("fixtures/value_class.bt"));
+    }
+
+    #[test]
+    fn identity_fixture_actor_class() {
+        assert_identity(include_str!("fixtures/actor_class.bt"));
+    }
+
+    #[test]
+    fn identity_fixture_method_comments() {
+        assert_identity(include_str!("fixtures/method_comments.bt"));
+    }
+
+    #[test]
+    fn identity_fixture_blocks() {
+        assert_identity(include_str!("fixtures/blocks.bt"));
+    }
+
+    #[test]
+    fn identity_fixture_standalone_methods() {
+        assert_identity(include_str!("fixtures/standalone_methods.bt"));
     }
 }

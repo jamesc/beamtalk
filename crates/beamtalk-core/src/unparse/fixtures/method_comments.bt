@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A class demonstrating comment attachment — canonical formatter fixture.
+///
+/// Demonstrates: leading line comments on methods, doc comments on methods,
+/// and trailing inline comments.
+Object subclass: CommentedMethods
+  state: value = 0
+
+  // A plain leading comment describes this method.
+  getValue => self.value
+
+  // Another plain leading comment.
+  // This method has two leading comment lines.
+  setValue: n => self.value := n
+
+  /// A doc-comment method: formally documented.
+  ///
+  /// Returns the value doubled.
+  doubled => self.value * 2
