@@ -100,7 +100,12 @@ const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
 /// Uses a lightweight TCP connect probe (cross-platform) to verify the
 /// workspace port is listening. If the workspace has a nonce, validates it
 /// against the port file nonce to detect stale entries (PID reuse after crash).
-pub fn is_node_running(info: &NodeInfo) -> bool {
+///
+/// When `workspace_id` is `Some`, the port file is read directly from the
+/// workspace directory (O(1)). When `None`, all workspace directories are
+/// scanned to find a matching port file (O(N) fallback for callers that do
+/// not have the workspace ID available).
+pub fn is_node_running(info: &NodeInfo, workspace_id: Option<&str>) -> bool {
     let host = info.connect_host();
     let addr = format!("{host}:{}", info.port);
     let Ok(addr) = addr.parse::<std::net::SocketAddr>() else {
@@ -114,8 +119,20 @@ pub fn is_node_running(info: &NodeInfo) -> bool {
 
     // If we have a nonce, verify it against the port file for stale detection
     if let Some(ref expected_nonce) = info.nonce {
-        // Read the port file nonce directly (no auth needed)
-        match read_port_file_nonce(info.port) {
+        let file_nonce = if let Some(id) = workspace_id {
+            // Fast path: read port file directly from the known workspace directory.
+            // Verify the port matches before using the nonce — if the port file
+            // belongs to a different startup, comparing nonces is meaningless.
+            match read_port_file(id).ok().flatten() {
+                Some((port, _)) if port != info.port => return false, // stale node.info
+                Some((_, nonce)) => nonce,
+                None => None,
+            }
+        } else {
+            // Fallback: scan all workspace directories (O(N))
+            read_port_file_nonce(info.port)
+        };
+        match file_nonce {
             Some(file_nonce) => file_nonce == *expected_nonce,
             None => true, // No port file — trust the TCP probe
         }

@@ -44,7 +44,7 @@ pub fn run(workspace_name: Option<&str>, recent: Option<usize>) -> Result<()> {
         .ok_or_else(|| miette!("No workspace found. Start one with `beamtalk repl`."))?;
 
     // Verify node is actually running
-    if !workspace::is_node_running(&node_info) {
+    if !workspace::is_node_running(&node_info, Some(&workspace_id)) {
         workspace::cleanup_stale_node_info(&workspace_id)?;
         return Err(miette!(
             "No workspace found. Start one with `beamtalk repl`."
