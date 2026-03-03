@@ -2890,4 +2890,100 @@ mod tests {
             .expect("Counter should be registered");
         assert!(!info.is_value, "Actor subclass should not have is_value");
     }
+
+    /// BT-1056: Test sealed method override detection with external superclasses.
+    /// When a class inherits from an external (unknown) class, ancestor lookup
+    /// should not break early; it should continue walking up the chain
+    /// using the `external_superclasses` data.
+    #[test]
+    fn sealed_override_checks_with_external_superclasses() {
+        // ClassB (in module) has sealed method foo
+        let sealed_base = ClassDefinition {
+            name: Identifier::new("ClassB", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: crate::ast::MessageSelector::Unary("foo".into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: None,
+                is_sealed: true,
+                kind: MethodKind::Primary,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        // ClassC (in module) inherits from UnknownClass (external)
+        // UnknownClass will later be declared to inherit from ClassB
+        let override_class = ClassDefinition {
+            name: Identifier::new("ClassC", test_span()),
+            superclass: Some(Identifier::new("UnknownClass", test_span())),
+            class_kind: ClassKind::Object,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: crate::ast::MessageSelector::Unary("foo".into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![sealed_base, override_class],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+
+        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+
+        // Register external class relationship: UnknownClass <- ClassB
+        let mut external_index = std::collections::HashMap::new();
+        external_index.insert("UnknownClass".to_string(), "ClassB".to_string());
+        h.add_external_superclasses(&external_index);
+
+        // After adding external superclass info, UnknownClass should be in the hierarchy
+        // and we should be able to walk from it to ClassB.
+        assert!(
+            h.get_class("UnknownClass").is_some(),
+            "UnknownClass should exist after add_external_superclasses"
+        );
+        assert_eq!(
+            h.superclass_chain("UnknownClass"),
+            vec![
+                EcoString::from("ClassB"),
+                EcoString::from("Object"),
+                EcoString::from("ProtoObject")
+            ],
+            "UnknownClass superclass chain should reach ClassB"
+        );
+    }
 }
