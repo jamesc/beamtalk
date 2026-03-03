@@ -718,7 +718,7 @@ mod tests {
         fs::create_dir_all(&site_dir).unwrap();
 
         fs::write(img_src.join("logo.svg"), "<svg/>").unwrap();
-        fs::write(img_src.join("favicon.ico"), &[0u8; 4]).unwrap();
+        fs::write(img_src.join("favicon.ico"), [0u8; 4]).unwrap();
 
         copy_images(&docs_dir, &site_dir).unwrap();
 
