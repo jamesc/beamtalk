@@ -130,8 +130,9 @@ fn rewrite_prose_links(
         let md_link = format!("[{source_file}]({source_file})");
         let titled_link = format!("[{title}]({output_file})");
         result = result.replace(&md_link, &titled_link);
-        // Replace any remaining bare filename references (e.g. in hrefs)
-        result = result.replace(source_file, output_file);
+        // Replace bare filename references only outside [..] brackets so the
+        // rewrite targets hrefs but not visible link text.
+        result = replace_outside_md_brackets(&result, source_file, output_file);
     }
     // Apply extra_links (e.g. ADR paths and ADR number references) only outside
     // fenced code blocks, to avoid corrupting code examples.
@@ -345,7 +346,7 @@ fn extract_adr_status(content: &str) -> String {
             continue;
         }
         if in_status {
-            if line.starts_with('#') {
+            if line.trim_start().starts_with('#') {
                 break;
             }
             let trimmed = line.trim();
@@ -564,7 +565,7 @@ const LANDING_CODE_SNIPPET: &str = "Actor subclass: Counter
 c := Counter spawn
 c increment
 c increment
-c value \"=> 2\"";
+c value // => 2";
 
 /// Generate the site landing page at the root.
 pub(super) fn write_site_landing_page(

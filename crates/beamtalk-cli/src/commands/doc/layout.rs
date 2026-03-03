@@ -41,7 +41,7 @@ pub(super) fn page_header(title: &str, css: &str, nav_prefix: &str) -> String {
         (String::new(), "Beamtalk".to_string())
     } else {
         let favicons = format!(
-            "<link rel=\"icon\" href=\"{nav_prefix}images/favicon.ico\" sizes=\"32x32\">\n\
+            "<link rel=\"icon\" href=\"{nav_prefix}images/favicon.ico\" sizes=\"any\">\n\
              <link rel=\"icon\" href=\"{nav_prefix}images/icon.svg\" type=\"image/svg+xml\">\n\
              <link rel=\"apple-touch-icon\" href=\"{nav_prefix}images/apple-touch-icon.png\">\n"
         );

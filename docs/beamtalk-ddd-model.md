@@ -107,7 +107,7 @@ A bounded context is an explicit boundary within which a domain model is defined
 │                         DEVELOPER MACHINE                           │
 │                                                                     │
 │  ┌───────────────────────────────────────────────────────────────┐  │
-│  │              LANGUAGE SERVICE CONTEXT (Rust)                   │ │
+│  │              LANGUAGE SERVICE CONTEXT (Rust)                   │  │
 │  │  - Queries: Completions, Hover, Diagnostics                   │  │
 │  │  - Incremental: File cache, Query cache                       │  │
 │  │  - IDE Integration: LSP Protocol                              │  │
@@ -115,7 +115,7 @@ A bounded context is an explicit boundary within which a domain model is defined
 │                              ▲                                      │
 │                              │ uses                                 │
 │  ┌───────────────────────────┴───────────────────────────────────┐  │
-│  │              COMPILER CONTEXT (Rust)                           │ │
+│  │              COMPILER CONTEXT (Rust)                           │  │
 │  │  ┌────────────────┐  ┌────────────────┐  ┌─────────────────┐ │   │
 │  │  │ SOURCE         │→ │ SEMANTIC       │→ │ CODE            │ │   │
 │  │  │ ANALYSIS       │  │ ANALYSIS       │  │ GENERATION      │ │   │
