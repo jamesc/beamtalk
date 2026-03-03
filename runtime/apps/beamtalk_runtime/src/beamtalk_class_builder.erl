@@ -157,7 +157,13 @@ do_register(ClassName, ClassInfo) ->
 %%   1. className is an atom (Symbol in Beamtalk terms)
 %%   2. superclassRef is set (not nil)
 %%   3. superclassRef is a valid type (atom | pid | #beamtalk_object{})
-%%   4. superclass is not sealed (if it is already registered)
+%%
+%% Note: sealed-superclass enforcement is intentionally NOT done here.
+%% The Beamtalk compiler (semantic_analysis) enforces it at compile time,
+%% and stdlib classes compiled with stdlib_mode are explicitly permitted to
+%% subclass sealed classes (e.g. Character extends Integer). Enforcing it
+%% again at runtime causes stdlib on_load hooks to fail when topo-sorted
+%% stdlib loading registers Integer (sealed) before Character (BT-791).
 -spec validate(term(), term()) -> ok | {error, #beamtalk_error{}}.
 validate(nil, _) ->
     Error0 = beamtalk_error:new(missing_parameter, 'ClassBuilder'),
@@ -175,7 +181,7 @@ validate(_ClassName, nil) ->
 validate(_ClassName, SuperclassRef) when
     is_atom(SuperclassRef); is_pid(SuperclassRef); is_record(SuperclassRef, beamtalk_object)
 ->
-    validate_superclass_not_sealed(SuperclassRef);
+    ok;
 validate(_ClassName, SuperclassRef) ->
     Error0 = beamtalk_error:new(type_error, 'ClassBuilder'),
     Error1 = beamtalk_error:with_selector(Error0, 'superclass:'),
@@ -189,29 +195,6 @@ validate(_ClassName, SuperclassRef) ->
                 )
             )
         )}.
-
-%% @private
--spec validate_superclass_not_sealed(term()) -> ok | {error, #beamtalk_error{}}.
-validate_superclass_not_sealed(SuperclassRef) ->
-    SuperclassName = resolve_superclass_name(SuperclassRef),
-    case beamtalk_class_registry:whereis_class(SuperclassName) of
-        undefined ->
-            %% Superclass not yet registered — acceptable during bootstrap ordering.
-            ok;
-        Pid ->
-            case beamtalk_object_class:is_sealed(Pid) of
-                true ->
-                    Error0 = beamtalk_error:new(instantiation_error, SuperclassName),
-                    Error1 = beamtalk_error:with_selector(Error0, register),
-                    {error,
-                        beamtalk_error:with_hint(
-                            Error1,
-                            <<"Cannot subclass a sealed class">>
-                        )};
-                false ->
-                    ok
-            end
-    end.
 
 %% @private
 %% @doc Resolve a superclass reference to a class name atom.

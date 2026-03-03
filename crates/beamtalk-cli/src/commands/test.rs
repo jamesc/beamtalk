@@ -426,7 +426,7 @@ fn run_eunit_tests(
     fixture_modules: &[String],
     package_modules: &[String],
     build_dir: &Utf8Path,
-    package_ebin_dir: Option<&Utf8Path>,
+    package_ebin_dirs: &[Utf8PathBuf],
 ) -> Result<EunitResult> {
     debug!(
         "Running {} EUnit modules in single process",
@@ -504,8 +504,8 @@ fn run_eunit_tests(
         cmd.arg("-noshell").arg("-pa").arg(build_dir.as_str());
     }
 
-    // Add package ebin directory to code path so package modules can be loaded
-    if let Some(ebin_dir) = package_ebin_dir {
+    // Add all package ebin directories to code path so package modules can be loaded
+    for ebin_dir in package_ebin_dirs {
         #[cfg(windows)]
         {
             let ebin_dir_path = ebin_dir.as_str().replace('\\', "/");
@@ -612,6 +612,27 @@ fn collect_beam_module_names(ebin_dir: &Utf8Path) -> Result<Vec<String>> {
 
     modules.sort();
     Ok(modules)
+}
+
+/// Walk up from `path` to find the nearest ancestor directory containing `beamtalk.toml`.
+///
+/// If `path` is a file, starts at its parent directory. If `path` is a directory,
+/// starts there. Returns the directory path if found, `None` if no manifest exists
+/// anywhere in the ancestor chain.
+fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
+    let start_dir = if path.is_file() {
+        path.parent()?
+    } else {
+        path
+    };
+
+    let mut current = start_dir.to_owned();
+    loop {
+        if current.join("beamtalk.toml").exists() {
+            return Some(current);
+        }
+        current = current.parent()?.to_owned();
+    }
 }
 
 /// Recursively collect `.bt` files from `dir` into `files`.
@@ -907,29 +928,56 @@ pub fn run_tests(path: &str) -> Result<()> {
     let build_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
         .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
 
-    // Build class module index from src/ so test files can resolve cross-file
-    // references to package classes in subdirectories.
-    let project_root_for_index = Utf8PathBuf::from(".");
-    let pkg_for_index = manifest::find_manifest(&project_root_for_index)?;
-    let (mut class_module_index, class_superclass_index): (
-        HashMap<String, String>,
-        HashMap<String, String>,
-    ) = if let Some(ref pkg) = pkg_for_index {
-        let src_dir = project_root_for_index.join("src");
-        let source_root = if src_dir.exists() {
-            Some(src_dir.clone())
-        } else {
-            None
-        };
-        if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
-            super::build::build_class_module_index(&src_files, source_root.as_deref(), &pkg.name)
-                .unwrap_or_default()
-        } else {
-            (HashMap::new(), HashMap::new())
+    // Discover all unique package roots: walk up from each test file's directory,
+    // and also check the CWD. This allows `beamtalk test .` from a parent directory
+    // (e.g. `examples/`) to find and build all packages that contain test files.
+    let discovered_packages: Vec<(Utf8PathBuf, manifest::PackageManifest)> = {
+        let mut roots: Vec<Utf8PathBuf> = Vec::new();
+        let mut seen: HashSet<Utf8PathBuf> = HashSet::new();
+
+        // Check CWD first
+        let cwd = Utf8PathBuf::from(".");
+        if seen.insert(cwd.clone()) {
+            roots.push(cwd);
         }
-    } else {
-        (HashMap::new(), HashMap::new())
+
+        // Walk up from each test file to find its package root
+        for test_file in &test_files {
+            if let Some(root) = find_package_root(test_file) {
+                if seen.insert(root.clone()) {
+                    roots.push(root);
+                }
+            }
+        }
+
+        // Load manifests, skip roots without a beamtalk.toml
+        let mut pkgs = Vec::new();
+        for root in roots {
+            if let Some(pkg) = manifest::find_manifest(&root)? {
+                pkgs.push((root, pkg));
+            }
+        }
+        pkgs
     };
+
+    // Build combined class module index from all packages' src/ directories so
+    // test files can resolve cross-file references to package classes.
+    let mut class_module_index: HashMap<String, String> = HashMap::new();
+    let mut class_superclass_index: HashMap<String, String> = HashMap::new();
+    for (pkg_root, pkg) in &discovered_packages {
+        let src_dir = pkg_root.join("src");
+        if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
+            let source_root = src_dir.exists().then_some(src_dir);
+            if let Ok((pkg_class_map, pkg_super_map)) = super::build::build_class_module_index(
+                &src_files,
+                source_root.as_deref(),
+                &pkg.name,
+            ) {
+                class_module_index.extend(pkg_class_map);
+                class_superclass_index.extend(pkg_super_map);
+            }
+        }
+    }
 
     // Phase 0: Pre-compile all fixtures in the fixtures/ subdirectory.
     // This makes all fixture classes available during test execution — like
@@ -1090,15 +1138,13 @@ pub fn run_tests(path: &str) -> Result<()> {
     all_fixture_modules.sort();
     all_fixture_modules.dedup();
 
-    // Phase 1b: Build package modules if a beamtalk.toml manifest exists.
-    // This ensures package-defined classes are compiled and their on_load
-    // hooks will register them in the class registry when loaded.
-    let project_root = project_root_for_index;
-    let pkg_manifest = pkg_for_index;
-    let (package_modules, package_ebin_dir) = if let Some(ref pkg) = pkg_manifest {
-        let ebin_dir = project_root.join("_build").join("dev").join("ebin");
-
-        // Build the package to ensure .beam files are up to date
+    // Phase 1b: Build all discovered packages so their .beam files are available.
+    // This ensures package-defined classes are compiled and their on_load hooks
+    // will register them in the class registry when loaded during the test run.
+    let mut package_modules: Vec<String> = Vec::new();
+    let mut package_ebin_dirs: Vec<Utf8PathBuf> = Vec::new();
+    for (pkg_root, pkg) in &discovered_packages {
+        let ebin_dir = pkg_root.join("_build").join("dev").join("ebin");
         println!("Building package '{}'...", pkg.name);
         let build_options = beamtalk_core::CompilerOptions {
             stdlib_mode: false,
@@ -1106,16 +1152,13 @@ pub fn run_tests(path: &str) -> Result<()> {
             workspace_mode: false,
             ..Default::default()
         };
-        super::build::build(project_root.as_str(), &build_options)
-            .wrap_err("Failed to build package before running tests")?;
-
-        // Collect module names from .beam files in _build/dev/ebin/
+        super::build::build(pkg_root.as_str(), &build_options)
+            .wrap_err_with(|| format!("Failed to build package '{}' before running tests", pkg.name))?;
         let modules = collect_beam_module_names(&ebin_dir)?;
         debug!(count = modules.len(), "Discovered package modules");
-        (modules, Some(ebin_dir))
-    } else {
-        (Vec::new(), None)
-    };
+        package_modules.extend(modules);
+        package_ebin_dirs.push(ebin_dir);
+    }
 
     let total_bunit_tests: usize = compiled_tests
         .iter()
@@ -1145,7 +1188,7 @@ pub fn run_tests(path: &str) -> Result<()> {
         &all_fixture_modules,
         &package_modules,
         &build_dir,
-        package_ebin_dir.as_deref(),
+        &package_ebin_dirs,
     )?;
 
     // Phase 4: Report results
@@ -1372,6 +1415,54 @@ mod tests {
         let dir = Utf8PathBuf::from("/nonexistent/path");
         let modules = collect_beam_module_names(&dir).unwrap();
         assert!(modules.is_empty());
+    }
+
+    #[test]
+    fn test_find_package_root_found() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create nested structure: pkg/test/my_test.bt with beamtalk.toml at pkg/
+        let pkg_dir = dir.join("pkg");
+        let test_dir = pkg_dir.join("test");
+        fs::create_dir_all(&test_dir).unwrap();
+        fs::write(
+            pkg_dir.join("beamtalk.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(test_dir.join("my_test.bt"), "").unwrap();
+
+        let result = find_package_root(&test_dir.join("my_test.bt"));
+        assert_eq!(result, Some(pkg_dir));
+    }
+
+    #[test]
+    fn test_find_package_root_not_found() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // No beamtalk.toml anywhere
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        fs::write(dir.join("sub/test.bt"), "").unwrap();
+
+        let result = find_package_root(&dir.join("sub/test.bt"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_package_root_directory_input() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let result = find_package_root(&dir);
+        assert_eq!(result, Some(dir));
     }
 
     #[test]

@@ -8,7 +8,7 @@
 %%%   - happy path: successful class registration
 %%%   - hot reload: registering an existing class updates it
 %%%   - missing superclass error: superclassRef = nil
-%%%   - sealed superclass error: superclass has is_sealed = true
+%%%   - sealed superclass allowed at runtime (enforced at compile time only)
 %%%   - bad name error: className is not an atom (nil or non-atom)
 %%%   - bootstrap assertion: Class respondsTo: #classBuilder
 
@@ -154,7 +154,10 @@ register_missing_superclass_error_test_() ->
         ]
     end}.
 
-register_sealed_superclass_error_test_() ->
+%% Sealed-superclass enforcement is intentionally NOT done at runtime.
+%% The compiler enforces it at compile time; stdlib classes compiled with
+%% stdlib_mode are explicitly permitted to subclass sealed classes (BT-791).
+register_sealed_superclass_allowed_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
@@ -170,7 +173,7 @@ register_sealed_superclass_error_test_() ->
                 },
                 {ok, SealedPid} = beamtalk_object_class:start('BT835SealedClass', SealedClassInfo),
 
-                %% Try to subclass the sealed class
+                %% Subclassing a sealed class succeeds at runtime
                 State = #{
                     className => 'BT835SealedSubclass',
                     superclassRef => 'BT835SealedClass',
@@ -178,9 +181,11 @@ register_sealed_superclass_error_test_() ->
                     methodSpecs => #{}
                 },
                 Result = beamtalk_class_builder:register(State),
-                ?assertMatch({error, #beamtalk_error{kind = instantiation_error}}, Result),
+                ?assertMatch({ok, _Pid}, Result),
 
                 %% Cleanup
+                {ok, SubPid} = Result,
+                gen_server:stop(SubPid, normal, 5000),
                 gen_server:stop(SealedPid, normal, 5000)
             end)
         ]
