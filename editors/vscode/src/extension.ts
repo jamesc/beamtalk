@@ -292,7 +292,11 @@ function computeWorkspaceId(projectRoot: string): string | null {
 
 /**
  * Find the project root for the current VS Code workspace.
- * Returns the first workspace folder that contains a `beamtalk.toml`.
+ * Prefers a workspace folder containing `beamtalk.toml`; falls back to the
+ * first workspace folder so the Workspace Explorer connects even in projects
+ * that haven't created a beamtalk.toml yet (e.g. when just running the REPL).
+ * The workspace ID hash check in handlePortFileAppeared still guards against
+ * connecting to an unrelated workspace.
  */
 function findProjectRoot(): string | null {
   const folders = vscode.workspace.workspaceFolders;
@@ -305,7 +309,7 @@ function findProjectRoot(): string | null {
       return folder.uri.fsPath;
     }
   }
-  return null;
+  return folders[0].uri.fsPath;
 }
 
 // ─── Auto-connect via port file watcher ──────────────────────────────────────

@@ -96,17 +96,24 @@ websocket_info(
 %% BT-698: Late need_input after eval completed — drop silently
 websocket_info({need_input, _, _, _}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
-%% BT-696: Eval completed successfully
+%% BT-696: Eval completed successfully — also push a bindings-changed event so
+%% the VSCode sidebar refreshes without polling.
 websocket_info(
     {eval_done, Value, Output, Warnings},
-    State = #ws_state{authenticated = true, pending_eval = Msg}
+    State = #ws_state{authenticated = true, pending_eval = Msg, session_id = SessionId}
 ) when
     Msg =/= undefined
 ->
     Response = beamtalk_repl_protocol:encode_result(
         Value, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings
     ),
-    {[{text, Response}], State#ws_state{
+    BindingsPush = jsx:encode(#{
+        <<"type">> => <<"push">>,
+        <<"channel">> => <<"bindings">>,
+        <<"event">> => <<"changed">>,
+        <<"data">> => #{<<"session">> => SessionId}
+    }),
+    {[{text, Response}, {text, BindingsPush}], State#ws_state{
         pending_eval = undefined,
         io_capture_pid = undefined,
         stdin_ref = undefined

@@ -603,7 +603,10 @@ export class WorkspaceTreeDataProvider
   }
 
   private _handlePush(event: PushEvent, client: WorkspaceClient): void {
-    if (event.channel === "actors") {
+    if (event.channel === "bindings" && event.event === "changed") {
+      // Server emits this after every successful eval — refresh the bindings section.
+      void this.refreshBindings();
+    } else if (event.channel === "actors") {
       if (event.event === "spawned") {
         // Guard against duplicate spawned events
         if (!this.actors.some((a) => a.pid === event.data.pid)) {
