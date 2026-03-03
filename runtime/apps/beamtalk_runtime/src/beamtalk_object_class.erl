@@ -265,7 +265,7 @@ init({ClassName, ClassInfo}) ->
     InstanceMethods = maps:get(instance_methods, ClassInfo, #{}),
     ClassMethods = maps:get(class_methods, ClassInfo, #{}),
 
-    ets:insert(beamtalk_class_hierarchy, {ClassName, Superclass}),
+    beamtalk_class_hierarchy_table:insert(ClassName, Superclass),
 
     %% BT-893: Store class metadata in process dictionary so class_send can
     %% bypass gen_server for self-calls (new/spawn from within class methods).
@@ -561,7 +561,7 @@ terminate(_Reason, #class_state{name = ClassName}) ->
     %% This runs when removeFromSystem stops the gen_server (gen_server:stop/1),
     %% ensuring the class is fully removed from the runtime registries.
     %% Wrapped in catch/try to be safe during node shutdown when ETS/pg may be gone.
-    _ = (catch ets:delete(beamtalk_class_hierarchy, ClassName)),
+    _ = (catch beamtalk_class_hierarchy_table:delete(ClassName)),
     _ = (catch pg:leave(beamtalk_classes, self())),
     ok.
 
@@ -623,9 +623,9 @@ has_class_new_in_chain(ClassName, Module, Depth) ->
             true;
         false ->
             SuperName =
-                case ets:lookup(beamtalk_class_hierarchy, ClassName) of
-                    [{_, S}] -> S;
-                    [] -> none
+                case beamtalk_class_hierarchy_table:lookup(ClassName) of
+                    {ok, S} -> S;
+                    not_found -> none
                 end,
             case SuperName of
                 none ->
