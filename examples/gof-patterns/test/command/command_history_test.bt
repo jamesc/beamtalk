@@ -6,14 +6,14 @@
 TestCase subclass: CommandHistoryTest
 
   testInsertCommand =>
-    buf    := TextBuffer withText: "hello"
-    cmd    := InsertCommand at: 6 insert: " world"
+    buf := TextBuffer withText: "hello"
+    cmd := InsertCommand at: 6 insert: " world"
     result := cmd execute: buf
     self assert: result text equals: "hello world"
 
   testDeleteCommand =>
-    buf    := TextBuffer withText: "hello world"
-    cmd    := DeleteCommand from: 6 length: 6
+    buf := TextBuffer withText: "hello world"
+    cmd := DeleteCommand from: 6 length: 6
     result := cmd execute: buf
     self assert: result text equals: "hello"
 

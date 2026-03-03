@@ -6,8 +6,7 @@ ShapeFactory subclass: CircleFactory
   state: radius = 1.0
 
   /// Create a factory configured to produce circles with the given radius.
-  class withRadius: r =>
-    self new: #{radius => r}
+  class withRadius: r => self new: #{#radius => r}
 
   /// Produce a Circle with this factory's configured radius.
   createShape => Circle withRadius: self.radius

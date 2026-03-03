@@ -14,12 +14,13 @@ FsEntry subclass: FsFile
   state: size = 0
 
   /// Create a file entry with the given name and byte size.
-  class name: n size: s =>
-    self new: #{name => n, size => s}
+  class name: n size: s => self new: #{#name => n, #size => s}
 
   /// Return the file name.
   name => self.name
+
   /// Return the file size in bytes.
   size => self.size
+
   /// Return "indent<name> (<size> bytes)".
   describe: indent => "{indent}{self.name} ({self.size} bytes)"

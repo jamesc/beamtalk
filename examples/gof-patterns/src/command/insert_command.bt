@@ -5,11 +5,10 @@
 /// Inserts a string at a given position (1-based).
 TextCommand subclass: InsertCommand
   state: position = 1
-  state: text     = ""
+  state: text = ""
 
   /// Create a command that will insert str at 1-based position pos.
-  class at: pos insert: str =>
-    self new: #{position => pos, text => str}
+  class at: pos insert: str => self new: #{#position => pos, #text => str}
 
   /// Insert this command's text into buffer at the stored position.
   execute: buffer => buffer insertAt: self.position text: self.text

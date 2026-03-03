@@ -16,8 +16,7 @@ Object subclass: HtmlBuilder
   state: element = nil
 
   /// Begin building a new element with the given tag name.
-  class buildTag: t =>
-    self new: #{element => (HtmlElement tag: t)}
+  class buildTag: t => self new: #{#element => (HtmlElement tag: t)}
 
   /// Add an HTML attribute to the element under construction.
   withAttr: key value: val =>
@@ -30,5 +29,4 @@ Object subclass: HtmlBuilder
     self
 
   /// Finalise construction and return the built HtmlElement.
-  build =>
-    self.element
+  build => self.element

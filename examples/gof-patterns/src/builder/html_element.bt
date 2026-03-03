@@ -7,13 +7,12 @@
 /// HtmlElement is an immutable value object. Its state is assembled step-by-step
 /// by HtmlBuilder. Callers never construct HtmlElement directly.
 Object subclass: HtmlElement
-  state: tag        = "div"
+  state: tag = "div"
   state: attributes = #{}
-  state: content    = ""
+  state: content = ""
 
   /// Begin with the given HTML tag name and empty attributes and content.
-  class tag: t =>
-    self new: #{tag => t}
+  class tag: t => self new: #{#tag => t}
 
   /// Return a new element with the given attribute added.
   attribute: key value: val =>
@@ -27,7 +26,8 @@ Object subclass: HtmlElement
 
   /// Render to an HTML string.
   render =>
-    attrs   := self.attributes
+    attrs := self.attributes
     attrStr := attrs keys inject: "" into: [:acc :k |
-      acc ++ " {k}=\"{attrs at: k}\""]
+      acc ++ " {k}=""{attrs at: k}"""
+    ]
     "<{self.tag}{attrStr}>{self.content}</{self.tag}>"

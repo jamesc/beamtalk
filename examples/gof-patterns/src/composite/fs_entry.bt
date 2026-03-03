@@ -6,9 +6,12 @@
 /// Composite lets clients treat individual objects (FsFile) and compositions
 /// (FsDir) uniformly through a single interface.
 Object subclass: FsEntry
+
   /// Return the name of this entry (file or directory name, without path).
-  name            => self subclassResponsibility
+  name => self subclassResponsibility
+
   /// Return the total byte size of this entry (recursive for directories).
-  size            => self subclassResponsibility
+  size => self subclassResponsibility
+
   /// Return a human-readable string representation, indented by indent.
   describe: _indent => self subclassResponsibility

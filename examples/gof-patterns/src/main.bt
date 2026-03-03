@@ -6,8 +6,7 @@
 /// Or load manually: :load src/main.bt
 Object subclass: Main
 
-  class run =>
-    self new run
+  class run => self new run
 
   run =>
     self traceCr: "Hello from gang_of_four!"

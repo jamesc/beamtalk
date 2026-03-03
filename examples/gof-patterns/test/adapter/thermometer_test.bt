@@ -10,21 +10,21 @@ TestCase subclass: ThermometerTest
     self assert: t readCelsius equals: 100.0
 
   testFreezingPointConversion =>
-    source  := CelsiusThermometer withCelsius: 0.0
+    source := CelsiusThermometer withCelsius: 0.0
     adapter := CelsiusToFahrenheitAdapter wrap: source
     self assert: adapter readFahrenheit equals: (32 / 1)
 
   testBoilingPointConversion =>
-    source  := CelsiusThermometer withCelsius: 100.0
+    source := CelsiusThermometer withCelsius: 100.0
     adapter := CelsiusToFahrenheitAdapter wrap: source
     self assert: adapter readFahrenheit equals: (212 / 1)
 
   testBodyTemperatureConversion =>
-    source  := CelsiusThermometer withCelsius: 37.0
+    source := CelsiusThermometer withCelsius: 37.0
     adapter := CelsiusToFahrenheitAdapter wrap: source
     self assert: adapter readFahrenheit equals: 98.6
 
   testAdapterExposesReadCelsius =>
-    source  := CelsiusThermometer withCelsius: 25.0
+    source := CelsiusThermometer withCelsius: 25.0
     adapter := CelsiusToFahrenheitAdapter wrap: source
     self assert: adapter readCelsius equals: 25.0

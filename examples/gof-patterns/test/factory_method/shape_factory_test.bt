@@ -22,12 +22,12 @@ TestCase subclass: ShapeFactoryTest
     self assert: r perimeter equals: 14.0
 
   testCircleFactoryCreatesCircle =>
-    f     := CircleFactory withRadius: 5.0
+    f := CircleFactory withRadius: 5.0
     shape := f createShape
     self assert: shape area equals: 3.14159 * 25.0
 
   testRectangleFactoryCreatesRectangle =>
-    f     := RectangleFactory width: 2.0 height: 3.0
+    f := RectangleFactory width: 2.0 height: 3.0
     shape := f createShape
     self assert: shape area equals: 6.0
 

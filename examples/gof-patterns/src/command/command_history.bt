@@ -13,28 +13,28 @@
 ///   h := h undo.
 ///   h buffer text    // => "hello"
 Object subclass: CommandHistory
-  state: buffer  = nil
-  state: history = #()   // stack of prior buffer snapshots
+  state: buffer = nil
+  state: history = #()  // stack of prior buffer snapshots
 
   /// Create a history whose initial buffer state is aBuffer.
-  class on: aBuffer =>
-    self new: #{buffer => aBuffer}
+  class on: aBuffer => self new: #{#buffer => aBuffer}
 
   /// Execute a command, save the current buffer as a snapshot, update the buffer.
   execute: command =>
-    nextBuffer   := command execute: self.buffer
+    nextBuffer := command execute: self.buffer
     self.history := self.history add: self.buffer
-    self.buffer  := nextBuffer
+    self.buffer := nextBuffer
     self
 
   /// Restore the most recent snapshot, removing it from the stack.
   undo =>
     self.history isEmpty ifTrue: [^self]
-    self.buffer  := self.history last
+    self.buffer := self.history last
     self.history := self.history take: self.history size - 1
     self
 
   /// Return the current buffer state.
-  buffer   => self.buffer
+  buffer => self.buffer
+
   /// Return true if there is at least one snapshot available to undo.
-  canUndo  => self.history isNotEmpty
+  canUndo => self.history isNotEmpty

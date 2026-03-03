@@ -13,6 +13,7 @@ Actor subclass: EventCollector
     self
 
   /// Return all received events in the order they arrived.
-  events     => self.events
+  events => self.events
+
   /// Return the number of events received so far.
   eventCount => self.events size

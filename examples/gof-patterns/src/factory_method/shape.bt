@@ -5,9 +5,12 @@
 /// Intent: Define the common product interface implemented by concrete shapes
 /// created by factory method creators.
 Object subclass: Shape
+
   /// Return the area of this shape.
-  area      => self subclassResponsibility
+  area => self subclassResponsibility
+
   /// Return the perimeter (circumference) of this shape.
   perimeter => self subclassResponsibility
+
   /// Return a short human-readable label for this shape, e.g. "Circle(r=5.0)".
-  describe  => self subclassResponsibility
+  describe => self subclassResponsibility
