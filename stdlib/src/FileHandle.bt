@@ -16,7 +16,7 @@
 ///   handle lines take: 10.
 /// ].
 /// ```
-sealed Value subclass: FileHandle
+sealed Object subclass: FileHandle
 
   /// Return a lazy Stream of lines from this file handle.
   ///
