@@ -908,77 +908,19 @@ impl ClassHierarchy {
     }
 
     /// Add classes from a parsed module. Returns diagnostics for errors.
+    ///
+    /// Uses a two-pass approach to avoid definition-order sensitivity:
+    /// Pass 1 registers all classes so ancestor lookups are complete;
+    /// Pass 2 runs sealed-override and superclass checks.
     #[allow(clippy::too_many_lines)]
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
+        // Pass 1: Build and register ClassInfo for every class in the module.
+        // Duplicate-selector checks only need the class's own methods, so they
+        // run here too. Sealed checks are deferred to Pass 2.
         for class in &module.classes {
-            // Check sealed class enforcement (skip for root classes with no superclass).
-            // Still register the class so downstream passes (codegen routing,
-            // completions) can reason about it despite the error.
-            if let Some(diag) = self.check_sealed_superclass(class, stdlib_mode) {
-                diagnostics.push(diag);
-            }
-
-            // Check sealed method override enforcement.
-            // BT-803: Built-in stdlib classes (e.g. Metaclass) are allowed to override
-            // sealed methods when compiling in stdlib mode.
-            // BT-807: Abstract stdlib classes (e.g. Behaviour) are also allowed to override
-            // sealed methods, as they provide class-side dispatch methods whose
-            // selectors coincide with sealed instance-side methods on Object, but are
-            // dispatched through a separate runtime namespace.
-            if let Some(ref superclass) = class.superclass {
-                let is_stdlib_builtin =
-                    stdlib_mode && Self::is_builtin_class(class.name.name.as_str());
-                let is_abstract_stdlib = stdlib_mode && class.is_abstract;
-                // Instance-method sealed checks: exempt builtin AND abstract stdlib classes.
-                // Abstract stdlib classes (e.g. Behaviour) may coincidentally share selector
-                // names with sealed instance-side methods on Object but dispatch through a
-                // separate runtime namespace.
-                if !is_stdlib_builtin && !is_abstract_stdlib {
-                    for method in class
-                        .methods
-                        .iter()
-                        .filter(|m| m.kind == MethodKind::Primary)
-                    {
-                        let selector = method.selector.name();
-                        if let Some((sealed_class, _)) = self
-                            .find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
-                        {
-                            diagnostics.push(Diagnostic::error(
-                                format!(
-                                    "Cannot override sealed method `{selector}` from class `{sealed_class}`"
-                                ),
-                                method.span,
-                            ));
-                        }
-                    }
-                }
-                // Class-method sealed checks: only exempt builtin stdlib classes.
-                // Abstract stdlib classes must still respect sealed class-method overrides.
-                if !is_stdlib_builtin {
-                    for method in class
-                        .class_methods
-                        .iter()
-                        .filter(|m| m.kind == MethodKind::Primary)
-                    {
-                        let selector = method.selector.name();
-                        if let Some((sealed_class, _)) = self.find_sealed_class_method_in_ancestors(
-                            superclass.name.as_str(),
-                            &selector,
-                        ) {
-                            diagnostics.push(Diagnostic::error(
-                                format!(
-                                    "Cannot override sealed method `{selector}` from class `{sealed_class}`"
-                                ),
-                                method.span,
-                            ));
-                        }
-                    }
-                }
-            }
-
-            // Check for duplicate method selectors
+            // Check for duplicate method selectors (no ancestor lookup needed)
             Self::check_duplicate_methods(
                 &class.methods,
                 &class.name.name,
@@ -1062,6 +1004,73 @@ impl ClassHierarchy {
             };
 
             self.classes.insert(class.name.name.clone(), class_info);
+        }
+
+        // Pass 2: All classes in this module are now registered. Run sealed
+        // superclass and method-override checks so ancestor lookups are
+        // deterministic regardless of class definition order within the module.
+        for class in &module.classes {
+            // Check sealed class enforcement (skip for root classes with no superclass).
+            // Still register the class so downstream passes (codegen routing,
+            // completions) can reason about it despite the error.
+            if let Some(diag) = self.check_sealed_superclass(class, stdlib_mode) {
+                diagnostics.push(diag);
+            }
+
+            // Check sealed method override enforcement.
+            // BT-803: Built-in stdlib classes (e.g. Metaclass) are allowed to override
+            // sealed methods when compiling in stdlib mode.
+            // BT-807: Abstract stdlib classes (e.g. Behaviour) are also allowed to override
+            // sealed methods, as they provide class-side dispatch methods whose
+            // selectors coincide with sealed instance-side methods on Object, but are
+            // dispatched through a separate runtime namespace.
+            if let Some(ref superclass) = class.superclass {
+                let is_stdlib_builtin =
+                    stdlib_mode && Self::is_builtin_class(class.name.name.as_str());
+                let is_abstract_stdlib = stdlib_mode && class.is_abstract;
+                // Instance-method sealed checks: exempt builtin AND abstract stdlib classes.
+                if !is_stdlib_builtin && !is_abstract_stdlib {
+                    for method in class
+                        .methods
+                        .iter()
+                        .filter(|m| m.kind == MethodKind::Primary)
+                    {
+                        let selector = method.selector.name();
+                        if let Some((sealed_class, _)) = self
+                            .find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
+                        {
+                            diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Cannot override sealed method `{selector}` from class `{sealed_class}`"
+                                ),
+                                method.span,
+                            ));
+                        }
+                    }
+                }
+                // Class-method sealed checks: only exempt builtin stdlib classes.
+                // Abstract stdlib classes must still respect sealed class-method overrides.
+                if !is_stdlib_builtin {
+                    for method in class
+                        .class_methods
+                        .iter()
+                        .filter(|m| m.kind == MethodKind::Primary)
+                    {
+                        let selector = method.selector.name();
+                        if let Some((sealed_class, _)) = self.find_sealed_class_method_in_ancestors(
+                            superclass.name.as_str(),
+                            &selector,
+                        ) {
+                            diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Cannot override sealed method `{selector}` from class `{sealed_class}`"
+                                ),
+                                method.span,
+                            ));
+                        }
+                    }
+                }
+            }
         }
 
         diagnostics
