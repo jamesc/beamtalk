@@ -533,22 +533,18 @@ function startReplCommand(context: vscode.ExtensionContext): void {
     return;
   }
 
-  // If the shell terminal is alive but the REPL has stopped, run it again there.
+  // If the shell terminal is alive but the REPL has stopped, close it and open a
+  // fresh one so we always start from the correct project root cwd.
   if (replTerminal && replTerminal.exitStatus === undefined && !replRunning) {
-    replTerminal.show();
-    replRunning = true;
-    if (replTerminal.shellIntegration) {
-      const execution = replTerminal.shellIntegration.executeCommand(replCommand());
-      void captureSessionId(execution, replTerminal);
-    } else {
-      replTerminal.sendText(replCommand());
-    }
-    return;
+    replTerminal.dispose();
+    replTerminal = undefined;
   }
 
+  const cwd = vscode.workspace.workspaceFolders?.[0]?.uri;
   replTerminal = vscode.window.createTerminal({
     name: "Beamtalk Session",
     iconPath: new vscode.ThemeIcon("beaker"),
+    cwd,
   });
   replTerminal.show();
   replRunning = true;

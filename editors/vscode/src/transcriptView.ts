@@ -80,13 +80,14 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
 
   private _appendText(text: string): void {
     this.accumText += text;
-    this.lineCount += Math.max(1, (text.match(/\n/g) ?? []).length);
+    this.lineCount += (text.match(/\n/g) ?? []).length;
 
     if (this.lineCount > MAX_LINES) {
       const lines = this.accumText.split("\n");
       const start = lines.length > TRIM_TO ? lines.length - TRIM_TO : 0;
-      this.accumText = lines.slice(start).join("\n");
-      this.lineCount = TRIM_TO;
+      const kept = lines.slice(start);
+      this.accumText = kept.join("\n");
+      this.lineCount = kept.length - 1;
     }
 
     if (this.view) {
