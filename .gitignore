@@ -125,3 +125,4 @@ _rel/
 *.crashdump
 _bt_stdlib_*.txt
 _bt_stdlib_subdir/
+_site/

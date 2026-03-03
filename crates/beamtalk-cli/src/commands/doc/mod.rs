@@ -40,6 +40,11 @@ use site::{generate_adr_docs, generate_prose_docs, write_site_landing_page};
 /// Prose documentation pages to render from the docs/ directory.
 const PROSE_PAGES: &[(&str, &str, &str)] = &[
     (
+        "beamtalk-installation.md",
+        "installation.html",
+        "Installation",
+    ),
+    (
         "beamtalk-language-features.md",
         "language-features.html",
         "Language Features",

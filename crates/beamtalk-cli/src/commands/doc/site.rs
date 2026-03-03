@@ -513,6 +513,10 @@ this.classList.remove('active');\"></div>\n";
 /// descriptions.
 fn landing_card_meta(output_file: &str) -> (&'static str, &'static str) {
     match output_file {
+        "installation.html" => (
+            "",
+            "Install the Beamtalk toolchain from a release tarball and set up the VS Code extension.",
+        ),
         "language-features.html" => (
             "🔤",
             "Syntax, semantics, and worked examples for the message-based programming model.",
@@ -591,9 +595,7 @@ pub(super) fn write_site_landing_page(
          bytecode.</p>\n",
     );
     html.push_str("<div class=\"landing-cta\">\n");
-    html.push_str(
-        "<a href=\"docs/language-features.html\" class=\"btn-primary\">Get started</a>\n",
-    );
+    html.push_str("<a href=\"docs/installation.html\" class=\"btn-primary\">Get started</a>\n");
     html.push_str("<a href=\"apidocs/\" class=\"btn-secondary\">API Reference</a>\n");
     html.push_str("</div>\n"); // .landing-cta
     html.push_str("</div>\n"); // .landing-hero-text
