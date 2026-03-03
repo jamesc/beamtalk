@@ -22,11 +22,12 @@ beamtalk-<version>-x86_64-unknown-linux-gnu.tar.gz   # x86-64
 beamtalk-<version>-aarch64-unknown-linux-gnu.tar.gz   # ARM64
 ```
 
-Extract and install:
+Extract and add to your PATH:
 
 ```
 tar xzf beamtalk-<version>-<platform>.tar.gz
-sudo mv beamtalk /usr/local/bin/
+echo 'export PATH="$HOME/beamtalk-<version>/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
 ```
 
 ### macOS
@@ -36,11 +37,12 @@ beamtalk-<version>-aarch64-apple-darwin.tar.gz   # Apple Silicon
 beamtalk-<version>-x86_64-apple-darwin.tar.gz    # Intel
 ```
 
-Extract and install:
+Extract and add to your PATH:
 
 ```
 tar xzf beamtalk-<version>-<platform>.tar.gz
-sudo mv beamtalk /usr/local/bin/
+echo 'export PATH="$HOME/beamtalk-<version>/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
 ```
 
 ### Windows
@@ -49,9 +51,9 @@ sudo mv beamtalk /usr/local/bin/
 beamtalk-<version>-x86_64-pc-windows-msvc.zip
 ```
 
-Extract the zip and place `beamtalk.exe` somewhere on your `PATH`, for example
-`C:\Program Files\beamtalk\`. Then add that directory to your `PATH` via
-**System Properties → Environment Variables**.
+Extract the zip, then add the `bin\` directory to your `PATH` via
+**System Properties → Environment Variables → Path → Edit**,
+adding `C:\Users\<you>\beamtalk-<version>\bin`.
 
 ### Verify
 
