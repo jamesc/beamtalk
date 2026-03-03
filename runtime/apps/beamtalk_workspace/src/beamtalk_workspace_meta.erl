@@ -162,10 +162,17 @@ register_module(Module) ->
     register_module(Module, undefined).
 
 %% @doc Register a loaded module with its .bt source file path.
--spec register_module(atom(), string() | undefined) -> ok.
+-spec register_module(atom(), string() | binary() | undefined) -> ok.
 register_module(Module, SourcePath) when is_atom(Module) ->
+    %% Normalise binary to string so persist_metadata_to_disk/1 always sees a list.
+    NormalizedPath =
+        case SourcePath of
+            undefined -> undefined;
+            B when is_binary(B) -> binary_to_list(B);
+            S when is_list(S) -> S
+        end,
     try
-        gen_server:cast(?MODULE, {register_module, Module, SourcePath})
+        gen_server:cast(?MODULE, {register_module, Module, NormalizedPath})
     catch
         exit:{noproc, _} ->
             ok
@@ -409,7 +416,8 @@ load_metadata_from_disk(State) ->
                                         Source =
                                             case maps:get(<<"source">>, Entry, null) of
                                                 null -> undefined;
-                                                S when is_binary(S) -> binary_to_list(S)
+                                                S when is_binary(S) -> binary_to_list(S);
+                                                _ -> undefined
                                             end,
                                         {true, {Atom, Source}}
                                 end;

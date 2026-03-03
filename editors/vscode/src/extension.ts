@@ -742,8 +742,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const uri = vscode.Uri.file(sourceFile);
       try {
         await vscode.window.showTextDocument(uri);
-      } catch {
-        await vscode.window.showInformationMessage(`Could not open source: ${sourceFile}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await vscode.window.showErrorMessage(`Could not open source: ${sourceFile}: ${msg}`);
       }
     })
   );
@@ -761,9 +762,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       try {
         const result = await workspaceWsClient.reload(sourceFile);
-        const names = result.classes.map((c) => c.name).join(", ");
+        const names = result.classes.map((c) => c.name).filter(Boolean);
+        const baseMessage =
+          names.length > 0 ? `Reloaded: ${names.join(", ")}` : "Reload completed.";
         const warningText = result.warnings.length > 0 ? ` (${result.warnings.join("; ")})` : "";
-        await vscode.window.showInformationMessage(`Reloaded: ${names}${warningText}`);
+        await vscode.window.showInformationMessage(`${baseMessage}${warningText}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         await vscode.window.showErrorMessage(`Reload failed: ${msg}`);
