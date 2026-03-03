@@ -41,6 +41,7 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 ERLANG_STAMP="$REPO_ROOT/.lint-erlang-stamp"
 JS_STAMP="$REPO_ROOT/.lint-js-stamp"
+BT_STAMP="$REPO_ROOT/.lint-beamtalk-stamp"
 
 # Compute a fingerprint of tracked files matching the given patterns.
 fingerprint() {
@@ -72,6 +73,15 @@ else
   echo "🔎 Running lint-js..."
   just lint-js
   echo "$JS_FP" > "$JS_STAMP"
+fi
+
+BT_FP="$(fingerprint '*.bt')"
+if stamp_matches "$BT_STAMP" "$BT_FP"; then
+  echo "⏭️  fmt-check-beamtalk: no Beamtalk changes since last lint, skipping"
+else
+  echo "🔍 Running fmt-check-beamtalk..."
+  just fmt-check-beamtalk
+  echo "$BT_FP" > "$BT_STAMP"
 fi
 
 echo "✅ All lint checks passed"
