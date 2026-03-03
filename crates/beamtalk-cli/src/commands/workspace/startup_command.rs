@@ -266,7 +266,11 @@ mod tests {
 
     #[test]
     fn test_build_command_clears_env_and_restores_path() {
-        // After env_clear(), PATH should be restored from current process
+        // After env_clear(), PATH should be restored from current process — but
+        // only when PATH is set in the test environment (minimal CI may omit it).
+        if std::env::var("PATH").is_err() {
+            return;
+        }
         let cmd = build_test_command();
         let envs: Vec<_> = cmd.get_envs().collect();
         let has_path = envs.iter().any(|(k, _)| k == &OsStr::new("PATH"));

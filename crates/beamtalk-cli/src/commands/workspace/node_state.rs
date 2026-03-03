@@ -89,8 +89,7 @@ pub fn is_node_running(info: &NodeInfo, workspace_id: Option<&str>) -> bool {
 /// Scans all workspace directories since we don't know `workspace_id` here.
 /// Returns `None` if no matching port file found or on read error.
 fn read_port_file_nonce(port: u16) -> Option<String> {
-    let home_dir = dirs::home_dir()?;
-    let workspaces_root = home_dir.join(".beamtalk").join("workspaces");
+    let workspaces_root = super::storage::workspaces_base_dir().ok()?;
 
     let entries = std::fs::read_dir(workspaces_root).ok()?;
 
