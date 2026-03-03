@@ -16,6 +16,10 @@
     "Programming Languages"
   ],
   "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:beamtalk",
+    "workspaceContains:beamtalk.toml"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -41,6 +45,10 @@
       ]
     },
     "commands": [
+      {
+        "command": "beamtalk.startRepl",
+        "title": "Beamtalk: Start REPL"
+      },
       {
         "command": "beamtalk.restartServer",
         "title": "Beamtalk: Restart Language Server"
@@ -69,6 +77,11 @@
         "command": "beamtalk.reloadClass",
         "title": "Reload Class",
         "icon": "$(sync)"
+      },
+      {
+        "command": "beamtalk.navigateToMethod",
+        "title": "Go to Definition",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
@@ -113,6 +126,16 @@
         {
           "command": "beamtalk.reloadClass",
           "when": "view == beamtalk.workspaceExplorer && viewItem == class-item",
+          "group": "beamtalk@1"
+        },
+        {
+          "command": "beamtalk.navigateToMethod",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == method-item",
+          "group": "inline"
+        },
+        {
+          "command": "beamtalk.navigateToMethod",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == method-item",
           "group": "beamtalk@1"
         }
       ]
@@ -160,7 +183,7 @@
         "beamtalk.workspace.autoConnect": {
           "type": "boolean",
           "default": true,
-          "description": "(BT-1024) Auto-connect the Workspace Explorer to a running Beamtalk workspace when a .bt file is opened. Not yet active — wiring is implemented in BT-1024."
+          "description": "Auto-connect the Workspace Explorer to a running Beamtalk workspace when a workspace port file appears. When disabled, the Workspace Explorer will not auto-connect."
         }
       }
     },

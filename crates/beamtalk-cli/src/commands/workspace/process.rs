@@ -100,7 +100,12 @@ const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
 /// Uses a lightweight TCP connect probe (cross-platform) to verify the
 /// workspace port is listening. If the workspace has a nonce, validates it
 /// against the port file nonce to detect stale entries (PID reuse after crash).
-pub fn is_node_running(info: &NodeInfo) -> bool {
+///
+/// When `workspace_id` is `Some`, the port file is read directly from the
+/// workspace directory (O(1)). When `None`, all workspace directories are
+/// scanned to find a matching port file (O(N) fallback for callers that do
+/// not have the workspace ID available).
+pub fn is_node_running(info: &NodeInfo, workspace_id: Option<&str>) -> bool {
     let host = info.connect_host();
     let addr = format!("{host}:{}", info.port);
     let Ok(addr) = addr.parse::<std::net::SocketAddr>() else {
@@ -114,8 +119,20 @@ pub fn is_node_running(info: &NodeInfo) -> bool {
 
     // If we have a nonce, verify it against the port file for stale detection
     if let Some(ref expected_nonce) = info.nonce {
-        // Read the port file nonce directly (no auth needed)
-        match read_port_file_nonce(info.port) {
+        let file_nonce = if let Some(id) = workspace_id {
+            // Fast path: read port file directly from the known workspace directory.
+            // Verify the port matches before using the nonce — if the port file
+            // belongs to a different startup, comparing nonces is meaningless.
+            match read_port_file(id).ok().flatten() {
+                Some((port, _)) if port != info.port => return false, // stale node.info
+                Some((_, nonce)) => nonce,
+                None => None,
+            }
+        } else {
+            // Fallback: scan all workspace directories (O(N))
+            read_port_file_nonce(info.port)
+        };
+        match file_nonce {
             Some(file_nonce) => file_nonce == *expected_nonce,
             None => true, // No port file — trust the TCP probe
         }
@@ -509,16 +526,7 @@ fn wait_for_tcp_ready(
     // Check whether the BEAM node is still alive to give a more actionable error.
     // If the process is gone it crashed during startup; if it's still running
     // it is either stuck initializing or the WebSocket stack failed to come up.
-    let node_alive = {
-        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-        let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
-            true,
-            ProcessRefreshKind::nothing(),
-        );
-        system.process(Pid::from_u32(pid)).is_some()
-    };
+    let node_alive = is_process_alive(pid);
 
     // Only mention the log file if we actually opened it (log_path is Some).
     let log_suffix = log_path
@@ -795,11 +803,9 @@ pub(super) fn wait_for_workspace_exit(host: &str, port: u16, timeout_secs: u64) 
 
 /// Force-kill a process by PID.
 ///
-/// Cross-platform: uses `sysinfo` for reliable process termination (ADR 0027).
+/// Cross-platform: uses `libc::kill(SIGKILL)` on Unix and `TerminateProcess` on Windows.
 /// Used as fallback when TCP graceful shutdown fails or times out.
 pub(super) fn force_kill_process(pid: u32) -> Result<()> {
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-
     // PID 0 is sentinel for when PID tracking is unavailable
     if pid == 0 {
         return Err(miette!(
@@ -808,84 +814,107 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
         ));
     }
 
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
-        true,
-        ProcessRefreshKind::nothing(),
-    );
+    #[cfg(unix)]
+    {
+        let pid_i = i32::try_from(pid).map_err(|_| miette!("PID {pid} too large for platform"))?;
+        // SAFETY: kill(2) is safe to call with a valid pid and signal number.
+        let ret = unsafe { libc::kill(pid_i, libc::SIGKILL) };
+        if ret == 0 {
+            return Ok(());
+        }
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ESRCH) {
+            // Process already exited — the goal of ensuring it is not running is achieved.
+            // This is the expected outcome when graceful shutdown succeeds just after a
+            // wait_for_workspace_exit timeout (race: BEAM exits naturally before we SIGKILL).
+            return Ok(());
+        }
+        Err(miette!("Failed to kill process {pid}: {err}"))
+    }
 
-    if let Some(process) = system.process(Pid::from_u32(pid)) {
-        if process.kill() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, FALSE};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_TERMINATE, TerminateProcess,
+        };
+
+        // SAFETY: Windows API call with documented parameters.
+        let handle = unsafe { OpenProcess(PROCESS_TERMINATE, FALSE, pid) };
+        if handle.is_null() {
+            let err = std::io::Error::last_os_error();
+            // ERROR_INVALID_PARAMETER (87) means the process no longer exists.
+            if err.raw_os_error() == Some(87) {
+                return Ok(());
+            }
+            return Err(miette!(
+                "Failed to open process {pid} for termination: {err}"
+            ));
+        }
+        // SAFETY: handle is valid, obtained from OpenProcess above.
+        let ret = unsafe { TerminateProcess(handle, 1) };
+        // Capture error *before* CloseHandle, which may clobber GetLastError.
+        let term_err = if ret == FALSE {
+            Some(std::io::Error::last_os_error())
+        } else {
+            None
+        };
+        // SAFETY: handle is valid, obtained from OpenProcess above.
+        unsafe { CloseHandle(handle) };
+        if ret != FALSE {
+            Ok(())
+        } else if term_err.as_ref().and_then(std::io::Error::raw_os_error) == Some(5) {
+            // ERROR_ACCESS_DENIED (5): process exited between OpenProcess and
+            // TerminateProcess — analogous to Unix ESRCH.
             Ok(())
         } else {
-            Err(miette!("Failed to kill process {pid}"))
+            Err(miette!(
+                "Failed to kill process {pid}: {}",
+                term_err.expect("term_err is Some when ret == FALSE")
+            ))
         }
-    } else {
-        // Process already exited — the goal of ensuring it is not running is achieved.
-        // This is the expected outcome when graceful shutdown succeeds just after a
-        // wait_for_workspace_exit timeout (race: BEAM exits naturally before we SIGKILL).
-        Ok(())
     }
 }
 
-/// Wait for a node name to be deregistered from `epmd`.
+/// Check whether a process is alive by PID.
 ///
-/// After force-killing a BEAM node, `epmd` may still hold the registration
-/// briefly. This polls `epmd -names` until the node name disappears or
-/// timeout is reached. Returns `Ok(())` once deregistered, or `Err` on timeout.
-#[cfg(all(unix, test))]
-pub(super) fn wait_for_epmd_deregistration(node_name: &str, timeout_secs: u64) -> Result<()> {
-    // Extract the short name (before '@') for epmd lookup
-    let short_name = node_name.split('@').next().unwrap_or(node_name);
-
-    let interval = Duration::from_millis(100);
-    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
-
-    while std::time::Instant::now() < deadline {
-        let output = Command::new("epmd")
-            .args(["-names"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output();
-
-        match output {
-            Ok(out) => {
-                // If epmd exits with a non-success status, keep polling
-                // rather than treating empty stdout as "deregistered".
-                if !out.status.success() {
-                    std::thread::sleep(interval);
-                    continue;
-                }
-
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                // Match exact node name in epmd output format:
-                //   "name <node_short_name> at port <N>"
-                // Using token-level matching to avoid false positives
-                // (e.g. "foo" matching "foobar").
-                let still_registered = stdout.lines().any(|line| {
-                    let mut parts = line.split_whitespace();
-                    matches!(parts.next(), Some("name"))
-                        && matches!(parts.next(), Some(name) if name == short_name)
-                });
-
-                if !still_registered {
-                    return Ok(());
-                }
-            }
-            Err(_) => {
-                // epmd not available — nothing to wait for
-                return Ok(());
-            }
+/// On Unix: uses `kill(pid, 0)` — signal 0 tests process existence without sending a signal.
+/// On Windows: uses `OpenProcess` + `GetExitCodeProcess` to check for `STILL_ACTIVE`.
+fn is_process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        let Ok(pid_i) = i32::try_from(pid) else {
+            return false;
+        };
+        // SAFETY: kill(2) with signal 0 is a standard existence check.
+        let ret = unsafe { libc::kill(pid_i, 0) };
+        if ret == 0 {
+            return true;
         }
-        std::thread::sleep(interval);
+        // EPERM means the process exists but we lack permission to signal it —
+        // it is still alive.
+        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }
 
-    Err(miette!(
-        "Node '{}' still registered in epmd after {}s",
-        short_name,
-        timeout_secs
-    ))
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, FALSE, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+
+        // SAFETY: Windows API call with documented parameters.
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
+        if handle.is_null() {
+            return false;
+        }
+        let mut exit_code: u32 = 0;
+        // SAFETY: handle is valid, exit_code is a local variable.
+        let ok = unsafe { GetExitCodeProcess(handle, &raw mut exit_code) };
+        // SAFETY: handle is valid, obtained from OpenProcess above.
+        unsafe { CloseHandle(handle) };
+        ok != FALSE && exit_code == STILL_ACTIVE as u32
+    }
 }
 
 #[cfg(test)]
