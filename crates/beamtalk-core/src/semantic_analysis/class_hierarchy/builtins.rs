@@ -93,25 +93,9 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
         },
     );
 
-    // Value — root class for immutable value objects (ADR 0042).
-    // `Value subclass:` is parsed as a class declaration with ClassKind::Value (BT-922).
-    // This entry provides the root so `is_value_subclass()` can resolve the hierarchy.
-    classes.insert(
-        "Value".into(),
-        ClassInfo {
-            name: "Value".into(),
-            superclass: Some("Object".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_value: false,
-            state: vec![],
-            state_types: HashMap::new(),
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-        },
-    );
+    // Value is already present in the generated set (stdlib/src/Value.bt).
+    // Do NOT insert it manually here — that would silently overwrite generated
+    // metadata (methods, state) if Value.bt ever gains them (BT-507, ADR 0042).
 
     classes
 }
