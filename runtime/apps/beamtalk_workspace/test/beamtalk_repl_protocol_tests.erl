@@ -66,6 +66,22 @@ decode_new_format_complete_test() ->
     ?assertEqual(<<"complete">>, element(2, Msg)),
     ?assertEqual(#{<<"code">> => <<"Coun">>}, element(5, Msg)).
 
+%% BT-1045: session field must be accessible via get_session/1, NOT via get_params/1.
+%% The protocol decoder strips op/id/session from params — handlers must use
+%% get_session(Msg) to retrieve the session ID for binding lookups.
+decode_complete_with_session_accessible_via_get_session_test() ->
+    {ok, Msg} = beamtalk_repl_protocol:decode(
+        <<"{\"op\": \"complete\", \"id\": \"c-1\", \"session\": \"main-session-42\", \"code\": \"s \", \"cursor\": 2}">>
+    ),
+    %% session is in the message-level session field
+    ?assertEqual(<<"main-session-42">>, beamtalk_repl_protocol:get_session(Msg)),
+    %% session is NOT in params — handlers must NOT use maps:get(<<"session">>, Params)
+    Params = beamtalk_repl_protocol:get_params(Msg),
+    ?assertEqual(false, maps:is_key(<<"session">>, Params)),
+    %% cursor and code ARE in params
+    ?assertEqual(<<"s ">>, maps:get(<<"code">>, Params)),
+    ?assertEqual(2, maps:get(<<"cursor">>, Params)).
+
 decode_new_format_info_test() ->
     {ok, Msg} = beamtalk_repl_protocol:decode(
         <<"{\"op\": \"info\", \"id\": \"msg-008\", \"symbol\": \"Counter\"}">>

@@ -114,8 +114,13 @@ init(Config) ->
     WebPort = maps:get(web_port, Config, undefined),
     %% Generate a random nonce for stale port file detection (BT-611)
     Nonce = generate_nonce(),
-    %% BT-666: Session registry for interrupt routing
-    ets:new(beamtalk_sessions, [named_table, public, {read_concurrency, true}]),
+    %% BT-666: Session registry for interrupt routing.
+    %% Guard against the table already existing (e.g. from a prior test run or
+    %% a crashed supervisor that was restarted before the owning process died).
+    case ets:whereis(beamtalk_sessions) of
+        undefined -> ets:new(beamtalk_sessions, [named_table, public, {read_concurrency, true}]);
+        _ -> ok
+    end,
     %% ADR 0020: Start cowboy WebSocket listener.
     %% Default: bind to 127.0.0.1 so only local processes can connect.
     %% --bind flag allows binding to other addresses (BT-691).

@@ -28,6 +28,14 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+%% BT-1045: Export internals for white-box testing of the binding-lookup pipeline.
+-ifdef(TEST).
+-export([
+    resolve_binding_session/2,
+    get_session_bindings/1
+]).
+-endif.
+
 %% Methods inherited from Object that are internal implementation protocol and
 %% should not appear in user-facing completions. Long-term, reflection methods
 %% (fieldNames, fieldAt:, fieldAt:put:) should move to Mirror classes (BT-1049).
@@ -62,8 +70,10 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
                 %% Completions run on a separate WebSocket session with no user bindings.
                 %% If the client passes its main session ID, resolve bindings from that session
                 %% so instance-method completions work for bound actor variables.
+                %% BT-1045: session is decoded into Msg by the protocol layer and stripped
+                %% from Params — use get_session(Msg), NOT maps:get(<<"session">>, Params).
                 BindingPid = resolve_binding_session(
-                    maps:get(<<"session">>, Params, undefined), SessionPid
+                    beamtalk_repl_protocol:get_session(Msg), SessionPid
                 ),
                 SessionBindings = get_session_bindings(BindingPid),
                 WorkspaceBindings = get_workspace_bindings(),
@@ -720,9 +730,7 @@ resolve_binding_session(SessionId, Default) when is_binary(SessionId) ->
         end
     catch
         _:_ -> Default
-    end;
-resolve_binding_session(_, Default) ->
-    Default.
+    end.
 
 %% @private
 %% @doc Get the session bindings map from a session PID.
@@ -752,46 +760,22 @@ get_workspace_bindings() ->
 %% @doc Collect all class-side method selectors for a class by walking the superclass chain.
 %% Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
 -spec collect_all_class_methods(atom(), non_neg_integer()) -> [atom()].
-collect_all_class_methods(_ClassName, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    [];
 collect_all_class_methods(ClassName, Depth) ->
-    case
-        try
-            beamtalk_class_registry:whereis_class(ClassName)
-        catch
-            _:_ -> undefined
-        end
-    of
-        undefined ->
-            [];
-        ClassPid ->
-            LocalMethods =
-                try
-                    beamtalk_object_class:local_class_methods(ClassPid)
-                catch
-                    _:_ -> []
-                end,
-            Superclass =
-                try
-                    beamtalk_object_class:superclass(ClassPid)
-                catch
-                    _:_ -> none
-                end,
-            InheritedMethods =
-                case Superclass of
-                    none -> [];
-                    Super -> collect_all_class_methods(Super, Depth + 1)
-                end,
-            LocalMethods ++ InheritedMethods
-    end.
+    collect_methods_with_fun(ClassName, Depth, fun beamtalk_object_class:local_class_methods/1).
 
 %% @private
 %% @doc Collect all instance method selectors for a class by walking the superclass chain.
 %% Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
 -spec collect_all_methods(atom(), non_neg_integer()) -> [atom()].
-collect_all_methods(_ClassName, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    [];
 collect_all_methods(ClassName, Depth) ->
+    collect_methods_with_fun(ClassName, Depth, fun beamtalk_object_class:methods/1).
+
+%% @private
+%% @doc Walk the superclass chain collecting methods via a caller-supplied getter fun.
+-spec collect_methods_with_fun(atom(), non_neg_integer(), fun((pid()) -> [atom()])) -> [atom()].
+collect_methods_with_fun(_ClassName, Depth, _Fun) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    [];
+collect_methods_with_fun(ClassName, Depth, Fun) ->
     case
         try
             beamtalk_class_registry:whereis_class(ClassName)
@@ -804,7 +788,7 @@ collect_all_methods(ClassName, Depth) ->
         ClassPid ->
             LocalMethods =
                 try
-                    beamtalk_object_class:methods(ClassPid)
+                    Fun(ClassPid)
                 catch
                     _:_ -> []
                 end,
@@ -817,7 +801,7 @@ collect_all_methods(ClassName, Depth) ->
             InheritedMethods =
                 case Superclass of
                     none -> [];
-                    Super -> collect_all_methods(Super, Depth + 1)
+                    Super -> collect_methods_with_fun(Super, Depth + 1, Fun)
                 end,
             LocalMethods ++ InheritedMethods
     end.
