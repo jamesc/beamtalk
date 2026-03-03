@@ -990,6 +990,16 @@ pub fn run_tests(path: &str) -> Result<()> {
         pkgs
     };
 
+    // Map from package root → package name for test module naming.
+    // Used to prefix test module names with the package name when multiple
+    // packages are in scope, preventing module collisions (e.g. two packages
+    // that both define a `SmokeTest` class would otherwise both compile to
+    // `bt@smoke_test.beam` in the shared temp build dir).
+    let pkg_root_to_name: HashMap<Utf8PathBuf, String> = discovered_packages
+        .iter()
+        .map(|(root, pkg)| (root.clone(), pkg.name.clone()))
+        .collect();
+
     // Build per-package class indexes and a merged combined index.
     // Per-package indexes let each test file see only its own package's classes,
     // preventing false cross-package class name collisions when running tests
@@ -1072,7 +1082,26 @@ pub fn run_tests(path: &str) -> Result<()> {
             &class_superclass_index,
         );
 
-        let (test_classes, load_files) = discover_test_classes(test_file)?;
+        let (mut test_classes, load_files) = discover_test_classes(test_file)?;
+
+        // When multiple packages are in scope, prefix the test module name with
+        // the owning package name to prevent `bt@smoke_test.beam` collisions
+        // between two packages that each define a class named `SmokeTest`.
+        // Single-package runs are unaffected (no prefix added when only one package
+        // is discovered), preserving backwards-compatible module names.
+        if discovered_packages.len() > 1 {
+            let pkg_name_slug = find_package_root(test_file)
+                .as_ref()
+                .and_then(|r| pkg_root_to_name.get(r))
+                .map(|n| beamtalk_core::codegen::core_erlang::to_module_name(n));
+
+            if let Some(ref prefix) = pkg_name_slug {
+                for tc in &mut test_classes {
+                    let stem = beamtalk_core::codegen::core_erlang::to_module_name(&tc.class_name);
+                    tc.module_name = format!("bt@{prefix}@{stem}");
+                }
+            }
+        }
 
         // Handle deprecated @load directives as fallback.
         // Fixtures in the fixtures/ directory are already compiled above.
@@ -1654,5 +1683,77 @@ mod tests {
         // Both test methods present
         assert!(wrapper.contains("'testA_test_'()"));
         assert!(wrapper.contains("'testB_test_'()"));
+    }
+
+    /// When two packages each define a class with the same name (e.g. `SmokeTest`),
+    /// the multi-package run would compile both to `bt@smoke_test.beam` in the same
+    /// temp build dir, with the second silently overwriting the first. The fix:
+    /// when `discovered_packages.len() > 1`, prefix each test module name with the
+    /// owning package name (e.g. `bt@pkg_a@smoke_test` and `bt@pkg_b@smoke_test`).
+    ///
+    /// This test verifies the renaming logic that produces those unique names.
+    #[test]
+    fn test_module_name_prefixed_for_multi_package_collision_avoidance() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Two packages, each with a SmokeTest class
+        let pkg_a = dir.join("pkg_a");
+        let pkg_b = dir.join("pkg_b");
+        for pkg in [&pkg_a, &pkg_b] {
+            fs::create_dir_all(pkg.join("test")).unwrap();
+        }
+        fs::write(
+            pkg_a.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_a\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            pkg_b.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_b\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let file_a = pkg_a.join("test/smoke_test.bt");
+        let file_b = pkg_b.join("test/smoke_test.bt");
+        for f in [&file_a, &file_b] {
+            fs::write(
+                f,
+                "TestCase subclass: SmokeTest\n  testOk => self assert: true\n",
+            )
+            .unwrap();
+        }
+
+        // Build pkg_root_to_name as the production code does
+        let pkg_root_to_name: HashMap<Utf8PathBuf, String> = [
+            (pkg_a.clone(), "pkg_a".to_string()),
+            (pkg_b.clone(), "pkg_b".to_string()),
+        ]
+        .into_iter()
+        .collect();
+
+        // Simulate the override applied in run_tests when len > 1
+        for (file, expected_module) in [
+            (&file_a, "bt@pkg_a@smoke_test"),
+            (&file_b, "bt@pkg_b@smoke_test"),
+        ] {
+            let (mut test_classes, _) = discover_test_classes(file).unwrap();
+            // Default (single-pkg) name
+            assert_eq!(test_classes[0].module_name, "bt@smoke_test");
+
+            // Apply multi-package prefix (mirrors run_tests logic)
+            let pkg_name_slug = find_package_root(file)
+                .as_ref()
+                .and_then(|r| pkg_root_to_name.get(r))
+                .map(|n| beamtalk_core::codegen::core_erlang::to_module_name(n));
+
+            if let Some(ref prefix) = pkg_name_slug {
+                for tc in &mut test_classes {
+                    let stem = beamtalk_core::codegen::core_erlang::to_module_name(&tc.class_name);
+                    tc.module_name = format!("bt@{prefix}@{stem}");
+                }
+            }
+
+            assert_eq!(test_classes[0].module_name, expected_module);
+        }
     }
 }
