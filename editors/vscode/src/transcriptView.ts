@@ -137,8 +137,17 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
   <pre id="output">${isEmpty ? '<span class="empty">No transcript output yet.</span>' : content}</pre>
   <script>
     (function () {
-      // Scroll to bottom on each render.
-      document.getElementById('output').scrollTop = document.getElementById('output').scrollHeight;
+      const el = document.getElementById('output');
+      // Restore scroll: only auto-scroll if user was already at the bottom
+      // (or hasn't scrolled yet). Preserves the ability to scroll up to inspect.
+      const atBottom = sessionStorage.getItem('scrollAtBottom') !== 'false';
+      if (atBottom) {
+        el.scrollTop = el.scrollHeight;
+      }
+      el.addEventListener('scroll', () => {
+        const near = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
+        sessionStorage.setItem('scrollAtBottom', near ? 'true' : 'false');
+      });
     }());
   </script>
 </body>

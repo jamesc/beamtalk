@@ -513,8 +513,8 @@ async function captureSessionId(
 
 function replCommand(): string {
   const ephemeral = vscode.workspace
-    .getConfiguration("beamtalk.repl")
-    .get<boolean>("ephemeral", false);
+    .getConfiguration("beamtalk")
+    .get<boolean>("repl.ephemeral", false);
   return ephemeral ? "beamtalk repl -e" : "beamtalk repl";
 }
 
@@ -536,6 +536,7 @@ function startReplCommand(context: vscode.ExtensionContext): void {
   // If the shell terminal is alive but the REPL has stopped, run it again there.
   if (replTerminal && replTerminal.exitStatus === undefined && !replRunning) {
     replTerminal.show();
+    replRunning = true;
     if (replTerminal.shellIntegration) {
       const execution = replTerminal.shellIntegration.executeCommand(replCommand());
       void captureSessionId(execution, replTerminal);
@@ -550,6 +551,7 @@ function startReplCommand(context: vscode.ExtensionContext): void {
     iconPath: new vscode.ThemeIcon("beaker"),
   });
   replTerminal.show();
+  replRunning = true;
 
   const terminal = replTerminal;
 
