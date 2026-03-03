@@ -16,7 +16,7 @@
 /// #(1, 2, 3) includes: 2       // => true
 /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
 /// ```
-abstract typed Value subclass: Collection
+abstract typed Object subclass: Collection
 
   /// Factory method — create a collection of this type from a list.
   ///
