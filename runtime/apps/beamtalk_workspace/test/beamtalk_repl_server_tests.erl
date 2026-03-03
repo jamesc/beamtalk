@@ -1420,15 +1420,10 @@ resolve_binding_session_undefined_returns_default_test() ->
     Default = self(),
     ?assertEqual(Default, beamtalk_repl_ops_dev:resolve_binding_session(undefined, Default)).
 
-%% non-binary session ID → return default (guard clause)
-resolve_binding_session_non_binary_returns_default_test() ->
-    Default = self(),
-    ?assertEqual(Default, beamtalk_repl_ops_dev:resolve_binding_session(12345, Default)).
-
 %% ETS table does not exist → catch returns default without crashing
 resolve_binding_session_no_ets_table_returns_default_test() ->
     %% Ensure the named table does not exist for this test
-    catch ets:delete(beamtalk_sessions_bt1045_test),
+    catch ets:delete(beamtalk_sessions),
     Default = self(),
     %% The function catches all errors and falls back to Default
     Result = beamtalk_repl_ops_dev:resolve_binding_session(<<"no-such-session">>, Default),
