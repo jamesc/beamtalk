@@ -250,32 +250,6 @@ Module {
                 ],
                 trailing: Some(
                     Comment {
-                        content: "comment here",
-                        span: Span {
-                            start: 344,
-                            end: 350,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                ),
-            },
-            expression: Identifier(
-                Identifier {
-                    name: "object",
-                    span: Span {
-                        start: 344,
-                        end: 350,
-                    },
-                },
-            ),
-            preceding_blank_line: true,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: Some(
-                    Comment {
                         content: "and here",
                         span: Span {
                             start: 380,
@@ -287,24 +261,44 @@ Module {
                 ),
             },
             expression: MessageSend {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found message:",
-                    span: Span {
-                        start: 371,
-                        end: 379,
+                receiver: Identifier(
+                    Identifier {
+                        name: "object",
+                        span: Span {
+                            start: 344,
+                            end: 350,
+                        },
                     },
-                },
-                selector: Unary(
-                    "value",
                 ),
-                arguments: [],
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "message:",
+                            span: Span {
+                                start: 371,
+                                end: 379,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Identifier(
+                        Identifier {
+                            name: "value",
+                            span: Span {
+                                start: 380,
+                                end: 385,
+                            },
+                        },
+                    ),
+                ],
                 is_cast: false,
                 span: Span {
-                    start: 371,
+                    start: 344,
                     end: 385,
                 },
             },
-            preceding_blank_line: false,
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -411,6 +405,3 @@ Module {
         },
     ],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found message:", span: Span { start: 371, end: 379 }, hint: None, category: None }
