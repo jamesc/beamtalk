@@ -47,7 +47,8 @@
     "commands": [
       {
         "command": "beamtalk.startRepl",
-        "title": "Beamtalk: Start REPL"
+        "title": "Beamtalk: Start Session",
+        "icon": "$(terminal-bash)"
       },
       {
         "command": "beamtalk.restartServer",
@@ -91,6 +92,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "beamtalk.startRepl",
+          "when": "view == beamtalk.workspaceExplorer",
+          "group": "navigation"
+        },
         {
           "command": "beamtalk.refreshWorkspace",
           "when": "view == beamtalk.workspaceExplorer",
