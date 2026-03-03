@@ -37,7 +37,11 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
     // Re-check under lock — another process may have created the workspace
     // while we were waiting for the lock.
     if workspace_exists(workspace_id)? {
-        return get_workspace_metadata(workspace_id);
+        // If metadata is valid, return it. If it is corrupted/empty (e.g. from a
+        // crashed write), fall through to recreate the workspace metadata.
+        if let Ok(metadata) = get_workspace_metadata(workspace_id) {
+            return Ok(metadata);
+        }
     }
 
     // Create workspace directory
