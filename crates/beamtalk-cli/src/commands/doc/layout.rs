@@ -35,6 +35,26 @@ pub(super) fn page_header(title: &str, css: &str, nav_prefix: &str) -> String {
     } else {
         nav_prefix.to_string()
     };
+    // Favicon links and logo image are only available in site mode (nav_prefix
+    // non-empty), where images/ is copied from docs/images/ by run_site.
+    let (favicon_links, logo_inner) = if nav_prefix.is_empty() {
+        (String::new(), "Beamtalk".to_string())
+    } else {
+        let favicons = format!(
+            "<link rel=\"icon\" href=\"{nav_prefix}images/favicon.ico\" sizes=\"any\">\n\
+             <link rel=\"icon\" type=\"image/png\" sizes=\"32x32\" \
+             href=\"{nav_prefix}images/favicon-32.png\">\n"
+        );
+        let logo = format!(
+            "<picture>\
+             <source srcset=\"{nav_prefix}images/beamtalk-logo-dark.svg\" \
+             media=\"(prefers-color-scheme: dark)\">\
+             <img src=\"{nav_prefix}images/beamtalk-logo-light.svg\" \
+             alt=\"Beamtalk\" height=\"28\">\
+             </picture>"
+        );
+        (favicons, logo)
+    };
     format!(
         "<!DOCTYPE html>\n\
          <html lang=\"en\">\n\
@@ -42,6 +62,7 @@ pub(super) fn page_header(title: &str, css: &str, nav_prefix: &str) -> String {
          <meta charset=\"utf-8\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
          <title>{title}</title>\n\
+         {favicon_links}\
          <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n\
          <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n\
          <link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap\" rel=\"stylesheet\">\n\
@@ -49,7 +70,7 @@ pub(super) fn page_header(title: &str, css: &str, nav_prefix: &str) -> String {
          </head>\n\
          <body>\n\
          <header class=\"top-nav\">\n\
-         <a class=\"nav-logo\" href=\"{logo_href}\">Beamtalk</a>\n\
+         <a class=\"nav-logo\" href=\"{logo_href}\">{logo_inner}</a>\n\
          <nav class=\"nav-links\">\n\
          {site_links}\
          <a href=\"https://github.com/jamesc/beamtalk\" class=\"nav-github\">GitHub ↗</a>\n\

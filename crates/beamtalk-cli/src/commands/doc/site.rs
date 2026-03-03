@@ -445,12 +445,12 @@ const LANDING_CODE_SNIPPET: &str = "Actor subclass: Counter
   state: value = 0
 
   increment => self.value := self.value + 1
-  getValue  => self.value
+  value => self.value
 
 c := Counter spawn.
 c increment.
 c increment.
-c getValue.   \"=> 2\"";
+c value. \"=> 2\"";
 
 /// Generate the site landing page at the root.
 pub(super) fn write_site_landing_page(

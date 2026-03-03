@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+
+  <g transform="translate(72, 100)">
+    <line x1="-16.1" y1="-13.5" x2="-59" y2="-49.5" stroke="#E63946" stroke-width="5" stroke-linecap="round"/>
+    <line x1="-19.7" y1="-7.2"  x2="-70.1" y2="-26.4" stroke="#E63946" stroke-width="5" stroke-linecap="round"/>
+    <line x1="-21" y1="0"       x2="-77" y2="0"    stroke="#E63946" stroke-width="5" stroke-linecap="round"/>
+    <line x1="-19.7" y1="7.2"   x2="-70.1" y2="26.4" stroke="#E63946" stroke-width="5" stroke-linecap="round"/>
+    <line x1="-16.1" y1="13.5"  x2="-59" y2="49.5" stroke="#E63946" stroke-width="5" stroke-linecap="round"/>
+
+    <circle cx="0" cy="0" r="21" fill="#E63946"/>
+
+    <line x1="22.5" y1="-13.5" x2="54" y2="-32" stroke="#111111" stroke-width="5" stroke-linecap="round" stroke-dasharray="2 7"/>
+    <line x1="22.5" y1="13.5"  x2="54" y2="32"  stroke="#111111" stroke-width="5" stroke-linecap="round" stroke-dasharray="2 7"/>
+
+    <circle cx="63" cy="-37" r="13" fill="#111111"/>
+    <circle cx="63" cy="37"  r="13" fill="#111111"/>
+
+    <line x1="78" y1="-45.5" x2="100" y2="-58" stroke="#111111" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="2 6"/>
+    <line x1="78.5" y1="-29.5" x2="100" y2="-18" stroke="#111111" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="2 6"/>
+    <line x1="78.5" y1="29.5"  x2="100" y2="18"  stroke="#111111" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="2 6"/>
+    <line x1="78" y1="45.5"    x2="100" y2="58"  stroke="#111111" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="2 6"/>
+
+    <circle cx="107" cy="-62" r="8" fill="#111111"/>
+    <circle cx="107" cy="-14" r="8" fill="#111111"/>
+    <circle cx="107" cy="14"  r="8" fill="#111111"/>
+    <circle cx="107" cy="62"  r="8" fill="#111111"/>
+  </g>
+
+</svg>
