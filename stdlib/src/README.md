@@ -6,9 +6,9 @@ The standard library for Beamtalk, where everything is a message send.
 
 See each class page for full API documentation and usage examples.
 
-## Base Class Choices
+## Choosing a Base Class
 
-Every Beamtalk class inherits from one of three roots:
+When defining a new class, pick one of these three base classes:
 
 | Base class | When to use |
 |------------|-------------|

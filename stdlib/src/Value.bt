@@ -4,8 +4,8 @@
 /// Value — Base class for immutable value types.
 ///
 /// Value types are lightweight, immutable objects that are passed by value
-/// rather than by reference. Examples include `Integer`, `String`, `Exception`,
-/// `Point`, and other stdlib types.
+/// rather than by reference. Examples include `Integer`, `String`, `Boolean`,
+/// `DateTime`, and other stdlib types.
 ///
 /// ## Key Characteristics
 ///
