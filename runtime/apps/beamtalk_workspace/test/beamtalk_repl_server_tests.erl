@@ -1475,10 +1475,11 @@ resolve_binding_session_dead_pid_returns_default_test() ->
                 beamtalk_sessions
         end,
     SessionId = <<"test-session-bt1045-dead">>,
-    DeadPid = spawn(fun() -> ok end),
-    timer:sleep(10),
-    %% Ensure the spawned process has exited
-    ?assertNot(is_process_alive(DeadPid)),
+    MonRef = erlang:monitor(process, spawn(fun() -> ok end)),
+    DeadPid =
+        receive
+            {'DOWN', MonRef, process, Pid, _} -> Pid
+        end,
     ets:insert(Tid, {SessionId, DeadPid}),
     Default = self(),
     Result = beamtalk_repl_ops_dev:resolve_binding_session(SessionId, Default),
@@ -1499,9 +1500,11 @@ get_session_bindings_from_live_shell_returns_map_test() ->
 
 %% Dead shell PID → returns empty map without crashing
 get_session_bindings_dead_pid_returns_empty_test() ->
-    DeadPid = spawn(fun() -> ok end),
-    timer:sleep(10),
-    ?assertNot(is_process_alive(DeadPid)),
+    MonRef = erlang:monitor(process, spawn(fun() -> ok end)),
+    DeadPid =
+        receive
+            {'DOWN', MonRef, process, Pid, _} -> Pid
+        end,
     Result = beamtalk_repl_ops_dev:get_session_bindings(DeadPid),
     ?assertEqual(#{}, Result).
 
