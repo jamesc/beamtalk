@@ -29,6 +29,8 @@ let transcriptViewProvider: TranscriptViewProvider | undefined;
 let workspaceWsClient: WorkspaceClient | undefined;
 /** The integrated terminal running `beamtalk repl`, if started by this extension. */
 let replTerminal: vscode.Terminal | undefined;
+/** True while `beamtalk repl` is actively running inside replTerminal. */
+let replRunning = false;
 
 type ResolvedServerPath = {
   serverPath: string;
@@ -364,13 +366,14 @@ function disconnectWorkspace(reason: "port-removed"): void {
   workspaceTreeProvider?.setClient(null);
   transcriptViewProvider?.setClient(null);
 
+  replRunning = false;
   outputChannel?.info(`Disconnected from workspace ${id}: ${reason}`);
 
   if (reason === "port-removed") {
     void vscode.window
-      .showInformationMessage("Beamtalk workspace stopped.", "Restart REPL")
+      .showInformationMessage("Beamtalk workspace stopped.", "Restart Beamtalk Session")
       .then((action) => {
-        if (action === "Restart REPL") {
+        if (action === "Restart Beamtalk Session") {
           void vscode.commands.executeCommand("beamtalk.startRepl");
         }
       });
@@ -466,7 +469,7 @@ function setupAutoConnect(context: vscode.ExtensionContext): void {
   }
 }
 
-// ─── Session ID capture ───────────────────────────────────────────────────────
+// ─── Start REPL command ───────────────────────────────────────────────────────
 
 const SESSION_ID_PATTERN = /\[beamtalk\] session: (\S+)/;
 
@@ -493,6 +496,7 @@ async function captureSessionId(
         if (replTerminal !== terminal) {
           break;
         }
+        replRunning = true;
         workspaceTreeProvider?.setSessionId(sessionId);
         // Don't break — keep reading. The REPL may reconnect and emit a new
         // session ID (BT-1021); we need to pick up the updated value.
@@ -507,26 +511,42 @@ async function captureSessionId(
   }
 }
 
-// ─── Start REPL command ───────────────────────────────────────────────────────
+function replCommand(): string {
+  const ephemeral = vscode.workspace
+    .getConfiguration("beamtalk.repl")
+    .get<boolean>("ephemeral", false);
+  return ephemeral ? "beamtalk repl -e" : "beamtalk repl";
+}
 
 /**
  * Open an integrated terminal running `beamtalk repl` and capture the session ID
  * from its output so the Workspace Explorer can show REPL bindings.
  *
- * Shell integration is used when available (VS Code 1.93+) to read stdout.
- * For older VS Code or shells without integration, `sendText` is used as fallback
- * and session ID capture is attempted via `onDidStartTerminalShellExecution` if
- * the user's shell later enables integration.
+ * If the REPL terminal is already open but the REPL has stopped (e.g. after a
+ * workspace disconnect), re-run `beamtalk repl` inside the existing terminal
+ * rather than ignoring the request.
  */
 function startReplCommand(context: vscode.ExtensionContext): void {
-  // Reuse the existing terminal if it's still alive.
-  if (replTerminal && replTerminal.exitStatus === undefined) {
+  // Reuse the existing terminal if the REPL is still actively running.
+  if (replTerminal && replTerminal.exitStatus === undefined && replRunning) {
     replTerminal.show();
     return;
   }
 
+  // If the shell terminal is alive but the REPL has stopped, run it again there.
+  if (replTerminal && replTerminal.exitStatus === undefined && !replRunning) {
+    replTerminal.show();
+    if (replTerminal.shellIntegration) {
+      const execution = replTerminal.shellIntegration.executeCommand(replCommand());
+      void captureSessionId(execution, replTerminal);
+    } else {
+      replTerminal.sendText(replCommand());
+    }
+    return;
+  }
+
   replTerminal = vscode.window.createTerminal({
-    name: "Beamtalk REPL",
+    name: "Beamtalk Session",
     iconPath: new vscode.ThemeIcon("beaker"),
   });
   replTerminal.show();
@@ -535,7 +555,7 @@ function startReplCommand(context: vscode.ExtensionContext): void {
 
   if (terminal.shellIntegration) {
     // Shell integration is already active — use executeCommand so we can read output.
-    const execution = terminal.shellIntegration.executeCommand("beamtalk repl");
+    const execution = terminal.shellIntegration.executeCommand(replCommand());
     void captureSessionId(execution, terminal);
   } else {
     // Shell integration not yet ready. Wait for it to become available, or fall
@@ -543,7 +563,7 @@ function startReplCommand(context: vscode.ExtensionContext): void {
     let started = false;
     // onDidChangeTerminalShellIntegration requires VS Code 1.93+; guard at runtime.
     if (!vscode.window.onDidChangeTerminalShellIntegration) {
-      terminal.sendText("beamtalk repl");
+      terminal.sendText(replCommand());
       return;
     }
     const integrationDisposable = vscode.window.onDidChangeTerminalShellIntegration(
@@ -554,18 +574,17 @@ function startReplCommand(context: vscode.ExtensionContext): void {
         started = true;
         integrationDisposable.dispose();
         clearTimeout(fallbackTimer);
-        const execution = shellIntegration.executeCommand("beamtalk repl");
+        const execution = shellIntegration.executeCommand(replCommand());
         void captureSessionId(execution, terminal);
       }
     );
     context.subscriptions.push(integrationDisposable);
 
     // Fallback: start REPL via sendText if shell integration doesn't activate.
-    // Session ID capture will still be attempted via onDidStartTerminalShellExecution.
     const fallbackTimer = setTimeout(() => {
       if (!started && replTerminal === terminal) {
         integrationDisposable.dispose();
-        terminal.sendText("beamtalk repl");
+        terminal.sendText(replCommand());
       }
     }, 2000);
     context.subscriptions.push({ dispose: () => clearTimeout(fallbackTimer) });
@@ -590,9 +609,10 @@ function setupTerminalMonitoring(context: vscode.ExtensionContext): void {
         return;
       }
       replTerminal = undefined;
+      replRunning = false;
       // Clear session ID — bindings from the closed session are gone.
       workspaceTreeProvider?.setSessionId(null);
-      outputChannel?.info("Beamtalk REPL terminal closed; session bindings cleared.");
+      outputChannel?.info("Beamtalk Session terminal closed; session bindings cleared.");
     })
   );
 

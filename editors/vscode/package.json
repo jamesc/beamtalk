@@ -15,6 +15,7 @@
   "categories": [
     "Programming Languages"
   ],
+  "extensionKind": ["workspace"],
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:beamtalk",
@@ -205,6 +206,11 @@
           "type": "boolean",
           "default": true,
           "description": "Auto-connect the Workspace Explorer to a running Beamtalk workspace when a workspace port file appears. When disabled, the Workspace Explorer will not auto-connect."
+        },
+        "beamtalk.repl.ephemeral": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start the Beamtalk REPL in ephemeral mode (-e). Bindings are not persisted across sessions."
         }
       }
     },
