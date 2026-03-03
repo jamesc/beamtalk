@@ -14,6 +14,23 @@
 
 -export([handle/4, validate_actor_pid/1, is_known_actor/1]).
 
+%% @private
+-spec encode_invalid_pid_error(atom(), string(), beamtalk_repl_protocol:protocol_msg()) -> binary().
+encode_invalid_pid_error(Reason, PidStr, Msg) ->
+    PidBin = list_to_binary(PidStr),
+    Err0 = beamtalk_error:new(Reason, 'Actor'),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([<<"Invalid actor PID: ">>, PidBin])
+    ),
+    Err2 = beamtalk_error:with_hint(
+        Err1,
+        <<"Use :actors to list valid actor PIDs.">>
+    ),
+    beamtalk_repl_protocol:encode_error(
+        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+    ).
+
 %% @doc Handle actors/inspect/kill/interrupt ops.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"actors">>, _Params, Msg, _SessionPid) ->
@@ -29,18 +46,7 @@ handle(<<"inspect">>, Params, Msg, _SessionPid) ->
     PidBin = list_to_binary(PidStr),
     case validate_actor_pid(PidStr) of
         {error, Reason} ->
-            Err0 = beamtalk_error:new(Reason, 'Actor'),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                iolist_to_binary([<<"Invalid actor PID: ">>, PidBin])
-            ),
-            Err2 = beamtalk_error:with_hint(
-                Err1,
-                <<"Use :actors to list valid actor PIDs.">>
-            ),
-            beamtalk_repl_protocol:encode_error(
-                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
-            );
+            encode_invalid_pid_error(Reason, PidStr, Msg);
         {ok, Pid} ->
             case is_process_alive(Pid) of
                 true ->
@@ -85,27 +91,16 @@ handle(<<"kill">>, Params, Msg, _SessionPid) ->
     PidStr = binary_to_list(maps:get(<<"actor">>, Params, maps:get(<<"pid">>, Params, <<>>))),
     case validate_actor_pid(PidStr) of
         {error, Reason} ->
-            PidBin = list_to_binary(PidStr),
-            Err0 = beamtalk_error:new(Reason, 'Actor'),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                iolist_to_binary([<<"Invalid actor PID: ">>, PidBin])
-            ),
-            Err2 = beamtalk_error:with_hint(
-                Err1,
-                <<"Use :actors to list valid actor PIDs.">>
-            ),
-            beamtalk_repl_protocol:encode_error(
-                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
-            );
+            encode_invalid_pid_error(Reason, PidStr, Msg);
         {ok, Pid} ->
             exit(Pid, kill),
             beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1)
     end;
-handle(<<"interrupt">>, Params, Msg, SessionPid) ->
+handle(<<"interrupt">>, _Params, Msg, SessionPid) ->
     %% BT-666: Interrupt a running evaluation.
+    %% BT-1045: session is stripped from Params by the protocol decoder — use get_session(Msg).
     TargetPid =
-        case maps:get(<<"session">>, Params, undefined) of
+        case beamtalk_repl_protocol:get_session(Msg) of
             undefined ->
                 SessionPid;
             TargetSession ->

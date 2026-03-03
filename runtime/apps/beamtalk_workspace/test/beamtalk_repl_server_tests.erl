@@ -1411,6 +1411,157 @@ context_completions_nonexistent_atom_receiver_returns_empty_test() ->
     ),
     ?assertEqual([], Result).
 
+%%% resolve_binding_session/2 tests (BT-1045)
+%%% These test the ETS-based session lookup that allows the completion client
+%%% to read bindings from the user's main REPL session.
+
+%% undefined session ID → always return the default PID
+resolve_binding_session_undefined_returns_default_test() ->
+    Default = self(),
+    ?assertEqual(Default, beamtalk_repl_ops_dev:resolve_binding_session(undefined, Default)).
+
+%% non-binary session ID → return default (guard clause)
+resolve_binding_session_non_binary_returns_default_test() ->
+    Default = self(),
+    ?assertEqual(Default, beamtalk_repl_ops_dev:resolve_binding_session(12345, Default)).
+
+%% ETS table does not exist → catch returns default without crashing
+resolve_binding_session_no_ets_table_returns_default_test() ->
+    %% Ensure the named table does not exist for this test
+    catch ets:delete(beamtalk_sessions_bt1045_test),
+    Default = self(),
+    %% The function catches all errors and falls back to Default
+    Result = beamtalk_repl_ops_dev:resolve_binding_session(<<"no-such-session">>, Default),
+    ?assertEqual(Default, Result).
+
+%% Session ID present in ETS with live PID → return that PID
+resolve_binding_session_finds_live_pid_in_ets_test() ->
+    %% Create the named sessions table that the function looks up
+    Tid =
+        case ets:whereis(beamtalk_sessions) of
+            undefined ->
+                ets:new(beamtalk_sessions, [named_table, public, {read_concurrency, true}]);
+            _ ->
+                beamtalk_sessions
+        end,
+    SessionId = <<"test-session-bt1045-live">>,
+    %% Use self() as the "session pid" — it is alive
+    SessionPid = self(),
+    ets:insert(Tid, {SessionId, SessionPid}),
+    Default = spawn(fun() -> ok end),
+    Result = beamtalk_repl_ops_dev:resolve_binding_session(SessionId, Default),
+    ets:delete(Tid, SessionId),
+    %% Should return the registered PID, not the default
+    ?assertEqual(SessionPid, Result).
+
+%% Session ID not in ETS → return default
+resolve_binding_session_unknown_session_returns_default_test() ->
+    Tid =
+        case ets:whereis(beamtalk_sessions) of
+            undefined ->
+                ets:new(beamtalk_sessions, [named_table, public, {read_concurrency, true}]);
+            _ ->
+                beamtalk_sessions
+        end,
+    SessionId = <<"test-session-bt1045-unknown">>,
+    %% Make sure this key is not in the table
+    ets:delete(Tid, SessionId),
+    Default = self(),
+    Result = beamtalk_repl_ops_dev:resolve_binding_session(SessionId, Default),
+    ?assertEqual(Default, Result).
+
+%% Dead PID in ETS → fall back to default rather than returning a dead process
+resolve_binding_session_dead_pid_returns_default_test() ->
+    Tid =
+        case ets:whereis(beamtalk_sessions) of
+            undefined ->
+                ets:new(beamtalk_sessions, [named_table, public, {read_concurrency, true}]);
+            _ ->
+                beamtalk_sessions
+        end,
+    SessionId = <<"test-session-bt1045-dead">>,
+    DeadPid = spawn(fun() -> ok end),
+    timer:sleep(10),
+    %% Ensure the spawned process has exited
+    ?assertNot(is_process_alive(DeadPid)),
+    ets:insert(Tid, {SessionId, DeadPid}),
+    Default = self(),
+    Result = beamtalk_repl_ops_dev:resolve_binding_session(SessionId, Default),
+    ets:delete(Tid, SessionId),
+    ?assertEqual(Default, Result).
+
+%%% get_session_bindings/1 tests (BT-1045)
+
+%% Live shell with no user bindings → returns a map (may include workspace singletons)
+get_session_bindings_from_live_shell_returns_map_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    {ok, ShellPid} = beamtalk_repl_shell:start_link(<<"test-gsb-1">>),
+    {ok, Bindings} = beamtalk_repl_shell:get_bindings(ShellPid),
+    SessionBindings = beamtalk_repl_ops_dev:get_session_bindings(ShellPid),
+    beamtalk_repl_shell:stop(ShellPid),
+    %% get_session_bindings/1 must return the same map as get_bindings/1
+    ?assertEqual(Bindings, SessionBindings).
+
+%% Dead shell PID → returns empty map without crashing
+get_session_bindings_dead_pid_returns_empty_test() ->
+    DeadPid = spawn(fun() -> ok end),
+    timer:sleep(10),
+    ?assertNot(is_process_alive(DeadPid)),
+    Result = beamtalk_repl_ops_dev:get_session_bindings(DeadPid),
+    ?assertEqual(#{}, Result).
+
+%%% Integration: ETS session lookup feeds into completion (BT-1045)
+%%% This test simulates the full handle/4 code path for a "complete" op:
+%%%   create session → insert into ETS → verify resolve_binding_session → get_session_bindings
+
+%% BT-1045: The protocol decoder strips "session" from params (into Msg.session).
+%% Verify that a complete op with session field has session in Msg, not in Params.
+complete_op_session_field_is_in_msg_not_params_test() ->
+    Json =
+        <<"{\"op\":\"complete\",\"id\":\"t1\",\"session\":\"sid-abc\",\"code\":\"s \",\"cursor\":2}">>,
+    {ok, Msg} = beamtalk_repl_protocol:decode(Json),
+    Params = beamtalk_repl_protocol:get_params(Msg),
+    %% session must be in Msg, not in Params — the old bug was maps:get(<<"session">>, Params)
+    ?assertEqual(<<"sid-abc">>, beamtalk_repl_protocol:get_session(Msg)),
+    ?assertNot(maps:is_key(<<"session">>, Params)).
+
+%% resolve_binding_session + get_session_bindings together reproduce what handle/4 does.
+%% Key invariant: the PID returned by resolve_binding_session is the shell PID, so
+%% get_session_bindings called on it returns the same map as get_bindings/1.
+session_binding_lookup_pipeline_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    %% 1. Start a real session shell
+    SessionId = <<"test-pipeline-bt1045">>,
+    {ok, ShellPid} = beamtalk_repl_shell:start_link(SessionId),
+
+    %% 2. Register the session in the ETS table (as beamtalk_ws_handler does)
+    Tid =
+        case ets:whereis(beamtalk_sessions) of
+            undefined ->
+                ets:new(beamtalk_sessions, [named_table, public, {read_concurrency, true}]);
+            _ ->
+                beamtalk_sessions
+        end,
+    ets:insert(Tid, {SessionId, ShellPid}),
+
+    %% 3. Simulate what handle/4 does for a complete op with session parameter
+    DefaultPid = spawn(fun() -> timer:sleep(10000) end),
+    BindingPid = beamtalk_repl_ops_dev:resolve_binding_session(SessionId, DefaultPid),
+    SessionBindings = beamtalk_repl_ops_dev:get_session_bindings(BindingPid),
+
+    %% 4. Also fetch via get_bindings/1 so we can compare
+    {ok, DirectBindings} = beamtalk_repl_shell:get_bindings(ShellPid),
+
+    %% 5. Clean up
+    ets:delete(Tid, SessionId),
+    exit(DefaultPid, kill),
+    beamtalk_repl_shell:stop(ShellPid),
+
+    %% 6. The pipeline must have resolved to the shell (not the default)
+    %% and the bindings must match what get_bindings/1 returns directly.
+    ?assertEqual(ShellPid, BindingPid),
+    ?assertEqual(DirectBindings, SessionBindings).
+
 %%% tokenise_send_chain/1 tests (BT-1006)
 
 tokenise_send_chain_simple_chain_test() ->
