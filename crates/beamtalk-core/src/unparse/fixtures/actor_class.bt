@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A simple counter actor — canonical formatter fixture.
+///
+/// Demonstrates: actor class with multiple state declarations,
+/// single-expression methods, and a multi-expression method body.
+Actor subclass: CanonicalCounter
+  state: count = 0
+  state: step = 1
+
+  /// Increment the counter by the configured step.
+  increment => self.count := self.count + self.step
+
+  /// Decrement the counter by the configured step.
+  decrement => self.count := self.count - self.step
+
+  /// Return the current count.
+  count => self.count
+
+  /// Set the increment step size.
+  setStep: n => self.step := n
+
+  /// Reset the counter to zero and the step to one.
+  reset =>
+    self.count := 0
+    self.step := 1

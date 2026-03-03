@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A simple greeting value type — canonical formatter fixture.
+///
+/// Demonstrates: value class with doc comment, state declaration,
+/// and short single-expression methods.
+Value subclass: Greeter
+  state: name = "World"
+
+  /// Returns a personalised greeting string.
+  greet => "Hello, " ++ self.name ++ "!"
+
+  /// Returns the stored name.
+  name => self.name

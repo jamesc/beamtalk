@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Standalone method definitions — canonical formatter fixture.
+//
+// Demonstrates: the `ClassName >> selector =>` syntax for adding
+// methods to existing classes outside their class declaration.
+
+Actor subclass: DescribableCounter
+  state: value = 0
+DescribableCounter >> increment => self.value := self.value + 1
+DescribableCounter >> getValue => self.value
+DescribableCounter >> describe => "Counter(" ++ self.value printString ++ ")"
