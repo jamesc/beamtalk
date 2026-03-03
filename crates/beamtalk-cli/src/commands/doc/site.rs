@@ -515,7 +515,7 @@ fn landing_card_meta(output_file: &str) -> (&'static str, &'static str) {
     match output_file {
         "installation.html" => (
             "",
-            "Install the Beamtalk toolchain from a release tarball and set up the VS Code extension.",
+            "Install the Beamtalk toolchain on Linux, macOS, or Windows and set up the VS Code extension.",
         ),
         "language-features.html" => (
             "🔤",

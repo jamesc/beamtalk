@@ -1,37 +1,63 @@
 # Installation
 
-Beamtalk is distributed as a pre-built tarball for Linux and macOS, plus a
-VS Code extension for the integrated development experience.
+Beamtalk is distributed as a pre-built binary for Linux, macOS, and Windows,
+plus a VS Code extension for the integrated development experience.
 
 ## Requirements
 
 - **Erlang/OTP 26+** — the BEAM runtime that Beamtalk compiles to.
-  Install via your system package manager or [kerl](https://github.com/kerl/kerl).
+  - Linux/macOS: install via your system package manager or [kerl](https://github.com/kerl/kerl).
+  - Windows: download from [erlang.org/downloads](https://www.erlang.org/downloads).
 - **VS Code 1.85+** — required for the extension (optional for CLI-only use).
 
-## Install from release tarball
+## Install from release archive
 
-1. Download the latest release tarball for your platform from the
-   [GitHub Releases](https://github.com/jamesc/beamtalk/releases) page:
+Download the latest release for your platform from the
+[GitHub Releases](https://github.com/jamesc/beamtalk/releases) page.
 
-   ```
-   beamtalk-<version>-x86_64-unknown-linux-gnu.tar.gz   # Linux x86-64
-   beamtalk-<version>-aarch64-apple-darwin.tar.gz        # macOS Apple Silicon
-   beamtalk-<version>-x86_64-apple-darwin.tar.gz         # macOS Intel
-   ```
+### Linux
 
-2. Extract and install:
+```
+beamtalk-<version>-x86_64-unknown-linux-gnu.tar.gz   # x86-64
+beamtalk-<version>-aarch64-unknown-linux-gnu.tar.gz   # ARM64
+```
 
-   ```
-   tar xzf beamtalk-<version>-<platform>.tar.gz
-   sudo mv beamtalk /usr/local/bin/
-   ```
+Extract and install:
 
-3. Verify the installation:
+```
+tar xzf beamtalk-<version>-<platform>.tar.gz
+sudo mv beamtalk /usr/local/bin/
+```
 
-   ```
-   beamtalk --version
-   ```
+### macOS
+
+```
+beamtalk-<version>-aarch64-apple-darwin.tar.gz   # Apple Silicon
+beamtalk-<version>-x86_64-apple-darwin.tar.gz    # Intel
+```
+
+Extract and install:
+
+```
+tar xzf beamtalk-<version>-<platform>.tar.gz
+sudo mv beamtalk /usr/local/bin/
+```
+
+### Windows
+
+```
+beamtalk-<version>-x86_64-pc-windows-msvc.zip
+```
+
+Extract the zip and place `beamtalk.exe` somewhere on your `PATH`, for example
+`C:\Program Files\beamtalk\`. Then add that directory to your `PATH` via
+**System Properties → Environment Variables**.
+
+### Verify
+
+```
+beamtalk --version
+```
 
 ## VS Code extension
 
