@@ -109,11 +109,7 @@ build_class_superclass_index() ->
         (_, Acc) ->
             Acc
     end,
-    try
-        ets:foldl(FoldFun, #{}, beamtalk_class_hierarchy)
-    catch
-        error:badarg -> #{}
-    end.
+    beamtalk_class_hierarchy_table:foldl(FoldFun, #{}).
 
 %% @doc Build a class→module index from all registered class gen-servers.
 %%

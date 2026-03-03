@@ -381,17 +381,12 @@ find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
     end.
 
 %% @private
-%% @doc Read the superclass name from the ETS hierarchy table (no gen_server call).
+%% @doc Read the superclass name from the hierarchy table (no gen_server call).
 -spec superclass_from_ets(class_name()) -> class_name() | none.
 superclass_from_ets(ClassName) ->
-    case ets:info(beamtalk_class_hierarchy) of
-        undefined ->
-            none;
-        _ ->
-            case ets:lookup(beamtalk_class_hierarchy, ClassName) of
-                [{_, Super}] -> Super;
-                [] -> none
-            end
+    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+        {ok, Super} -> Super;
+        not_found -> none
     end.
 
 %% @doc Convert a class method selector to its module function name.
