@@ -707,4 +707,37 @@ mod tests {
         // Root CSS
         assert!(out_dir.join("style.css").exists());
     }
+
+    #[test]
+    fn test_copy_images_copies_files() {
+        let temp = TempDir::new().unwrap();
+        let docs_dir = Utf8PathBuf::from_path_buf(temp.path().join("docs")).unwrap();
+        let img_src = docs_dir.join("images");
+        let site_dir = Utf8PathBuf::from_path_buf(temp.path().join("site")).unwrap();
+        fs::create_dir_all(&img_src).unwrap();
+        fs::create_dir_all(&site_dir).unwrap();
+
+        fs::write(img_src.join("logo.svg"), "<svg/>").unwrap();
+        fs::write(img_src.join("favicon.ico"), &[0u8; 4]).unwrap();
+
+        copy_images(&docs_dir, &site_dir).unwrap();
+
+        assert!(site_dir.join("images/logo.svg").exists());
+        assert!(site_dir.join("images/favicon.ico").exists());
+        let content = fs::read_to_string(site_dir.join("images/logo.svg")).unwrap();
+        assert_eq!(content, "<svg/>");
+    }
+
+    #[test]
+    fn test_copy_images_no_op_when_absent() {
+        let temp = TempDir::new().unwrap();
+        let docs_dir = Utf8PathBuf::from_path_buf(temp.path().join("docs")).unwrap();
+        let site_dir = Utf8PathBuf::from_path_buf(temp.path().join("site")).unwrap();
+        fs::create_dir_all(&docs_dir).unwrap();
+        fs::create_dir_all(&site_dir).unwrap();
+
+        // No docs/images/ dir — should succeed without creating site/images/
+        copy_images(&docs_dir, &site_dir).unwrap();
+        assert!(!site_dir.join("images").exists());
+    }
 }
