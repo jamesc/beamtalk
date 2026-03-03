@@ -25,6 +25,9 @@ use tracing::{debug, info, instrument, warn};
 
 use super::manifest;
 
+/// Per-package class module indexes: package root → (`class_module_index`, `class_superclass_index`).
+type PkgClassIndexes = HashMap<Utf8PathBuf, (HashMap<String, String>, HashMap<String, String>)>;
+
 // ──────────────────────────────────────────────────────────────────────────
 // Test discovery from AST
 // ──────────────────────────────────────────────────────────────────────────
@@ -426,7 +429,7 @@ fn run_eunit_tests(
     fixture_modules: &[String],
     package_modules: &[String],
     build_dir: &Utf8Path,
-    package_ebin_dir: Option<&Utf8Path>,
+    package_ebin_dirs: &[Utf8PathBuf],
 ) -> Result<EunitResult> {
     debug!(
         "Running {} EUnit modules in single process",
@@ -504,8 +507,8 @@ fn run_eunit_tests(
         cmd.arg("-noshell").arg("-pa").arg(build_dir.as_str());
     }
 
-    // Add package ebin directory to code path so package modules can be loaded
-    if let Some(ebin_dir) = package_ebin_dir {
+    // Add all package ebin directories to code path so package modules can be loaded
+    for ebin_dir in package_ebin_dirs {
         #[cfg(windows)]
         {
             let ebin_dir_path = ebin_dir.as_str().replace('\\', "/");
@@ -612,6 +615,74 @@ fn collect_beam_module_names(ebin_dir: &Utf8Path) -> Result<Vec<String>> {
 
     modules.sort();
     Ok(modules)
+}
+
+/// Canonicalize `path` to an absolute form; fall back to the original if canonicalization fails.
+///
+/// Used to normalize package root paths before deduplication so that `"."` (relative CWD)
+/// and the same directory expressed as an absolute path compare equal.
+fn canonical_path(p: &Utf8Path) -> Utf8PathBuf {
+    std::fs::canonicalize(p)
+        .ok()
+        .and_then(|abs| Utf8PathBuf::from_path_buf(abs).ok())
+        .unwrap_or_else(|| p.to_owned())
+}
+
+/// Walk from `path` to its package root (via `find_package_root`) and return the
+/// canonical (absolute, symlink-resolved) form of that root.
+///
+/// All map keys in `pkg_class_indexes` and `pkg_root_to_name` are canonicalized at
+/// build time, so every lookup into those maps must go through this function to
+/// guarantee path-shape consistency (relative vs absolute, symlinked paths).
+fn canonical_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
+    find_package_root(path).map(|r| canonical_path(&r))
+}
+
+/// Walk up from `path` to find the nearest ancestor directory containing `beamtalk.toml`.
+///
+/// If `path` is a file, starts at its parent directory. If `path` is a directory,
+/// starts there. Returns the directory path if found, `None` if no manifest exists
+/// anywhere in the ancestor chain.
+fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
+    let start_dir = if path.is_file() { path.parent()? } else { path };
+
+    let mut current = start_dir.to_owned();
+    loop {
+        if current.join("beamtalk.toml").exists() {
+            return Some(current);
+        }
+        current = current.parent()?.to_owned();
+    }
+}
+
+/// Return the effective class module index for a test file.
+///
+/// Uses the per-package index for the file's owning package (if found), so test
+/// files only see their own package's class names — not class names from other
+/// packages that happen to be compiled in the same `beamtalk test` run. Fixture
+/// classes are merged on top. Falls back to the merged combined index for files
+/// that don't belong to any discovered package.
+fn class_index_for_file(
+    test_file: &Utf8Path,
+    pkg_class_indexes: &PkgClassIndexes,
+    fixture_class_index: &HashMap<String, String>,
+    merged_class_index: &HashMap<String, String>,
+    merged_super_index: &HashMap<String, String>,
+) -> (HashMap<String, String>, HashMap<String, String>) {
+    let (base_class, base_super) = canonical_package_root(test_file)
+        .and_then(|r| pkg_class_indexes.get(&r))
+        .map_or_else(
+            || (merged_class_index.clone(), merged_super_index.clone()),
+            |(c, s)| (c.clone(), s.clone()),
+        );
+
+    let mut effective = base_class;
+    effective.extend(
+        fixture_class_index
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone())),
+    );
+    (effective, base_super)
 }
 
 /// Recursively collect `.bt` files from `dir` into `files`.
@@ -907,29 +978,79 @@ pub fn run_tests(path: &str) -> Result<()> {
     let build_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf())
         .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
 
-    // Build class module index from src/ so test files can resolve cross-file
-    // references to package classes in subdirectories.
-    let project_root_for_index = Utf8PathBuf::from(".");
-    let pkg_for_index = manifest::find_manifest(&project_root_for_index)?;
-    let (mut class_module_index, class_superclass_index): (
-        HashMap<String, String>,
-        HashMap<String, String>,
-    ) = if let Some(ref pkg) = pkg_for_index {
-        let src_dir = project_root_for_index.join("src");
-        let source_root = if src_dir.exists() {
-            Some(src_dir.clone())
-        } else {
-            None
-        };
-        if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
-            super::build::build_class_module_index(&src_files, source_root.as_deref(), &pkg.name)
-                .unwrap_or_default()
-        } else {
-            (HashMap::new(), HashMap::new())
+    // Discover all unique package roots: walk up from each test file's directory,
+    // and also check the CWD. This allows `beamtalk test .` from a parent directory
+    // (e.g. `examples/`) to find and build all packages that contain test files.
+    //
+    // All roots are canonicalized before deduplication so that `"."` (relative CWD)
+    // and an absolute path to the same directory compare equal in `seen`. Without
+    // this, passing absolute test file paths could insert the same package twice
+    // (once as `"."`, once as `/abs/path`), incorrectly flipping multi-package mode.
+    let discovered_packages: Vec<(Utf8PathBuf, manifest::PackageManifest)> = {
+        let mut roots: Vec<Utf8PathBuf> = Vec::new();
+        let mut seen: HashSet<Utf8PathBuf> = HashSet::new();
+
+        // Check CWD first
+        let cwd = canonical_path(Utf8Path::new("."));
+        if seen.insert(cwd.clone()) {
+            roots.push(cwd);
         }
-    } else {
-        (HashMap::new(), HashMap::new())
+
+        // Walk up from each test file to find its package root
+        for test_file in &test_files {
+            if let Some(root) = canonical_package_root(test_file) {
+                if seen.insert(root.clone()) {
+                    roots.push(root);
+                }
+            }
+        }
+
+        // Load manifests, skip roots without a beamtalk.toml
+        let mut pkgs = Vec::new();
+        for root in roots {
+            if let Some(pkg) = manifest::find_manifest(&root)? {
+                pkgs.push((root, pkg));
+            }
+        }
+        pkgs
     };
+
+    // Map from package root → package name for test module naming.
+    // Used to prefix test module names with the package name when multiple
+    // packages are in scope, preventing module collisions (e.g. two packages
+    // that both define a `SmokeTest` class would otherwise both compile to
+    // `bt@smoke_test.beam` in the shared temp build dir).
+    let pkg_root_to_name: HashMap<Utf8PathBuf, String> = discovered_packages
+        .iter()
+        .map(|(root, pkg)| (root.clone(), pkg.name.clone()))
+        .collect();
+
+    // Build per-package class indexes and a merged combined index.
+    // Per-package indexes let each test file see only its own package's classes,
+    // preventing false cross-package class name collisions when running tests
+    // from a parent directory containing multiple packages. The merged index is
+    // used for fixture compilation (which can reference any package's classes).
+    let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
+    let mut class_module_index: HashMap<String, String> = HashMap::new();
+    let mut class_superclass_index: HashMap<String, String> = HashMap::new();
+    for (pkg_root, pkg) in &discovered_packages {
+        let src_dir = pkg_root.join("src");
+        if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
+            let source_root = src_dir.exists().then_some(src_dir);
+            if let Ok((pkg_class_map, pkg_super_map)) = super::build::build_class_module_index(
+                &src_files,
+                source_root.as_deref(),
+                &pkg.name,
+            ) {
+                pkg_class_indexes.insert(
+                    pkg_root.clone(),
+                    (pkg_class_map.clone(), pkg_super_map.clone()),
+                );
+                class_module_index.extend(pkg_class_map);
+                class_superclass_index.extend(pkg_super_map);
+            }
+        }
+    }
 
     // Phase 0: Pre-compile all fixtures in the fixtures/ subdirectory.
     // This makes all fixture classes available during test execution — like
@@ -949,14 +1070,16 @@ pub fn run_tests(path: &str) -> Result<()> {
             .unwrap_or_default()
     };
 
-    // Extend the class module index with fixture class → module name mappings so
-    // that both fixture files (referencing each other) and test files (referencing
-    // fixture classes in subdirectories) resolve to the correct module names.
-    if fixtures_dir.is_dir() {
+    // Build the fixture class index separately so it can be merged per-file in
+    // Phase 1. Also merge into the combined index for Phase 0 fixture compilation,
+    // where cross-package and cross-fixture references are allowed.
+    let fixture_class_index: HashMap<String, String> = if fixtures_dir.is_dir() {
         let fixture_files = find_test_files(&fixtures_dir)?;
-        let fixture_index = build_fixture_class_module_index(&fixture_files)?;
-        class_module_index.extend(fixture_index);
-    }
+        build_fixture_class_module_index(&fixture_files)?
+    } else {
+        HashMap::new()
+    };
+    class_module_index.extend(fixture_class_index.clone());
 
     let precompiled = compile_fixtures_directory(
         &fixtures_dir,
@@ -973,7 +1096,36 @@ pub fn run_tests(path: &str) -> Result<()> {
     let mut fixture_modules_by_name: HashMap<String, Utf8PathBuf> = HashMap::new();
 
     for test_file in &test_files {
-        let (test_classes, load_files) = discover_test_classes(test_file)?;
+        // Build per-file effective class index: own package's classes + fixtures.
+        // This prevents class name collisions between packages when running tests
+        // from a common parent directory.
+        let (file_class_index, file_super_index) = class_index_for_file(
+            test_file,
+            &pkg_class_indexes,
+            &fixture_class_index,
+            &class_module_index,
+            &class_superclass_index,
+        );
+
+        let (mut test_classes, load_files) = discover_test_classes(test_file)?;
+
+        // When multiple packages are in scope, prefix the test module name with
+        // the owning package name to prevent `bt@smoke_test.beam` collisions
+        // between two packages that each define a class named `SmokeTest`.
+        // Single-package runs are unaffected (no prefix added when only one package
+        // is discovered), preserving backwards-compatible module names.
+        if discovered_packages.len() > 1 {
+            let pkg_name_slug = canonical_package_root(test_file)
+                .and_then(|r| pkg_root_to_name.get(&r))
+                .map(|n| beamtalk_core::codegen::core_erlang::to_module_name(n));
+
+            if let Some(ref prefix) = pkg_name_slug {
+                for tc in &mut test_classes {
+                    let stem = beamtalk_core::codegen::core_erlang::to_module_name(&tc.class_name);
+                    tc.module_name = format!("bt@{prefix}@{stem}");
+                }
+            }
+        }
 
         // Handle deprecated @load directives as fallback.
         // Fixtures in the fixtures/ directory are already compiled above.
@@ -1029,8 +1181,8 @@ pub fn run_tests(path: &str) -> Result<()> {
             let module_name = compile_fixture(
                 &fixture_path,
                 &build_dir,
-                &class_module_index,
-                &class_superclass_index,
+                &file_class_index,
+                &file_super_index,
             )?;
             all_fixture_modules.push(module_name);
         }
@@ -1042,8 +1194,8 @@ pub fn run_tests(path: &str) -> Result<()> {
                 test_file,
                 &test_class.module_name,
                 &build_dir,
-                &class_module_index,
-                &class_superclass_index,
+                &file_class_index,
+                &file_super_index,
             )?;
 
             // Generate EUnit wrapper
@@ -1067,8 +1219,8 @@ pub fn run_tests(path: &str) -> Result<()> {
         let doc_results = discover_and_compile_doc_tests(
             test_file,
             &build_dir,
-            &class_module_index,
-            &class_superclass_index,
+            &file_class_index,
+            &file_super_index,
         )?;
         for dr in doc_results {
             all_erl_files.push(dr.erl_file);
@@ -1090,15 +1242,13 @@ pub fn run_tests(path: &str) -> Result<()> {
     all_fixture_modules.sort();
     all_fixture_modules.dedup();
 
-    // Phase 1b: Build package modules if a beamtalk.toml manifest exists.
-    // This ensures package-defined classes are compiled and their on_load
-    // hooks will register them in the class registry when loaded.
-    let project_root = project_root_for_index;
-    let pkg_manifest = pkg_for_index;
-    let (package_modules, package_ebin_dir) = if let Some(ref pkg) = pkg_manifest {
-        let ebin_dir = project_root.join("_build").join("dev").join("ebin");
-
-        // Build the package to ensure .beam files are up to date
+    // Phase 1b: Build all discovered packages so their .beam files are available.
+    // This ensures package-defined classes are compiled and their on_load hooks
+    // will register them in the class registry when loaded during the test run.
+    let mut package_modules: Vec<String> = Vec::new();
+    let mut package_ebin_dirs: Vec<Utf8PathBuf> = Vec::new();
+    for (pkg_root, pkg) in &discovered_packages {
+        let ebin_dir = pkg_root.join("_build").join("dev").join("ebin");
         println!("Building package '{}'...", pkg.name);
         let build_options = beamtalk_core::CompilerOptions {
             stdlib_mode: false,
@@ -1106,16 +1256,17 @@ pub fn run_tests(path: &str) -> Result<()> {
             workspace_mode: false,
             ..Default::default()
         };
-        super::build::build(project_root.as_str(), &build_options)
-            .wrap_err("Failed to build package before running tests")?;
-
-        // Collect module names from .beam files in _build/dev/ebin/
+        super::build::build(pkg_root.as_str(), &build_options).wrap_err_with(|| {
+            format!(
+                "Failed to build package '{}' before running tests",
+                pkg.name
+            )
+        })?;
         let modules = collect_beam_module_names(&ebin_dir)?;
         debug!(count = modules.len(), "Discovered package modules");
-        (modules, Some(ebin_dir))
-    } else {
-        (Vec::new(), None)
-    };
+        package_modules.extend(modules);
+        package_ebin_dirs.push(ebin_dir);
+    }
 
     let total_bunit_tests: usize = compiled_tests
         .iter()
@@ -1145,7 +1296,7 @@ pub fn run_tests(path: &str) -> Result<()> {
         &all_fixture_modules,
         &package_modules,
         &build_dir,
-        package_ebin_dir.as_deref(),
+        &package_ebin_dirs,
     )?;
 
     // Phase 4: Report results
@@ -1375,6 +1526,169 @@ mod tests {
     }
 
     #[test]
+    fn test_find_package_root_found() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create nested structure: pkg/test/my_test.bt with beamtalk.toml at pkg/
+        let pkg_dir = dir.join("pkg");
+        let test_dir = pkg_dir.join("test");
+        fs::create_dir_all(&test_dir).unwrap();
+        fs::write(
+            pkg_dir.join("beamtalk.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(test_dir.join("my_test.bt"), "").unwrap();
+
+        let result = find_package_root(&test_dir.join("my_test.bt"));
+        assert_eq!(result, Some(pkg_dir));
+    }
+
+    #[test]
+    fn test_find_package_root_not_found() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // No beamtalk.toml anywhere
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        fs::write(dir.join("sub/test.bt"), "").unwrap();
+
+        let result = find_package_root(&dir.join("sub/test.bt"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_package_root_directory_input() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let result = find_package_root(&dir);
+        assert_eq!(result, Some(dir));
+    }
+
+    #[test]
+    fn test_class_index_for_file_uses_own_package() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Two packages, each defining a class named "Counter"
+        let pkg_a = dir.join("pkg_a");
+        let pkg_b = dir.join("pkg_b");
+        fs::create_dir_all(pkg_a.join("test")).unwrap();
+        fs::create_dir_all(pkg_b.join("test")).unwrap();
+        fs::write(
+            pkg_a.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_a\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            pkg_b.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_b\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let mut index_a: HashMap<String, String> = HashMap::new();
+        index_a.insert("Counter".to_string(), "bt@pkg_a@counter".to_string());
+        let mut index_b: HashMap<String, String> = HashMap::new();
+        index_b.insert("Counter".to_string(), "bt@pkg_b@counter".to_string());
+
+        let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
+        pkg_class_indexes.insert(canonical_path(&pkg_a), (index_a.clone(), HashMap::new()));
+        pkg_class_indexes.insert(canonical_path(&pkg_b), (index_b.clone(), HashMap::new()));
+
+        // Merged index has pkg_b's entry (inserted last, overwrites pkg_a's)
+        let mut merged: HashMap<String, String> = HashMap::new();
+        merged.extend(index_a);
+        merged.extend(index_b); // overwrites Counter
+
+        let fixture_index: HashMap<String, String> = HashMap::new();
+        let merged_super: HashMap<String, String> = HashMap::new();
+
+        // Test file in pkg_a should get pkg_a's Counter, not pkg_b's
+        let test_file_a = pkg_a.join("test/counter_test.bt");
+        fs::write(&test_file_a, "").unwrap();
+        let (class_idx, _) = class_index_for_file(
+            &test_file_a,
+            &pkg_class_indexes,
+            &fixture_index,
+            &merged,
+            &merged_super,
+        );
+        assert_eq!(
+            class_idx.get("Counter").map(String::as_str),
+            Some("bt@pkg_a@counter")
+        );
+
+        // Test file in pkg_b should get pkg_b's Counter
+        let test_file_b = pkg_b.join("test/counter_test.bt");
+        fs::write(&test_file_b, "").unwrap();
+        let (class_idx, _) = class_index_for_file(
+            &test_file_b,
+            &pkg_class_indexes,
+            &fixture_index,
+            &merged,
+            &merged_super,
+        );
+        assert_eq!(
+            class_idx.get("Counter").map(String::as_str),
+            Some("bt@pkg_b@counter")
+        );
+    }
+
+    #[test]
+    fn test_class_index_for_file_fixture_classes_available() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let pkg_a = dir.join("pkg_a");
+        fs::create_dir_all(pkg_a.join("test")).unwrap();
+        fs::write(
+            pkg_a.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_a\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let mut pkg_a_class_index: HashMap<String, String> = HashMap::new();
+        pkg_a_class_index.insert("Counter".to_string(), "bt@pkg_a@counter".to_string());
+
+        let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
+        pkg_class_indexes.insert(canonical_path(&pkg_a), (pkg_a_class_index, HashMap::new()));
+
+        let mut fixture_index: HashMap<String, String> = HashMap::new();
+        fixture_index.insert("MockHelper".to_string(), "bt@mock_helper".to_string());
+
+        let merged: HashMap<String, String> = HashMap::new();
+        let merged_super: HashMap<String, String> = HashMap::new();
+
+        let test_file = pkg_a.join("test/my_test.bt");
+        fs::write(&test_file, "").unwrap();
+        let (class_idx, _) = class_index_for_file(
+            &test_file,
+            &pkg_class_indexes,
+            &fixture_index,
+            &merged,
+            &merged_super,
+        );
+        // Own class is accessible
+        assert_eq!(
+            class_idx.get("Counter").map(String::as_str),
+            Some("bt@pkg_a@counter")
+        );
+        // Fixture class is also accessible
+        assert_eq!(
+            class_idx.get("MockHelper").map(String::as_str),
+            Some("bt@mock_helper")
+        );
+    }
+
+    #[test]
     fn test_generate_eunit_wrapper_with_lifecycle() {
         let test_class = TestCaseClass {
             class_name: "MyTest".to_string(),
@@ -1393,5 +1707,109 @@ mod tests {
         // Both test methods present
         assert!(wrapper.contains("'testA_test_'()"));
         assert!(wrapper.contains("'testB_test_'()"));
+    }
+
+    /// Inserting `"."` and the absolute CWD into `seen` without canonicalization would
+    /// treat them as different entries, making a single-package run appear to have two
+    /// packages and incorrectly triggering multi-package module-name prefixing.
+    ///
+    /// This test verifies that the canonicalization in `discovered_packages` deduplicates
+    /// the relative `"."` and the same path expressed as an absolute path.
+    #[test]
+    fn test_canonical_dedup_relative_and_absolute_same_path() {
+        // Get the absolute CWD — this is the value that `find_package_root()` would
+        // return for a file inside the current directory, while the production code
+        // also inserts `"."` (relative). Both must canonicalize to the same path so
+        // they deduplicate in `seen` and don't incorrectly flip multi-package mode.
+        let cwd_abs = Utf8PathBuf::from_path_buf(std::env::current_dir().unwrap()).unwrap();
+
+        let a = canonical_path(Utf8Path::new("."));
+        let b = canonical_path(&cwd_abs);
+
+        assert_eq!(
+            a, b,
+            "'.' and the absolute CWD should canonicalize to the same path"
+        );
+
+        // Inserting both into a seen-set must yield exactly 1 entry.
+        let mut seen: HashSet<Utf8PathBuf> = HashSet::new();
+        seen.insert(a);
+        seen.insert(b);
+        assert_eq!(
+            seen.len(),
+            1,
+            "relative '.' and absolute CWD must deduplicate in the seen-set"
+        );
+    }
+
+    /// When two packages each define a class with the same name (e.g. `SmokeTest`),
+    /// the multi-package run would compile both to `bt@smoke_test.beam` in the same
+    /// temp build dir, with the second silently overwriting the first. The fix:
+    /// when `discovered_packages.len() > 1`, prefix each test module name with the
+    /// owning package name (e.g. `bt@pkg_a@smoke_test` and `bt@pkg_b@smoke_test`).
+    ///
+    /// This test verifies the renaming logic that produces those unique names.
+    #[test]
+    fn test_module_name_prefixed_for_multi_package_collision_avoidance() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Two packages, each with a SmokeTest class
+        let pkg_a = dir.join("pkg_a");
+        let pkg_b = dir.join("pkg_b");
+        for pkg in [&pkg_a, &pkg_b] {
+            fs::create_dir_all(pkg.join("test")).unwrap();
+        }
+        fs::write(
+            pkg_a.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_a\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            pkg_b.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_b\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let file_a = pkg_a.join("test/smoke_test.bt");
+        let file_b = pkg_b.join("test/smoke_test.bt");
+        for f in [&file_a, &file_b] {
+            fs::write(
+                f,
+                "TestCase subclass: SmokeTest\n  testOk => self assert: true\n",
+            )
+            .unwrap();
+        }
+
+        // Build pkg_root_to_name as the production code does (with canonicalized keys)
+        let pkg_root_to_name: HashMap<Utf8PathBuf, String> = [
+            (canonical_path(&pkg_a), "pkg_a".to_string()),
+            (canonical_path(&pkg_b), "pkg_b".to_string()),
+        ]
+        .into_iter()
+        .collect();
+
+        // Simulate the override applied in run_tests when len > 1
+        for (file, expected_module) in [
+            (&file_a, "bt@pkg_a@smoke_test"),
+            (&file_b, "bt@pkg_b@smoke_test"),
+        ] {
+            let (mut test_classes, _) = discover_test_classes(file).unwrap();
+            // Default (single-pkg) name
+            assert_eq!(test_classes[0].module_name, "bt@smoke_test");
+
+            // Apply multi-package prefix (mirrors run_tests logic)
+            let pkg_name_slug = canonical_package_root(file)
+                .and_then(|r| pkg_root_to_name.get(&r))
+                .map(|n| beamtalk_core::codegen::core_erlang::to_module_name(n));
+
+            if let Some(ref prefix) = pkg_name_slug {
+                for tc in &mut test_classes {
+                    let stem = beamtalk_core::codegen::core_erlang::to_module_name(&tc.class_name);
+                    tc.module_name = format!("bt@{prefix}@{stem}");
+                }
+            }
+
+            assert_eq!(test_classes[0].module_name, expected_module);
+        }
     }
 }

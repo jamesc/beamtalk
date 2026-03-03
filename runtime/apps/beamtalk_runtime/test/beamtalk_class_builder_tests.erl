@@ -8,7 +8,7 @@
 %%%   - happy path: successful class registration
 %%%   - hot reload: registering an existing class updates it
 %%%   - missing superclass error: superclassRef = nil
-%%%   - sealed superclass error: superclass has is_sealed = true
+%%%   - sealed superclass rejected (stdlibMode bypasses this for stdlib loading, BT-791)
 %%%   - bad name error: className is not an atom (nil or non-atom)
 %%%   - bootstrap assertion: Class respondsTo: #classBuilder
 
@@ -154,7 +154,9 @@ register_missing_superclass_error_test_() ->
         ]
     end}.
 
-register_sealed_superclass_error_test_() ->
+%% Sealed-superclass enforcement is done at runtime for user code.
+%% StdlibMode = true bypasses this for stdlib on_load hooks (BT-791).
+register_sealed_superclass_rejected_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
@@ -170,7 +172,7 @@ register_sealed_superclass_error_test_() ->
                 },
                 {ok, SealedPid} = beamtalk_object_class:start('BT835SealedClass', SealedClassInfo),
 
-                %% Try to subclass the sealed class
+                %% Subclassing a sealed class fails for user code (no stdlibMode)
                 State = #{
                     className => 'BT835SealedSubclass',
                     superclassRef => 'BT835SealedClass',
@@ -180,7 +182,14 @@ register_sealed_superclass_error_test_() ->
                 Result = beamtalk_class_builder:register(State),
                 ?assertMatch({error, #beamtalk_error{kind = instantiation_error}}, Result),
 
+                %% Subclassing succeeds when stdlibMode = true
+                StdlibState = State#{stdlibMode => true},
+                StdlibResult = beamtalk_class_builder:register(StdlibState),
+                ?assertMatch({ok, _Pid}, StdlibResult),
+                {ok, SubPid} = StdlibResult,
+
                 %% Cleanup
+                gen_server:stop(SubPid, normal, 5000),
                 gen_server:stop(SealedPid, normal, 5000)
             end)
         ]

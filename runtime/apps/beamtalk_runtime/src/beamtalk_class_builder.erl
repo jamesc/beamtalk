@@ -76,7 +76,10 @@ register(BuilderState) when is_map(BuilderState) ->
     MethodSpecs = maps:get(methodSpecs, BuilderState, #{}),
     Modifiers = maps:get(modifiers, BuilderState, []),
     BuilderPid = maps:get(builderPid, BuilderState, undefined),
-    case validate(ClassName, SuperclassRef) of
+    %% BT-791: stdlib_mode bypasses sealed-superclass check so stdlib classes
+    %% like Character (extends sealed Integer) can load via on_load hooks.
+    StdlibMode = maps:get(stdlibMode, BuilderState, false),
+    case validate(ClassName, SuperclassRef, StdlibMode) of
         {error, _} = Err ->
             Err;
         ok when is_map(FieldSpecs), is_map(MethodSpecs) ->
@@ -157,26 +160,33 @@ do_register(ClassName, ClassInfo) ->
 %%   1. className is an atom (Symbol in Beamtalk terms)
 %%   2. superclassRef is set (not nil)
 %%   3. superclassRef is a valid type (atom | pid | #beamtalk_object{})
-%%   4. superclass is not sealed (if it is already registered)
--spec validate(term(), term()) -> ok | {error, #beamtalk_error{}}.
-validate(nil, _) ->
+%%   4. superclass is not sealed (unless StdlibMode = true)
+%%
+%% Note: sealed-superclass enforcement is bypassed when StdlibMode = true.
+%% The Beamtalk compiler (semantic_analysis) enforces it at compile time,
+%% and stdlib classes compiled with stdlib_mode are explicitly permitted to
+%% subclass sealed classes (e.g. Character extends Integer). Enforcing it
+%% again at runtime causes stdlib on_load hooks to fail when topo-sorted
+%% stdlib loading registers Integer (sealed) before Character (BT-791).
+-spec validate(term(), term(), boolean()) -> ok | {error, #beamtalk_error{}}.
+validate(nil, _, _) ->
     Error0 = beamtalk_error:new(missing_parameter, 'ClassBuilder'),
     Error1 = beamtalk_error:with_selector(Error0, 'name:'),
     {error, beamtalk_error:with_hint(Error1, <<"className must be a Symbol (atom)">>)};
-validate(ClassName, _) when not is_atom(ClassName) ->
+validate(ClassName, _, _) when not is_atom(ClassName) ->
     Error0 = beamtalk_error:new(type_error, 'ClassBuilder'),
     Error1 = beamtalk_error:with_selector(Error0, 'name:'),
     {error, beamtalk_error:with_hint(Error1, <<"className must be a Symbol (atom)">>)};
-validate(_ClassName, nil) ->
+validate(_ClassName, nil, _) ->
     Error0 = beamtalk_error:new(no_superclass, 'ClassBuilder'),
     Error1 = beamtalk_error:with_selector(Error0, 'superclass:'),
     {error,
         beamtalk_error:with_hint(Error1, <<"superclassRef must be set before calling register">>)};
-validate(_ClassName, SuperclassRef) when
-    is_atom(SuperclassRef); is_pid(SuperclassRef); is_record(SuperclassRef, beamtalk_object)
+validate(_ClassName, SuperclassRef, _) when
+    not is_atom(SuperclassRef),
+    not is_pid(SuperclassRef),
+    not is_record(SuperclassRef, beamtalk_object)
 ->
-    validate_superclass_not_sealed(SuperclassRef);
-validate(_ClassName, SuperclassRef) ->
     Error0 = beamtalk_error:new(type_error, 'ClassBuilder'),
     Error1 = beamtalk_error:with_selector(Error0, 'superclass:'),
     {error,
@@ -188,25 +198,47 @@ validate(_ClassName, SuperclassRef) ->
                     [SuperclassRef]
                 )
             )
-        )}.
+        )};
+validate(_ClassName, SuperclassRef, false) ->
+    validate_superclass_not_sealed(SuperclassRef);
+validate(_ClassName, _SuperclassRef, true) ->
+    %% BT-791: stdlib mode — skip sealed check so stdlib on_load hooks succeed.
+    ok.
 
 %% @private
--spec validate_superclass_not_sealed(term()) -> ok | {error, #beamtalk_error{}}.
+%% @doc Check that the superclass is not sealed (user code enforcement).
+%%
+%% Looks up the superclass class process and checks `is_sealed`. Only called
+%% when StdlibMode = false (user-invoked classBuilder). Stdlib on_load hooks
+%% pass StdlibMode = true and skip this check entirely (BT-791).
+-spec validate_superclass_not_sealed(atom() | pid() | #beamtalk_object{}) ->
+    ok | {error, #beamtalk_error{}}.
 validate_superclass_not_sealed(SuperclassRef) ->
-    SuperclassName = resolve_superclass_name(SuperclassRef),
-    case beamtalk_class_registry:whereis_class(SuperclassName) of
+    SuperclassPid =
+        case SuperclassRef of
+            Name when is_atom(Name) -> beamtalk_class_registry:whereis_class(Name);
+            Pid when is_pid(Pid) -> Pid;
+            #beamtalk_object{pid = Pid} -> Pid
+        end,
+    case SuperclassPid of
         undefined ->
-            %% Superclass not yet registered — acceptable during bootstrap ordering.
+            %% Unknown superclass — allow registration; name resolution will fail later
             ok;
-        Pid ->
-            case beamtalk_object_class:is_sealed(Pid) of
+        ClassPid when is_pid(ClassPid) ->
+            case beamtalk_object_class:is_sealed(ClassPid) of
                 true ->
-                    Error0 = beamtalk_error:new(instantiation_error, SuperclassName),
-                    Error1 = beamtalk_error:with_selector(Error0, register),
+                    SuperclassName = beamtalk_object_class:class_name(ClassPid),
+                    Error0 = beamtalk_error:new(instantiation_error, 'ClassBuilder'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'superclass:'),
                     {error,
                         beamtalk_error:with_hint(
                             Error1,
-                            <<"Cannot subclass a sealed class">>
+                            iolist_to_binary(
+                                io_lib:format(
+                                    "cannot subclass sealed class ~p",
+                                    [SuperclassName]
+                                )
+                            )
                         )};
                 false ->
                     ok
