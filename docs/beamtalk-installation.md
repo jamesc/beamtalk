@@ -92,13 +92,20 @@ The status bar will show the Beamtalk workspace connection status.
 
 ## Quick start
 
-After installation, start the REPL:
+Create a new workspace:
+
+```
+beamtalk workspace new my-project
+cd my-project
+```
+
+This sets up the standard project file structure. Then start the REPL:
 
 ```
 beamtalk repl
 ```
 
-Or open a folder containing `.bt` files in VS Code — the extension will
-start a workspace automatically.
+Or open the project folder in VS Code — the extension will start a workspace
+automatically.
 
 See [Language Features](language-features.html) for a tour of the language.
