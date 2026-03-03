@@ -230,6 +230,16 @@ impl CoreErlangGenerator {
                     last_result.clone_from(&self.last_open_scope_result);
                 }
                 // If not last, the let chain stays open for the next expression
+            } else if Self::is_local_var_assignment(expr) {
+                // BT-1053: Local variable mutation inside conditional branch.
+                // generate_local_var_assignment_in_loop emits open let chain:
+                // "let _Val = <value> in let StateAccN = maps:put('key', _Val, StateAccM) in "
+                let doc = self.generate_local_var_assignment_in_loop(expr)?;
+                docs.push(doc);
+                if is_last {
+                    // last_open_scope_result is set to _Val by generate_local_var_assignment_in_loop
+                    last_result.clone_from(&self.last_open_scope_result);
+                }
             } else if is_last && self.control_flow_has_mutations(expr) {
                 // Last expression is nested control flow with mutations.
                 // It returns {Result, State} — unpack both.

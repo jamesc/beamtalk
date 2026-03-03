@@ -9,6 +9,8 @@
 //! terms (maps) with no process. They are created with `new` and `new:`,
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
+use std::fmt::Write as FmtWrite;
+
 use super::document::{Document, concat};
 use super::spec_codegen;
 use super::util::ClassIdentity;
@@ -888,6 +890,12 @@ impl CoreErlangGenerator {
                         body_parts.push(docvec!["    let ", core_var, " = ", val_doc, " in\n",]);
                     }
                 }
+            } else if self.is_do_with_vt_local_threading(expr) {
+                // BT-1053: Non-last `do:` loop that mutates captured outer locals.
+                // Generate foldl + extract locals as open let chains so the updated
+                // values are visible to all subsequent method body expressions.
+                let doc = self.generate_value_type_do_open(expr)?;
+                body_parts.push(doc);
             } else {
                 // Non-last expressions: wrap in let to sequence side effects
                 let tmp_var = self.fresh_temp_var("seq");
@@ -982,6 +990,127 @@ impl CoreErlangGenerator {
         Ok(Document::String(format!(
             "    let {tmp_var} = {expr_code} in\n"
         )))
+    }
+
+    /// BT-1053: Returns `true` if `expr` is a `do:` message send with a literal
+    /// block that, in `ValueType` context, captures and mutates outer local variables.
+    ///
+    /// Used by `generate_value_type_method` to select the open-let-chain path for
+    /// non-last `do:` loops so the mutated locals are visible to subsequent exprs.
+    fn is_do_with_vt_local_threading(&self, expr: &Expression) -> bool {
+        if !matches!(self.context, CodeGenContext::ValueType) {
+            return false;
+        }
+        if let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        {
+            let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+            if sel == "do:" {
+                if let Some(Expression::Block(body)) = arguments.first() {
+                    return !self.compute_threaded_locals_for_loop(body, None).is_empty();
+                }
+            }
+        }
+        false
+    }
+
+    /// BT-1053: Generates a non-last `do:` loop (with value-type captured local threading)
+    /// as an **open let chain**.
+    ///
+    /// Unlike the closed form (which buries the extracted locals inside `_seqN = (... 'nil')`)
+    /// this form emits the foldl and the `let X = maps:get(...)` extractions directly in
+    /// the method body, ending with `in ` so the caller's next `body_part` provides the
+    /// continuation.  This makes the updated locals visible to all subsequent expressions.
+    fn generate_value_type_do_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        let (receiver, body) = match expr {
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } if matches!(arguments.first(), Some(Expression::Block(_))) => {
+                let Some(Expression::Block(b)) = arguments.first() else {
+                    return Ok(Document::Nil);
+                };
+                (receiver.as_ref(), b)
+            }
+            _ => return Ok(Document::Nil),
+        };
+
+        let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
+
+        // Phase 1: create a fresh map and pack each captured local into it.
+        let init_map_var = self.fresh_temp_var("InitMap");
+        let mut pack_prefix = String::new();
+        let _ = write!(pack_prefix, "let {init_map_var} = call 'maps':'new'() in ");
+        let mut current = init_map_var;
+        for var_name in &threaded_locals {
+            let packed_var = self.fresh_temp_var("Packed");
+            let core_var = self
+                .lookup_var(var_name)
+                .cloned()
+                .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+            let key = Self::local_state_key(var_name);
+            let _ = write!(
+                pack_prefix,
+                "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
+            );
+            current = packed_var;
+        }
+        let init_state_code = current;
+
+        // Phase 2: generate receiver + list guard + lambda.
+        let list_var = self.fresh_temp_var("temp");
+        let recv_code = self.expression_doc(receiver)?;
+        let safe_list_var = self.fresh_temp_var("temp");
+        let lambda_var = self.fresh_temp_var("temp");
+        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
+        let item_var = Self::to_core_erlang_var(item_param);
+
+        let mut docs: Vec<Document<'static>> = vec![
+            Document::String(pack_prefix),
+            docvec![
+                format!("let {list_var} = "),
+                recv_code,
+                format!(
+                    " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
+                     <'true'> when 'true' -> {list_var} \
+                     <'false'> when 'true' -> \
+                     call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                     in let {lambda_var} = fun ({item_var}, StateAcc) -> "
+                ),
+            ],
+        ];
+
+        // Phase 3: generate foldl lambda body (reuses existing threading helper).
+        let body_doc = self.generate_list_do_body_with_threading(body, &item_var)?;
+        docs.push(body_doc);
+
+        // Phase 4: call foldl, then extract each local as an open `let X = ... in `.
+        // These `let` bindings are emitted into the method body scope, not inside an
+        // expression, so they shadow the pre-loop bindings and are visible to all
+        // subsequent `body_parts`.
+        let fold_result = self.fresh_temp_var("FoldResult");
+        let mut post_code = format!(
+            " in let {fold_result} = call 'lists':'foldl'({lambda_var}, {init_state_code}, {safe_list_var}) in "
+        );
+        for var_name in &threaded_locals {
+            let core_var = Self::to_core_erlang_var(var_name);
+            // Update the scope so subsequent method-body expressions look up
+            // this Erlang variable name.
+            self.bind_var(var_name, &core_var);
+            let key = Self::local_state_key(var_name);
+            let _ = write!(
+                post_code,
+                "let {core_var} = call 'maps':'get'('{key}', {fold_result}) in "
+            );
+        }
+        // Intentionally open — the caller's next body_part provides the continuation.
+        docs.push(Document::String(post_code));
+
+        Ok(Document::Vec(docs))
     }
 
     /// Returns `true` if `expr` contains a `^` (Return) that is nested inside

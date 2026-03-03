@@ -1102,7 +1102,13 @@ impl CoreErlangGenerator {
         } else {
             // BT-892: Value types have no State variable, so self-sends should
             // NOT trigger state threading. Only field writes need threading.
+            // BT-1053: Captured local variable mutations (outer vars both read and
+            // written in the block) also need threading via a fresh local map.
             !analysis.field_writes.is_empty()
+                || analysis
+                    .captured_reads
+                    .iter()
+                    .any(|v| analysis.local_writes.contains(v))
         }
     }
 

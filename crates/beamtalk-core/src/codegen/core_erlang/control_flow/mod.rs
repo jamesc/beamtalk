@@ -122,6 +122,10 @@ impl CoreErlangGenerator {
                     format!("State{}", self.state_version())
                 };
 
+                // BT-1053: Record val_var so callers (e.g. generate_conditional_branch_inline)
+                // can use it as the branch result via last_open_scope_result.
+                self.last_open_scope_result = Some(val_var.clone());
+
                 return Ok(docvec![
                     "let ",
                     val_var.clone(),
@@ -142,15 +146,22 @@ impl CoreErlangGenerator {
         Ok(Document::Nil)
     }
 
-    /// BT-598: Compute local variables that need threading through a loop's `StateAcc`.
-    /// Returns the sorted list of local vars that are both read and written in the block
-    /// (excluding block parameters). For actor methods only; returns empty for REPL mode.
+    /// BT-598/BT-1053: Compute local variables that need threading through a loop's `StateAcc`.
+    ///
+    /// For actor methods: returns vars that are both read and written in the block
+    /// (excluding block parameters). Reads from an optional condition block are merged.
+    ///
+    /// For value-type methods (BT-1053): returns vars that are captured from the outer
+    /// scope AND written in the block. Using `captured_reads` (not all reads) avoids
+    /// threading block-internal temporaries that happen to be read+written within the block.
+    ///
+    /// Returns empty for REPL mode (handled separately) and other contexts.
     pub(super) fn compute_threaded_locals_for_loop(
         &self,
         body: &crate::ast::Block,
         condition: Option<&Expression>,
     ) -> Vec<String> {
-        if self.is_repl_mode || self.context != CodeGenContext::Actor {
+        if self.is_repl_mode {
             return Vec::new();
         }
 
@@ -158,23 +169,39 @@ impl CoreErlangGenerator {
         let block_params: std::collections::HashSet<String> =
             body.parameters.iter().map(|p| p.name.to_string()).collect();
 
-        // Include reads from condition block if provided
-        let mut all_reads = analysis.local_reads.clone();
-        if let Some(Expression::Block(cond_block)) = condition {
-            let cond_analysis = block_analysis::analyze_block(cond_block);
-            all_reads = all_reads
-                .union(&cond_analysis.local_reads)
-                .cloned()
-                .collect();
+        match self.context {
+            CodeGenContext::Actor => {
+                // Include reads from condition block if provided
+                let mut all_reads = analysis.local_reads.clone();
+                if let Some(Expression::Block(cond_block)) = condition {
+                    let cond_analysis = block_analysis::analyze_block(cond_block);
+                    all_reads = all_reads
+                        .union(&cond_analysis.local_reads)
+                        .cloned()
+                        .collect();
+                }
+                all_reads
+                    .intersection(&analysis.local_writes)
+                    .filter(|v| !block_params.contains(*v))
+                    .cloned()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect()
+            }
+            CodeGenContext::ValueType => {
+                // BT-1053: Only thread vars captured from the outer scope that are also
+                // written in the block. `captured_reads` excludes block-internal temps.
+                analysis
+                    .captured_reads
+                    .intersection(&analysis.local_writes)
+                    .filter(|v| !block_params.contains(*v))
+                    .cloned()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect()
+            }
+            CodeGenContext::Repl => Vec::new(),
         }
-
-        all_reads
-            .intersection(&analysis.local_writes)
-            .filter(|v| !block_params.contains(*v))
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect()
     }
 
     /// BT-598: Returns the state map key for a local variable.

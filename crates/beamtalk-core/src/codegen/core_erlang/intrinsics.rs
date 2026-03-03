@@ -1197,8 +1197,9 @@ impl CoreErlangGenerator {
         use super::CodeGenContext;
         use super::block_analysis;
 
-        // Only applies in actor context (field mutations are only tracked there)
-        if self.context != CodeGenContext::Actor {
+        // Only applies in actor context OR when inside a loop body (BT-1053: value-type
+        // methods may have inline conditionals mutating captured locals inside do: blocks).
+        if self.context != CodeGenContext::Actor && !self.in_loop_body {
             return Ok(None);
         }
 
@@ -1213,7 +1214,11 @@ impl CoreErlangGenerator {
             "ifTrue:" if arguments.len() == 1 => {
                 if let Expression::Block(block) = &arguments[0] {
                     let analysis = block_analysis::analyze_block(block);
-                    if self.needs_mutation_threading(&analysis) {
+                    // BT-1053: When inside a loop body, also trigger for any local write
+                    // (the outer loop has already determined which locals need threading).
+                    let needs_threading = self.needs_mutation_threading(&analysis)
+                        || (self.in_loop_body && !analysis.local_writes.is_empty());
+                    if needs_threading {
                         let doc = self.generate_if_true_with_mutations(receiver, block)?;
                         return Ok(Some(doc));
                     }
@@ -1222,7 +1227,9 @@ impl CoreErlangGenerator {
             "ifFalse:" if arguments.len() == 1 => {
                 if let Expression::Block(block) = &arguments[0] {
                     let analysis = block_analysis::analyze_block(block);
-                    if self.needs_mutation_threading(&analysis) {
+                    let needs_threading = self.needs_mutation_threading(&analysis)
+                        || (self.in_loop_body && !analysis.local_writes.is_empty());
+                    if needs_threading {
                         let doc = self.generate_if_false_with_mutations(receiver, block)?;
                         return Ok(Some(doc));
                     }
@@ -1234,9 +1241,12 @@ impl CoreErlangGenerator {
                 {
                     let true_analysis = block_analysis::analyze_block(true_block);
                     let false_analysis = block_analysis::analyze_block(false_block);
-                    if self.needs_mutation_threading(&true_analysis)
+                    let needs_threading = self.needs_mutation_threading(&true_analysis)
                         || self.needs_mutation_threading(&false_analysis)
-                    {
+                        || (self.in_loop_body
+                            && (!true_analysis.local_writes.is_empty()
+                                || !false_analysis.local_writes.is_empty()));
+                    if needs_threading {
                         let doc = self.generate_if_true_if_false_with_mutations(
                             receiver,
                             true_block,

@@ -8,9 +8,7 @@
 //! This domain service analyzes blocks to detect which variables and fields are
 //! read/written, enabling proper state threading in tail-recursive loops.
 
-#[cfg(test)]
-use crate::ast::MessageSelector;
-use crate::ast::{Block, Expression};
+use crate::ast::{Block, Expression, MessageSelector};
 use std::collections::HashSet;
 
 /// Analysis results for a block's variable and field usage.
@@ -167,6 +165,7 @@ fn analyze_expression(
 
         Expression::MessageSend {
             receiver,
+            selector,
             arguments,
             ..
         } => {
@@ -175,8 +174,49 @@ fn analyze_expression(
                 analysis.has_self_sends = true;
             }
             analyze_expression(receiver, analysis, ctx);
-            for arg in arguments {
-                analyze_expression(arg, analysis, ctx);
+            // BT-1053: ifTrue:/ifFalse:/ifTrue:ifFalse: blocks are compiled inline
+            // (not as closures), so their local_writes and some captured_reads affect
+            // the enclosing scope. Propagate them to allow the outer loop analysis to
+            // detect that a captured local variable is mutated inside a conditional.
+            //
+            // captured_reads from the inner block are propagated selectively: only
+            // variables that are NOT already defined in the outer block's local bindings
+            // context are considered captured from the method scope. This prevents
+            // variables introduced within the outer block body (e.g. `newI := i + 1`
+            // before an `ifTrue: [^newI]`) from being misclassified as outer captures.
+            if is_inline_conditional_selector(selector) {
+                for arg in arguments {
+                    if let Expression::Block(block) = arg {
+                        let nested = analyze_block(block);
+                        analysis
+                            .local_reads
+                            .extend(nested.local_reads.iter().cloned());
+                        analysis
+                            .local_writes
+                            .extend(nested.local_writes.iter().cloned());
+                        // Only propagate captured_reads for vars not yet defined locally
+                        for v in &nested.captured_reads {
+                            if !ctx.local_bindings.contains(v.as_str()) {
+                                analysis.captured_reads.insert(v.clone());
+                            }
+                        }
+                        analysis
+                            .field_reads
+                            .extend(nested.field_reads.iter().cloned());
+                        analysis
+                            .field_writes
+                            .extend(nested.field_writes.iter().cloned());
+                        if nested.has_self_sends {
+                            analysis.has_self_sends = true;
+                        }
+                    } else {
+                        analyze_expression(arg, analysis, ctx);
+                    }
+                }
+            } else {
+                for arg in arguments {
+                    analyze_expression(arg, analysis, ctx);
+                }
             }
         }
 
@@ -254,6 +294,18 @@ fn analyze_expression(
 /// Returns true if the expression is a reference to `self`.
 fn is_self_reference(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(id) if id.name == "self")
+}
+
+/// Returns true if the selector is an inline conditional (`ifTrue:`, `ifFalse:`, or
+/// `ifTrue:ifFalse:`). These are compiled inline rather than as closures, so mutations
+/// inside their block arguments affect the enclosing scope.
+fn is_inline_conditional_selector(selector: &MessageSelector) -> bool {
+    if let MessageSelector::Keyword(parts) = selector {
+        let name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        matches!(name.as_str(), "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:")
+    } else {
+        false
+    }
 }
 
 /// Checks if a block is a literal block (not a variable reference).
