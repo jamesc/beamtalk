@@ -4277,10 +4277,8 @@ Object subclass: Foo
     fn infer_types_and_returns_produces_both_outputs() {
         // Module with a class whose method returns an integer literal, and a
         // top-level expression using that method.
-        let class = make_class_with_methods(
-            "Box",
-            vec![method_unannotated("value", vec![int_lit(42)])],
-        );
+        let class =
+            make_class_with_methods("Box", vec![method_unannotated("value", vec![int_lit(42)])]);
         let module = make_module_with_classes(vec![], vec![class]);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
