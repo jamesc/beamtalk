@@ -623,7 +623,10 @@ impl ClassHierarchy {
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 for method in &info.methods {
-                    if method.selector.as_str() == selector && method.is_sealed {
+                    if method.kind == MethodKind::Primary
+                        && method.selector.as_str() == selector
+                        && method.is_sealed
+                    {
                         return Some((info.name.clone(), method.clone()));
                     }
                 }
@@ -653,7 +656,10 @@ impl ClassHierarchy {
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 for method in &info.class_methods {
-                    if method.selector.as_str() == selector && method.is_sealed {
+                    if method.kind == MethodKind::Primary
+                        && method.selector.as_str() == selector
+                        && method.is_sealed
+                    {
                         return Some((info.name.clone(), method.clone()));
                     }
                 }
@@ -930,7 +936,11 @@ impl ClassHierarchy {
                 // names with sealed instance-side methods on Object but dispatch through a
                 // separate runtime namespace.
                 if !is_stdlib_builtin && !is_abstract_stdlib {
-                    for method in &class.methods {
+                    for method in class
+                        .methods
+                        .iter()
+                        .filter(|m| m.kind == MethodKind::Primary)
+                    {
                         let selector = method.selector.name();
                         if let Some((sealed_class, _)) = self
                             .find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
@@ -947,7 +957,11 @@ impl ClassHierarchy {
                 // Class-method sealed checks: only exempt builtin stdlib classes.
                 // Abstract stdlib classes must still respect sealed class-method overrides.
                 if !is_stdlib_builtin {
-                    for method in &class.class_methods {
+                    for method in class
+                        .class_methods
+                        .iter()
+                        .filter(|m| m.kind == MethodKind::Primary)
+                    {
                         let selector = method.selector.name();
                         if let Some((sealed_class, _)) = self.find_sealed_class_method_in_ancestors(
                             superclass.name.as_str(),

@@ -378,6 +378,12 @@ mod tests {
             result.is_err(),
             "expected error for whitespace metadata.json"
         );
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("empty or corrupt"),
+            "expected 'empty or corrupt' in error message, got: {msg}"
+        );
 
         let _ = fs::remove_dir_all(&ws_dir);
     }
