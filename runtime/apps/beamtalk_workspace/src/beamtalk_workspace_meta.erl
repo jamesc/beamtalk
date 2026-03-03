@@ -167,9 +167,15 @@ register_module(Module, SourcePath) when is_atom(Module) ->
     %% Normalise binary to string so persist_metadata_to_disk/1 always sees a list.
     NormalizedPath =
         case SourcePath of
-            undefined -> undefined;
-            B when is_binary(B) -> binary_to_list(B);
-            S when is_list(S) -> S
+            undefined ->
+                undefined;
+            B when is_binary(B) ->
+                case unicode:characters_to_list(B) of
+                    L when is_list(L) -> L;
+                    _ -> undefined
+                end;
+            S when is_list(S) ->
+                S
         end,
     try
         gen_server:cast(?MODULE, {register_module, Module, NormalizedPath})
@@ -415,9 +421,15 @@ load_metadata_from_disk(State) ->
                                     Atom ->
                                         Source =
                                             case maps:get(<<"source">>, Entry, null) of
-                                                null -> undefined;
-                                                S when is_binary(S) -> binary_to_list(S);
-                                                _ -> undefined
+                                                null ->
+                                                    undefined;
+                                                S when is_binary(S) ->
+                                                    case unicode:characters_to_list(S) of
+                                                        L when is_list(L) -> L;
+                                                        _ -> undefined
+                                                    end;
+                                                _ ->
+                                                    undefined
                                             end,
                                         {true, {Atom, Source}}
                                 end;
@@ -497,8 +509,13 @@ persist_metadata_to_disk(State) ->
                 <<"name">> => atom_to_binary(M, utf8),
                 <<"source">> =>
                     case S of
-                        undefined -> null;
-                        _ -> list_to_binary(S)
+                        undefined ->
+                            null;
+                        _ ->
+                            case unicode:characters_to_binary(S) of
+                                Bin when is_binary(Bin) -> Bin;
+                                _ -> null
+                            end
                     end
             }
          || {M, S} <- maps:to_list(State#state.loaded_modules)
