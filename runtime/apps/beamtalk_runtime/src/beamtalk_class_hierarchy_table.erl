@@ -10,8 +10,8 @@
 %%% queries.  No other module may reference the `beamtalk_class_hierarchy` atom
 %%% directly.
 %%%
-%%% Extracted from `beamtalk_class_registry` (BT-1062) following the same
-%%% pattern used for `beamtalk_session_table`.
+%%% Extracted from `beamtalk_class_registry` (BT-1062), following the same
+%%% ETS-owner pattern used elsewhere in the runtime.
 %%%
 %%% ## Table properties
 %%%
@@ -110,7 +110,13 @@ foldl(Fun, Acc0) ->
         undefined ->
             Acc0;
         _ ->
-            ets:foldl(Fun, Acc0, beamtalk_class_hierarchy)
+            try
+                ets:foldl(Fun, Acc0, beamtalk_class_hierarchy)
+            catch
+                error:badarg ->
+                    %% Table deleted between ets:info/1 and ets:foldl/3 (TOCTOU).
+                    Acc0
+            end
     end.
 
 %% @doc Return all class names whose direct superclass is `ClassName`.
