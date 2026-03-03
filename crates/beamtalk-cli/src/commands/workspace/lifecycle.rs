@@ -48,9 +48,14 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
     let dir = workspace_dir(workspace_id)?;
     fs::create_dir_all(&dir).into_diagnostic()?;
 
-    // Generate and save cookie
-    let cookie = generate_cookie();
-    save_workspace_cookie(workspace_id, &cookie)?;
+    // Only generate a new cookie when one doesn't already exist. Preserving the
+    // existing cookie is important when recovering from corrupt metadata: a live
+    // node still holds the old cookie in memory, so overwriting it would break
+    // reconnection / authentication.
+    if !dir.join("cookie").exists() {
+        let cookie = generate_cookie();
+        save_workspace_cookie(workspace_id, &cookie)?;
+    }
 
     // Create metadata
     let now = SystemTime::now()

@@ -131,7 +131,12 @@ pub fn get_workspace_metadata(workspace_id: &str) -> Result<WorkspaceMetadata> {
             metadata_path.display()
         ));
     }
-    serde_json::from_str(&content).into_diagnostic()
+    serde_json::from_str(&content).map_err(|err| {
+        miette!(
+            "workspace metadata file is empty or corrupt: {} ({err})",
+            metadata_path.display()
+        )
+    })
 }
 
 /// Save workspace metadata.
@@ -349,6 +354,11 @@ mod tests {
         assert!(
             result.is_err(),
             "expected error for whitespace metadata.json"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("empty or corrupt"),
+            "expected 'empty or corrupt' in error message, got: {msg}"
         );
 
         let _ = fs::remove_dir_all(&ws_dir);
