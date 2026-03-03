@@ -617,13 +617,17 @@ impl ClassHierarchy {
     ) -> Option<(EcoString, MethodInfo)> {
         let mut current = Some(start_class.to_string());
         let mut visited = HashSet::new();
+        let mut fell_back_to_object = false;
         while let Some(name) = current {
             if !visited.insert(name.clone()) {
                 break;
             }
             if let Some(info) = self.classes.get(name.as_str()) {
                 for method in &info.methods {
-                    if method.selector.as_str() == selector && method.is_sealed {
+                    if method.kind == MethodKind::Primary
+                        && method.selector.as_str() == selector
+                        && method.is_sealed
+                    {
                         return Some((info.name.clone(), method.clone()));
                     }
                 }
@@ -632,7 +636,57 @@ impl ClassHierarchy {
                     .as_ref()
                     .map(std::string::ToString::to_string);
             } else {
+                // Unknown/external class: fall back to Object to ensure we check
+                // Object's sealed methods, then stop. This prevents sealed overrides
+                // from being bypassed when an external class is in the inheritance chain.
+                current = if fell_back_to_object {
+                    None
+                } else {
+                    fell_back_to_object = true;
+                    Some("Object".to_string())
+                };
+            }
+        }
+        None
+    }
+
+    /// Walk the superclass chain looking for a sealed primary class-side method with the given selector.
+    /// Returns `Some((class_name, MethodInfo))` if found, `None` otherwise.
+    fn find_sealed_class_method_in_ancestors(
+        &self,
+        start_class: &str,
+        selector: &str,
+    ) -> Option<(EcoString, MethodInfo)> {
+        let mut current = Some(start_class.to_string());
+        let mut visited = HashSet::new();
+        let mut fell_back_to_object = false;
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
                 break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                for method in &info.class_methods {
+                    if method.kind == MethodKind::Primary
+                        && method.selector.as_str() == selector
+                        && method.is_sealed
+                    {
+                        return Some((info.name.clone(), method.clone()));
+                    }
+                }
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                // Unknown/external class: fall back to Object to ensure we check
+                // Object's sealed methods, then stop. This prevents sealed overrides
+                // from being bypassed when an external class is in the inheritance chain.
+                current = if fell_back_to_object {
+                    None
+                } else {
+                    fell_back_to_object = true;
+                    Some("Object".to_string())
+                };
             }
         }
         None
@@ -872,48 +926,19 @@ impl ClassHierarchy {
     }
 
     /// Add classes from a parsed module. Returns diagnostics for errors.
+    ///
+    /// Uses a two-pass approach to avoid definition-order sensitivity:
+    /// Pass 1 registers all classes so ancestor lookups are complete;
+    /// Pass 2 runs sealed-override and superclass checks.
     #[allow(clippy::too_many_lines)]
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
+        // Pass 1: Build and register ClassInfo for every class in the module.
+        // Duplicate-selector checks only need the class's own methods, so they
+        // run here too. Sealed checks are deferred to Pass 2.
         for class in &module.classes {
-            // Check sealed class enforcement (skip for root classes with no superclass).
-            // Still register the class so downstream passes (codegen routing,
-            // completions) can reason about it despite the error.
-            if let Some(diag) = self.check_sealed_superclass(class, stdlib_mode) {
-                diagnostics.push(diag);
-            }
-
-            // Check sealed method override enforcement.
-            // BT-803: Built-in stdlib classes (e.g. Metaclass) are allowed to override
-            // sealed methods when compiling in stdlib mode.
-            // BT-807: Abstract stdlib classes (e.g. Behaviour) are also allowed to override
-            // sealed methods, as they provide class-side dispatch methods whose
-            // selectors coincide with sealed instance-side methods on Object, but are
-            // dispatched through a separate runtime namespace.
-            if let Some(ref superclass) = class.superclass {
-                for method in &class.methods {
-                    let selector = method.selector.name();
-                    let is_stdlib_builtin =
-                        stdlib_mode && Self::is_builtin_class(class.name.name.as_str());
-                    let is_abstract_stdlib = stdlib_mode && class.is_abstract;
-                    if is_stdlib_builtin || is_abstract_stdlib {
-                        continue;
-                    }
-                    if let Some((sealed_class, _)) =
-                        self.find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
-                    {
-                        diagnostics.push(Diagnostic::error(
-                            format!(
-                                "Cannot override sealed method `{selector}` from class `{sealed_class}`"
-                            ),
-                            method.span,
-                        ));
-                    }
-                }
-            }
-
-            // Check for duplicate method selectors
+            // Check for duplicate method selectors (no ancestor lookup needed)
             Self::check_duplicate_methods(
                 &class.methods,
                 &class.name.name,
@@ -997,6 +1022,73 @@ impl ClassHierarchy {
             };
 
             self.classes.insert(class.name.name.clone(), class_info);
+        }
+
+        // Pass 2: All classes in this module are now registered. Run sealed
+        // superclass and method-override checks so ancestor lookups are
+        // deterministic regardless of class definition order within the module.
+        for class in &module.classes {
+            // Check sealed class enforcement (skip for root classes with no superclass).
+            // Still register the class so downstream passes (codegen routing,
+            // completions) can reason about it despite the error.
+            if let Some(diag) = self.check_sealed_superclass(class, stdlib_mode) {
+                diagnostics.push(diag);
+            }
+
+            // Check sealed method override enforcement.
+            // BT-803: Built-in stdlib classes (e.g. Metaclass) are allowed to override
+            // sealed methods when compiling in stdlib mode.
+            // BT-807: Abstract stdlib classes (e.g. Behaviour) are also allowed to override
+            // sealed methods, as they provide class-side dispatch methods whose
+            // selectors coincide with sealed instance-side methods on Object, but are
+            // dispatched through a separate runtime namespace.
+            if let Some(ref superclass) = class.superclass {
+                let is_stdlib_builtin =
+                    stdlib_mode && Self::is_builtin_class(class.name.name.as_str());
+                let is_abstract_stdlib = stdlib_mode && class.is_abstract;
+                // Instance-method sealed checks: exempt builtin AND abstract stdlib classes.
+                if !is_stdlib_builtin && !is_abstract_stdlib {
+                    for method in class
+                        .methods
+                        .iter()
+                        .filter(|m| m.kind == MethodKind::Primary)
+                    {
+                        let selector = method.selector.name();
+                        if let Some((sealed_class, _)) = self
+                            .find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
+                        {
+                            diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Cannot override sealed method `{selector}` from class `{sealed_class}`"
+                                ),
+                                method.span,
+                            ));
+                        }
+                    }
+                }
+                // Class-method sealed checks: only exempt builtin stdlib classes.
+                // Abstract stdlib classes must still respect sealed class-method overrides.
+                if !is_stdlib_builtin {
+                    for method in class
+                        .class_methods
+                        .iter()
+                        .filter(|m| m.kind == MethodKind::Primary)
+                    {
+                        let selector = method.selector.name();
+                        if let Some((sealed_class, _)) = self.find_sealed_class_method_in_ancestors(
+                            superclass.name.as_str(),
+                            &selector,
+                        ) {
+                            diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Cannot override sealed method `{selector}` from class `{sealed_class}`"
+                                ),
+                                method.span,
+                            ));
+                        }
+                    }
+                }
+            }
         }
 
         diagnostics
@@ -1165,8 +1257,18 @@ mod tests {
         let methods = h.all_methods("Actor");
         let selectors: Vec<&str> = methods.iter().map(|m| m.selector.as_str()).collect();
 
-        // Actor's own methods
-        assert!(selectors.contains(&"spawn"));
+        // Actor instance methods (spawn/spawnWith: are class-side, not instance-side)
+        assert!(selectors.contains(&"stop"));
+        assert!(selectors.contains(&"isAlive"));
+        assert!(
+            !selectors.contains(&"spawn"),
+            "spawn must NOT be in instance methods"
+        );
+        assert!(
+            !selectors.contains(&"spawnWith:"),
+            "spawnWith: must NOT be in instance methods"
+        );
+        // Note: `new` is still in Object's instance methods and thus inherited here
 
         // Inherited from Object
         assert!(selectors.contains(&"isNil"));
@@ -1175,6 +1277,34 @@ mod tests {
         // Inherited from ProtoObject
         assert!(selectors.contains(&"class"));
         assert!(selectors.contains(&"=="));
+    }
+
+    #[test]
+    fn actor_spawn_methods_are_class_side() {
+        let h = ClassHierarchy::with_builtins();
+        let class_methods = h.all_class_methods("Actor");
+        let selectors: Vec<&str> = class_methods.iter().map(|m| m.selector.as_str()).collect();
+
+        assert!(
+            selectors.contains(&"spawn"),
+            "spawn must be in class_methods"
+        );
+        assert!(
+            selectors.contains(&"spawnWith:"),
+            "spawnWith: must be in class_methods"
+        );
+        assert!(selectors.contains(&"new"), "new must be in class_methods");
+        assert!(selectors.contains(&"new:"), "new: must be in class_methods");
+
+        // Instance methods must NOT appear on class side
+        assert!(
+            !selectors.contains(&"stop"),
+            "stop must NOT be in class_methods"
+        );
+        assert!(
+            !selectors.contains(&"isAlive"),
+            "isAlive must NOT be in class_methods"
+        );
     }
 
     #[test]
@@ -1371,8 +1501,13 @@ mod tests {
 
         // Local method
         assert!(h.resolves_selector("Counter", "increment"));
-        // Inherited from Actor
-        assert!(h.resolves_selector("Counter", "spawn"));
+        // spawn is class-side on Actor — verify via all_class_methods
+        assert!(
+            h.all_class_methods("Counter")
+                .iter()
+                .any(|m| m.selector.as_str() == "spawn"),
+            "Counter should inherit class-side spawn from Actor"
+        );
         // Inherited from Object
         assert!(h.resolves_selector("Counter", "respondsTo:"));
         // Inherited from ProtoObject
@@ -1584,6 +1719,39 @@ mod tests {
         }
     }
 
+    fn make_class_with_sealed_class_method(
+        name: &str,
+        superclass: &str,
+        method_name: &str,
+        sealed: bool,
+    ) -> ClassDefinition {
+        ClassDefinition {
+            name: Identifier::new(name, test_span()),
+            superclass: Some(Identifier::new(superclass, test_span())),
+            class_kind: ClassKind::from_superclass_name(superclass),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![],
+            class_methods: vec![MethodDefinition {
+                selector: crate::ast::MessageSelector::Unary(method_name.into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: None,
+                is_sealed: sealed,
+                kind: MethodKind::Primary,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        }
+    }
+
     #[test]
     fn sealed_method_override_rejected() {
         // Parent defines sealed method "doCustomWork", child tries to override it
@@ -1677,8 +1845,8 @@ mod tests {
 
     #[test]
     fn builtin_actor_spawn_override_rejected() {
-        // Actor's spawn is sealed in builtins — subclass cannot override it
-        let child = make_class_with_sealed_method("MyActor", "Actor", "spawn", false);
+        // Actor's class-side spawn is sealed in builtins — subclass cannot override it
+        let child = make_class_with_sealed_class_method("MyActor", "Actor", "spawn", false);
 
         let module = Module {
             classes: vec![child],
@@ -1847,7 +2015,13 @@ mod tests {
         // Derived should inherit from Base -> Actor -> Object -> ProtoObject
         assert!(h.resolves_selector("Derived", "derivedMethod"));
         assert!(h.resolves_selector("Derived", "baseMethod"));
-        assert!(h.resolves_selector("Derived", "spawn"));
+        // spawn is class-side on Actor — verify via all_class_methods
+        assert!(
+            h.all_class_methods("Derived")
+                .iter()
+                .any(|m| m.selector.as_str() == "spawn"),
+            "Derived should inherit class-side spawn from Actor"
+        );
         assert!(h.resolves_selector("Derived", "class"));
     }
 
@@ -2733,5 +2907,101 @@ mod tests {
             .get_class("Counter")
             .expect("Counter should be registered");
         assert!(!info.is_value, "Actor subclass should not have is_value");
+    }
+
+    /// BT-1056: Test sealed method override detection with external superclasses.
+    /// When a class inherits from an external (unknown) class, ancestor lookup
+    /// should not break early; it should continue walking up the chain
+    /// using the `external_superclasses` data.
+    #[test]
+    fn sealed_override_checks_with_external_superclasses() {
+        // ClassB (in module) has sealed method foo
+        let sealed_base = ClassDefinition {
+            name: Identifier::new("ClassB", test_span()),
+            superclass: Some(Identifier::new("Object", test_span())),
+            class_kind: ClassKind::Object,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: crate::ast::MessageSelector::Unary("foo".into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: None,
+                is_sealed: true,
+                kind: MethodKind::Primary,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        // ClassC (in module) inherits from UnknownClass (external)
+        // UnknownClass will later be declared to inherit from ClassB
+        let override_class = ClassDefinition {
+            name: Identifier::new("ClassC", test_span()),
+            superclass: Some(Identifier::new("UnknownClass", test_span())),
+            class_kind: ClassKind::Object,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![MethodDefinition {
+                selector: crate::ast::MessageSelector::Unary("foo".into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: None,
+                is_sealed: false,
+                kind: MethodKind::Primary,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        };
+
+        let module = Module {
+            classes: vec![sealed_base, override_class],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+
+        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+
+        // Register external class relationship: UnknownClass <- ClassB
+        let mut external_index = std::collections::HashMap::new();
+        external_index.insert("UnknownClass".to_string(), "ClassB".to_string());
+        h.add_external_superclasses(&external_index);
+
+        // After adding external superclass info, UnknownClass should be in the hierarchy
+        // and we should be able to walk from it to ClassB.
+        assert!(
+            h.get_class("UnknownClass").is_some(),
+            "UnknownClass should exist after add_external_superclasses"
+        );
+        assert_eq!(
+            h.superclass_chain("UnknownClass"),
+            vec![
+                EcoString::from("ClassB"),
+                EcoString::from("Object"),
+                EcoString::from("ProtoObject")
+            ],
+            "UnknownClass superclass chain should reach ClassB"
+        );
     }
 }

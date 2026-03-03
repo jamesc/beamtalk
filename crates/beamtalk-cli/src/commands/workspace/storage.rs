@@ -389,7 +389,6 @@ mod tests {
         // Cleanup
         let _ = fs::remove_dir_all(&ws_dir);
     }
-
     /// Verify that `remove_stale_runtime_files` is idempotent — calling it when
     /// the files are already absent (e.g. after a clean shutdown) must not error.
     #[test]

@@ -48,6 +48,7 @@
     signal_message/2,
     signal_from_class/1,
     kind_to_class/1,
+    class_to_kind/1,
     is_exception_class/1
 ]).
 
@@ -82,6 +83,17 @@ kind_to_class(erlang_throw) -> 'ThrowError';
 %% file_*/io_error/invalid_path/permission_denied stay Error — future IOError (ADR 0015 Phase 6).
 kind_to_class(signal) -> 'Error';
 kind_to_class(_) -> 'Error'.
+
+%% @doc Derive the canonical error kind for a named exception class.
+%%
+%% Inverse of kind_to_class/1 for the stdlib exception subclasses that have
+%% a dedicated kind (BT-1056: InstantiationError and TypeError have canonical kinds
+%% so that `SomeClass new signal: msg` produces the correct catchable kind).
+%% User-defined subclasses without a dedicated kind use `signal`.
+-spec class_to_kind(atom()) -> atom().
+class_to_kind('InstantiationError') -> instantiation_error;
+class_to_kind('TypeError') -> type_error;
+class_to_kind(_) -> signal.
 
 %% @doc Check if a class name belongs to the exception hierarchy.
 %%
@@ -397,7 +409,7 @@ signal_message(Message) ->
 -spec signal_message(term(), atom()) -> no_return().
 signal_message(Message, ExceptionClass) when is_binary(Message) ->
     Error = #beamtalk_error{
-        kind = signal,
+        kind = class_to_kind(ExceptionClass),
         class = ExceptionClass,
         selector = undefined,
         message = Message,
@@ -417,7 +429,7 @@ signal_message(Message, ExceptionClass) ->
 -spec signal_from_class(atom()) -> no_return().
 signal_from_class(ClassName) ->
     Error = #beamtalk_error{
-        kind = signal,
+        kind = class_to_kind(ClassName),
         class = ClassName,
         selector = undefined,
         message = atom_to_binary(ClassName, utf8),

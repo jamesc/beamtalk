@@ -95,15 +95,16 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state: vec![],
             state_types: HashMap::new(),
             methods: vec![
-                MethodInfo { selector: "spawn".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![] },
-                MethodInfo { selector: "spawnWith:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![None] },
-                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![] },
-                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![None] },
                 MethodInfo { selector: "stop".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: Some("Symbol".into()), param_types: vec![] },
                 MethodInfo { selector: "kill".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: Some("Symbol".into()), param_types: vec![] },
                 MethodInfo { selector: "isAlive".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: Some("Boolean".into()), param_types: vec![] },
             ],
-            class_methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "spawn".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "spawnWith:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![None] },
+                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![None] },
+            ],
             class_variables: vec![],
         },
     );
