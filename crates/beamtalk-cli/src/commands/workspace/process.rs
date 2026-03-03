@@ -120,11 +120,14 @@ pub fn is_node_running(info: &NodeInfo, workspace_id: Option<&str>) -> bool {
     // If we have a nonce, verify it against the port file for stale detection
     if let Some(ref expected_nonce) = info.nonce {
         let file_nonce = if let Some(id) = workspace_id {
-            // Fast path: read port file directly from the known workspace directory
-            read_port_file(id)
-                .ok()
-                .flatten()
-                .and_then(|(_port, nonce)| nonce)
+            // Fast path: read port file directly from the known workspace directory.
+            // Verify the port matches before using the nonce — if the port file
+            // belongs to a different startup, comparing nonces is meaningless.
+            read_port_file(id).ok().flatten().and_then(
+                |(port, nonce)| {
+                    if port == info.port { nonce } else { None }
+                },
+            )
         } else {
             // Fallback: scan all workspace directories (O(N))
             read_port_file_nonce(info.port)
