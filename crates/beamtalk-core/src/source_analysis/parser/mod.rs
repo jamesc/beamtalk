@@ -1018,25 +1018,23 @@ impl Parser {
         self.is_method_selector_at(offset)
     }
 
-    /// Checks if there is a method selector followed by `=>` at the given offset.
+    /// Checks if there is a method selector followed by `=>` (or `-> Type =>`) at the given offset.
     fn is_method_selector_at(&self, offset: usize) -> bool {
         match self.peek_at(offset) {
-            // Unary: `identifier =>`
-            Some(TokenKind::Identifier(_)) => {
-                matches!(self.peek_at(offset + 1), Some(TokenKind::FatArrow))
-            }
-            // Binary: `+ other =>`
+            // Unary: `identifier =>` or `identifier -> Type =>`
+            Some(TokenKind::Identifier(_)) => self.is_fat_arrow_or_return_type(offset + 1),
+            // Binary: `+ other =>` or `+ other -> Type =>`
             Some(TokenKind::BinarySelector(_)) => {
                 matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
-                    && matches!(self.peek_at(offset + 2), Some(TokenKind::FatArrow))
+                    && self.is_fat_arrow_or_return_type(offset + 2)
             }
-            // Keyword: `at: index put: value =>`
+            // Keyword: `at: index put: value =>` or `at: index -> Type =>`
             Some(TokenKind::Keyword(_)) => self.is_keyword_method_selector_at(offset),
             _ => false,
         }
     }
 
-    /// Checks if there's a keyword method selector followed by `=>` at the given offset.
+    /// Checks if there's a keyword method selector followed by `=>` (or `-> Type =>`) at the given offset.
     fn is_keyword_method_selector_at(&self, start_offset: usize) -> bool {
         let mut offset = start_offset;
         loop {
@@ -1051,7 +1049,13 @@ impl Parser {
             match self.peek_at(offset) {
                 Some(TokenKind::FatArrow) => return true,
                 Some(TokenKind::Keyword(_)) => {}
-                _ => return false,
+                _ => {
+                    // Could be `-> Type =>` after the last param
+                    if self.is_fat_arrow_or_return_type(offset) {
+                        return true;
+                    }
+                    return false;
+                }
             }
         }
     }

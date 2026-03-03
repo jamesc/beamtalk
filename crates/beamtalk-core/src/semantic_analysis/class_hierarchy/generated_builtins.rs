@@ -41,7 +41,6 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "File"
             | "FileHandle"
             | "Float"
-            | "Future"
             | "InstantiationError"
             | "Integer"
             | "JSON"
@@ -731,30 +730,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
-        "Future".into(),
-        ClassInfo {
-            name: "Future".into(),
-            superclass: Some("Object".into()),
-            is_sealed: true,
-            is_abstract: false,
-            is_typed: false,
-            is_value: false,
-            state: vec![],
-            state_types: HashMap::new(),
-            methods: vec![
-                MethodInfo { selector: "await".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: None, param_types: vec![] },
-                MethodInfo { selector: "await:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: None, param_types: vec![Some("Integer".into())] },
-                MethodInfo { selector: "awaitForever".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: None, param_types: vec![] },
-                MethodInfo { selector: "whenResolved:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: Some("Symbol".into()), param_types: vec![Some("Block".into())] },
-                MethodInfo { selector: "whenRejected:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: Some("Symbol".into()), param_types: vec![Some("Block".into())] },
-                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Future".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
-            ],
-            class_methods: vec![],
-            class_variables: vec![],
-        },
-    );
-
-    classes.insert(
         "InstantiationError".into(),
         ClassInfo {
             name: "InstantiationError".into(),
@@ -802,9 +777,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "isOdd".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
                 MethodInfo { selector: "min:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![Some("Number".into())] },
                 MethodInfo { selector: "max:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![Some("Number".into())] },
-                MethodInfo { selector: "timesRepeat:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())] },
-                MethodInfo { selector: "to:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![None, Some("Block".into())] },
-                MethodInfo { selector: "to:by:do:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![None, None, Some("Block".into())] },
+                MethodInfo { selector: "timesRepeat:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None, param_types: vec![Some("Block".into())] },
+                MethodInfo { selector: "to:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None, param_types: vec![None, Some("Block".into())] },
+                MethodInfo { selector: "to:by:do:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: None, param_types: vec![None, None, Some("Block".into())] },
                 MethodInfo { selector: "asFloat".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },

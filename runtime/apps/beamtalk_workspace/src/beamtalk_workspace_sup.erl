@@ -121,6 +121,18 @@ init(Config) ->
                     modules => [beamtalk_class_events]
                 },
 
+                %% Bindings-changed event pub/sub
+                %% Broadcasts to all WS clients after each successful eval so the
+                %% VS Code sidebar refreshes regardless of which session ran the eval.
+                #{
+                    id => beamtalk_bindings_events,
+                    start => {beamtalk_bindings_events, start_link, [registered]},
+                    restart => permanent,
+                    shutdown => 5000,
+                    type => worker,
+                    modules => [beamtalk_bindings_events]
+                },
+
                 %% Bootstrap worker — sets singleton class variables (ADR 0019 Phase 2)
                 %% and activates compiled project modules (BT-739).
                 %% Must start after all singletons but before REPL server accepts connections.

@@ -43,8 +43,8 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    %% Should have 11 children: workspace_meta, transcript_stream, beamtalk_interface, actor_registry, workspace_interface, class_events, workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup
-    ?assertEqual(11, length(ChildSpecs)).
+    %% Should have 12 children: workspace_meta, transcript_stream, beamtalk_interface, actor_registry, workspace_interface, class_events, bindings_events, workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup
+    ?assertEqual(12, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -57,6 +57,7 @@ children_ids_test() ->
     ?assert(lists:member('bt@stdlib@workspace_interface', Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)),
     ?assert(lists:member(beamtalk_class_events, Ids)),
+    ?assert(lists:member(beamtalk_bindings_events, Ids)),
     ?assert(lists:member(beamtalk_repl_server, Ids)),
     ?assert(lists:member(beamtalk_idle_monitor, Ids)),
     ?assert(lists:member(beamtalk_actor_sup, Ids)),
@@ -256,6 +257,7 @@ all_children_alive_test() ->
             beamtalk_actor_registry,
             'bt@stdlib@workspace_interface',
             beamtalk_class_events,
+            beamtalk_bindings_events,
             beamtalk_workspace_bootstrap,
             beamtalk_repl_server,
             beamtalk_idle_monitor,

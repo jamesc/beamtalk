@@ -12,8 +12,9 @@
 //! - Field name validation in `new:` maps (BT-563)
 //! - Class variable access (BT-563)
 //! - Empty method bodies (BT-631)
+//! - Value type `-> Nil` return annotations (BT-1052)
 
-use crate::ast::{Block, Expression, Identifier, Module};
+use crate::ast::{Block, Expression, Identifier, MessageSelector, MethodDefinition, Module};
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::block_context::{classify_block, is_collection_hof_selector};
 use crate::semantic_analysis::{BlockContext, ClassHierarchy};
@@ -1175,6 +1176,109 @@ fn visit_cast_on_value_type(
     }
 }
 
+// ── BT-1052: Value type `-> Nil` return annotation ────────────────────────────
+
+/// BT-1052: Error when an instance method on a Value type has an explicit `-> Nil`
+/// return type annotation.
+///
+/// Value types (ADR 0042) are immutable transformations — methods should return
+/// new values, not perform side effects. A `-> Nil` return type signals a
+/// side-effecting void method, which contradicts value-type semantics.
+///
+/// Class-side methods and `subclassResponsibility` placeholders are exempt.
+pub(crate) fn check_value_nil_return(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        let class_name = class.name.name.as_str();
+        if !hierarchy.is_value_subclass(class_name) {
+            continue;
+        }
+        // Only check instance methods — class_methods are exempt.
+        for method in &class.methods {
+            check_method_nil_return(method, class_name, diagnostics);
+        }
+    }
+    // Also check standalone method definitions (Tonel-style).
+    for standalone in &module.method_definitions {
+        if standalone.is_class_method {
+            continue;
+        }
+        let class_name = standalone.class_name.name.as_str();
+        if !hierarchy.is_value_subclass(class_name) {
+            continue;
+        }
+        check_method_nil_return(&standalone.method, class_name, diagnostics);
+    }
+}
+
+/// Returns `true` if the method body contains a `self subclassResponsibility`
+/// call anywhere (including inside `^ self subclassResponsibility`, cascades,
+/// or other wrapped forms), marking it as an abstract placeholder that should
+/// be exempt from the value `-> Nil` lint.
+fn is_subclass_responsibility(method: &MethodDefinition) -> bool {
+    let mut found = false;
+    for stmt in &method.body {
+        walk_expression(&stmt.expression, &mut |e| {
+            if found {
+                return;
+            }
+            if matches!(
+                e,
+                Expression::MessageSend {
+                    receiver,
+                    selector: MessageSelector::Unary(sel),
+                    ..
+                } if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+                    && sel.as_str() == "subclassResponsibility"
+            ) {
+                found = true;
+            }
+        });
+    }
+    found
+}
+
+/// Check a single method for `-> Nil` on a value type and push an error diagnostic.
+fn check_method_nil_return(
+    method: &MethodDefinition,
+    class_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(return_type) = &method.return_type else {
+        return;
+    };
+    let crate::ast::TypeAnnotation::Simple(id) = return_type else {
+        return;
+    };
+    if id.name.as_str() != "Nil" {
+        return;
+    }
+    // Exempt abstract placeholder methods.
+    if is_subclass_responsibility(method) {
+        return;
+    }
+    let selector = method.selector.name();
+    let mut diag = Diagnostic::error(
+        format!(
+            "method `{selector}` returns Nil on a Value type \
+             — Value types should not have side-effecting void methods; \
+             consider `Object subclass:` instead"
+        ),
+        method.span,
+    );
+    diag.hint = Some(
+        format!(
+            "Value types (ADR 0042) are immutable transformations. \
+             Move `{class_name}` to inherit from `Object` if it needs void methods."
+        )
+        .into(),
+    );
+    diagnostics.push(diag);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1182,7 +1286,7 @@ mod tests {
     use crate::source_analysis::Severity;
     use crate::source_analysis::parse;
 
-    /// Future is now a real stdlib class (stdlib/src/Future.bt exists).
+    /// Future is a runtime-only built-in class (BT-1057 removed the stub).
     /// User-defined `Future` classes should trigger a stdlib shadowing warning.
     #[test]
     fn future_class_triggers_shadowing_warning() {
@@ -2262,6 +2366,140 @@ mod tests {
                 .iter()
                 .all(|d| d.message.contains("always `true`")),
             "Expected all messages to say 'always `true`', got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-1052: Value type `-> Nil` return annotation tests ─────────────────
+
+    /// Value instance method with `-> Nil` is an error.
+    #[test]
+    fn value_instance_method_nil_return_is_error() {
+        let src = "Value subclass: MyVal\n  doSomething -> Nil => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_nil_return(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for -> Nil on value type, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(
+            diagnostics[0].message.contains("doSomething"),
+            "Expected selector in message, got: {:?}",
+            diagnostics[0].message
+        );
+    }
+
+    /// Value class-side method with `-> Nil` is exempt.
+    #[test]
+    fn value_class_method_nil_return_is_exempt() {
+        let src = "Value subclass: MyVal\n  class create -> Nil => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_nil_return(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error for class-side -> Nil, got: {diagnostics:?}"
+        );
+    }
+
+    /// Object instance method with `-> Nil` is not flagged.
+    #[test]
+    fn object_instance_method_nil_return_is_exempt() {
+        let src = "Object subclass: MyObj\n  doSomething -> Nil => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_nil_return(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error for Object -> Nil, got: {diagnostics:?}"
+        );
+    }
+
+    /// Actor instance method with `-> Nil` is not flagged.
+    #[test]
+    fn actor_instance_method_nil_return_is_exempt() {
+        let src = "Actor subclass: MyActor\n  doSomething -> Nil => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_nil_return(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error for Actor -> Nil, got: {diagnostics:?}"
+        );
+    }
+
+    /// Value instance method with `self subclassResponsibility` is exempt.
+    #[test]
+    fn value_subclass_responsibility_nil_return_is_exempt() {
+        let src = "Value subclass: MyVal\n  doSomething -> Nil => self subclassResponsibility";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_nil_return(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error for subclassResponsibility placeholder, got: {diagnostics:?}"
+        );
+    }
+
+    /// `^ self subclassResponsibility` (early-return form) is also exempt.
+    #[test]
+    fn value_subclass_responsibility_early_return_is_exempt() {
+        let src = "Value subclass: MyVal\n  doSomething -> Nil => ^ self subclassResponsibility";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_nil_return(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error for ^ self subclassResponsibility, got: {diagnostics:?}"
+        );
+    }
+
+    /// Standalone (Tonel-style) Value method with `-> Nil` is also an error.
+    #[test]
+    fn standalone_value_method_nil_return_is_error() {
+        let src = "Value subclass: MyVal\n  doSomething => nil\nMyVal >> doVoid -> Nil => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_nil_return(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for standalone -> Nil on value type, got: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics[0].message.contains("doVoid"),
+            "Expected selector in message, got: {:?}",
+            diagnostics[0].message
         );
     }
 }

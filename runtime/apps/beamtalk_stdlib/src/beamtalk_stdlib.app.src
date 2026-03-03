@@ -29,7 +29,6 @@
             {'bt@stdlib@file', 'File', 'Object'},
             {'bt@stdlib@file_handle', 'FileHandle', 'Object'},
             {'bt@stdlib@float', 'Float', 'Number'},
-            {'bt@stdlib@future', 'Future', 'Object'},
             {'bt@stdlib@instantiation_error', 'InstantiationError', 'Error'},
             {'bt@stdlib@integer', 'Integer', 'Number'},
             {'bt@stdlib@json', 'JSON', 'Object'},

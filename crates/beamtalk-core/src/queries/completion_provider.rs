@@ -32,7 +32,7 @@ use crate::language_service::{Completion, CompletionKind, Position};
 use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::queries::erlang_modules;
 use crate::semantic_analysis::type_checker::TypeMap;
-use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
+use crate::semantic_analysis::{ClassHierarchy, InferredType};
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -107,20 +107,22 @@ pub fn compute_completions(
     // Determine class context at cursor position
     let context = find_class_context(module, offset);
 
-    // Enrich hierarchy with inferred return types (BT-1014).
-    // This enables chain resolution for methods whose return type is not explicitly
-    // annotated but can be inferred from the method body (BT-1005).
+    // Enrich hierarchy with inferred return types and get the type map in a single
+    // TypeChecker pass (BT-1014, BT-1047). The TypeChecker now consults its own
+    // inferred method_return_types during chain resolution, so a second pass is
+    // no longer needed for correct chain completion filtering (BT-1005).
     let enriched_hierarchy;
-    let hierarchy = match enrich_hierarchy_with_inferred_returns(module, hierarchy) {
-        Some(h) => {
-            enriched_hierarchy = h;
-            &enriched_hierarchy
-        }
-        None => hierarchy,
+    let (hierarchy, type_map) = {
+        let (enriched, type_map) = enrich_hierarchy_with_inferred_returns(module, hierarchy);
+        let h = match enriched {
+            Some(h) => {
+                enriched_hierarchy = h;
+                &enriched_hierarchy
+            }
+            None => hierarchy,
+        };
+        (h, type_map)
     };
-
-    // Run type inference to get receiver types at positions
-    let type_map = infer_types(module, hierarchy);
 
     // Try to find receiver type at cursor for type-filtered completions
     let receiver_type = find_receiver_type(module, offset, &type_map);

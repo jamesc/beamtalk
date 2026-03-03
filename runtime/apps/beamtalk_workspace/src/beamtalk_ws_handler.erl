@@ -111,6 +111,15 @@ websocket_info(
         io_capture_pid = undefined,
         stdin_ref = undefined
     }};
+%% Bindings-changed broadcast from beamtalk_bindings_events pub/sub
+websocket_info({bindings_changed, SessionId}, State = #ws_state{authenticated = true}) ->
+    Push = jsx:encode(#{
+        <<"type">> => <<"push">>,
+        <<"channel">> => <<"bindings">>,
+        <<"event">> => <<"changed">>,
+        <<"data">> => #{<<"session">> => SessionId}
+    }),
+    {[{text, Push}], State};
 %% BT-696: Eval completed with error
 websocket_info(
     {eval_error, Reason, Output, Warnings},
@@ -198,6 +207,8 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
     beamtalk_repl_actors:unsubscribe(),
     %% Unsubscribe from class-loaded push messages (BT-1020)
     beamtalk_class_events:unsubscribe(),
+    %% Unsubscribe from bindings-changed push messages
+    beamtalk_bindings_events:unsubscribe(),
     %% Keep session alive for resume — session idle monitor handles cleanup.
     %% Don't delete from ETS or stop the process here.
     ok.
@@ -301,6 +312,7 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                     beamtalk_transcript_stream_primitives:subscribe('Transcript'),
                     beamtalk_repl_actors:subscribe(),
                     beamtalk_class_events:subscribe(),
+                    beamtalk_bindings_events:subscribe(),
                     InitialActors = actor_snapshot_frames(),
                     AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
                     SessionMsg = jsx:encode(#{
@@ -351,6 +363,7 @@ create_session(SessionId, State) ->
             beamtalk_transcript_stream_primitives:subscribe('Transcript'),
             beamtalk_repl_actors:subscribe(),
             beamtalk_class_events:subscribe(),
+            beamtalk_bindings_events:subscribe(),
             InitialActors = actor_snapshot_frames(),
             AuthOk = jsx:encode(#{<<"type">> => <<"auth_ok">>}),
             SessionMsg = jsx:encode(#{
