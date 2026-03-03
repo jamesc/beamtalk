@@ -1,0 +1,215 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1053: Tests for inject:into: as pure Beamtalk on abstract Collection
+// (implemented using `self do:` with local variable accumulator mutation).
+//
+// These tests cover:
+//  1. inject:into: on List (the concrete subclass)
+//  2. inject:into: on NumberList (user-defined Collection subclass — exercises
+//     the abstract Collection.inject:into: via `self do:` mutation threading)
+//  3. inject:into: on built-in abstract collections: Set, Dictionary
+//  4. collect:/select:/reject: on NumberList (they call inject:into: internally)
+//  5. Edge cases: empty, single-element, non-commutative argument order
+
+TestCase subclass: InjectIntoPureBtTest
+
+  // =========================================================================
+  // List inject:into: — basic correctness
+  // =========================================================================
+
+  testListSumBasic =>
+    self assert: (#(1, 2, 3) inject: 0 into: [:acc :x | acc + x]) equals: 6
+
+  testListProductBasic =>
+    self assert: (#(1, 2, 3, 4) inject: 1 into: [:acc :x | acc * x]) equals: 24
+
+  testListEmptyWithInitial =>
+    self assert: (#() inject: 99 into: [:acc :x | acc + x]) equals: 99
+
+  testListSingleElement =>
+    self assert: (#(7) inject: 0 into: [:acc :x | acc + x]) equals: 7
+
+  testListStringConcat =>
+    self assert: (#("a", "b", "c") inject: "" into: [:acc :x | acc ++ x]) equals: "abc"
+
+  // Non-commutative: verifies accumulator is the FIRST block argument.
+  // Subtraction: ((10 - 1) - 2) - 3 = 4 (left-fold), NOT 10 - (1 - (2 - 3)) = 14.
+  testListArgOrderNonCommutative =>
+    self assert: (#(1, 2, 3) inject: 10 into: [:acc :x | acc - x]) equals: 4
+
+  testListBuildReverseList =>
+    self assert: (#(1, 2, 3) inject: #() into: [:acc :x |
+      acc addFirst: x
+    ]) equals: #(3, 2, 1)
+
+  testListFindMax =>
+    self assert: (#(3, 1, 4, 1, 5, 9) inject: 0 into: [:max :x |
+      x > max ifTrue: [x] ifFalse: [max]
+    ]) equals: 9
+
+  testListCountSatisfying =>
+    self assert: (#(1, 2, 3, 4, 5) inject: 0 into: [:count :x |
+      x > 2 ifTrue: [count + 1] ifFalse: [count]
+    ]) equals: 3
+
+  // =========================================================================
+  // NumberList (user-defined Collection subclass) inject:into:
+  // — exercises the abstract Collection.inject:into: body which calls
+  //   `self do:` and mutates a local `acc` variable
+  // =========================================================================
+
+  testNumberListSumBasic =>
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    self assert: (col inject: 0 into: [:acc :x | acc + x]) equals: 6
+
+  testNumberListProductBasic =>
+    col := NumberList new: #{#items => #(1, 2, 3, 4)}
+    self assert: (col inject: 1 into: [:acc :x | acc * x]) equals: 24
+
+  testNumberListEmptyWithInitial =>
+    col := NumberList new: #{#items => #()}
+    self assert: (col inject: 42 into: [:acc :x | acc + x]) equals: 42
+
+  testNumberListSingleElement =>
+    col := NumberList new: #{#items => #(99)}
+    self assert: (col inject: 0 into: [:acc :x | acc + x]) equals: 99
+
+  // Non-commutative: accumulator is the first argument
+  testNumberListArgOrderNonCommutative =>
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    self assert: (col inject: #() into: [:acc :x |
+      acc addFirst: x
+    ]) equals: #(3, 2, 1)
+
+  testNumberListBuildString =>
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    self assert: (col inject: "" into: [:acc :x | acc ++ x printString]) equals: "123"
+
+  testNumberListCountElements =>
+    col := NumberList new: #{#items => #(10, 20, 30, 40)}
+    self assert: (col inject: 0 into: [:count :_ | count + 1]) equals: 4
+
+  testNumberListFindMin =>
+    col := NumberList new: #{#items => #(5, 2, 8, 1, 9)}
+    self assert: (col inject: 999 into: [:min :x |
+      x < min ifTrue: [x] ifFalse: [min]
+    ]) equals: 1
+
+  // =========================================================================
+  // Set inject:into: — inherits from Collection via do:
+  // =========================================================================
+
+  testSetSumOfThreeElements =>
+    s := ((Set new add: 1) add: 2) add: 3
+    self assert: (s inject: 0 into: [:acc :x | acc + x]) equals: 6
+
+  testSetEmptyCollection =>
+    s := Set new
+    self assert: (s inject: 0 into: [:acc :x | acc + x]) equals: 0
+
+  testSetSingleElement =>
+    s := Set new add: 7
+    self assert: (s inject: 0 into: [:acc :x | acc + x]) equals: 7
+
+  // =========================================================================
+  // Dictionary inject:into: — iterates over VALUES
+  // =========================================================================
+
+  testDictionarySumOfValues =>
+    d := Dictionary new: #{#a => 1, #b => 2, #c => 3}
+    self assert: (d inject: 0 into: [:acc :v | acc + v]) equals: 6
+
+  testDictionaryEmptyCollection =>
+    d := Dictionary new
+    self assert: (d inject: 0 into: [:acc :v | acc + v]) equals: 0
+
+  testDictionarySingleEntry =>
+    d := Dictionary new: #{#key => 42}
+    self assert: (d inject: 0 into: [:acc :v | acc + v]) equals: 42
+
+  // =========================================================================
+  // collect: on NumberList — calls inject:into: internally (regression)
+  // After removing @primitive from inject:into:, collect: must still work
+  // =========================================================================
+
+  testNumberListCollect =>
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    self assert: (col collect: [:x | x * 2]) equals: #(2, 4, 6)
+
+  testNumberListCollectEmpty =>
+    col := NumberList new: #{#items => #()}
+    self assert: (col collect: [:x | x * 2]) equals: #()
+
+  testNumberListCollectSingle =>
+    col := NumberList new: #{#items => #(5)}
+    self assert: (col collect: [:x | x * x]) equals: #(25)
+
+  testNumberListCollectPreservesOrder =>
+    col := NumberList new: #{#items => #(3, 1, 4, 1, 5)}
+    self assert: (col collect: [:x | x + 10]) equals: #(13, 11, 14, 11, 15)
+
+  // =========================================================================
+  // select: on NumberList — calls inject:into: internally (regression)
+  // =========================================================================
+
+  testNumberListSelect =>
+    col := NumberList new: #{#items => #(1, 2, 3, 4, 5)}
+    self assert: (col select: [:x | x > 2]) equals: #(3, 4, 5)
+
+  testNumberListSelectEmpty =>
+    col := NumberList new: #{#items => #()}
+    self assert: (col select: [:x | x > 0]) equals: #()
+
+  testNumberListSelectNoneMatch =>
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    self assert: (col select: [:x | x > 10]) equals: #()
+
+  testNumberListSelectAllMatch =>
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    self assert: (col select: [:x | x > 0]) equals: #(1, 2, 3)
+
+  // =========================================================================
+  // reject: on NumberList — calls inject:into: internally (regression)
+  // =========================================================================
+
+  testNumberListReject =>
+    col := NumberList new: #{#items => #(1, 2, 3, 4, 5)}
+    self assert: (col reject: [:x | x > 3]) equals: #(1, 2, 3)
+
+  testNumberListRejectEmpty =>
+    col := NumberList new: #{#items => #()}
+    self assert: (col reject: [:x | x > 0]) equals: #()
+
+  // =========================================================================
+  // Chained inject:into: invocations — verifies no state leaks between calls
+  // =========================================================================
+
+  testMultipleCallsOnSameCollection =>
+    col := NumberList new: #{#items => #(1, 2, 3, 4, 5)}
+    sum := col inject: 0 into: [:acc :x | acc + x]
+    product := col inject: 1 into: [:acc :x | acc * x]
+    self assert: sum equals: 15
+    self assert: product equals: 120
+
+  testChainedInjectResults =>
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    result1 := col inject: 0 into: [:acc :x | acc + x]
+    result2 := col inject: 10 into: [:acc :x | acc + x]
+    self assert: result1 equals: 6
+    self assert: result2 equals: 16
+
+  // =========================================================================
+  // inject:into: with complex block bodies (multiple expressions in block)
+  // =========================================================================
+
+  testInjectWithComplexBlock =>
+    // Block that checks a condition and branches before updating accumulator
+    self assert: (#(1, 2, 3, 4, 5) inject: 0 into: [:acc :x |
+      x > 2 ifTrue: [acc + x] ifFalse: [acc]
+    ]) equals: 12
+
+  testInjectBuildingString =>
+    self assert: (#(1, 2, 3) inject: "" into: [:acc :x |
+      acc ++ (x * 2) printString
+    ]) equals: "246"

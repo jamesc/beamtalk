@@ -72,13 +72,23 @@ impl CoreErlangGenerator {
         let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
         let item_var = Self::to_core_erlang_var(item_param);
 
-        // BT-598: Before the foldl, pack threaded locals into the StateAcc map
+        // BT-598/BT-1053: Before the foldl, pack threaded locals into the StateAcc map.
+        // For actor methods, pack into a copy of the actor State.
+        // For value-type methods (BT-1053), create a fresh map with maps:new().
         let initial_state = self.current_state_var();
         let mut init_state_code = initial_state.clone();
         if !threaded_locals.is_empty() && !self.is_repl_mode {
-            // Pack local vars into a copy of State for the initial accumulator
+            // BT-1053: Value-type context has no State variable — use a fresh empty map.
+            let is_value_type = matches!(self.context, CodeGenContext::ValueType);
             let mut pack_prefix = String::new();
-            let mut current = initial_state.clone();
+            let mut current = if is_value_type {
+                // Start with a fresh empty map instead of the actor State
+                let init_map_var = self.fresh_temp_var("InitMap");
+                let _ = write!(pack_prefix, "let {init_map_var} = call 'maps':'new'() in ");
+                init_map_var
+            } else {
+                initial_state.clone()
+            };
             for (idx, var_name) in threaded_locals.iter().enumerate() {
                 let packed_var = self.fresh_temp_var("Packed");
                 let core_var = self
@@ -129,8 +139,12 @@ impl CoreErlangGenerator {
                     "let {core_var} = call 'maps':'get'('{key}', {fold_result}) in "
                 );
             }
-            // Extract the clean state (with locals still in it, but that's harmless)
-            let _ = write!(post_code, "{{'nil', {fold_result}}}");
+            // BT-1053: Value types return 'nil' (no state); actors return {'nil', FinalState}.
+            if is_value_type {
+                let _ = write!(post_code, "'nil'");
+            } else {
+                let _ = write!(post_code, "{{'nil', {fold_result}}}");
+            }
             pre_docs.push(Document::String(post_code));
 
             return Ok(Document::Vec(pre_docs));
@@ -160,6 +174,37 @@ impl CoreErlangGenerator {
         )));
 
         Ok(Document::Vec(docs))
+    }
+
+    /// BT-1053: Returns true if `expr` is an inline conditional (`ifTrue:` / `ifFalse:` /
+    /// `ifTrue:ifFalse:`) whose block argument writes to at least one variable in `threaded`.
+    ///
+    /// This catches the "pure-overwrite" pattern like `each > max ifTrue: [max := each]`
+    /// where `max` is in `threaded` but the inner block's `captured_reads` is empty
+    /// (no read-before-write), so `control_flow_has_mutations` returns false even
+    /// though we must thread `max` through `StateAcc`.
+    fn inline_conditional_writes_threaded(expr: &Expression, threaded: &[String]) -> bool {
+        use super::super::block_analysis;
+        use crate::ast::MessageSelector;
+        if let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        {
+            let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+            if matches!(sel.as_str(), "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:") {
+                for arg in arguments {
+                    if let Expression::Block(block) = arg {
+                        let analysis = block_analysis::analyze_block(block);
+                        if analysis.local_writes.iter().any(|v| threaded.contains(v)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
     }
 
     pub(in crate::codegen::core_erlang) fn generate_list_do_body_with_threading(
@@ -237,6 +282,34 @@ impl CoreErlangGenerator {
                 if is_last {
                     // Last expression: close with the final state variable
                     docs.push(Document::String(format!(" {}", self.current_state_var())));
+                }
+            } else if self.control_flow_has_mutations(expr)
+                || Self::inline_conditional_writes_threaded(expr, &threaded)
+            {
+                has_mutations = true;
+                // BT-1053: Inline conditional (ifTrue: etc.) with local mutations returns
+                // {Result, NewStateAcc}. Unpack element(2) to get the updated StateAcc
+                // and continue threading it through subsequent iterations.
+                let tuple_var = self.fresh_temp_var("CondResult");
+                let doc = self.generate_expression(expr)?;
+                // generate_if_true_with_mutations saves/restores state_version, so we
+                // must manually advance it here to name the extracted state variable.
+                let new_version = self.state_version() + 1;
+                self.set_state_version(new_version);
+                let new_state = self.current_state_var();
+                docs.push(docvec![
+                    "let ",
+                    Document::String(tuple_var.clone()),
+                    " = ",
+                    doc,
+                    " in let ",
+                    Document::String(new_state.clone()),
+                    " = call 'erlang':'element'(2, ",
+                    Document::String(tuple_var),
+                    ") in ",
+                ]);
+                if is_last {
+                    docs.push(Document::String(self.current_state_var()));
                 }
             } else {
                 // Non-assignment expression
