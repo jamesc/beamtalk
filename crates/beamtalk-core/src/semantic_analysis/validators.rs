@@ -1260,6 +1260,15 @@ fn check_method_nil_return(
     if is_subclass_responsibility(method) {
         return;
     }
+    // Exempt iteration/callback methods that accept a Block parameter.
+    // These methods delegate side-effects to the block rather than performing
+    // them directly on the Value — consistent with Value-type semantics.
+    let has_block_param = method.parameters.iter().any(|p| {
+        matches!(&p.type_annotation, Some(crate::ast::TypeAnnotation::Simple(id)) if id.name.as_str() == "Block")
+    });
+    if has_block_param {
+        return;
+    }
     let selector = method.selector.name();
     let mut diag = Diagnostic::error(
         format!(
@@ -2444,6 +2453,42 @@ mod tests {
             diagnostics.is_empty(),
             "Expected no error for Actor -> Nil, got: {diagnostics:?}"
         );
+    }
+
+    /// Value instance method with a Block parameter and `-> Nil` is exempt (iteration pattern).
+    #[test]
+    fn value_block_param_nil_return_is_exempt() {
+        let src = "Value subclass: MyVal\n  each: block: Block -> Nil => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_nil_return(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error for Block-param -> Nil (iteration pattern), got: {diagnostics:?}"
+        );
+    }
+
+    /// Value instance method WITHOUT a Block parameter and `-> Nil` is still an error.
+    #[test]
+    fn value_no_block_param_nil_return_is_error() {
+        let src = "Value subclass: MyVal\n  sideEffect -> Nil => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_nil_return(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected error for -> Nil without Block param, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
     }
 
     /// Value instance method with `self subclassResponsibility` is exempt.

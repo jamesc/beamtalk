@@ -156,9 +156,11 @@ impl CoreErlangGenerator {
     /// - `repeat` (0 args) → infinite loop
     /// - `whileTrue:` (1 arg) → loop while condition block returns true
     /// - `whileFalse:` (1 arg) → loop while condition block returns false
-    /// - `timesRepeat:` (1 arg) → repeat body N times
-    /// - `to:do:` (2 args) → range iteration from start to end
-    /// - `to:by:do:` (3 args) → range iteration with custom step
+    /// - `timesRepeat:` (1 arg) → arity validation + mutating-block state threading only;
+    ///   non-mutating falls through to pure-BT Integer method (BT-1054)
+    /// - `to:do:` (2 args) → arity validation + mutating-block state threading only (BT-1054)
+    /// - `to:by:do:` (3 args) → arity validation + mutating-block state threading only (BT-1054)
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn try_generate_block_message(
         &mut self,
         receiver: &Expression,
@@ -238,26 +240,80 @@ impl CoreErlangGenerator {
                     }
 
                     // `timesRepeat:` - repeat body N times
+                    // BT-1054: Only intercept for mutating blocks; non-mutating cases
+                    // fall through to the pure-BT tail-recursive Integer method.
                     "timesRepeat:" => {
-                        let doc = self.generate_times_repeat(receiver, &arguments[0])?;
-                        Ok(Some(doc))
-                    }
-
-                    // `to:do:` - range iteration (structural intrinsic from Integer)
-                    "to:do:" if arguments.len() == 2 => {
-                        let doc = self.generate_to_do(receiver, &arguments[0], &arguments[1])?;
-                        Ok(Some(doc))
-                    }
-
-                    // `to:by:do:` - range iteration with step (structural intrinsic from Integer)
-                    "to:by:do:" if arguments.len() == 3 => {
-                        let doc = self.generate_to_by_do(
-                            receiver,
+                        use super::block_analysis;
+                        validate_block_arity_exact(
                             &arguments[0],
-                            &arguments[1],
-                            &arguments[2],
+                            0,
+                            "timesRepeat:",
+                            "Fix: Use a zero-arg block. If you need the iteration index, use to:do: instead:\n\
+                             \x20 3 timesRepeat: [self doSomething]\n\
+                             \x20 1 to: 3 do: [:i | self doSomethingWith: i]",
                         )?;
-                        Ok(Some(doc))
+                        if let Expression::Block(body_block) = &arguments[0] {
+                            let analysis = block_analysis::analyze_block(body_block);
+                            if self.needs_mutation_threading(&analysis) {
+                                let doc = self
+                                    .generate_times_repeat_with_mutations(receiver, body_block)?;
+                                return Ok(Some(doc));
+                            }
+                        }
+                        Ok(None)
+                    }
+
+                    // `to:do:` - range iteration
+                    // BT-1054: Only intercept for mutating blocks; non-mutating cases
+                    // fall through to the pure-BT tail-recursive Integer method.
+                    "to:do:" if arguments.len() == 2 => {
+                        use super::block_analysis;
+                        validate_block_arity_exact(
+                            &arguments[1],
+                            1,
+                            "to:do:",
+                            "Fix: The body block must take one argument (the iteration index):\n\
+                             \x20 1 to: 10 do: [:i | i printString]",
+                        )?;
+                        if let Expression::Block(body_block) = &arguments[1] {
+                            let analysis = block_analysis::analyze_block(body_block);
+                            if self.needs_mutation_threading(&analysis) {
+                                let doc = self.generate_to_do_with_mutations(
+                                    receiver,
+                                    &arguments[0],
+                                    body_block,
+                                )?;
+                                return Ok(Some(doc));
+                            }
+                        }
+                        Ok(None)
+                    }
+
+                    // `to:by:do:` - range iteration with step
+                    // BT-1054: Only intercept for mutating blocks; non-mutating cases
+                    // fall through to the pure-BT tail-recursive Integer method.
+                    "to:by:do:" if arguments.len() == 3 => {
+                        use super::block_analysis;
+                        validate_block_arity_exact(
+                            &arguments[2],
+                            1,
+                            "to:by:do:",
+                            "Fix: The body block must take one argument (the iteration index):\n\
+                             \x20 1 to: 10 by: 2 do: [:i | i printString]",
+                        )?;
+                        if let Expression::Block(body_block) = &arguments[2] {
+                            let analysis = block_analysis::analyze_block(body_block);
+                            if self.needs_mutation_threading(&analysis) {
+                                let doc = self.generate_to_by_do_with_mutations(
+                                    receiver,
+                                    &arguments[0],
+                                    &arguments[1],
+                                    body_block,
+                                )?;
+                                return Ok(Some(doc));
+                            }
+                        }
+                        Ok(None)
                     }
 
                     // `on:do:` - exception handling (try/catch with class matching)

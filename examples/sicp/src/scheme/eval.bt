@@ -107,7 +107,7 @@ Object subclass: SchemeEval
       "define" -> [
         varName := (tail at: 1) name
         defVal  := self eval: (tail at: 2) in: env
-        env define: varName value: defVal.
+        env define: varName value: defVal
         nil] value;
 
       // (lambda (params...) body) — create a closure
