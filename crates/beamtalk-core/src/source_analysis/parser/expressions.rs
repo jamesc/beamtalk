@@ -229,8 +229,7 @@ impl Parser {
             return receiver;
         }
         if self.current_token().has_leading_newline()
-            && (self.is_at_method_definition()
-                || (self.in_class_body && !self.in_method_body))
+            && (self.is_at_method_definition() || (self.in_class_body && !self.in_method_body))
         {
             return receiver;
         }
