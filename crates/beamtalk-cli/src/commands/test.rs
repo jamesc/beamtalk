@@ -1710,28 +1710,29 @@ mod tests {
     /// the relative `"."` and the same path expressed as an absolute path.
     #[test]
     fn test_canonical_dedup_relative_and_absolute_same_path() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let abs = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        // Get the absolute CWD — this is the value that `find_package_root()` would
+        // return for a file inside the current directory, while the production code
+        // also inserts `"."` (relative). Both must canonicalize to the same path so
+        // they deduplicate in `seen` and don't incorrectly flip multi-package mode.
+        let cwd_abs = Utf8PathBuf::from_path_buf(std::env::current_dir().unwrap()).unwrap();
 
-        // Both the relative "." trick and the absolute path should canonicalize
-        // to the same thing, so inserting both into a seen-set should yield 1 entry.
         let a = canonical_path(Utf8Path::new("."));
-        let b = canonical_path(&abs);
+        let b = canonical_path(&cwd_abs);
 
-        // They may differ (test runs in a different cwd) — but the point is that
-        // canonicalization ensures consistency: two paths to the same dir → same entry.
-        // Here we just verify canonical_path() returns an absolute path.
-        assert!(
-            a.is_absolute() || a == Utf8Path::new("."),
-            "canonical_path of '.' should be absolute"
+        assert_eq!(
+            a, b,
+            "'.' and the absolute CWD should canonicalize to the same path"
         );
-        assert!(b.is_absolute());
 
-        // Inserting the same absolute path twice deduplicates correctly.
+        // Inserting both into a seen-set must yield exactly 1 entry.
         let mut seen: HashSet<Utf8PathBuf> = HashSet::new();
-        seen.insert(b.clone());
-        let inserted = seen.insert(b.clone());
-        assert!(!inserted, "duplicate absolute path must not be inserted");
+        seen.insert(a);
+        seen.insert(b);
+        assert_eq!(
+            seen.len(),
+            1,
+            "relative '.' and absolute CWD must deduplicate in the seen-set"
+        );
     }
 
     /// When two packages each define a class with the same name (e.g. `SmokeTest`),
