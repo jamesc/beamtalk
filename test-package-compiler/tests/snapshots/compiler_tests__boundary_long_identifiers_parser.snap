@@ -150,96 +150,82 @@ Module {
                         },
                     },
                 ),
-                value: Identifier(
-                    Identifier {
-                        name: "veryLongObjectWithManyMethods",
-                        span: Span {
-                            start: 672,
-                            end: 701,
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "veryLongObjectWithManyMethods",
+                            span: Span {
+                                start: 672,
+                                end: 701,
+                            },
                         },
+                    ),
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "thisIsAVeryLongKeywordPart:",
+                                span: Span {
+                                    start: 707,
+                                    end: 734,
+                                },
+                            },
+                            KeywordPart {
+                                keyword: "andAnotherVeryLongKeywordPart:",
+                                span: Span {
+                                    start: 747,
+                                    end: 777,
+                                },
+                            },
+                            KeywordPart {
+                                keyword: "andYetAnotherExtremelyLongKeywordPart:",
+                                span: Span {
+                                    start: 789,
+                                    end: 827,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Identifier(
+                            Identifier {
+                                name: "value1",
+                                span: Span {
+                                    start: 735,
+                                    end: 741,
+                                },
+                            },
+                        ),
+                        Identifier(
+                            Identifier {
+                                name: "value2",
+                                span: Span {
+                                    start: 778,
+                                    end: 784,
+                                },
+                            },
+                        ),
+                        Identifier(
+                            Identifier {
+                                name: "value3",
+                                span: Span {
+                                    start: 828,
+                                    end: 834,
+                                },
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 672,
+                        end: 834,
                     },
-                ),
+                },
                 span: Span {
                     start: 662,
-                    end: 701,
-                },
-            },
-            preceding_blank_line: true,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: MessageSend {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found thisIsAVeryLongKeywordPart:",
-                    span: Span {
-                        start: 707,
-                        end: 734,
-                    },
-                },
-                selector: Unary(
-                    "value1",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 707,
-                    end: 741,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: MessageSend {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found andAnotherVeryLongKeywordPart:",
-                    span: Span {
-                        start: 747,
-                        end: 777,
-                    },
-                },
-                selector: Unary(
-                    "value2",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 747,
-                    end: 784,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: MessageSend {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found andYetAnotherExtremelyLongKeywordPart:",
-                    span: Span {
-                        start: 789,
-                        end: 827,
-                    },
-                },
-                selector: Unary(
-                    "value3",
-                ),
-                arguments: [],
-                is_cast: false,
-                span: Span {
-                    start: 789,
                     end: 834,
                 },
             },
-            preceding_blank_line: false,
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -325,8 +311,3 @@ Module {
     file_leading_comments: [],
     file_trailing_comments: [],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found thisIsAVeryLongKeywordPart:", span: Span { start: 707, end: 734 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found andAnotherVeryLongKeywordPart:", span: Span { start: 747, end: 777 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found andYetAnotherExtremelyLongKeywordPart:", span: Span { start: 789, end: 827 }, hint: None, category: None }

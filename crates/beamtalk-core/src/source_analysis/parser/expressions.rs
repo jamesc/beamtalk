@@ -220,16 +220,17 @@ impl Parser {
         let receiver = self.parse_binary_message();
 
         // Check if this is a keyword message.
-        // A newline before the first keyword normally indicates a new statement.
-        // Exception (BT-1061): if the receiver is a parenthesized expression,
-        // the closing `)` makes it unambiguous that the keyword continues the
-        // same expression — allow continuation even across a newline.
+        // A keyword token can never validly start a new statement on its own
+        // (it always requires a receiver), so a keyword on a new line is
+        // unambiguously a continuation of the previous expression (BT-1061).
+        // The one exception is a keyword that begins a method definition
+        // (`keyword: param =>`), which must not be consumed as a continuation.
         if !matches!(self.current_kind(), TokenKind::Keyword(_)) {
             return receiver;
         }
         if self.current_token().has_leading_newline()
-            && (!matches!(&receiver, Expression::Parenthesized { .. })
-                || self.is_at_method_definition())
+            && (self.is_at_method_definition()
+                || (self.in_class_body && !self.in_method_body))
         {
             return receiver;
         }

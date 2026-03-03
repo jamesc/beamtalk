@@ -174,111 +174,378 @@ Module {
                 ],
                 trailing: None,
             },
-            expression: Identifier(
-                Identifier {
-                    name: "object",
+            expression: Cascade {
+                receiver: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "object",
+                            span: Span {
+                                start: 317,
+                                end: 323,
+                            },
+                        },
+                    ),
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "at:",
+                                span: Span {
+                                    start: 328,
+                                    end: 331,
+                                },
+                            },
+                            KeywordPart {
+                                keyword: "put:",
+                                span: Span {
+                                    start: 339,
+                                    end: 343,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            String(
+                                "key1",
+                            ),
+                            Span {
+                                start: 332,
+                                end: 338,
+                            },
+                        ),
+                        Identifier(
+                            Identifier {
+                                name: "value1",
+                                span: Span {
+                                    start: 344,
+                                    end: 350,
+                                },
+                            },
+                        ),
+                    ],
+                    is_cast: false,
                     span: Span {
                         start: 317,
-                        end: 323,
+                        end: 350,
                     },
                 },
-            ),
+                messages: [
+                    CascadeMessage {
+                        selector: Keyword(
+                            [
+                                KeywordPart {
+                                    keyword: "at:",
+                                    span: Span {
+                                        start: 356,
+                                        end: 359,
+                                    },
+                                },
+                                KeywordPart {
+                                    keyword: "put:",
+                                    span: Span {
+                                        start: 367,
+                                        end: 371,
+                                    },
+                                },
+                            ],
+                        ),
+                        arguments: [
+                            Literal(
+                                String(
+                                    "key2",
+                                ),
+                                Span {
+                                    start: 360,
+                                    end: 366,
+                                },
+                            ),
+                            Identifier(
+                                Identifier {
+                                    name: "value2",
+                                    span: Span {
+                                        start: 372,
+                                        end: 378,
+                                    },
+                                },
+                            ),
+                        ],
+                        span: Span {
+                            start: 356,
+                            end: 378,
+                        },
+                    },
+                    CascadeMessage {
+                        selector: Keyword(
+                            [
+                                KeywordPart {
+                                    keyword: "at:",
+                                    span: Span {
+                                        start: 384,
+                                        end: 387,
+                                    },
+                                },
+                                KeywordPart {
+                                    keyword: "put:",
+                                    span: Span {
+                                        start: 395,
+                                        end: 399,
+                                    },
+                                },
+                            ],
+                        ),
+                        arguments: [
+                            Literal(
+                                String(
+                                    "key3",
+                                ),
+                                Span {
+                                    start: 388,
+                                    end: 394,
+                                },
+                            ),
+                            Identifier(
+                                Identifier {
+                                    name: "value3",
+                                    span: Span {
+                                        start: 400,
+                                        end: 406,
+                                    },
+                                },
+                            ),
+                        ],
+                        span: Span {
+                            start: 384,
+                            end: 406,
+                        },
+                    },
+                ],
+                span: Span {
+                    start: 317,
+                    end: 406,
+                },
+            },
             preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "Nested cascade (cascade result used in another message)",
+                        span: Span {
+                            start: 467,
+                            end: 473,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
                 trailing: None,
             },
-            expression: Error {
-                message: "Unexpected token: expected expression, found at:",
-                span: Span {
-                    start: 328,
-                    end: 331,
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "result",
+                        span: Span {
+                            start: 467,
+                            end: 473,
+                        },
+                    },
+                ),
+                value: Parenthesized {
+                    expression: Cascade {
+                        receiver: MessageSend {
+                            receiver: Identifier(
+                                Identifier {
+                                    name: "array",
+                                    span: Span {
+                                        start: 478,
+                                        end: 483,
+                                    },
+                                },
+                            ),
+                            selector: Keyword(
+                                [
+                                    KeywordPart {
+                                        keyword: "add:",
+                                        span: Span {
+                                            start: 489,
+                                            end: 493,
+                                        },
+                                    },
+                                ],
+                            ),
+                            arguments: [
+                                Literal(
+                                    Integer(
+                                        1,
+                                    ),
+                                    Span {
+                                        start: 494,
+                                        end: 495,
+                                    },
+                                ),
+                            ],
+                            is_cast: false,
+                            span: Span {
+                                start: 478,
+                                end: 495,
+                            },
+                        },
+                        messages: [
+                            CascadeMessage {
+                                selector: Keyword(
+                                    [
+                                        KeywordPart {
+                                            keyword: "add:",
+                                            span: Span {
+                                                start: 501,
+                                                end: 505,
+                                            },
+                                        },
+                                    ],
+                                ),
+                                arguments: [
+                                    Literal(
+                                        Integer(
+                                            2,
+                                        ),
+                                        Span {
+                                            start: 506,
+                                            end: 507,
+                                        },
+                                    ),
+                                ],
+                                span: Span {
+                                    start: 501,
+                                    end: 507,
+                                },
+                            },
+                            CascadeMessage {
+                                selector: Unary(
+                                    "size",
+                                ),
+                                arguments: [],
+                                span: Span {
+                                    start: 513,
+                                    end: 517,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            start: 478,
+                            end: 517,
+                        },
+                    },
+                    span: Span {
+                        start: 477,
+                        end: 518,
+                    },
                 },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Error {
-                message: "Unexpected token: expected expression, found ;",
                 span: Span {
-                    start: 350,
-                    end: 351,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Error {
-                message: "Unexpected token: expected expression, found ;",
-                span: Span {
-                    start: 378,
-                    end: 379,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Error {
-                message: "Unexpected token: expected expression, found ;",
-                span: Span {
-                    start: 495,
-                    end: 496,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Error {
-                message: "Unexpected token: expected expression, found ;",
-                span: Span {
-                    start: 507,
-                    end: 508,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Error {
-                message: "Unexpected token: expected expression, found )",
-                span: Span {
-                    start: 517,
+                    start: 467,
                     end: 518,
                 },
             },
-            preceding_blank_line: false,
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "Cascade with blocks",
+                        span: Span {
+                            start: 543,
+                            end: 552,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
                 trailing: None,
             },
             expression: Cascade {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found ]",
+                receiver: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "processor",
+                            span: Span {
+                                start: 543,
+                                end: 552,
+                            },
+                        },
+                    ),
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "with:",
+                                span: Span {
+                                    start: 557,
+                                    end: 562,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Block(
+                            Block {
+                                parameters: [
+                                    BlockParameter {
+                                        name: "x",
+                                        span: Span {
+                                            start: 565,
+                                            end: 566,
+                                        },
+                                    },
+                                ],
+                                body: [
+                                    ExpressionStatement {
+                                        comments: CommentAttachment {
+                                            leading: [],
+                                            trailing: None,
+                                        },
+                                        expression: MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "x",
+                                                    span: Span {
+                                                        start: 569,
+                                                        end: 570,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "+",
+                                            ),
+                                            arguments: [
+                                                Literal(
+                                                    Integer(
+                                                        1,
+                                                    ),
+                                                    Span {
+                                                        start: 573,
+                                                        end: 574,
+                                                    },
+                                                ),
+                                            ],
+                                            is_cast: false,
+                                            span: Span {
+                                                start: 569,
+                                                end: 574,
+                                            },
+                                        },
+                                        preceding_blank_line: false,
+                                    },
+                                ],
+                                span: Span {
+                                    start: 563,
+                                    end: 575,
+                                },
+                            },
+                        ),
+                    ],
+                    is_cast: false,
                     span: Span {
-                        start: 574,
+                        start: 543,
                         end: 575,
                     },
                 },
@@ -370,11 +637,11 @@ Module {
                     },
                 ],
                 span: Span {
-                    start: 574,
+                    start: 543,
                     end: 612,
                 },
             },
-            preceding_blank_line: false,
+            preceding_blank_line: true,
         },
     ],
     span: Span {
@@ -384,12 +651,3 @@ Module {
     file_leading_comments: [],
     file_trailing_comments: [],
 }
-
-Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found at:", span: Span { start: 328, end: 331 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 350, end: 351 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 378, end: 379 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 495, end: 496 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ;", span: Span { start: 507, end: 508 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found )", span: Span { start: 517, end: 518 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 574, end: 575 }, hint: None, category: None }

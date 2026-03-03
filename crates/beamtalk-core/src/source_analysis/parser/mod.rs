@@ -1410,10 +1410,28 @@ mod tests {
     }
 
     #[test]
-    fn parse_keyword_message_newline_non_paren_receiver_is_new_statement() {
-        // BT-1061: without parens, a newline before the first keyword is still
-        // a statement terminator (preserves existing behaviour).
-        // `x` is one statement; `y foo: 1` is a second statement with its own receiver.
+    fn parse_keyword_message_newline_keyword_continues_receiver() {
+        // BT-1061: a keyword on the next line is always a continuation — keywords
+        // can never validly start a new statement on their own. `x\n  ifTrue: [x]`
+        // is one statement, not two.
+        let module = parse_ok("x\n  ifTrue: [x]");
+        assert_eq!(module.expressions.len(), 1, "Should be one statement");
+        match &module.expressions[0].expression {
+            Expression::MessageSend {
+                selector: MessageSelector::Keyword(parts),
+                ..
+            } => {
+                assert_eq!(parts[0].keyword.as_str(), "ifTrue:");
+            }
+            _ => panic!("Expected keyword message send"),
+        }
+    }
+
+    #[test]
+    fn parse_keyword_message_newline_identifier_receiver_is_new_statement() {
+        // The newline rule for IDENTIFIER tokens is unchanged: `x\ny foo: 1`
+        // is still two statements because `y` (an identifier, not a keyword)
+        // can validly start a new expression.
         let module = parse_ok("x\ny foo: 1");
         assert_eq!(module.expressions.len(), 2);
     }
