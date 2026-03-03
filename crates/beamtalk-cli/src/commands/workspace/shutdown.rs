@@ -26,6 +26,9 @@ use crate::commands::protocol::ProtocolClient;
 /// TCP connect timeout for exit probe in milliseconds.
 const EXIT_PROBE_CONNECT_TIMEOUT_MS: u64 = 500;
 
+/// How long to wait for port release after a forced kill, in seconds.
+const FORCE_KILL_WAIT_TIMEOUT_SECS: u64 = 5;
+
 /// Send a WebSocket shutdown message to a workspace (BT-611, ADR 0020).
 ///
 /// Connects to the workspace's WebSocket endpoint, authenticates with the
@@ -221,7 +224,7 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
                     ));
                 }
                 // Ensure the node has actually released its port before returning.
-                force_kill_and_wait(info.pid, host, info.port, 5)?;
+                force_kill_and_wait(info.pid, host, info.port, FORCE_KILL_WAIT_TIMEOUT_SECS)?;
             } else {
                 eprintln!(
                     "Stopping workspace '{workspace_id}' (port {})...",
@@ -246,7 +249,12 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
                                 ));
                             }
                             eprintln!("Graceful shutdown timed out, force-killing...");
-                            force_kill_and_wait(info.pid, host, info.port, 5)?;
+                            force_kill_and_wait(
+                                info.pid,
+                                host,
+                                info.port,
+                                FORCE_KILL_WAIT_TIMEOUT_SECS,
+                            )?;
                         }
                     }
                     Err(e) => {
@@ -260,7 +268,12 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
                             ));
                         }
                         eprintln!("TCP shutdown failed ({e}), force-killing...");
-                        force_kill_and_wait(info.pid, host, info.port, 5)?;
+                        force_kill_and_wait(
+                            info.pid,
+                            host,
+                            info.port,
+                            FORCE_KILL_WAIT_TIMEOUT_SECS,
+                        )?;
                     }
                 }
             }
