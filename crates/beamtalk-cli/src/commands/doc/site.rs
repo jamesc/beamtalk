@@ -141,7 +141,8 @@ fn rewrite_prose_links(
     result
 }
 
-/// Replace `source` with `dest` in `text`, skipping content inside fenced code blocks.
+/// Replace `source` with `dest` in `text`, skipping fenced code blocks and
+/// existing markdown link brackets `[...]` (to avoid creating nested links).
 fn rewrite_outside_code_fences(text: &str, source: &str, dest: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_fence = false;
@@ -153,13 +154,48 @@ fn rewrite_outside_code_fences(text: &str, source: &str, dest: &str) -> String {
         } else if in_fence {
             out.push_str(line);
         } else {
-            out.push_str(&line.replace(source, dest));
+            out.push_str(&replace_outside_md_brackets(line, source, dest));
         }
         out.push('\n');
     }
     // split('\n') on a string not ending in '\n' adds an extra empty segment
     if !text.ends_with('\n') && out.ends_with('\n') {
         out.pop();
+    }
+    out
+}
+
+/// Replace `source` with `dest` in `line`, skipping text inside `[...]` brackets
+/// so that existing markdown links are not corrupted.
+fn replace_outside_md_brackets(line: &str, source: &str, dest: &str) -> String {
+    let mut out = String::with_capacity(line.len() + dest.len());
+    let src = source.as_bytes();
+    let src_len = source.len();
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut depth = 0i32;
+    while i < len {
+        if bytes[i] == b'[' {
+            depth += 1;
+            out.push('[');
+            i += 1;
+        } else if bytes[i] == b']' {
+            depth = (depth - 1).max(0);
+            out.push(']');
+            i += 1;
+        } else if depth == 0 && i + src_len <= len && &bytes[i..i + src_len] == src {
+            out.push_str(dest);
+            i += src_len;
+        } else {
+            // Advance one Unicode code point
+            let c_start = i;
+            i += 1;
+            while i < len && !line.is_char_boundary(i) {
+                i += 1;
+            }
+            out.push_str(&line[c_start..i]);
+        }
     }
     out
 }
@@ -585,7 +621,6 @@ pub(super) fn write_site_landing_page(
 
     // API Reference card
     html.push_str("<a href=\"apidocs/\" class=\"landing-card\">\n");
-    html.push_str("<span class=\"landing-card-emoji\">📚</span>\n");
     html.push_str("<h2>API Reference</h2>\n");
     html.push_str(
         "<p>Standard library classes — Actor, Block, Integer, String, \
@@ -595,7 +630,6 @@ pub(super) fn write_site_landing_page(
 
     // ADR card
     html.push_str("<a href=\"adr/\" class=\"landing-card\">\n");
-    html.push_str("<span class=\"landing-card-emoji\">📐</span>\n");
     html.push_str("<h2>Architecture Decisions</h2>\n");
     html.push_str(
         "<p>Key design decisions — context, alternatives considered, and consequences.</p>\n",
@@ -604,11 +638,10 @@ pub(super) fn write_site_landing_page(
 
     // Prose docs cards
     for &(_, file, title) in prose_pages {
-        let (emoji, desc) = landing_card_meta(file);
+        let (_, desc) = landing_card_meta(file);
         let _ = writeln!(
             html,
             "<a href=\"docs/{file}\" class=\"landing-card\">\n\
-             <span class=\"landing-card-emoji\">{emoji}</span>\n\
              <h2>{title}</h2>\n\
              <p>{desc}</p>\n\
              </a>"
@@ -618,10 +651,7 @@ pub(super) fn write_site_landing_page(
     html.push_str("</div>\n"); // .landing-cards
 
     html.push_str("<div class=\"landing-links\">\n");
-    html.push_str(
-        "<a href=\"https://github.com/jamesc/beamtalk\">View on GitHub</a> &nbsp;·&nbsp; \
-         <a href=\"docs/known-limitations.html\">Known Limitations</a>\n",
-    );
+    html.push_str("<a href=\"https://github.com/jamesc/beamtalk\">View on GitHub</a>\n");
     html.push_str("</div>\n");
 
     html.push_str("</main>\n");

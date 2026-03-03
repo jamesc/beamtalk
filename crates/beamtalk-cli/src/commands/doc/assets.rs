@@ -101,7 +101,7 @@ body {
   flex-shrink: 0;
 }
 .nav-logo:hover { color: var(--fg); text-decoration: none; }
-.nav-logo img { display: block; height: 28px; width: auto; }
+.nav-logo img { display: block; height: 32px; width: auto; }
 
 .nav-links {
   display: flex;
@@ -622,7 +622,7 @@ footer {
   margin-left: 0.5rem;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.72rem;
-  color: #52525B;
+  color: #A1A1AA;
 }
 .code-window-body { padding: 1.25rem 1.5rem; }
 .code-window-body pre {
@@ -662,7 +662,6 @@ footer {
   transform: translateY(-1px);
   text-decoration: none;
 }
-.landing-card-emoji { font-size: 1.35rem; margin-bottom: 0.65rem; display: block; }
 .landing-card h2 {
   font-size: 0.95rem;
   margin-top: 0; margin-bottom: 0.4rem;
