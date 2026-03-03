@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// DoAccumulatorValue — BT-1053: value-type methods that use `do:` with local
+// variable accumulator mutation.
+//
+// The compiler must detect that the `do:` block writes an outer local variable
+// that is read after the loop, and generate `lists:foldl` (accumulator-
+// threading) instead of `lists:foreach` (which would discard the mutation).
+//
+// These methods are intentionally in a plain Value type (not an Actor) so
+// that the new BT-1053 value-type mutation threading is exercised, not the
+// existing BT-598 actor-based threading.
+
+Value subclass: DoAccumulatorValue
+
+  // Sum all integers in items via do: with local accumulator.
+  sumList: items: List -> Integer =>
+    sum := 0
+    items do: [:each | sum := sum + each]
+    sum
+
+  // Count elements satisfying a predicate block.
+  countMatching: items: List predicate: pred: Block -> Integer =>
+    count := 0
+    items do: [:each | (pred value: each) ifTrue: [count := count + 1]]
+    count
+
+  // Find the maximum value in a non-empty list.
+  findMax: items: List -> Integer =>
+    max := items first
+    items do: [:each | each > max ifTrue: [max := each]]
+    max
+
+  // Find the minimum value in a non-empty list.
+  findMin: items: List -> Integer =>
+    min := items first
+    items do: [:each | each < min ifTrue: [min := each]]
+    min
+
+  // Multiply all elements together (product fold).
+  productList: items: List -> Integer =>
+    product := 1
+    items do: [:each | product := product * each]
+    product
+
+  // Collect items into a new list in-order (like toList).
+  // Verifies that the accumulator can be a non-numeric type.
+  buildList: items: List -> List =>
+    result := #()
+    items do: [:each | result := result add: each]
+    result
+
+  // Thread TWO local variables simultaneously through the same do: loop:
+  // accumulate both sum and count, returning them as a List #(sum, count).
+  sumAndCount: items: List -> List =>
+    sum := 0
+    count := 0
+    items do: [:each | sum := sum + each. count := count + 1]
+    #(sum, count)
+
+  // Simulate the abstract Collection.inject:into: pattern:
+  // an outer accumulator `acc` is mutated inside a `do:` block on a list
+  // argument, then returned.  This is exactly the pure-BT body we want to
+  // write for Collection.inject:into: once BT-1053 is fixed.
+  injectWithDo: items: List initial: initial into: block: Block =>
+    acc := initial
+    items do: [:each | acc := block value: acc value: each]
+    acc
