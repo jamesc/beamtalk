@@ -51,10 +51,12 @@ pulldown-cmark.workspace = true
 tempfile = "3.14"
 # why: WebSocket client for REPL protocol (ADR 0020)
 tungstenite.workspace = true
-# why: Cross-platform process management for Windows PID discovery (ADR 0027)
-sysinfo.workspace = true
 # why: unified diff output for beamtalk fmt-check (BT-978)
 similar.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# why: native process kill and liveness checks on Windows (BT-1039)
+windows-sys.workspace = true
 
 [dev-dependencies]
 serial_test = "3"

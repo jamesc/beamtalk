@@ -1225,7 +1225,6 @@ mod tests {
     use color::ColorGuard;
     use process::DEFAULT_REPL_PORT;
     use serial_test::serial;
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
     #[test]
     #[serial(color)]
@@ -1383,17 +1382,46 @@ mod tests {
         // Give it a moment to clean up
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        // Verify the process is no longer running using sysinfo
-        let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
-            true,
-            ProcessRefreshKind::nothing(),
-        );
-        assert!(
-            system.process(Pid::from_u32(pid)).is_none(),
-            "Process should have been killed"
-        );
+        // Verify the process is no longer running using native OS liveness check
+        #[cfg(unix)]
+        {
+            let pid_i = i32::try_from(pid).expect("pid should fit in i32");
+            // SAFETY: kill(2) with signal 0 is a standard existence check.
+            let alive = unsafe { libc::kill(pid_i, 0) } == 0;
+            assert!(!alive, "Process should have been killed");
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Foundation::{CloseHandle, FALSE, STILL_ACTIVE};
+            use windows_sys::Win32::System::Threading::{
+                GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            };
+            // SAFETY: Windows API call with documented parameters.
+            let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
+            if !handle.is_null() {
+                let mut exit_code: u32 = 0;
+                // SAFETY: handle is valid, exit_code is a local variable.
+                let ok = unsafe { GetExitCodeProcess(handle, &raw mut exit_code) };
+                // Capture the OS error *before* CloseHandle, which may clobber GetLastError.
+                let query_err = if ok == FALSE {
+                    Some(std::io::Error::last_os_error())
+                } else {
+                    None
+                };
+                // SAFETY: handle is valid, obtained from OpenProcess above.
+                unsafe { CloseHandle(handle) };
+                assert!(
+                    query_err.is_none(),
+                    "GetExitCodeProcess failed: {}",
+                    query_err.unwrap()
+                );
+                assert_ne!(
+                    exit_code, STILL_ACTIVE as u32,
+                    "Process should have been killed"
+                );
+            }
+            // handle == 0 means OpenProcess failed → process no longer exists
+        }
     }
 
     #[test]

@@ -16,6 +16,10 @@
     "Programming Languages"
   ],
   "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:beamtalk",
+    "workspaceContains:beamtalk.toml"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -41,6 +45,10 @@
       ]
     },
     "commands": [
+      {
+        "command": "beamtalk.startRepl",
+        "title": "Beamtalk: Start REPL"
+      },
       {
         "command": "beamtalk.restartServer",
         "title": "Beamtalk: Restart Language Server"
@@ -160,7 +168,7 @@
         "beamtalk.workspace.autoConnect": {
           "type": "boolean",
           "default": true,
-          "description": "(BT-1024) Auto-connect the Workspace Explorer to a running Beamtalk workspace when a .bt file is opened. Not yet active — wiring is implemented in BT-1024."
+          "description": "Auto-connect the Workspace Explorer to a running Beamtalk workspace when a workspace port file appears. When disabled, the Workspace Explorer will not auto-connect."
         }
       }
     },
