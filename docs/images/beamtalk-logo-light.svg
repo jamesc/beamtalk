@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 300" width="820" height="300">
+
+  <g transform="translate(108, 150)">
+    <!-- Beam rays -->
+    <line x1="-13.8" y1="-11.6" x2="-50.6" y2="-42.4" stroke="#E63946" stroke-width="4" stroke-linecap="round"/>
+    <line x1="-16.9" y1="-6.2" x2="-60.1" y2="-22.6" stroke="#E63946" stroke-width="4" stroke-linecap="round"/>
+    <line x1="-18" y1="0" x2="-66" y2="0" stroke="#E63946" stroke-width="4" stroke-linecap="round"/>
+    <line x1="-16.9" y1="6.2" x2="-60.1" y2="22.6" stroke="#E63946" stroke-width="4" stroke-linecap="round"/>
+    <line x1="-13.8" y1="11.6" x2="-50.6" y2="42.4" stroke="#E63946" stroke-width="4" stroke-linecap="round"/>
+
+    <circle cx="0" cy="0" r="18" fill="#E63946"/>
+
+    <!-- Message lines (dotted, with gap from circle) -->
+    <line x1="20" y1="-11.5" x2="52" y2="-30" stroke="#111111" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 6"/>
+    <line x1="20" y1="11.5"  x2="52" y2="30"  stroke="#111111" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 6"/>
+
+    <circle cx="60" cy="-34" r="11" fill="#111111"/>
+    <circle cx="60" cy="34"  r="11" fill="#111111"/>
+
+    <line x1="73" y1="-41.5" x2="92" y2="-52" stroke="#111111" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 5"/>
+    <line x1="73.5" y1="-27.5" x2="92" y2="-18" stroke="#111111" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 5"/>
+    <line x1="73.5" y1="27.5" x2="92" y2="18"  stroke="#111111" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 5"/>
+    <line x1="73" y1="41.5" x2="92" y2="52"  stroke="#111111" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 5"/>
+
+    <circle cx="98" cy="-55" r="7" fill="#111111"/>
+    <circle cx="98" cy="-15" r="7" fill="#111111"/>
+    <circle cx="98" cy="15"  r="7" fill="#111111"/>
+    <circle cx="98" cy="55"  r="7" fill="#111111"/>
+  </g>
+
+  <text x="280" y="172"
+        font-family="'Futura', 'Avant Garde', 'Century Gothic', sans-serif"
+        font-size="80" font-weight="bold" fill="#E63946" letter-spacing="2">Beam</text>
+  <text x="500" y="172"
+        font-family="'Futura', 'Avant Garde', 'Century Gothic', sans-serif"
+        font-size="80" font-weight="bold" fill="#111111" letter-spacing="2">Talk</text>
+
+</svg>

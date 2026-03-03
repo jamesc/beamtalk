@@ -10,6 +10,7 @@ on:
       - 'stdlib/src/**'
       - 'docs/beamtalk-*.md'
       - 'docs/known-limitations.md'
+      - 'docs/images/**'
       - 'crates/beamtalk-cli/src/commands/doc.rs'
       - 'crates/beamtalk-cli/src/main.rs'
       - 'crates/beamtalk-core/src/codegen/core_erlang/doc_chunks.rs'

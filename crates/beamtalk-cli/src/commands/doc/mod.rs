@@ -29,7 +29,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::HashMap;
 use std::fs;
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 use assets::{write_css, write_search_js};
 use extractor::{collect_inherited_methods, find_source_files, parse_class_info};
@@ -121,7 +121,10 @@ pub fn run_site(lib_path: &str, docs_path: &str, output_dir: &str) -> Result<()>
     // 4. Generate landing page
     write_site_landing_page(&output_path, PROSE_PAGES)?;
 
-    // 5. Write shared CSS to root (prose pages and landing page reference it)
+    // 5. Copy images (logo SVGs, favicons) from docs/images/ to site root
+    copy_images(&docs_source, &output_path)?;
+
+    // 6. Write shared CSS to root (prose pages and landing page reference it)
     write_css(&output_path)?;
 
     println!("  Site root: {output_path}/");
@@ -209,6 +212,36 @@ fn generate_api_docs(
     println!("Generated documentation for {} class(es)", classes.len());
     println!("  Output: {output_path}/");
 
+    Ok(())
+}
+
+/// Copy `docs/images/` to `_site/images/` if the source directory exists.
+///
+/// Silently no-ops when `docs_source/images/` is absent so that standalone
+/// `beamtalk doc` invocations (no site) are unaffected.
+fn copy_images(docs_source: &Utf8Path, site_root: &Utf8Path) -> Result<()> {
+    let src = docs_source.join("images");
+    if !src.exists() {
+        return Ok(());
+    }
+    let dst = site_root.join("images");
+    fs::create_dir_all(&dst)
+        .into_diagnostic()
+        .wrap_err("Failed to create images/ output directory")?;
+    for entry in fs::read_dir(&src).into_diagnostic()? {
+        let entry = entry.into_diagnostic()?;
+        let path = Utf8PathBuf::from_path_buf(entry.path())
+            .map_err(|p| miette::miette!("Non-UTF-8 image path: {}", p.display()))?;
+        if path.is_file() {
+            let filename = path
+                .file_name()
+                .ok_or_else(|| miette::miette!("Image path has no filename: {path}"))?;
+            fs::copy(&path, dst.join(filename))
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to copy image '{path}'"))?;
+        }
+    }
+    debug!("Copied images to {dst}/");
     Ok(())
 }
 

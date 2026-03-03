@@ -18,9 +18,9 @@ const CSS_STYLESHEET: &str = r":root {
   --bg: #FAFAF8;
   --fg: #111827;
   --fg-muted: #6B7280;
-  --accent: #6366F1;
-  --accent-hover: #4F46E5;
-  --accent-bg: #EEF2FF;
+  --accent: #DC2626;
+  --accent-hover: #B91C1C;
+  --accent-bg: #FFF1F2;
   --border: #E5E7EB;
   --code-bg: #18181B;
   --code-fg: #E4E4E7;
@@ -33,8 +33,8 @@ const CSS_STYLESHEET: &str = r":root {
   --shadow: 0 1px 3px rgba(0,0,0,0.07);
   --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
   --radius: 8px;
-  --badge-abstract-bg: #FEF3C7;
-  --badge-abstract-fg: #92400E;
+  --badge-abstract-bg: #FFF1F2;
+  --badge-abstract-fg: #9B1C1C;
   /* Syntax highlighting — tuned for dark code blocks */
   --hl-keyword: #C084FC;
   --hl-string: #86EFAC;
@@ -51,9 +51,9 @@ const CSS_STYLESHEET: &str = r":root {
     --bg: #0A0A09;
     --fg: #FAFAF8;
     --fg-muted: #9CA3AF;
-    --accent: #818CF8;
-    --accent-hover: #A5B4FC;
-    --accent-bg: #1E1B4B;
+    --accent: #FF6B74;
+    --accent-hover: #FF8A91;
+    --accent-bg: #450A0A;
     --border: #27272A;
     --code-bg: #111110;
     --code-fg: #E4E4E7;
@@ -63,8 +63,8 @@ const CSS_STYLESHEET: &str = r":root {
     --nav-bg: #0A0A09;
     --shadow: 0 1px 3px rgba(0,0,0,0.4);
     --shadow-md: 0 4px 12px rgba(0,0,0,0.5);
-    --badge-abstract-bg: #3D2B08;
-    --badge-abstract-fg: #FCD34D;
+    --badge-abstract-bg: #450A0A;
+    --badge-abstract-fg: #FCA5A5;
   }
 }
 
@@ -101,6 +101,7 @@ body {
   flex-shrink: 0;
 }
 .nav-logo:hover { color: var(--fg); text-decoration: none; }
+.nav-logo img { display: block; height: 28px; width: auto; }
 
 .nav-links {
   display: flex;
