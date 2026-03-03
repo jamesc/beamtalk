@@ -3,7 +3,9 @@
 
 /// Decorator Pattern — Milk (concrete decorator)
 CondimentDecorator subclass: Milk
+
   /// Append ", Milk" to the wrapped beverage's description.
   description => "{self.beverage description}, Milk"
+
   /// Add $0.25 to the wrapped beverage's cost.
-  cost        => self.beverage cost + 0.25
+  cost => self.beverage cost + 0.25

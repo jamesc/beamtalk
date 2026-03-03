@@ -17,13 +17,10 @@ Object subclass: DataExporter
     self header ++ formatted join ++ self footer
 
   /// Hook: text placed before all rows. Subclasses must override.
-  header =>
-    self subclassResponsibility
+  header => self subclassResponsibility
 
   /// Hook: text placed after all rows. Subclasses must override.
-  footer =>
-    self subclassResponsibility
+  footer => self subclassResponsibility
 
   /// Hook: format a single row (a List of cell strings). Subclasses must override.
-  formatRow: _row =>
-    self subclassResponsibility
+  formatRow: _row => self subclassResponsibility

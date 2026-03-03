@@ -3,7 +3,9 @@
 
 /// Decorator Pattern — WhippedCream (concrete decorator)
 CondimentDecorator subclass: WhippedCream
+
   /// Append ", Whipped Cream" to the wrapped beverage's description.
   description => "{self.beverage description}, Whipped Cream"
+
   /// Add $0.50 to the wrapped beverage's cost.
-  cost        => self.beverage cost + 0.50
+  cost => self.beverage cost + 0.5

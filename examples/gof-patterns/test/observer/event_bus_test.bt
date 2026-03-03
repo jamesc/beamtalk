@@ -37,8 +37,8 @@ TestCase subclass: EventBusTest
 
   testMultipleSubscribers =>
     bus := EventBus spawn
-    c1  := EventCollector spawn
-    c2  := EventCollector spawn
+    c1 := EventCollector spawn
+    c2 := EventCollector spawn
     bus subscribe: c1; subscribe: c2; notify: "event"
     self assert: c1 eventCount equals: 1
     self assert: c2 eventCount equals: 1

@@ -23,33 +23,27 @@
 ///
 /// See examples/chat-room/README.md for a full walkthrough
 Actor subclass: ChatMember
-  state: name = "Guest"        // Member's display name
-  state: inbox = #()           // List of received messages
-  state: room = nil            // Reference to the ChatRoom actor
+  state: name = "Guest"  // Member's display name
+  state: inbox = #()  // List of received messages
+  state: room = nil  // Reference to the ChatRoom actor
 
   // Set the member's display name
-  setName: newName =>
-    self.name := newName
-  
+  setName: newName => self.name := newName
+
   // Set the chat room reference
   // Demonstrates: Storing an actor reference in a field
-  setRoom: newRoom =>
-    self.room := newRoom
+  setRoom: newRoom => self.room := newRoom
 
   // Receive a message (called by ChatRoom during broadcast)
   // Demonstrates: List concatenation for inbox
-  receiveMessage: msg =>
-    self.inbox := self.inbox ++ #(msg)
+  receiveMessage: msg => self.inbox := self.inbox ++ #(msg)
 
   // Send a message via the room, using own name as sender
   // Demonstrates: Calling method on actor reference stored in field
-  say: message =>
-    self.room say: message from: self.name
+  say: message => self.room say: message from: self.name
 
   // Return received messages
-  getInbox =>
-    self.inbox
+  getInbox => self.inbox
 
   // Return member's name
-  getName =>
-    self.name
+  getName => self.name

@@ -6,5 +6,6 @@
 /// Undo is handled by CommandHistory, which saves buffer snapshots before each
 /// command so no command needs to implement its own reverse logic.
 Object subclass: TextCommand
+
   /// Apply this command to buffer and return the resulting buffer.
   execute: _buffer => self subclassResponsibility

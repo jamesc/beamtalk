@@ -12,8 +12,7 @@ Object subclass: TextBuffer
   state: text = ""
 
   /// Create a buffer pre-populated with the given string.
-  class withText: t =>
-    self new: #{text => t}
+  class withText: t => self new: #{#text => t}
 
   /// Return the current text content of the buffer.
   text => self.text
@@ -22,7 +21,7 @@ Object subclass: TextBuffer
   insertAt: pos text: str =>
     pos < 1 ifTrue: [self error: "insertAt:text: pos must be >= 1"]
     before := self.text take: pos - 1
-    after  := self.text drop: pos - 1
+    after := self.text drop: pos - 1
     TextBuffer withText: before ++ str ++ after
 
   /// Return a new buffer with len characters removed starting at pos (1-based).
@@ -30,5 +29,5 @@ Object subclass: TextBuffer
     pos < 1 ifTrue: [self error: "deleteFrom:length: pos must be >= 1"]
     len < 0 ifTrue: [self error: "deleteFrom:length: len must be >= 0"]
     before := self.text take: pos - 1
-    after  := self.text drop: pos - 1 + len
+    after := self.text drop: pos - 1 + len
     TextBuffer withText: before ++ after

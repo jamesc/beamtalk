@@ -10,17 +10,13 @@
 
 TestCase subclass: TransactionTest
 
-  testDefaultAmount =>
-    self assert: Transaction new amount equals: 0
+  testDefaultAmount => self assert: Transaction new amount equals: 0
 
-  testDefaultFrom =>
-    self assert: Transaction new from equals: ""
+  testDefaultFrom => self assert: Transaction new from equals: ""
 
-  testDefaultTo =>
-    self assert: Transaction new to equals: ""
+  testDefaultTo => self assert: Transaction new to equals: ""
 
-  testDefaultStatus =>
-    self assert: Transaction new status equals: "pending"
+  testDefaultStatus => self assert: Transaction new status equals: "pending"
 
   testDefaultTimestampIsNil =>
     self assert: Transaction new timestamp equals: nil
@@ -46,9 +42,9 @@ TestCase subclass: TransactionTest
       #status => "completed"
     }
     self assert: txn amount equals: 500;
-         assert: txn from equals: "Alice";
-         assert: txn to equals: "Bob";
-         assert: txn status equals: "completed"
+      assert: txn from equals: "Alice";
+      assert: txn to equals: "Bob";
+      assert: txn status equals: "completed"
 
   testTwoInstancesAreIndependent =>
     // Value types — no shared mutable state

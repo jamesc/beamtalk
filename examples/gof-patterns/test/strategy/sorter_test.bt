@@ -32,5 +32,5 @@ TestCase subclass: SorterTest
 
   testStrategiesAreInterchangeable =>
     nums := #(5, 2, 8, 1)
-    self assert: ((Sorter ascending)  sort: nums) equals: #(1, 2, 5, 8)
+    self assert: ((Sorter ascending) sort: nums) equals: #(1, 2, 5, 8)
     self assert: ((Sorter descending) sort: nums) equals: #(8, 5, 2, 1)

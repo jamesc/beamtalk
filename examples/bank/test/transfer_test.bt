@@ -42,8 +42,8 @@ TestCase subclass: TransferTest
     agent transfer: 200 from: alice to: bob
     // getLastAmount reflects the most recent transfer
     self assert: alice balance equals: 700;
-         assert: bob balance equals: 300;
-         assert: agent getLastAmount equals: 200
+      assert: bob balance equals: 300;
+      assert: agent getLastAmount equals: 200
 
   testTransferInBothDirections =>
     alice := Account spawn

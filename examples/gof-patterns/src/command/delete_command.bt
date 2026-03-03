@@ -6,11 +6,10 @@
 /// Undo is provided by CommandHistory snapshot rollback, not by this class.
 TextCommand subclass: DeleteCommand
   state: position = 1
-  state: length   = 0
+  state: length = 0
 
   /// Create a command that will delete len characters starting at 1-based position pos.
-  class from: pos length: len =>
-    self new: #{position => pos, length => len}
+  class from: pos length: len => self new: #{#position => pos, #length => len}
 
   /// Delete this command's character range from buffer.
   execute: buffer => buffer deleteFrom: self.position length: self.length

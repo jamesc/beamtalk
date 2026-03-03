@@ -8,5 +8,4 @@ Beverage subclass: CondimentDecorator
   state: beverage = nil
 
   /// Wrap aBeverage so this condiment's description and cost are layered on top.
-  class wrap: aBeverage =>
-    self new: #{beverage => aBeverage}
+  class wrap: aBeverage => self new: #{#beverage => aBeverage}

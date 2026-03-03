@@ -12,8 +12,7 @@ Object subclass: CelsiusThermometer
   state: celsius = 0.0
 
   /// Create a thermometer whose reading is degrees Celsius.
-  class withCelsius: degrees =>
-    self new: #{celsius => degrees}
+  class withCelsius: degrees => self new: #{#celsius => degrees}
 
   /// Return the current temperature in degrees Celsius.
   readCelsius => self.celsius

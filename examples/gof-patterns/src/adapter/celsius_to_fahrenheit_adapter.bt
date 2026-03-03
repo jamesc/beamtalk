@@ -14,10 +14,10 @@ FahrenheitThermometer subclass: CelsiusToFahrenheitAdapter
   state: adaptee = nil
 
   /// Wrap a CelsiusThermometer so it can be used as a FahrenheitThermometer.
-  class wrap: thermometer =>
-    self new: #{adaptee => thermometer}
+  class wrap: thermometer => self new: #{#adaptee => thermometer}
 
   /// Return the adaptee's reading in degrees Celsius (pass-through).
-  readCelsius    => self.adaptee readCelsius
+  readCelsius => self.adaptee readCelsius
+
   /// Convert the adaptee's Celsius reading to Fahrenheit.
   readFahrenheit => self.adaptee readCelsius * 9.0 / 5.0 + 32.0
