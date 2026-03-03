@@ -86,6 +86,10 @@ impl CoreErlangGenerator {
                         format!("State{}", self.state_version())
                     };
 
+                    // BT-1053: Record val_var so callers (e.g. generate_conditional_branch_inline)
+                    // can use it as the branch result via last_open_scope_result.
+                    self.last_open_scope_result = Some(val_var.clone());
+
                     return Ok(docvec![
                         "let ",
                         Document::String(t2_tuple.clone()),
