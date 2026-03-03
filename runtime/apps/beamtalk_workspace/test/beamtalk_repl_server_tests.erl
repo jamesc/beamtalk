@@ -1416,12 +1416,12 @@ context_completions_nonexistent_atom_receiver_returns_empty_test() ->
 %%% and the VS Code extension to read bindings from the user's main REPL session.
 
 %% undefined session ID → always return the default PID
-resolve_binding_session_undefined_returns_default_test() ->
+session_table_undefined_returns_default_test() ->
     Default = self(),
     ?assertEqual(Default, beamtalk_session_table:resolve_pid(undefined, Default)).
 
 %% ETS table does not exist → catch returns default without crashing
-resolve_binding_session_no_ets_table_returns_default_test() ->
+session_table_no_ets_table_returns_default_test() ->
     %% Ensure the named table does not exist for this test
     catch ets:delete(beamtalk_sessions),
     Default = self(),
@@ -1430,7 +1430,7 @@ resolve_binding_session_no_ets_table_returns_default_test() ->
     ?assertEqual(Default, Result).
 
 %% Session ID present in ETS with live PID → return that PID
-resolve_binding_session_finds_live_pid_in_ets_test() ->
+session_table_finds_live_pid_test() ->
     beamtalk_session_table:new(),
     SessionId = <<"test-session-bt1045-live">>,
     %% Use self() as the "session pid" — it is alive
@@ -1443,7 +1443,7 @@ resolve_binding_session_finds_live_pid_in_ets_test() ->
     ?assertEqual(SessionPid, Result).
 
 %% Session ID not in ETS → return default
-resolve_binding_session_unknown_session_returns_default_test() ->
+session_table_unknown_session_returns_default_test() ->
     beamtalk_session_table:new(),
     SessionId = <<"test-session-bt1045-unknown">>,
     %% Make sure this key is not in the table
@@ -1453,7 +1453,7 @@ resolve_binding_session_unknown_session_returns_default_test() ->
     ?assertEqual(Default, Result).
 
 %% Dead PID in ETS → fall back to default rather than returning a dead process
-resolve_binding_session_dead_pid_returns_default_test() ->
+session_table_dead_pid_returns_default_test() ->
     beamtalk_session_table:new(),
     SessionId = <<"test-session-bt1045-dead">>,
     MonRef = erlang:monitor(process, spawn(fun() -> ok end)),
@@ -1535,6 +1535,41 @@ session_binding_lookup_pipeline_test() ->
     after
         beamtalk_session_table:delete(SessionId),
         exit(DefaultPid, kill),
+        beamtalk_repl_shell:stop(ShellPid)
+    end.
+
+%% handle_op bindings with session field returns bindings from target session, not WS session.
+%% Regression test for BT-1063: the bindings op must read session from Msg (via get_session/1),
+%% not from Params — the protocol decoder strips the top-level "session" key into Msg.
+handle_op_bindings_with_session_returns_target_bindings_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    SessionId = <<"test-bindings-op-bt1063">>,
+    {ok, ShellPid} = beamtalk_repl_shell:start_link(SessionId),
+    beamtalk_session_table:new(),
+    beamtalk_session_table:insert(SessionId, ShellPid),
+    %% eval a binding into the target session
+    {ok, _, _, _} = beamtalk_repl_shell:eval(ShellPid, "x := 42"),
+    try
+        %% Construct a bindings request with session field at the top level.
+        %% The protocol decoder puts it in Msg, not Params.
+        Json = jsx:encode(#{
+            <<"op">> => <<"bindings">>,
+            <<"id">> => <<"b1">>,
+            <<"session">> => SessionId
+        }),
+        {ok, Msg} = beamtalk_repl_protocol:decode(Json),
+        Params = beamtalk_repl_protocol:get_params(Msg),
+        %% Use a dummy WS session pid (no bindings) as the default
+        WsPid = spawn(fun() -> timer:sleep(10000) end),
+        Result = beamtalk_repl_server:handle_op(<<"bindings">>, Params, Msg, WsPid),
+        exit(WsPid, kill),
+        Decoded = jsx:decode(Result, [return_maps]),
+        ?assertMatch(#{<<"id">> := <<"b1">>}, Decoded),
+        %% Must return bindings from ShellPid (the target session), not the empty WS session
+        Bindings = maps:get(<<"bindings">>, Decoded),
+        ?assert(maps:is_key(<<"x">>, Bindings))
+    after
+        beamtalk_session_table:delete(SessionId),
         beamtalk_repl_shell:stop(ShellPid)
     end.
 
@@ -2202,8 +2237,13 @@ handle_op_inspect_live_tagged_actor_test() ->
         undefined ->
             ok;
         Old ->
+            Ref = erlang:monitor(process, Old),
             catch gen_server:stop(Old),
-            timer:sleep(20)
+            receive
+                {'DOWN', Ref, process, Old, _} -> ok
+            after 1000 ->
+                ok
+            end
     end,
     {ok, RegistryPid} = gen_server:start_link(
         {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
