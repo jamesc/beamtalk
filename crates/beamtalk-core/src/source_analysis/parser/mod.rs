@@ -1350,6 +1350,75 @@ mod tests {
     }
 
     #[test]
+    fn parse_keyword_message_multiline_paren_receiver_continuation() {
+        // BT-1061: `(expr)\n  ifTrue: [...]` should be a single keyword send,
+        // not two statements. The parenthesized receiver signals unambiguous
+        // continuation.
+        let module = parse_ok("(a > 0)\n  ifTrue: [a]");
+        assert_eq!(module.expressions.len(), 1, "Should be one statement");
+        match &module.expressions[0].expression {
+            Expression::MessageSend {
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } => {
+                assert_eq!(parts.len(), 1);
+                assert_eq!(parts[0].keyword.as_str(), "ifTrue:");
+                assert_eq!(arguments.len(), 1);
+            }
+            _ => panic!("Expected keyword message send"),
+        }
+    }
+
+    #[test]
+    fn parse_keyword_message_multiline_paren_receiver_iftrue_iffalse() {
+        // BT-1061: parenthesized receiver + multi-keyword continuation across newlines
+        let module = parse_ok("(a > 0)\n  ifTrue: [a]\n  ifFalse: [0]");
+        assert_eq!(module.expressions.len(), 1, "Should be one statement");
+        match &module.expressions[0].expression {
+            Expression::MessageSend {
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } => {
+                assert_eq!(parts.len(), 2);
+                assert_eq!(parts[0].keyword.as_str(), "ifTrue:");
+                assert_eq!(parts[1].keyword.as_str(), "ifFalse:");
+                assert_eq!(arguments.len(), 2);
+            }
+            _ => panic!("Expected keyword message send"),
+        }
+    }
+
+    #[test]
+    fn parse_keyword_message_multiline_complex_paren_receiver() {
+        // BT-1061: the motivating case from the issue — complex parenthesized
+        // boolean expression followed by ifTrue: on the next line
+        let module =
+            parse_ok("((step > 0 and: [x <= end]) or: [step < 0 and: [x >= end]])\n  ifTrue: [x]");
+        assert_eq!(module.expressions.len(), 1, "Should be one statement");
+        match &module.expressions[0].expression {
+            Expression::MessageSend {
+                selector: MessageSelector::Keyword(parts),
+                ..
+            } => {
+                assert_eq!(parts.len(), 1);
+                assert_eq!(parts[0].keyword.as_str(), "ifTrue:");
+            }
+            _ => panic!("Expected keyword message send"),
+        }
+    }
+
+    #[test]
+    fn parse_keyword_message_newline_non_paren_receiver_is_new_statement() {
+        // BT-1061: without parens, a newline before the first keyword is still
+        // a statement terminator (preserves existing behaviour).
+        // `x` is one statement; `y foo: 1` is a second statement with its own receiver.
+        let module = parse_ok("x\ny foo: 1");
+        assert_eq!(module.expressions.len(), 2);
+    }
+
+    #[test]
     fn parse_multiline_keyword_does_not_consume_method_def() {
         // In a class body, a keyword method on the next line should NOT
         // be consumed as a continuation of the keyword message above.

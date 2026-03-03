@@ -219,10 +219,16 @@ impl Parser {
     pub(super) fn parse_keyword_message(&mut self) -> Expression {
         let receiver = self.parse_binary_message();
 
-        // Check if this is a keyword message
-        // A newline before the keyword indicates a new statement, not a message
-        if !matches!(self.current_kind(), TokenKind::Keyword(_))
-            || self.current_token().has_leading_newline()
+        // Check if this is a keyword message.
+        // A newline before the first keyword normally indicates a new statement.
+        // Exception (BT-1061): if the receiver is a parenthesized expression,
+        // the closing `)` makes it unambiguous that the keyword continues the
+        // same expression — allow continuation even across a newline.
+        if !matches!(self.current_kind(), TokenKind::Keyword(_)) {
+            return receiver;
+        }
+        if self.current_token().has_leading_newline()
+            && !matches!(receiver, Expression::Parenthesized { .. })
         {
             return receiver;
         }
