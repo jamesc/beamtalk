@@ -501,25 +501,20 @@ export class WorkspaceTreeDataProvider
     const classSide = methods.filter((m) => m.side === "class");
     const toItems = (ms: MethodInfo[]): MethodItemNode[] =>
       ms.map((m) => ({ kind: "method-item" as const, method: m, classInfo }));
-    const groups: MethodGroupNode[] = [];
-    if (instance.length > 0 || classSide.length === 0) {
-      // Always show instance group; only omit class group when it's empty
-      groups.push({
+    return [
+      {
         kind: "method-group" as const,
         side: "instance",
         classInfo,
         methods: toItems(instance),
-      });
-    }
-    if (classSide.length > 0) {
-      groups.push({
+      },
+      {
         kind: "method-group" as const,
         side: "class",
         classInfo,
         methods: toItems(classSide),
-      });
-    }
-    return groups;
+      },
+    ];
   }
 
   private _inspectFields(state: Record<string, unknown>, parentId: string): InspectFieldNode[] {

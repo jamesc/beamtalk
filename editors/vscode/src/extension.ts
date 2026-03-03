@@ -687,9 +687,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const { classInfo, method } = node;
 
       // Determine the source URI: file URI for user classes, virtual URI for stdlib.
+      // The runtime sends "unknown" when no source file is recorded (e.g. eval-defined classes).
+      const sourceFile = classInfo.source_file;
+      const hasSourceFile = sourceFile && sourceFile !== "unknown";
       let uri: vscode.Uri;
-      if (classInfo.source_file) {
-        uri = vscode.Uri.file(classInfo.source_file);
+      if (hasSourceFile) {
+        uri = vscode.Uri.file(sourceFile);
       } else {
         uri = vscode.Uri.parse(`beamtalk-stdlib:///${classInfo.name}.bt`);
       }
