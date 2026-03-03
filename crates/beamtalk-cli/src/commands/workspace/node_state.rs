@@ -73,8 +73,12 @@ pub fn is_node_running(info: &NodeInfo, workspace_id: Option<&str>) -> bool {
                 None => None,
             }
         } else {
-            // Fallback: scan all workspace directories (O(N))
-            read_port_file_nonce(info.port)
+            // Fallback: scan all workspace directories (O(N)).
+            // If the workspaces root cannot be resolved, trust the TCP probe.
+            super::storage::workspaces_base_dir()
+                .ok()
+                .as_deref()
+                .and_then(|root| read_port_file_nonce(root, info.port))
         };
         match file_nonce {
             Some(file_nonce) => file_nonce == *expected_nonce,
@@ -86,11 +90,14 @@ pub fn is_node_running(info: &NodeInfo, workspace_id: Option<&str>) -> bool {
 }
 
 /// Read the nonce from a port file that matches the given port.
-/// Scans all workspace directories since we don't know `workspace_id` here.
-/// Returns `None` if no matching port file found or on read error.
-fn read_port_file_nonce(port: u16) -> Option<String> {
-    let workspaces_root = super::storage::workspaces_base_dir().ok()?;
-
+///
+/// Scans all immediate subdirectories of `workspaces_root` for a `port` file
+/// whose first line matches `port`, returning the second line (the nonce) when
+/// found. Accepts a `workspaces_root` parameter so callers can pass either the
+/// real `~/.beamtalk/workspaces` directory or a temporary directory in tests.
+///
+/// Returns `None` if no matching port file is found or on any I/O error.
+fn read_port_file_nonce(workspaces_root: &std::path::Path, port: u16) -> Option<String> {
     let entries = std::fs::read_dir(workspaces_root).ok()?;
 
     for entry in entries.flatten() {
@@ -198,61 +205,58 @@ pub(super) fn is_process_alive(pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
+    /// Write a two-line port file (`PORT\nNONCE\n`) into `workspaces_root/ws_id/port`.
+    fn write_port_file(workspaces_root: &Path, ws_id: &str, port: u16, nonce: Option<&str>) {
+        let ws_dir = workspaces_root.join(ws_id);
+        std::fs::create_dir_all(&ws_dir).unwrap();
+        let content = match nonce {
+            Some(n) => format!("{port}\n{n}\n"),
+            None => format!("{port}\n"),
+        };
+        std::fs::write(ws_dir.join("port"), content).unwrap();
+    }
 
     #[test]
     fn test_read_port_file_nonce_from_plain_text() {
-        // Set up a temp workspace dir with a plain-text port file
-        let home = dirs::home_dir().expect("HOME must be set");
-        let ws_id = format!("test_nonce_{}", std::process::id());
-        let ws_dir = home.join(".beamtalk").join("workspaces").join(&ws_id);
-        std::fs::create_dir_all(&ws_dir).unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_port_file(tmp.path(), "ws1", 12345, Some("abc123def456"));
 
-        let port_file = ws_dir.join("port");
-        std::fs::write(&port_file, "12345\nabc123def456\n").unwrap();
-
-        let nonce = read_port_file_nonce(12345);
+        let nonce = read_port_file_nonce(tmp.path(), 12345);
         assert_eq!(nonce, Some("abc123def456".to_string()));
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&ws_dir);
     }
 
     #[test]
     fn test_read_port_file_nonce_wrong_port() {
-        let home = dirs::home_dir().expect("HOME must be set");
-        let ws_id = format!("test_nonce_wrong_{}", std::process::id());
-        let ws_dir = home.join(".beamtalk").join("workspaces").join(&ws_id);
-        std::fs::create_dir_all(&ws_dir).unwrap();
-
-        let port_file = ws_dir.join("port");
-        // Use a distinct port (23456) to avoid racing with read_port_file_nonce_from_plain_text
-        // which also writes port 12345. Both tests scan all workspace dirs, so sharing a port
-        // number causes non-deterministic results depending on directory enumeration order.
-        std::fs::write(&port_file, "23456\nnonce_value\n").unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_port_file(tmp.path(), "ws1", 23456, Some("nonce_value"));
 
         // Looking for a different port should return None
-        let nonce = read_port_file_nonce(54321);
+        let nonce = read_port_file_nonce(tmp.path(), 54321);
         assert_eq!(nonce, None);
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&ws_dir);
     }
 
     #[test]
     fn test_read_port_file_nonce_no_nonce_line() {
-        let home = dirs::home_dir().expect("HOME must be set");
-        let ws_id = format!("test_nonce_none_{}", std::process::id());
-        let ws_dir = home.join(".beamtalk").join("workspaces").join(&ws_id);
-        std::fs::create_dir_all(&ws_dir).unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_port_file(tmp.path(), "ws1", 11111, None);
 
-        // Port file with only port, no nonce (use unique port to avoid scan collisions)
-        let port_file = ws_dir.join("port");
-        std::fs::write(&port_file, "11111\n").unwrap();
-
-        let nonce = read_port_file_nonce(11111);
+        let nonce = read_port_file_nonce(tmp.path(), 11111);
         assert_eq!(nonce, None, "Missing nonce line should return None");
+    }
 
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&ws_dir);
+    #[test]
+    fn test_read_port_file_nonce_multiple_workspaces_returns_correct() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_port_file(tmp.path(), "ws1", 10001, Some("nonce_a"));
+        write_port_file(tmp.path(), "ws2", 10002, Some("nonce_b"));
+        write_port_file(tmp.path(), "ws3", 10003, Some("nonce_c"));
+
+        assert_eq!(
+            read_port_file_nonce(tmp.path(), 10002),
+            Some("nonce_b".to_string())
+        );
+        assert_eq!(read_port_file_nonce(tmp.path(), 10099), None);
     }
 }
