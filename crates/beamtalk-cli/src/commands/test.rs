@@ -1600,8 +1600,8 @@ mod tests {
         index_b.insert("Counter".to_string(), "bt@pkg_b@counter".to_string());
 
         let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
-        pkg_class_indexes.insert(pkg_a.clone(), (index_a.clone(), HashMap::new()));
-        pkg_class_indexes.insert(pkg_b.clone(), (index_b.clone(), HashMap::new()));
+        pkg_class_indexes.insert(canonical_path(&pkg_a), (index_a.clone(), HashMap::new()));
+        pkg_class_indexes.insert(canonical_path(&pkg_b), (index_b.clone(), HashMap::new()));
 
         // Merged index has pkg_b's entry (inserted last, overwrites pkg_a's)
         let mut merged: HashMap<String, String> = HashMap::new();
@@ -1659,7 +1659,7 @@ mod tests {
         pkg_a_class_index.insert("Counter".to_string(), "bt@pkg_a@counter".to_string());
 
         let mut pkg_class_indexes: PkgClassIndexes = HashMap::new();
-        pkg_class_indexes.insert(pkg_a.clone(), (pkg_a_class_index, HashMap::new()));
+        pkg_class_indexes.insert(canonical_path(&pkg_a), (pkg_a_class_index, HashMap::new()));
 
         let mut fixture_index: HashMap<String, String> = HashMap::new();
         fixture_index.insert("MockHelper".to_string(), "bt@mock_helper".to_string());
@@ -1780,10 +1780,10 @@ mod tests {
             .unwrap();
         }
 
-        // Build pkg_root_to_name as the production code does
+        // Build pkg_root_to_name as the production code does (with canonicalized keys)
         let pkg_root_to_name: HashMap<Utf8PathBuf, String> = [
-            (pkg_a.clone(), "pkg_a".to_string()),
-            (pkg_b.clone(), "pkg_b".to_string()),
+            (canonical_path(&pkg_a), "pkg_a".to_string()),
+            (canonical_path(&pkg_b), "pkg_b".to_string()),
         ]
         .into_iter()
         .collect();
