@@ -64,7 +64,7 @@ fn attach_by_workspace_id(name_or_id: &str) -> Result<()> {
     let node_info =
         get_node_info(&workspace_id)?.ok_or_else(|| workspace_not_running(name_or_id))?;
 
-    if !workspace::is_node_running(&node_info) {
+    if !workspace::is_node_running(&node_info, Some(&workspace_id)) {
         return Err(workspace_not_running(name_or_id));
     }
 

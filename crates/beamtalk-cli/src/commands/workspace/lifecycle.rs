@@ -114,7 +114,7 @@ pub fn get_or_start_workspace(
 
     // Check if node is already running (under lock)
     if let Some(node_info) = get_node_info(&workspace_id)? {
-        if is_node_running(&node_info) {
+        if is_node_running(&node_info, Some(&workspace_id)) {
             return Ok((node_info, false, workspace_id)); // Existing node
         }
         // Stale node.info file - orphaned workspace detected
@@ -209,7 +209,7 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
 
         let (status, port, pid) = match get_node_info(&workspace_id) {
             Ok(Some(info)) => {
-                if is_node_running(&info) {
+                if is_node_running(&info, Some(&workspace_id)) {
                     (WorkspaceStatus::Running, Some(info.port), Some(info.pid))
                 } else {
                     // Stale node.info — clean it up
@@ -266,7 +266,7 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
     let node_info = get_node_info(&workspace_id)?;
 
     match node_info {
-        Some(info) if is_node_running(&info) => {
+        Some(info) if is_node_running(&info, Some(&workspace_id)) => {
             let host = info.connect_host();
             if force {
                 // Force-kill: skip graceful shutdown, go straight to OS kill.
@@ -397,7 +397,7 @@ pub fn workspace_status(name_or_id: Option<&str>) -> Result<WorkspaceDetail> {
 
     let (status, node_name, port, pid) = match get_node_info(&workspace_id) {
         Ok(Some(info)) => {
-            if is_node_running(&info) {
+            if is_node_running(&info, Some(&workspace_id)) {
                 (
                     WorkspaceStatus::Running,
                     Some(info.node_name),

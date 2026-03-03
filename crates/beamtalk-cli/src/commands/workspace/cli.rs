@@ -258,7 +258,7 @@ fn run_create_background(
     let workspace_id = super::workspace_id_for_project(&project_root, Some(name))?;
     if let Ok(true) = super::storage::workspace_exists(&workspace_id) {
         if let Ok(Some(info)) = super::storage::get_node_info(&workspace_id) {
-            if super::is_node_running(&info) {
+            if super::is_node_running(&info, Some(&workspace_id)) {
                 println!("Workspace '{workspace_id}' already running");
                 let has_startup_flags = tls
                     || bind.is_some()

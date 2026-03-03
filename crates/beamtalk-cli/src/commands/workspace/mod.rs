@@ -451,7 +451,7 @@ mod tests {
             nonce: None,
             bind_addr: None,
         };
-        assert!(!is_node_running(&info));
+        assert!(!is_node_running(&info, None));
     }
 
     #[test]
@@ -469,7 +469,7 @@ mod tests {
             nonce: None,
             bind_addr: None,
         };
-        assert!(!is_node_running(&info));
+        assert!(!is_node_running(&info, None));
     }
 
     #[test]
@@ -483,7 +483,7 @@ mod tests {
             bind_addr: None,
         };
         // PID doesn't exist at all
-        assert!(!is_node_running(&info));
+        assert!(!is_node_running(&info, None));
     }
 
     #[test]
@@ -998,7 +998,7 @@ mod tests {
     #[track_caller]
     fn assert_node_stopped(info: &NodeInfo, msg: &str) {
         for _ in 0..10 {
-            if !is_node_running(info) {
+            if !is_node_running(info, None) {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -1076,7 +1076,7 @@ mod tests {
 
         // Verify the node is actually running
         assert!(
-            is_node_running(&node_info),
+            is_node_running(&node_info, Some(&tw.id)),
             "is_node_running should return true for live node"
         );
 
@@ -1108,11 +1108,11 @@ mod tests {
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_is_node_running_true_then_false_integration() {
-        let (_tw, node_info, _guard) = start_test_node("integ_running");
+        let (tw, node_info, _guard) = start_test_node("integ_running");
 
         // True case: node is running
         assert!(
-            is_node_running(&node_info),
+            is_node_running(&node_info, Some(&tw.id)),
             "is_node_running should be true while node is alive"
         );
 
@@ -1149,7 +1149,10 @@ mod tests {
         let _guard1 = NodeGuard::new(&info1);
         assert!(started1, "first call should start a new node");
         assert_eq!(id1, tw.id);
-        assert!(is_node_running(&info1), "node should be running");
+        assert!(
+            is_node_running(&info1, Some(&tw.id)),
+            "node should be running"
+        );
 
         // Step 2: Second call reconnects to existing node
         let (info2, started2, id2) = get_or_start_workspace(
@@ -1200,7 +1203,10 @@ mod tests {
             info3.pid, info1.pid,
             "restarted node should have different PID"
         );
-        assert!(is_node_running(&info3), "restarted node should be running");
+        assert!(
+            is_node_running(&info3, Some(&tw.id)),
+            "restarted node should be running"
+        );
     }
 
     /// Regression test for BT-970: concurrent `get_or_start_workspace` calls on the
@@ -1284,7 +1290,7 @@ mod tests {
             "both callers must return the same node port"
         );
         assert!(
-            is_node_running(info0),
+            is_node_running(info0, Some(id0)),
             "node should be running after concurrent start"
         );
     }
@@ -1364,7 +1370,7 @@ mod tests {
             "new node should have a different PID"
         );
         assert!(
-            is_node_running(&new_info),
+            is_node_running(&new_info, Some(&tw.id)),
             "new node should be running and reachable"
         );
     }
@@ -1432,7 +1438,7 @@ mod tests {
             "new node should have a different PID"
         );
         assert!(
-            is_node_running(&new_info),
+            is_node_running(&new_info, Some(&tw.id)),
             "new node should be running and reachable"
         );
         // Tombstone must be gone after successful startup.
@@ -1549,7 +1555,7 @@ mod tests {
 
         // Verify node is running before we stop it
         assert!(
-            is_node_running(&node_info),
+            is_node_running(&node_info, Some(&tw.id)),
             "Node should be running before force stop"
         );
 
