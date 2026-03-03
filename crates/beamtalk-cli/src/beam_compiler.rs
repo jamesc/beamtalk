@@ -623,6 +623,7 @@ pub fn write_core_erlang_with_bindings(
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
     source_text: Option<&str>,
     workspace_mode: bool,
+    stdlib_mode: bool,
     class_module_index: &std::collections::HashMap<String, String>,
     class_superclass_index: &std::collections::HashMap<String, String>,
     source_path: Option<&str>,
@@ -640,6 +641,7 @@ pub fn write_core_erlang_with_bindings(
             .with_bindings(bindings.clone())
             .with_source_opt(source_text)
             .with_workspace_mode(workspace_mode)
+            .with_stdlib_mode(stdlib_mode)
             .with_class_module_index(class_module_index.clone())
             .with_class_superclass_index(class_superclass_index.clone())
             .with_source_path_opt(source_path),
@@ -815,6 +817,7 @@ pub fn compile_source_with_bindings(
         bindings,
         Some(&source),
         options.workspace_mode,
+        options.stdlib_mode,
         class_module_index,
         class_superclass_index,
         embed_source_path,
