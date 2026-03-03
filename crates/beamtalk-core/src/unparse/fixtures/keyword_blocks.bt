@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A class demonstrating keyword message formatting with block arguments.
+///
+/// Demonstrates: multi-statement block args break keywords to their own lines;
+/// single-statement block args stay inline (BT-1064).
+Object subclass: KeywordBlockExamples
+
+  /// Single-statement block: keyword stays inline.
+  shortIf: flag => flag ifTrue: [^42]
+
+  /// ifTrue:/ifFalse: where ifTrue: has a multi-statement block.
+  /// Both keywords break to their own indented lines.
+  hanoiLike: flag =>
+    flag
+      ifTrue: [
+        self traceCr: "yes"
+        self traceCr: "done"
+      ]
+      ifFalse: [nil]
+
+  /// Single keyword with multi-statement block.
+  doAll: coll =>
+    coll
+      do: [
+        self traceCr: "first"
+        self traceCr: "second"
+      ]
+
+  /// Single keyword with a parametrized multi-statement block.
+  doEach: coll =>
+    coll
+      do: [:x |
+        self traceCr: x
+        self traceCr: "done"
+      ]
+
+  /// inject:into: with a multi-statement block on the second argument.
+  sumAll: coll =>
+    coll
+      inject: 0
+      into: [:sum :each |
+        self traceCr: each printString
+        sum + each
+      ]
+
+  /// Long receiver with single-statement block: keyword stays inline.
+  longBlock: aVeryLongVariableNameThatExceedsTheEightyColumnLineWidthLimit =>
+    aVeryLongVariableNameThatExceedsTheEightyColumnLineWidthLimit ifTrue: [
+      self traceCr: "yes"
+    ]

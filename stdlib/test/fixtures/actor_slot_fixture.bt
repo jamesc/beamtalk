@@ -32,18 +32,20 @@ Actor subclass: ActorSlotCounter
 
   // Slot assignment inside do: block with two slot mutations per iteration
   countAndSum: items =>
-    items do: [:item |
-      self.count := self.count + 1
-      self.total := self.total + item
-    ]
+    items
+      do: [:item |
+        self.count := self.count + 1
+        self.total := self.total + item
+      ]
     #{#count => self.count, #total => self.total}
 
   // Slot assignment inside collect: block (count tracks each element processed)
   collectDoubled: items =>
-    result := items collect: [:item |
-      self.count := self.count + 1
-      item * 2
-    ]
+    result := items
+      collect: [:item |
+        self.count := self.count + 1
+        item * 2
+      ]
     result
 
   // Slot assignment then early return (^) from method body via ifTrue:

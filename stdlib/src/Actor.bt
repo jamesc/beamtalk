@@ -38,7 +38,8 @@ Object subclass: Actor
   /// ```beamtalk
   /// Counter new   // => ERROR: instantiation_error
   /// ```
-  class sealed new => InstantiationError new signal: "Actors must use spawn, not new"
+  class sealed new =>
+    InstantiationError new signal: "Actors must use spawn, not new"
 
   /// Raises an InstantiationError — actors must use `spawnWith:`, not `new:`.
   ///
@@ -46,7 +47,8 @@ Object subclass: Actor
   /// ```beamtalk
   /// Counter new: #{}   // => ERROR: instantiation_error
   /// ```
-  class sealed new: _initArgs => InstantiationError new signal: "Actors must use spawnWith:, not new:"
+  class sealed new: _initArgs =>
+    InstantiationError new signal: "Actors must use spawnWith:, not new:"
 
   /// Gracefully stop this actor (gen_server:stop).
   ///

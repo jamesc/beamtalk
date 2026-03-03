@@ -18,10 +18,12 @@ Actor subclass: LocalMutationActor
   // Local mutation in inject:into:
   sumWithInject: items =>
     count := 0
-    result := items inject: 0 into: [:acc :item |
-      count := count + 1
-      acc + item
-    ]
+    result := items
+      inject: 0
+      into: [:acc :item |
+        count := count + 1
+        acc + item
+      ]
     #{#result => result, #count => count}
 
   // Local mutation in timesRepeat:
@@ -40,10 +42,11 @@ Actor subclass: LocalMutationActor
   countDownFrom: n =>
     counter := n
     steps := 0
-    [counter > 0] whileTrue: [
-      counter := counter - 1
-      steps := steps + 1
-    ]
+    [counter > 0]
+      whileTrue: [
+        counter := counter - 1
+        steps := steps + 1
+      ]
     steps
 
   // Local mutation in whileFalse:
@@ -61,8 +64,9 @@ Actor subclass: LocalMutationActor
   // Mixed local + field mutation
   processWithTracking: items =>
     localCount := 0
-    items do: [:item |
-      localCount := localCount + 1
-      self.log := self.log + item
-    ]
+    items
+      do: [:item |
+        localCount := localCount + 1
+        self.log := self.log + item
+      ]
     #{#localCount => localCount, #log => self.log}
