@@ -32,7 +32,7 @@ use crate::ast::{
 use crate::language_service::{HoverInfo, Position};
 use crate::queries::enrich_hierarchy_with_inferred_returns;
 use crate::semantic_analysis::type_checker::TypeMap;
-use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
+use crate::semantic_analysis::{ClassHierarchy, InferredType};
 use crate::source_analysis::Span;
 
 /// Computes hover information at a given position.
@@ -77,20 +77,22 @@ pub fn compute_hover(
     // Find the class context at this position for self-type hover
     let class_context = find_hover_class_context(module, offset_val);
 
-    // Enrich hierarchy with inferred return types (BT-1014).
-    // This enables chain-resolved hover for methods whose return type is not explicitly
-    // annotated but can be inferred from the method body (BT-1005).
+    // Enrich hierarchy with inferred return types and get the type map in a single
+    // TypeChecker pass (BT-1014, BT-1047). This enables chain-resolved hover for methods
+    // whose return type is not explicitly annotated but can be inferred from the method
+    // body (BT-1005).
     let enriched_hierarchy;
-    let hierarchy = match enrich_hierarchy_with_inferred_returns(module, hierarchy) {
-        Some(h) => {
-            enriched_hierarchy = h;
-            &enriched_hierarchy
-        }
-        None => hierarchy,
+    let (hierarchy, type_map) = {
+        let (enriched, type_map) = enrich_hierarchy_with_inferred_returns(module, hierarchy);
+        let h = match enriched {
+            Some(h) => {
+                enriched_hierarchy = h;
+                &enriched_hierarchy
+            }
+            None => hierarchy,
+        };
+        (h, type_map)
     };
-
-    // Run type inference to get types at positions
-    let type_map = infer_types(module, hierarchy);
 
     // Find declaration-level symbols (class names, superclasses, standalone method qualifiers)
     if let Some(hover) = find_hover_in_declarations(module, offset_val, hierarchy) {
