@@ -79,5 +79,4 @@ TestCase subclass: ChatRoomTest
     alice setName: "Alice"
     self assert: alice getName equals: "Alice"
 
-  testMemberDefaultName =>
-    self assert: ChatMember spawn getName equals: "Guest"
+  testMemberDefaultName => self assert: ChatMember spawn getName equals: "Guest"

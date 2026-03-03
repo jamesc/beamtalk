@@ -10,11 +10,9 @@
 
 TestCase subclass: MessageTest
 
-  testDefaultText =>
-    self assert: Message new text equals: ""
+  testDefaultText => self assert: Message new text equals: ""
 
-  testDefaultSender =>
-    self assert: Message new sender equals: "Anonymous"
+  testDefaultSender => self assert: Message new sender equals: "Anonymous"
 
   testNewWithText =>
     msg := Message new: #{#text => "Hello!"}

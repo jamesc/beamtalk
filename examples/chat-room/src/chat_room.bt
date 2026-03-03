@@ -30,6 +30,7 @@
 // ===========================================================================
 // CHATROOM ACTOR
 // ===========================================================================
+
 /// ChatRoom manages a Set of member actors and a List of message strings
 /// It demonstrates:
 /// - Storing actor references (PIDs) in a Set
@@ -37,34 +38,30 @@
 /// - Broadcasting via do: iteration over actor Set
 /// - List concatenation for message history
 Actor subclass: ChatRoom
-  state: members = Set new     // Set of ChatMember actor references
-  state: history = #()         // List of formatted message strings
+  state: members = Set new  // Set of ChatMember actor references
+  state: history = #()  // List of formatted message strings
 
   // Add a member to the room
   // Demonstrates: Set add: operation with actor references
-  join: member =>
-    self.members := self.members add: member
-  
+  join: member => self.members := self.members add: member
+
   // Remove a member from the room
   // Demonstrates: Set remove: operation
-  leave: member =>
-    self.members := self.members remove: member
-  
+  leave: member => self.members := self.members remove: member
+
   // Broadcast a message to all members
-  // Demonstrates: 
+  // Demonstrates:
   // - List concatenation (++) for history
   // - Set do: iteration with blocks
   // - Calling actor methods inside block (m receiveMessage:)
   say: text from: senderName =>
     self.history := self.history ++ #(senderName ++ ": " ++ text)
     self.members do: [:m | m receiveMessage: senderName ++ ": " ++ text]
-  
+
   // Return current online members
   // Demonstrates: Returning a Set of actor references
-  online =>
-    self.members
+  online => self.members
 
   // Return message history
   // Demonstrates: Returning a List of formatted strings
-  getHistory =>
-    self.history
+  getHistory => self.history
