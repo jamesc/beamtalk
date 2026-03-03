@@ -15,6 +15,7 @@ import {
 } from "vscode-languageclient/node";
 import { TranscriptViewProvider } from "./transcriptView";
 import { WorkspaceClient } from "./workspaceClient";
+import type { MethodItemNode } from "./workspaceTreeView";
 import { WorkspaceTreeDataProvider } from "./workspaceTreeView";
 
 let client: LanguageClient | undefined;
@@ -678,6 +679,66 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("beamtalk.reloadClass", (_node) => {
       // Class reload requires Phase 2 (method browser).
       void vscode.window.showInformationMessage("Reload class: not yet connected to a workspace.");
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.navigateToMethod", async (node: MethodItemNode) => {
+      const { classInfo, method } = node;
+
+      // Determine the source URI: file URI for user classes, virtual URI for stdlib.
+      // The runtime sends "unknown" when no source file is recorded (e.g. eval-defined classes).
+      const sourceFile = classInfo.source_file;
+      const hasSourceFile = sourceFile && sourceFile !== "unknown";
+      let uri: vscode.Uri;
+      if (hasSourceFile) {
+        uri = vscode.Uri.file(sourceFile);
+      } else {
+        uri = vscode.Uri.parse(`beamtalk-stdlib:///${classInfo.name}.bt`);
+      }
+
+      let document: vscode.TextDocument;
+      try {
+        document = await vscode.workspace.openTextDocument(uri);
+      } catch {
+        await vscode.window.showInformationMessage("Source not available");
+        return;
+      }
+
+      // Find the selector in the source file to get an approximate position for LSP.
+      const text = document.getText();
+      const selectorIndex = text.indexOf(method.selector);
+      if (selectorIndex === -1) {
+        await vscode.window.showInformationMessage("Source not available");
+        return;
+      }
+      const position = document.positionAt(selectorIndex);
+
+      // Use LSP go-to-definition to find the exact definition location.
+      // The provider may return Location[] or LocationLink[] depending on the LSP server.
+      let locations: Array<vscode.Location | vscode.LocationLink> | undefined;
+      try {
+        locations = await vscode.commands.executeCommand<
+          Array<vscode.Location | vscode.LocationLink>
+        >("vscode.executeDefinitionProvider", uri, position);
+      } catch {
+        // LSP not available — fall back to navigating to the selector position.
+      }
+
+      if (locations && locations.length > 0) {
+        const loc = locations[0];
+        const targetUri = "targetUri" in loc ? loc.targetUri : loc.uri;
+        const targetRange = "targetRange" in loc ? loc.targetRange : loc.range;
+        await vscode.window.showTextDocument(targetUri, { selection: targetRange });
+      } else if (locations !== undefined) {
+        // LSP responded but found no definition.
+        await vscode.window.showInformationMessage("Source not available");
+      } else {
+        // LSP not available: navigate directly to the selector position.
+        await vscode.window.showTextDocument(document, {
+          selection: new vscode.Range(position, position),
+        });
+      }
     })
   );
 

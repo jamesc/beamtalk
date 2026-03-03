@@ -7,6 +7,7 @@ import type {
   BindingsMap,
   ClassInfo,
   ConnectionState,
+  MethodInfo,
   PushEvent,
   WorkspaceClient,
 } from "./workspaceClient";
@@ -49,6 +50,19 @@ export interface ClassItemNode {
   readonly info: ClassInfo;
 }
 
+export interface MethodGroupNode {
+  readonly kind: "method-group";
+  readonly side: "instance" | "class";
+  readonly classInfo: ClassInfo;
+  readonly methods: MethodItemNode[];
+}
+
+export interface MethodItemNode {
+  readonly kind: "method-item";
+  readonly method: MethodInfo;
+  readonly classInfo: ClassInfo;
+}
+
 export interface InspectFieldNode {
   readonly kind: "inspect-field";
   readonly key: string;
@@ -65,6 +79,8 @@ export type WorkspaceNode =
   | BindingItemNode
   | ActorItemNode
   | ClassItemNode
+  | MethodGroupNode
+  | MethodItemNode
   | InspectFieldNode;
 
 // ─── Singleton section nodes (stable references for onDidChangeTreeData) ─────
@@ -109,6 +125,9 @@ export class WorkspaceTreeDataProvider
 
   /** Cached inspect results keyed by "actor:<pid>". */
   private readonly inspectCache = new Map<string, Record<string, unknown>>();
+
+  /** Cached methods results keyed by class name. */
+  private readonly methodsCache = new Map<string, MethodInfo[]>();
 
   private readonly disposeHandlers: Array<() => void> = [];
 
@@ -220,6 +239,7 @@ export class WorkspaceTreeDataProvider
       return;
     }
     this.inspectCache.clear();
+    this.methodsCache.clear();
     await this._fetchInitialData(this.client);
   }
 
@@ -254,6 +274,10 @@ export class WorkspaceTreeDataProvider
         return this._actorItem(element);
       case "class-item":
         return this._classItem(element);
+      case "method-group":
+        return this._methodGroupItem(element);
+      case "method-item":
+        return this._methodItem(element);
       case "inspect-field":
         return this._inspectFieldItem(element);
     }
@@ -304,6 +328,29 @@ export class WorkspaceTreeDataProvider
           return [];
         }
       }
+
+      case "class-item": {
+        const cached = this.methodsCache.get(element.info.name);
+        if (cached) {
+          return this._methodGroups(cached, element.info);
+        }
+        const activeClient = this.client;
+        if (!activeClient || this.connectionState !== "connected") {
+          return [];
+        }
+        try {
+          const methods = await activeClient.methods(element.info.name);
+          // Guard: client may have changed while methods() was in-flight
+          if (this.client !== activeClient) return [];
+          this.methodsCache.set(element.info.name, methods);
+          return this._methodGroups(methods, element.info);
+        } catch {
+          return [];
+        }
+      }
+
+      case "method-group":
+        return element.methods;
 
       default:
         return [];
@@ -400,13 +447,41 @@ export class WorkspaceTreeDataProvider
   }
 
   private _classItem(node: ClassItemNode): vscode.TreeItem {
-    const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.None);
+    const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.Collapsed);
     item.iconPath = new vscode.ThemeIcon("symbol-class");
     item.contextValue = "class-item";
     item.tooltip = node.info.source_file ? `Source: ${node.info.source_file}` : node.info.name;
     if (node.info.actor_count !== undefined && node.info.actor_count > 0) {
       item.description = `${node.info.actor_count} instance${node.info.actor_count !== 1 ? "s" : ""}`;
     }
+    return item;
+  }
+
+  private _methodGroupItem(node: MethodGroupNode): vscode.TreeItem {
+    const label = node.side === "instance" ? "Instance Methods" : "Class Methods";
+    const state =
+      node.methods.length > 0
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.None;
+    const item = new vscode.TreeItem(label, state);
+    item.iconPath = new vscode.ThemeIcon(
+      node.side === "instance" ? "symbol-method" : "symbol-namespace"
+    );
+    item.description = node.methods.length > 0 ? `(${node.methods.length})` : "(none)";
+    item.contextValue = "method-group";
+    return item;
+  }
+
+  private _methodItem(node: MethodItemNode): vscode.TreeItem {
+    const item = new vscode.TreeItem(node.method.selector, vscode.TreeItemCollapsibleState.None);
+    item.iconPath = new vscode.ThemeIcon("symbol-method");
+    item.contextValue = "method-item";
+    item.tooltip = node.method.name !== node.method.selector ? node.method.name : undefined;
+    item.command = {
+      command: "beamtalk.navigateToMethod",
+      title: "Go to Definition",
+      arguments: [node],
+    };
     return item;
   }
 
@@ -420,6 +495,27 @@ export class WorkspaceTreeDataProvider
   }
 
   // ─── Private: helpers ────────────────────────────────────────────────────
+
+  private _methodGroups(methods: MethodInfo[], classInfo: ClassInfo): MethodGroupNode[] {
+    const instance = methods.filter((m) => m.side === "instance");
+    const classSide = methods.filter((m) => m.side === "class");
+    const toItems = (ms: MethodInfo[]): MethodItemNode[] =>
+      ms.map((m) => ({ kind: "method-item" as const, method: m, classInfo }));
+    return [
+      {
+        kind: "method-group" as const,
+        side: "instance",
+        classInfo,
+        methods: toItems(instance),
+      },
+      {
+        kind: "method-group" as const,
+        side: "class",
+        classInfo,
+        methods: toItems(classSide),
+      },
+    ];
+  }
 
   private _inspectFields(state: Record<string, unknown>, parentId: string): InspectFieldNode[] {
     return Object.entries(state).map(([key, value]) => ({
@@ -461,6 +557,7 @@ export class WorkspaceTreeDataProvider
     this.actors = [];
     this.classes = [];
     this.inspectCache.clear();
+    this.methodsCache.clear();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -515,6 +612,8 @@ export class WorkspaceTreeDataProvider
         this._onDidChangeTreeData.fire(ACTORS_SECTION);
       }
     } else if (event.channel === "classes" && event.event === "loaded") {
+      // Invalidate cached methods for the reloaded class — its methods may have changed.
+      this.methodsCache.delete(event.data.class);
       // Re-fetch the full class list — the event only carries the new class name,
       // not the complete list with actor_count metadata.
       // Use a generation counter to discard stale responses when multiple
