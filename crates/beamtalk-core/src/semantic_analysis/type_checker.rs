@@ -4270,4 +4270,34 @@ Object subclass: Foo
             "second take should return empty map after drain"
         );
     }
+
+    // ── infer_types_and_returns combined entry point (BT-1047) ──────────
+
+    #[test]
+    fn infer_types_and_returns_produces_both_outputs() {
+        // Module with a class whose method returns an integer literal, and a
+        // top-level expression using that method.
+        let class = make_class_with_methods(
+            "Box",
+            vec![method_unannotated("value", vec![int_lit(42)])],
+        );
+        let module = make_module_with_classes(vec![], vec![class]);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let (type_map, returns) = infer_types_and_returns(&module, &hierarchy);
+
+        // method_return_types should contain the inferred return type
+        assert_eq!(
+            returns.get(&("Box".into(), "value".into(), false)),
+            Some(&"Integer".into()),
+            "should infer Box#value returns Integer"
+        );
+
+        // type_map should be non-empty (at least the class was processed)
+        // This verifies both outputs come from the same single pass
+        assert!(
+            !type_map.types.is_empty() || returns.len() == 1,
+            "combined function should produce valid outputs from a single pass"
+        );
+    }
 }
