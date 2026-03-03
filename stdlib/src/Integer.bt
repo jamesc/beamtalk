@@ -205,7 +205,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 3 timesRepeat: [Transcript show: "hi"]
   /// ```
-  timesRepeat: block: Block -> Nil => @intrinsic timesRepeat
+  timesRepeat: block: Block => @intrinsic timesRepeat
 
   /// Iterate from the receiver to `end`, evaluating `block` with each value.
   ///
@@ -213,7 +213,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 1 to: 3 do: [:i | Transcript show: i]
   /// ```
-  to: end do: block: Block -> Nil => @intrinsic toDo
+  to: end do: block: Block => @intrinsic toDo
 
   /// Iterate from the receiver to `end` by `step`, evaluating `block` with each value.
   ///
@@ -221,7 +221,7 @@ sealed Number subclass: Integer
   /// ```beamtalk
   /// 1 to: 10 by: 3 do: [:i | Transcript show: i]
   /// ```
-  to: end by: step do: block: Block -> Nil => @intrinsic toByDo
+  to: end by: step do: block: Block => @intrinsic toByDo
 
   /// Convert the receiver to a Float.
   ///
