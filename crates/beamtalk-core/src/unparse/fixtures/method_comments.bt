@@ -3,8 +3,7 @@
 
 /// A class demonstrating comment attachment — canonical formatter fixture.
 ///
-/// Demonstrates: leading line comments on methods, doc comments on methods,
-/// and trailing inline comments.
+/// Demonstrates: leading line comments on methods and doc comments on methods.
 Object subclass: CommentedMethods
   state: value = 0
 

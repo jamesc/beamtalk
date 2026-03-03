@@ -8,7 +8,7 @@
 Object subclass: BlockExamples
 
   /// Short inline block: fits within 80 columns.
-  shortBlock => self ifTrue: [42]
+  shortBlock => true ifTrue: [42]
 
   /// Block with a parameter: inline.
   eachItem: coll => coll do: [:x | x println]

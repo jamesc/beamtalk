@@ -2274,4 +2274,9 @@ mod tests {
     fn identity_fixture_standalone_methods() {
         assert_identity(include_str!("fixtures/standalone_methods.bt"));
     }
+
+    #[test]
+    fn identity_empty_source() {
+        assert_identity("");
+    }
 }

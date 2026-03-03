@@ -5,7 +5,7 @@
 ///
 /// Demonstrates: value class with doc comment, state declaration,
 /// and short single-expression methods.
-Object subclass: Greeter
+Value subclass: Greeter
   state: name = "World"
 
   /// Returns a personalised greeting string.
