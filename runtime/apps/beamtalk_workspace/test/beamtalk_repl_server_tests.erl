@@ -1528,11 +1528,9 @@ complete_op_session_field_is_in_msg_not_params_test() ->
 %% get_session_bindings called on it returns the same map as get_bindings/1.
 session_binding_lookup_pipeline_test() ->
     application:ensure_all_started(beamtalk_runtime),
-    %% 1. Start a real session shell
     SessionId = <<"test-pipeline-bt1045">>,
     {ok, ShellPid} = beamtalk_repl_shell:start_link(SessionId),
-
-    %% 2. Register the session in the ETS table (as beamtalk_ws_handler does)
+    DefaultPid = spawn(fun() -> timer:sleep(10000) end),
     Tid =
         case ets:whereis(beamtalk_sessions) of
             undefined ->
@@ -1541,24 +1539,20 @@ session_binding_lookup_pipeline_test() ->
                 beamtalk_sessions
         end,
     ets:insert(Tid, {SessionId, ShellPid}),
-
-    %% 3. Simulate what handle/4 does for a complete op with session parameter
-    DefaultPid = spawn(fun() -> timer:sleep(10000) end),
-    BindingPid = beamtalk_repl_ops_dev:resolve_binding_session(SessionId, DefaultPid),
-    SessionBindings = beamtalk_repl_ops_dev:get_session_bindings(BindingPid),
-
-    %% 4. Also fetch via get_bindings/1 so we can compare
-    {ok, DirectBindings} = beamtalk_repl_shell:get_bindings(ShellPid),
-
-    %% 5. Clean up
-    ets:delete(Tid, SessionId),
-    exit(DefaultPid, kill),
-    beamtalk_repl_shell:stop(ShellPid),
-
-    %% 6. The pipeline must have resolved to the shell (not the default)
-    %% and the bindings must match what get_bindings/1 returns directly.
-    ?assertEqual(ShellPid, BindingPid),
-    ?assertEqual(DirectBindings, SessionBindings).
+    try
+        %% Simulate what handle/4 does for a complete op with a session field
+        BindingPid = beamtalk_repl_ops_dev:resolve_binding_session(SessionId, DefaultPid),
+        SessionBindings = beamtalk_repl_ops_dev:get_session_bindings(BindingPid),
+        {ok, DirectBindings} = beamtalk_repl_shell:get_bindings(ShellPid),
+        %% Pipeline must resolve to the shell (not the default fallback)
+        %% and bindings must match what get_bindings/1 returns directly.
+        ?assertEqual(ShellPid, BindingPid),
+        ?assertEqual(DirectBindings, SessionBindings)
+    after
+        ets:delete(Tid, SessionId),
+        exit(DefaultPid, kill),
+        beamtalk_repl_shell:stop(ShellPid)
+    end.
 
 %%% tokenise_send_chain/1 tests (BT-1006)
 
