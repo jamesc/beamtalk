@@ -37,26 +37,32 @@ pub mod references_provider;
 pub mod signature_help_provider;
 
 use crate::ast::Module;
-use crate::semantic_analysis::{ClassHierarchy, infer_method_return_types};
+use crate::semantic_analysis::type_checker::TypeMap;
+use crate::semantic_analysis::{ClassHierarchy, infer_types_and_returns};
 
-/// Enriches a class hierarchy with method return types inferred from a module's source.
+/// Enriches a class hierarchy with method return types inferred from a module's source,
+/// and returns the [`TypeMap`] from the same single [`TypeChecker`] pass (BT-1047).
 ///
-/// Returns `Some(enriched_copy)` when inference produces any results, cloning the
-/// hierarchy and applying the inferred types. Returns `None` when there is nothing
-/// to infer, avoiding the allocation of an unnecessary clone.
+/// Returns `(Some(enriched_copy), type_map)` when inference produces any results,
+/// cloning the hierarchy and applying the inferred types. Returns `(None, type_map)`
+/// when there is nothing to infer, avoiding the allocation of an unnecessary clone.
+///
+/// The [`TypeMap`] is returned from the same pass so callers do not need to run
+/// a second `infer_types` call.
 ///
 /// Used by [`completion_provider`] and [`hover_provider`] so both share identical
 /// enrichment logic (BT-1014).
 pub(crate) fn enrich_hierarchy_with_inferred_returns(
     module: &Module,
     hierarchy: &ClassHierarchy,
-) -> Option<ClassHierarchy> {
-    let inferred = infer_method_return_types(module, hierarchy);
-    if inferred.is_empty() {
+) -> (Option<ClassHierarchy>, TypeMap) {
+    let (type_map, inferred) = infer_types_and_returns(module, hierarchy);
+    let enriched = if inferred.is_empty() {
         None
     } else {
         let mut h = hierarchy.clone();
         h.apply_inferred_return_types(&inferred);
         Some(h)
-    }
+    };
+    (enriched, type_map)
 }
