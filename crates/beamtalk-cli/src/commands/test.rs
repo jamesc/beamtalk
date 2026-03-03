@@ -620,11 +620,7 @@ fn collect_beam_module_names(ebin_dir: &Utf8Path) -> Result<Vec<String>> {
 /// starts there. Returns the directory path if found, `None` if no manifest exists
 /// anywhere in the ancestor chain.
 fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
-    let start_dir = if path.is_file() {
-        path.parent()?
-    } else {
-        path
-    };
+    let start_dir = if path.is_file() { path.parent()? } else { path };
 
     let mut current = start_dir.to_owned();
     loop {
@@ -1152,8 +1148,12 @@ pub fn run_tests(path: &str) -> Result<()> {
             workspace_mode: false,
             ..Default::default()
         };
-        super::build::build(pkg_root.as_str(), &build_options)
-            .wrap_err_with(|| format!("Failed to build package '{}' before running tests", pkg.name))?;
+        super::build::build(pkg_root.as_str(), &build_options).wrap_err_with(|| {
+            format!(
+                "Failed to build package '{}' before running tests",
+                pkg.name
+            )
+        })?;
         let modules = collect_beam_module_names(&ebin_dir)?;
         debug!(count = modules.len(), "Discovered package modules");
         package_modules.extend(modules);
