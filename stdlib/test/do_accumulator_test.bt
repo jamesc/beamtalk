@@ -13,7 +13,6 @@ TestCase subclass: DoAccumulatorTest
   // =========================================================================
   // sumList: — basic single-variable accumulation
   // =========================================================================
-
   testSumListBasic =>
     helper := DoAccumulatorValue new
     self assert: (helper sumList: #(1, 2, 3)) equals: 6
@@ -41,18 +40,23 @@ TestCase subclass: DoAccumulatorTest
   // =========================================================================
   // countMatching: — conditional accumulation (accumulator updated in branch)
   // =========================================================================
-
   testCountMatchingAllMatch =>
     helper := DoAccumulatorValue new
-    self assert: (helper countMatching: #(2, 4, 6) predicate: [:x | x > 0]) equals: 3
+    self assert: (helper countMatching: #(2, 4, 6) predicate: [:x |
+      x > 0
+    ]) equals: 3
 
   testCountMatchingNoneMatch =>
     helper := DoAccumulatorValue new
-    self assert: (helper countMatching: #(1, 2, 3) predicate: [:x | x > 10]) equals: 0
+    self assert: (helper countMatching: #(1, 2, 3) predicate: [:x |
+      x > 10
+    ]) equals: 0
 
   testCountMatchingSomeMatch =>
     helper := DoAccumulatorValue new
-    self assert: (helper countMatching: #(1, 2, 3, 4, 5) predicate: [:x | x > 2]) equals: 3
+    self assert: (helper countMatching: #(1, 2, 3, 4, 5) predicate: [:x |
+      x > 2
+    ]) equals: 3
 
   testCountMatchingEmptyList =>
     helper := DoAccumulatorValue new
@@ -61,7 +65,6 @@ TestCase subclass: DoAccumulatorTest
   // =========================================================================
   // findMax: — accumulator initialized from first element, updated via branch
   // =========================================================================
-
   testFindMaxBasic =>
     helper := DoAccumulatorValue new
     self assert: (helper findMax: #(3, 1, 4, 1, 5, 9, 2, 6)) equals: 9
@@ -85,7 +88,6 @@ TestCase subclass: DoAccumulatorTest
   // =========================================================================
   // findMin: — symmetric with findMax:
   // =========================================================================
-
   testFindMinBasic =>
     helper := DoAccumulatorValue new
     self assert: (helper findMin: #(3, 1, 4, 1, 5, 9, 2, 6)) equals: 1
@@ -101,7 +103,6 @@ TestCase subclass: DoAccumulatorTest
   // =========================================================================
   // productList: — multiplicative accumulation
   // =========================================================================
-
   testProductListBasic =>
     helper := DoAccumulatorValue new
     self assert: (helper productList: #(1, 2, 3, 4)) equals: 24
@@ -121,7 +122,6 @@ TestCase subclass: DoAccumulatorTest
   // =========================================================================
   // buildList: — list accumulation (non-numeric accumulator)
   // =========================================================================
-
   testBuildListBasic =>
     helper := DoAccumulatorValue new
     self assert: (helper buildList: #(1, 2, 3)) equals: #(1, 2, 3)
@@ -137,7 +137,6 @@ TestCase subclass: DoAccumulatorTest
   // =========================================================================
   // sumAndCount: — two local variables threaded through a single do: loop
   // =========================================================================
-
   testSumAndCountBasic =>
     helper := DoAccumulatorValue new
     result := helper sumAndCount: #(1, 2, 3, 4, 5)
@@ -160,26 +159,35 @@ TestCase subclass: DoAccumulatorTest
   // injectWithDo: — simulates abstract Collection.inject:into: pattern
   // (the core fix: do: block mutates `acc` which is read after the loop)
   // =========================================================================
-
   testInjectWithDoSum =>
     helper := DoAccumulatorValue new
-    self assert: (helper injectWithDo: #(1, 2, 3) initial: 0 into: [:acc :x | acc + x]) equals: 6
+    self assert: (helper injectWithDo: #(1, 2, 3) initial: 0 into: [:acc :x |
+      acc + x
+    ]) equals: 6
 
   testInjectWithDoProduct =>
     helper := DoAccumulatorValue new
-    self assert: (helper injectWithDo: #(1, 2, 3, 4) initial: 1 into: [:acc :x | acc * x]) equals: 24
+    self assert: (helper injectWithDo: #(1, 2, 3, 4) initial: 1 into: [:acc :x |
+      acc * x
+    ]) equals: 24
 
   testInjectWithDoStringConcat =>
     helper := DoAccumulatorValue new
-    self assert: (helper injectWithDo: #("a", "b", "c") initial: "" into: [:acc :x | acc ++ x]) equals: "abc"
+    self assert: (helper injectWithDo: #("a", "b", "c") initial: "" into: [:acc :x |
+      acc ++ x
+    ]) equals: "abc"
 
   testInjectWithDoEmptyList =>
     helper := DoAccumulatorValue new
-    self assert: (helper injectWithDo: #() initial: 42 into: [:acc :x | acc + x]) equals: 42
+    self assert: (helper injectWithDo: #() initial: 42 into: [:acc :x |
+      acc + x
+    ]) equals: 42
 
   testInjectWithDoSingleElement =>
     helper := DoAccumulatorValue new
-    self assert: (helper injectWithDo: #(10) initial: 5 into: [:acc :x | acc + x]) equals: 15
+    self assert: (helper injectWithDo: #(10) initial: 5 into: [:acc :x |
+      acc + x
+    ]) equals: 15
 
   // Non-commutative: verifies correct argument order is (accumulator, element)
   testInjectWithDoOrderMatters =>
@@ -192,12 +200,13 @@ TestCase subclass: DoAccumulatorTest
   testInjectWithDoSubtraction =>
     helper := DoAccumulatorValue new
     // ((10 - 1) - 2) - 3 = 4  (left-fold, not right-fold)
-    self assert: (helper injectWithDo: #(1, 2, 3) initial: 10 into: [:acc :x | acc - x]) equals: 4
+    self assert: (helper injectWithDo: #(1, 2, 3) initial: 10 into: [:acc :x |
+      acc - x
+    ]) equals: 4
 
   // =========================================================================
   // Multiple invocations — verifies that the value type is stateless between calls
   // =========================================================================
-
   testSumListIsStateless =>
     helper := DoAccumulatorValue new
     self assert: (helper sumList: #(1, 2, 3)) equals: 6

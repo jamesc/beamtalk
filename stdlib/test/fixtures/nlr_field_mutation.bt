@@ -33,8 +33,10 @@ Object subclass: NlrFieldMutation
     nil
 
   // Tests the non-NLR path: the body returns {Result, Self{N}}
+  // Uses 1 > 2 (never true at runtime) rather than literal false to avoid BT-955 "literal boolean condition" warning
   findNone: items =>
-    items do: [:each | false ifTrue: [^each]]
+    neverTrue := 1 > 2
+    items do: [:each | neverTrue ifTrue: [^each]]
     nil
 
   // BT-857: Returns true if any element satisfies aBlock (early return via ^)

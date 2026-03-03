@@ -44,12 +44,13 @@ TestCase subclass: KeywordMessagesTest
     self assert: (applyBlock value: [:x | x + 100] value: 42) equals: 142
 
   testMultiLineKeywordMessage =>
-    // BT-890: keyword messages should continue across newlines
-    result := true ifTrue: [42] ifFalse: [0]
+    // BT-890: keyword messages should continue across newlines (single-line until BT-890 lands)
+    flag := 3 > 1
+    result := flag ifTrue: [42] ifFalse: [0]
     self assert: result equals: 42
 
   testMultiLineInjectInto =>
-    // BT-890: multi-line inject:into: keyword message
+    // BT-890: multi-line inject:into: keyword message (single-line until BT-890 lands)
     sum := #(1, 2, 3) inject: 0 into: [:acc :each | acc + each]
     self assert: sum equals: 6
 

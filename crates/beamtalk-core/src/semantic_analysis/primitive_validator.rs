@@ -52,9 +52,7 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     "whileFalse",
     "repeat",
     // Iteration
-    "timesRepeat",
-    "toDo",
-    "toByDo",
+    // Note: timesRepeat/toDo/toByDo are no longer intrinsics (BT-1054)
     "listDo",
     "listCollect",
     "listSelect",

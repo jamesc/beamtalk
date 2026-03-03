@@ -632,13 +632,8 @@ mod tests {
             })
         );
 
-        // Integer timesRepeat: is a structural intrinsic
-        assert_eq!(
-            table.lookup("Integer", "timesRepeat:"),
-            Some(&PrimitiveBinding::StructuralIntrinsic {
-                name: "timesRepeat".to_string(),
-            })
-        );
+        // BT-1054: Integer timesRepeat: is now pure BT — no longer in the binding table
+        assert!(table.lookup("Integer", "timesRepeat:").is_none());
 
         // String length is a selector-based primitive
         assert_eq!(

@@ -15,14 +15,24 @@ Actor subclass: ActorCollectCounter
     self.count := self.count + 1
     item * 2
 
-  // collect: with self-send — needs state threading
-  doubleAll: items => items collect: [:item | self processItem: item]
+  // collect: with self-send — needs state threading.
+  // @expect all: this fixture intentionally sends `self` inside a collection block to
+  // test BT-904 state threading. The compiler correctly warns that re-entering the Actor
+  // gen_server via `calling_self` from within a HOF block can deadlock; we suppress it
+  // here because the deadlock risk is the exact behaviour under test.
+  doubleAll: items =>
+    @expect all
+    items collect: [:item | self processItem: item]
 
-  // select: with self-send — needs state threading
-  selectPositive: items => items select: [:item | self checkPositive: item]
+  // select: with self-send — same intentional pattern as doubleAll: above.
+  selectPositive: items =>
+    @expect all
+    items select: [:item | self checkPositive: item]
 
-  // reject: with self-send — needs state threading
-  rejectNegative: items => items reject: [:item | self checkNegative: item]
+  // reject: with self-send — same intentional pattern as doubleAll: above.
+  rejectNegative: items =>
+    @expect all
+    items reject: [:item | self checkNegative: item]
 
   // collect: with field assignment in block — direct field mutation
   doubleAllWithFieldMutation: items =>
@@ -31,11 +41,16 @@ Actor subclass: ActorCollectCounter
       item * 2
     ]
 
-  // collect: as last expression (no ^) — uses last-expression handler
-  doubleAllImplicit: items => items collect: [:item | self processItem: item]
+  // collect: as last expression (no ^) — uses last-expression handler.
+  // Same intentional self-capture pattern as doubleAll:.
+  doubleAllImplicit: items =>
+    @expect all
+    items collect: [:item | self processItem: item]
 
-  // do: with self-send — already works (has state threading)
+  // do: with self-send — already works (has state threading).
+  // Same intentional self-capture pattern as doubleAll:.
   countAll: items =>
+    @expect all
     items do: [:item | self processItem: item]
     self.count
 
