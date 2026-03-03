@@ -638,6 +638,36 @@ impl ClassHierarchy {
         None
     }
 
+    /// Walk the superclass chain looking for a sealed primary class-side method with the given selector.
+    /// Returns `Some((class_name, MethodInfo))` if found, `None` otherwise.
+    fn find_sealed_class_method_in_ancestors(
+        &self,
+        start_class: &str,
+        selector: &str,
+    ) -> Option<(EcoString, MethodInfo)> {
+        let mut current = Some(start_class.to_string());
+        let mut visited = HashSet::new();
+        while let Some(name) = current {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(info) = self.classes.get(name.as_str()) {
+                for method in &info.class_methods {
+                    if method.selector.as_str() == selector && method.is_sealed {
+                        return Some((info.name.clone(), method.clone()));
+                    }
+                }
+                current = info
+                    .superclass
+                    .as_ref()
+                    .map(std::string::ToString::to_string);
+            } else {
+                break;
+            }
+        }
+        None
+    }
+
     /// Returns a reference to the underlying class map.
     #[must_use]
     pub fn classes(&self) -> &HashMap<EcoString, ClassInfo> {
@@ -892,23 +922,36 @@ impl ClassHierarchy {
             // selectors coincide with sealed instance-side methods on Object, but are
             // dispatched through a separate runtime namespace.
             if let Some(ref superclass) = class.superclass {
-                for method in &class.methods {
-                    let selector = method.selector.name();
-                    let is_stdlib_builtin =
-                        stdlib_mode && Self::is_builtin_class(class.name.name.as_str());
-                    let is_abstract_stdlib = stdlib_mode && class.is_abstract;
-                    if is_stdlib_builtin || is_abstract_stdlib {
-                        continue;
+                let is_stdlib_builtin =
+                    stdlib_mode && Self::is_builtin_class(class.name.name.as_str());
+                let is_abstract_stdlib = stdlib_mode && class.is_abstract;
+                if !is_stdlib_builtin && !is_abstract_stdlib {
+                    for method in &class.methods {
+                        let selector = method.selector.name();
+                        if let Some((sealed_class, _)) = self
+                            .find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
+                        {
+                            diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Cannot override sealed method `{selector}` from class `{sealed_class}`"
+                                ),
+                                method.span,
+                            ));
+                        }
                     }
-                    if let Some((sealed_class, _)) =
-                        self.find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
-                    {
-                        diagnostics.push(Diagnostic::error(
-                            format!(
-                                "Cannot override sealed method `{selector}` from class `{sealed_class}`"
-                            ),
-                            method.span,
-                        ));
+                    for method in &class.class_methods {
+                        let selector = method.selector.name();
+                        if let Some((sealed_class, _)) = self.find_sealed_class_method_in_ancestors(
+                            superclass.name.as_str(),
+                            &selector,
+                        ) {
+                            diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Cannot override sealed method `{selector}` from class `{sealed_class}`"
+                                ),
+                                method.span,
+                            ));
+                        }
                     }
                 }
             }
@@ -1165,8 +1208,18 @@ mod tests {
         let methods = h.all_methods("Actor");
         let selectors: Vec<&str> = methods.iter().map(|m| m.selector.as_str()).collect();
 
-        // Actor's own methods
-        assert!(selectors.contains(&"spawn"));
+        // Actor instance methods (spawn/spawnWith: are class-side, not instance-side)
+        assert!(selectors.contains(&"stop"));
+        assert!(selectors.contains(&"isAlive"));
+        assert!(
+            !selectors.contains(&"spawn"),
+            "spawn must NOT be in instance methods"
+        );
+        assert!(
+            !selectors.contains(&"spawnWith:"),
+            "spawnWith: must NOT be in instance methods"
+        );
+        // Note: `new` is still in Object's instance methods and thus inherited here
 
         // Inherited from Object
         assert!(selectors.contains(&"isNil"));
@@ -1175,6 +1228,34 @@ mod tests {
         // Inherited from ProtoObject
         assert!(selectors.contains(&"class"));
         assert!(selectors.contains(&"=="));
+    }
+
+    #[test]
+    fn actor_spawn_methods_are_class_side() {
+        let h = ClassHierarchy::with_builtins();
+        let class_methods = h.all_class_methods("Actor");
+        let selectors: Vec<&str> = class_methods.iter().map(|m| m.selector.as_str()).collect();
+
+        assert!(
+            selectors.contains(&"spawn"),
+            "spawn must be in class_methods"
+        );
+        assert!(
+            selectors.contains(&"spawnWith:"),
+            "spawnWith: must be in class_methods"
+        );
+        assert!(selectors.contains(&"new"), "new must be in class_methods");
+        assert!(selectors.contains(&"new:"), "new: must be in class_methods");
+
+        // Instance methods must NOT appear on class side
+        assert!(
+            !selectors.contains(&"stop"),
+            "stop must NOT be in class_methods"
+        );
+        assert!(
+            !selectors.contains(&"isAlive"),
+            "isAlive must NOT be in class_methods"
+        );
     }
 
     #[test]
@@ -1371,8 +1452,13 @@ mod tests {
 
         // Local method
         assert!(h.resolves_selector("Counter", "increment"));
-        // Inherited from Actor
-        assert!(h.resolves_selector("Counter", "spawn"));
+        // spawn is class-side on Actor — verify via all_class_methods
+        assert!(
+            h.all_class_methods("Counter")
+                .iter()
+                .any(|m| m.selector.as_str() == "spawn"),
+            "Counter should inherit class-side spawn from Actor"
+        );
         // Inherited from Object
         assert!(h.resolves_selector("Counter", "respondsTo:"));
         // Inherited from ProtoObject
@@ -1584,6 +1670,39 @@ mod tests {
         }
     }
 
+    fn make_class_with_sealed_class_method(
+        name: &str,
+        superclass: &str,
+        method_name: &str,
+        sealed: bool,
+    ) -> ClassDefinition {
+        ClassDefinition {
+            name: Identifier::new(name, test_span()),
+            superclass: Some(Identifier::new(superclass, test_span())),
+            class_kind: ClassKind::from_superclass_name(superclass),
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: vec![],
+            methods: vec![],
+            class_methods: vec![MethodDefinition {
+                selector: crate::ast::MessageSelector::Unary(method_name.into()),
+                parameters: vec![],
+                body: vec![],
+                return_type: None,
+                is_sealed: sealed,
+                kind: MethodKind::Primary,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: test_span(),
+            }],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        }
+    }
+
     #[test]
     fn sealed_method_override_rejected() {
         // Parent defines sealed method "doCustomWork", child tries to override it
@@ -1677,8 +1796,8 @@ mod tests {
 
     #[test]
     fn builtin_actor_spawn_override_rejected() {
-        // Actor's spawn is sealed in builtins — subclass cannot override it
-        let child = make_class_with_sealed_method("MyActor", "Actor", "spawn", false);
+        // Actor's class-side spawn is sealed in builtins — subclass cannot override it
+        let child = make_class_with_sealed_class_method("MyActor", "Actor", "spawn", false);
 
         let module = Module {
             classes: vec![child],
@@ -1847,7 +1966,13 @@ mod tests {
         // Derived should inherit from Base -> Actor -> Object -> ProtoObject
         assert!(h.resolves_selector("Derived", "derivedMethod"));
         assert!(h.resolves_selector("Derived", "baseMethod"));
-        assert!(h.resolves_selector("Derived", "spawn"));
+        // spawn is class-side on Actor — verify via all_class_methods
+        assert!(
+            h.all_class_methods("Derived")
+                .iter()
+                .any(|m| m.selector.as_str() == "spawn"),
+            "Derived should inherit class-side spawn from Actor"
+        );
         assert!(h.resolves_selector("Derived", "class"));
     }
 

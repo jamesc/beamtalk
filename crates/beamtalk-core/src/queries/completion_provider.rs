@@ -542,6 +542,7 @@ fn find_receiver_in_expr(
         // If cursor is right after a message send, the result type is the receiver
         Expression::MessageSend {
             receiver,
+            selector,
             arguments,
             span,
             ..
@@ -557,6 +558,12 @@ fn find_receiver_in_expr(
             }
             // If cursor is just after the message send span, use the send's result type
             if offset >= span.end() && offset <= span.end() + 1 {
+                // `SomeClass class <TAB>` — `class` sent to a ClassReference stays on class-side
+                if selector.name() == "class" {
+                    if let Expression::ClassReference { name, .. } = receiver.as_ref() {
+                        return Some(ReceiverSide::Class(name.name.clone()));
+                    }
+                }
                 return type_map.get(*span).and_then(|ty| match ty {
                     InferredType::Known(n) => Some(ReceiverSide::Instance(n.clone())),
                     InferredType::Dynamic => None,
@@ -1379,6 +1386,94 @@ mod tests {
             abs.detail.as_deref().is_some_and(|d| d.contains("Integer")),
             "Detail should show receiver class Integer. Got: {:?}",
             abs.detail
+        );
+    }
+
+    // --- Actor class vs instance method set tests (BT-1056) ---
+
+    #[test]
+    fn actor_instance_completions_exclude_spawn_methods() {
+        // `c <TAB>` where c is an actor instance should NOT offer spawn/spawnWith: (class-side only)
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nc := Counter spawn\nc ";
+        let completions = completions_at(source, Position::new(6, 2));
+        let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
+        assert!(
+            !labels.contains(&"spawn"),
+            "Actor instance should NOT offer 'spawn'. Got: {labels:?}"
+        );
+        assert!(
+            !labels.contains(&"spawnWith:"),
+            "Actor instance should NOT offer 'spawnWith:'. Got: {labels:?}"
+        );
+        // Should still offer instance methods
+        assert!(
+            labels.contains(&"increment"),
+            "Actor instance should offer 'increment'. Got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn counter_class_reference_completions_include_spawn() {
+        // `Counter <TAB>` (ClassReference) should offer spawn/spawnWith:/new/new:
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nCounter ";
+        let completions = completions_at(source, Position::new(5, 8));
+        let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
+        assert!(
+            labels.contains(&"spawn"),
+            "Counter class-side should offer 'spawn'. Got: {labels:?}"
+        );
+        assert!(
+            labels.contains(&"spawnWith:"),
+            "Counter class-side should offer 'spawnWith:'. Got: {labels:?}"
+        );
+        assert!(
+            labels.contains(&"new"),
+            "Counter class-side should offer 'new'. Got: {labels:?}"
+        );
+        assert!(
+            labels.contains(&"new:"),
+            "Counter class-side should offer 'new:'. Got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn counter_class_message_completions_include_spawn() {
+        // `Counter class <TAB>` should offer the same class-side methods as `Counter <TAB>`
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nCounter class ";
+        let completions = completions_at(source, Position::new(5, 14));
+        let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
+        assert!(
+            labels.contains(&"spawn"),
+            "Counter class <TAB> should offer 'spawn'. Got: {labels:?}"
+        );
+        assert!(
+            labels.contains(&"spawnWith:"),
+            "Counter class <TAB> should offer 'spawnWith:'. Got: {labels:?}"
+        );
+        assert!(
+            labels.contains(&"new"),
+            "Counter class <TAB> should offer 'new'. Got: {labels:?}"
+        );
+        // Should NOT offer instance methods via `class` keyword
+        assert!(
+            !labels.contains(&"increment"),
+            "Counter class <TAB> should NOT offer instance method 'increment'. Got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn actor_instance_completions_include_instance_methods() {
+        // `c <TAB>` should offer stop/kill/isAlive (Actor instance methods)
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nc := Counter spawn\nc ";
+        let completions = completions_at(source, Position::new(6, 2));
+        let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
+        assert!(
+            labels.contains(&"stop"),
+            "Actor instance should offer 'stop'. Got: {labels:?}"
+        );
+        assert!(
+            labels.contains(&"isAlive"),
+            "Actor instance should offer 'isAlive'. Got: {labels:?}"
         );
     }
 }
