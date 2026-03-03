@@ -23,11 +23,14 @@ const TRIM_TO = Math.floor(MAX_LINES * 0.9);
 export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewType = "beamtalk.transcript";
 
+  private static readonly DEBOUNCE_MS = 50;
+
   private view: vscode.WebviewView | undefined;
   private accumText = "";
   private lineCount = 0;
   private readonly disposeHandlers: Array<() => void> = [];
   private disposed = false;
+  private debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
   // ─── WebviewViewProvider ─────────────────────────────────────────────────
 
@@ -62,6 +65,10 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
   }
 
   clear(): void {
+    if (this.debounceTimer !== undefined) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = undefined;
+    }
     this.accumText = "";
     this.lineCount = 0;
     if (this.view) {
@@ -72,6 +79,10 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.debounceTimer !== undefined) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = undefined;
+    }
     for (const d of this.disposeHandlers) d();
     this.disposeHandlers.length = 0;
   }
@@ -90,8 +101,15 @@ export class TranscriptViewProvider implements vscode.WebviewViewProvider, vscod
       this.lineCount = kept.length - 1;
     }
 
-    if (this.view) {
-      this.view.webview.html = this._buildHtml();
+    if (!this.view) return;
+
+    if (this.debounceTimer === undefined) {
+      this.debounceTimer = setTimeout(() => {
+        this.debounceTimer = undefined;
+        if (this.view) {
+          this.view.webview.html = this._buildHtml();
+        }
+      }, TranscriptViewProvider.DEBOUNCE_MS);
     }
   }
 
