@@ -149,8 +149,7 @@ abstract typed Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3, 4) reject: [:x | x > 2]  // => #(1, 2)
   /// ```
-  reject: block: Block -> Self =>
-    self select: [:each | (block value: each) not]
+  reject: block: Block -> Self => self select: [:each | (block value: each) not]
 
   /// Find the first element for which `block` returns true.
   ///

@@ -17,7 +17,6 @@ TestCase subclass: InjectIntoPureBtTest
   // =========================================================================
   // List inject:into: — basic correctness
   // =========================================================================
-
   testListSumBasic =>
     self assert: (#(1, 2, 3) inject: 0 into: [:acc :x | acc + x]) equals: 6
 
@@ -31,7 +30,9 @@ TestCase subclass: InjectIntoPureBtTest
     self assert: (#(7) inject: 0 into: [:acc :x | acc + x]) equals: 7
 
   testListStringConcat =>
-    self assert: (#("a", "b", "c") inject: "" into: [:acc :x | acc ++ x]) equals: "abc"
+    self assert: (#("a", "b", "c") inject: "" into: [:acc :x |
+      acc ++ x
+    ]) equals: "abc"
 
   // Non-commutative: verifies accumulator is the FIRST block argument.
   // Subtraction: ((10 - 1) - 2) - 3 = 4 (left-fold), NOT 10 - (1 - (2 - 3)) = 14.
@@ -58,7 +59,6 @@ TestCase subclass: InjectIntoPureBtTest
   // — exercises the abstract Collection.inject:into: body which calls
   //   `self do:` and mutates a local `acc` variable
   // =========================================================================
-
   testNumberListSumBasic =>
     col := NumberList new: #{#items => #(1, 2, 3)}
     self assert: (col inject: 0 into: [:acc :x | acc + x]) equals: 6
@@ -84,7 +84,9 @@ TestCase subclass: InjectIntoPureBtTest
 
   testNumberListBuildString =>
     col := NumberList new: #{#items => #(1, 2, 3)}
-    self assert: (col inject: "" into: [:acc :x | acc ++ x printString]) equals: "123"
+    self assert: (col inject: "" into: [:acc :x |
+      acc ++ x printString
+    ]) equals: "123"
 
   testNumberListCountElements =>
     col := NumberList new: #{#items => #(10, 20, 30, 40)}
@@ -99,7 +101,6 @@ TestCase subclass: InjectIntoPureBtTest
   // =========================================================================
   // Set inject:into: — inherits from Collection via do:
   // =========================================================================
-
   testSetSumOfThreeElements =>
     s := ((Set new add: 1) add: 2) add: 3
     self assert: (s inject: 0 into: [:acc :x | acc + x]) equals: 6
@@ -115,7 +116,6 @@ TestCase subclass: InjectIntoPureBtTest
   // =========================================================================
   // Dictionary inject:into: — iterates over VALUES
   // =========================================================================
-
   testDictionarySumOfValues =>
     d := Dictionary new: #{#a => 1, #b => 2, #c => 3}
     self assert: (d inject: 0 into: [:acc :v | acc + v]) equals: 6
@@ -132,7 +132,6 @@ TestCase subclass: InjectIntoPureBtTest
   // collect: on NumberList — calls inject:into: internally (regression)
   // After removing @primitive from inject:into:, collect: must still work
   // =========================================================================
-
   testNumberListCollect =>
     col := NumberList new: #{#items => #(1, 2, 3)}
     self assert: (col collect: [:x | x * 2]) equals: #(2, 4, 6)
@@ -152,7 +151,6 @@ TestCase subclass: InjectIntoPureBtTest
   // =========================================================================
   // select: on NumberList — calls inject:into: internally (regression)
   // =========================================================================
-
   testNumberListSelect =>
     col := NumberList new: #{#items => #(1, 2, 3, 4, 5)}
     self assert: (col select: [:x | x > 2]) equals: #(3, 4, 5)
@@ -172,7 +170,6 @@ TestCase subclass: InjectIntoPureBtTest
   // =========================================================================
   // reject: on NumberList — calls inject:into: internally (regression)
   // =========================================================================
-
   testNumberListReject =>
     col := NumberList new: #{#items => #(1, 2, 3, 4, 5)}
     self assert: (col reject: [:x | x > 3]) equals: #(1, 2, 3)
@@ -184,7 +181,6 @@ TestCase subclass: InjectIntoPureBtTest
   // =========================================================================
   // Chained inject:into: invocations — verifies no state leaks between calls
   // =========================================================================
-
   testMultipleCallsOnSameCollection =>
     col := NumberList new: #{#items => #(1, 2, 3, 4, 5)}
     sum := col inject: 0 into: [:acc :x | acc + x]
@@ -202,7 +198,6 @@ TestCase subclass: InjectIntoPureBtTest
   // =========================================================================
   // inject:into: with complex block bodies (multiple expressions in block)
   // =========================================================================
-
   testInjectWithComplexBlock =>
     // Block that checks a condition and branches before updating accumulator
     self assert: (#(1, 2, 3, 4, 5) inject: 0 into: [:acc :x |

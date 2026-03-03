@@ -68,10 +68,7 @@ TestCase subclass: DictionaryTest
     // Works for empty dictionary
     self assert: (#{} doWithKey: [:k :v | nil]) equals: nil
     // Works for multi-entry dictionary
-    self assert: (#{
-      #a => 1,
-      #b => 2
-    } doWithKey: [:k :v | nil]) equals: nil
+    self assert: (#{#a => 1, #b => 2} doWithKey: [:k :v | nil]) equals: nil
     // Block receives correct key (#a) and value (99) — raises if wrong values passed
     self assert: (#{#a => 99} doWithKey: [:k :v |
       (k =:= #a) ifFalse: [k error: "unexpected key"]
