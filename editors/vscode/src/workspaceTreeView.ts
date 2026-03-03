@@ -139,6 +139,11 @@ export class WorkspaceTreeDataProvider
 
   // ─── Public API ──────────────────────────────────────────────────────────
 
+  /** The active REPL session ID, or null if no REPL session is running. */
+  get currentReplSessionId(): string | null {
+    return this.replSessionId;
+  }
+
   /**
    * Set the REPL session ID captured from `beamtalk repl` stdout.
    * This session ID is used for bindings queries so the sidebar shows

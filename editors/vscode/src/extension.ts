@@ -13,9 +13,10 @@ import {
   RevealOutputChannelOn,
   type ServerOptions,
 } from "vscode-languageclient/node";
+import { InspectorPanel } from "./inspectorPanel";
 import { TranscriptViewProvider } from "./transcriptView";
 import { WorkspaceClient } from "./workspaceClient";
-import type { MethodItemNode } from "./workspaceTreeView";
+import type { ActorItemNode, BindingItemNode, MethodItemNode } from "./workspaceTreeView";
 import { WorkspaceTreeDataProvider } from "./workspaceTreeView";
 
 let client: LanguageClient | undefined;
@@ -335,6 +336,14 @@ function connectWorkspace(workspaceId: string): void {
   workspaceWsClient = newClient;
   workspaceTreeProvider?.setClient(newClient);
   transcriptViewProvider?.setClient(newClient);
+
+  // Close inspector panels for actors that have stopped.
+  newClient.onPush((event) => {
+    if (event.channel === "actors" && event.event === "stopped") {
+      InspectorPanel.notifyActorStopped(event.data.pid);
+    }
+  });
+
   newClient.connect();
   outputChannel?.info(`Connected to workspace: ${workspaceId}`);
 }
@@ -667,11 +676,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("beamtalk.inspectBinding", (_node) => {
-      // Rich binding inspector is Phase 2.
-      void vscode.window.showInformationMessage(
-        "Inspect binding: not yet connected to a workspace."
-      );
+    vscode.commands.registerCommand("beamtalk.inspectBinding", (node: BindingItemNode) => {
+      const sessionId =
+        workspaceTreeProvider?.currentReplSessionId ?? workspaceWsClient?.currentSessionId ?? null;
+      InspectorPanel.show(workspaceWsClient ?? null, {
+        kind: "binding",
+        name: node.name,
+        value: node.value,
+        sessionId,
+      });
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.inspectActor", (node: ActorItemNode) => {
+      InspectorPanel.show(workspaceWsClient ?? null, {
+        kind: "actor",
+        info: node.info,
+      });
     })
   );
 
@@ -762,6 +784,9 @@ export function deactivate(): Thenable<void> | undefined {
     clearTimeout(portDebounceTimer);
     portDebounceTimer = null;
   }
+  // Close all inspector panels before disposing the client so they don't
+  // attempt to re-fetch after the connection is gone.
+  InspectorPanel.disposeAll();
   // Providers are disposed via context.subscriptions; dispose() is idempotent
   // so no double-dispose risk, but we detach the client first to ensure no
   // late push events fire into disposed providers.

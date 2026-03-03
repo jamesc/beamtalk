@@ -74,6 +74,11 @@
         "icon": "$(search)"
       },
       {
+        "command": "beamtalk.inspectActor",
+        "title": "Inspect",
+        "icon": "$(search)"
+      },
+      {
         "command": "beamtalk.reloadClass",
         "title": "Reload Class",
         "icon": "$(sync)"
@@ -104,7 +109,17 @@
           "group": "inline"
         },
         {
+          "command": "beamtalk.inspectActor",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
+          "group": "inline"
+        },
+        {
           "command": "beamtalk.killActor",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
+          "group": "beamtalk@1"
+        },
+        {
+          "command": "beamtalk.inspectActor",
           "when": "view == beamtalk.workspaceExplorer && viewItem == actor-item",
           "group": "beamtalk@1"
         },
