@@ -115,12 +115,13 @@ Object subclass: SchemeReader
   /// ```
   parseString: chars acc: acc =>
     chars isEmpty ifTrue: [^self error: "Unterminated string literal"]
-    (chars first =:= """") ifTrue: [
-      (chars rest isEmpty not and: [
-        chars rest first =:= """"
-      ]) ifTrue: [^self parseString: chars rest rest acc: acc ++ """"]
-      ^self pairOf: acc rest: chars rest
-    ]
+    (chars first =:= """")
+      ifTrue: [
+        (chars rest isEmpty not and: [
+          chars rest first =:= """"
+        ]) ifTrue: [^self parseString: chars rest rest acc: acc ++ """"]
+        ^self pairOf: acc rest: chars rest
+      ]
     self parseString: chars rest acc: acc ++ chars first
 
   /// Parse a symbol by accumulating non-delimiter characters.
