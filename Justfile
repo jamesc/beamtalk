@@ -198,7 +198,7 @@ fmt-rust:
     @echo "✨ Formatting Rust code..."
     cargo fmt --all
 
-# Format all code (Rust + Erlang + JS + Beamtalk)
+# Format all code (Rust + Erlang + JS + Beamtalk stdlib/test sources)
 fmt: fmt-rust fmt-erlang fmt-js fmt-beamtalk
 
 # Check JS/TS formatting (Biome)

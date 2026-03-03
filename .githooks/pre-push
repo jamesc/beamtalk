@@ -7,9 +7,10 @@
 # - lint-rust (clippy + fmt-check-rust) always runs (~1s)
 # - lint-erlang (dialyzer) runs only if Erlang sources changed (~9s)
 # - lint-js runs only if JS/TS sources changed
+# - lint-beamtalk (fmt-check-beamtalk) runs only if .bt/.btscript sources changed
 #
-# Stamp files (.lint-erlang-stamp, .lint-js-stamp) track the last-linted
-# fingerprint of each language's sources.
+# Stamp files (.lint-erlang-stamp, .lint-js-stamp, .lint-beamtalk-stamp) track the
+# last-linted fingerprint of each language's sources.
 
 set -euo pipefail
 
@@ -75,12 +76,12 @@ else
   echo "$JS_FP" > "$JS_STAMP"
 fi
 
-BT_FP="$(fingerprint '*.bt')"
+BT_FP="$(fingerprint '*.bt' '*.btscript')"
 if stamp_matches "$BT_STAMP" "$BT_FP"; then
-  echo "⏭️  fmt-check-beamtalk: no Beamtalk changes since last lint, skipping"
+  echo "⏭️  lint-beamtalk: no Beamtalk changes since last lint, skipping"
 else
-  echo "🔍 Running fmt-check-beamtalk..."
-  just fmt-check-beamtalk
+  echo "🔍 Running lint-beamtalk..."
+  just lint-beamtalk
   echo "$BT_FP" > "$BT_STAMP"
 fi
 
