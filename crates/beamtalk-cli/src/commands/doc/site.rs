@@ -114,6 +114,10 @@ fn prose_nav(active_file: &str, prose_pages: &[(&str, &str, &str)]) -> String {
 
 /// Rewrite cross-references between prose docs from `.md` to `.html`.
 ///
+/// When the source filename is used as both the link text and href
+/// (e.g. `[beamtalk-foo.md](beamtalk-foo.md)`), the display text is replaced
+/// with the human-readable page title instead of leaving `.html` visible.
+///
 /// Also applies `extra_links` rewrites (e.g. ADR source paths → rendered URLs).
 fn rewrite_prose_links(
     markdown: &str,
@@ -121,13 +125,80 @@ fn rewrite_prose_links(
     extra_links: &[(String, String)],
 ) -> String {
     let mut result = markdown.to_string();
-    for &(source_file, output_file, _) in prose_pages {
-        result = result.replace(source_file, output_file);
+    for &(source_file, output_file, title) in prose_pages {
+        // Replace full markdown links first so the display text becomes the title
+        let md_link = format!("[{source_file}]({source_file})");
+        let titled_link = format!("[{title}]({output_file})");
+        result = result.replace(&md_link, &titled_link);
+        // Replace bare filename references only outside [..] brackets so the
+        // rewrite targets hrefs but not visible link text.
+        result = replace_outside_md_brackets(&result, source_file, output_file);
     }
+    // Apply extra_links (e.g. ADR paths and ADR number references) only outside
+    // fenced code blocks, to avoid corrupting code examples.
     for (source, dest) in extra_links {
-        result = result.replace(source.as_str(), dest.as_str());
+        result = rewrite_outside_code_fences(&result, source, dest);
     }
     result
+}
+
+/// Replace `source` with `dest` in `text`, skipping fenced code blocks and
+/// existing markdown link brackets `[...]` (to avoid creating nested links).
+fn rewrite_outside_code_fences(text: &str, source: &str, dest: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_fence = false;
+    for line in text.split('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_fence = !in_fence;
+            out.push_str(line);
+        } else if in_fence {
+            out.push_str(line);
+        } else {
+            out.push_str(&replace_outside_md_brackets(line, source, dest));
+        }
+        out.push('\n');
+    }
+    // split('\n') on a string not ending in '\n' adds an extra empty segment
+    if !text.ends_with('\n') && out.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
+/// Replace `source` with `dest` in `line`, skipping text inside `[...]` brackets
+/// so that existing markdown links are not corrupted.
+fn replace_outside_md_brackets(line: &str, source: &str, dest: &str) -> String {
+    let mut out = String::with_capacity(line.len() + dest.len());
+    let src = source.as_bytes();
+    let src_len = source.len();
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut depth = 0i32;
+    while i < len {
+        if bytes[i] == b'[' {
+            depth += 1;
+            out.push('[');
+            i += 1;
+        } else if bytes[i] == b']' {
+            depth = (depth - 1).max(0);
+            out.push(']');
+            i += 1;
+        } else if depth == 0 && i + src_len <= len && &bytes[i..i + src_len] == src {
+            out.push_str(dest);
+            i += src_len;
+        } else {
+            // Advance one Unicode code point
+            let c_start = i;
+            i += 1;
+            while i < len && !line.is_char_boundary(i) {
+                i += 1;
+            }
+            out.push_str(&line[c_start..i]);
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +213,8 @@ struct AdrInfo {
     slug: String,
     /// Human title extracted from the H1, e.g. `"No Compound Assignment in Beamtalk"`.
     title: String,
+    /// Status line extracted from the `## Status` section, e.g. `"Implemented (2026-02-08)"`.
+    status: String,
     /// Output HTML filename, e.g. `"0001-no-compound-assignment.html"`.
     output_file: String,
 }
@@ -173,6 +246,17 @@ pub(super) fn generate_adr_docs(
         return Ok(Vec::new());
     }
 
+    // Build intra-ADR "ADR NNNN" → link pairs (same directory — no ../adr/ prefix).
+    let intra_links: Vec<(String, String)> = adrs
+        .iter()
+        .map(|a| {
+            (
+                format!("ADR {}", a.number),
+                format!("[ADR {}]({})", a.number, a.output_file),
+            )
+        })
+        .collect();
+
     // Render each ADR page
     for adr in &adrs {
         let source_path = adr_source.join(format!("{}.md", adr.slug));
@@ -180,7 +264,11 @@ pub(super) fn generate_adr_docs(
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to read ADR '{}'", adr.slug))?;
         // Rewrite within-ADR links: sibling .md → .html (same directory)
-        let content = rewrite_adr_internal_links(&content, &adrs);
+        let mut content = rewrite_adr_internal_links(&content, &adrs);
+        // Rewrite "ADR NNNN" references to links (outside code fences and brackets)
+        for (source, dest) in &intra_links {
+            content = rewrite_outside_code_fences(&content, source, dest);
+        }
         render_adr_page(adr, &adrs, &content, &adr_output)?;
     }
 
@@ -191,15 +279,20 @@ pub(super) fn generate_adr_docs(
 
     // Return link-rewriting pairs for prose doc rendering.
     // Prose pages live in /docs/, so the relative path to /adr/ is ../adr/.
-    let links = adrs
-        .iter()
-        .map(|a| {
-            (
-                format!("ADR/{}.md", a.slug),
-                format!("../adr/{}", a.output_file),
-            )
-        })
-        .collect();
+    // Two pairs per ADR:
+    //   1. Full filename (e.g. "ADR/0004-slug.md") → relative HTML path
+    //   2. Short reference (e.g. "ADR 0004") → markdown link with title
+    let mut links = Vec::new();
+    for a in &adrs {
+        links.push((
+            format!("ADR/{}.md", a.slug),
+            format!("../adr/{}", a.output_file),
+        ));
+        links.push((
+            format!("ADR {}", a.number),
+            format!("[ADR {}](../adr/{})", a.number, a.output_file),
+        ));
+    }
     Ok(links)
 }
 
@@ -224,10 +317,12 @@ fn discover_adrs(adr_source: &Utf8Path) -> Result<Vec<AdrInfo>> {
             }
             let content = fs::read_to_string(&path).ok()?;
             let title = extract_adr_title(&content);
+            let status = extract_adr_status(&content);
             Some(AdrInfo {
                 number,
                 slug: stem,
                 title,
+                status,
                 output_file: format!("{}.html", path.file_stem()?),
             })
         })
@@ -255,6 +350,28 @@ fn extract_adr_title(content: &str) -> String {
         }
     }
     String::from("Untitled ADR")
+}
+
+/// Extract the status from an ADR's `## Status` section (first non-empty line after it).
+fn extract_adr_status(content: &str) -> String {
+    let mut in_status = false;
+    for line in content.lines() {
+        if line.trim() == "## Status" {
+            in_status = true;
+            continue;
+        }
+        if in_status {
+            if line.trim_start().starts_with('#') {
+                break;
+            }
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                // Return only up to the first " — " to keep it concise
+                return trimmed.split(" — ").next().unwrap_or(trimmed).to_string();
+            }
+        }
+    }
+    String::from("Unknown")
 }
 
 /// Rewrite sibling ADR links within an ADR page (`.md` → `.html`, same dir).
@@ -319,17 +436,26 @@ fn render_adr_index(adrs: &[AdrInfo], adr_output: &Utf8Path) -> Result<()> {
         "<p>Key design decisions with context, alternatives considered, \
          and consequences.</p>\n",
     );
-    html.push_str("<ul class=\"adr-list\">\n");
+    html.push_str(
+        "<table>\n\
+         <colgroup>\
+         <col style=\"width:5ch\">\
+         <col>\
+         <col style=\"width:18ch\">\
+         </colgroup>\n\
+         <thead>\n<tr><th>#</th><th>Decision</th><th>Status</th></tr>\n</thead>\n<tbody>\n",
+    );
     for adr in adrs {
         let _ = writeln!(
             html,
-            "<li><a href=\"{file}\">{num} — {title}</a></li>",
+            "<tr><td>{num}</td><td><a href=\"{file}\">{title}</a></td><td>{status}</td></tr>",
             file = adr.output_file,
             num = html_escape(&adr.number),
             title = html_escape(&adr.title),
+            status = html_escape(&adr.status),
         );
     }
-    html.push_str("</ul>\n");
+    html.push_str("</tbody>\n</table>\n");
     html.push_str("</main>\n");
     html.push_str(&page_footer_simple());
 
@@ -403,6 +529,10 @@ this.classList.remove('active');\"></div>\n";
 /// descriptions.
 fn landing_card_meta(output_file: &str) -> (&'static str, &'static str) {
     match output_file {
+        "installation.html" => (
+            "",
+            "Install the Beamtalk toolchain on Linux, macOS, or Windows and set up the VS Code extension.",
+        ),
         "language-features.html" => (
             "🔤",
             "Syntax, semantics, and worked examples for the message-based programming model.",
@@ -447,10 +577,10 @@ const LANDING_CODE_SNIPPET: &str = "Actor subclass: Counter
   increment => self.value := self.value + 1
   value => self.value
 
-c := Counter spawn.
-c increment.
-c increment.
-c value. \"=> 2\"";
+c := Counter spawn
+c increment
+c increment
+c value // => 2";
 
 /// Generate the site landing page at the root.
 pub(super) fn write_site_landing_page(
@@ -469,16 +599,19 @@ pub(super) fn write_site_landing_page(
 
     // Left column
     html.push_str("<div class=\"landing-hero-text\">\n");
-    html.push_str("<h1>Beamtalk</h1>\n");
+    html.push_str(
+        "<picture class=\"landing-logo\">\
+         <source srcset=\"images/beamtalk-logo-dark.svg\" media=\"(prefers-color-scheme: dark)\">\
+         <img src=\"images/beamtalk-logo-light.svg\" alt=\"Beamtalk\" height=\"64\">\
+         </picture>\n",
+    );
     html.push_str(
         "<p class=\"landing-tagline\">A live, message-based language built on the \
          BEAM VM. Smalltalk semantics, Erlang reliability, compiled to native \
          bytecode.</p>\n",
     );
     html.push_str("<div class=\"landing-cta\">\n");
-    html.push_str(
-        "<a href=\"docs/language-features.html\" class=\"btn-primary\">Get started</a>\n",
-    );
+    html.push_str("<a href=\"docs/installation.html\" class=\"btn-primary\">Get started</a>\n");
     html.push_str("<a href=\"apidocs/\" class=\"btn-secondary\">API Reference</a>\n");
     html.push_str("</div>\n"); // .landing-cta
     html.push_str("</div>\n"); // .landing-hero-text
@@ -506,7 +639,6 @@ pub(super) fn write_site_landing_page(
 
     // API Reference card
     html.push_str("<a href=\"apidocs/\" class=\"landing-card\">\n");
-    html.push_str("<span class=\"landing-card-emoji\">📚</span>\n");
     html.push_str("<h2>API Reference</h2>\n");
     html.push_str(
         "<p>Standard library classes — Actor, Block, Integer, String, \
@@ -516,7 +648,6 @@ pub(super) fn write_site_landing_page(
 
     // ADR card
     html.push_str("<a href=\"adr/\" class=\"landing-card\">\n");
-    html.push_str("<span class=\"landing-card-emoji\">📐</span>\n");
     html.push_str("<h2>Architecture Decisions</h2>\n");
     html.push_str(
         "<p>Key design decisions — context, alternatives considered, and consequences.</p>\n",
@@ -525,11 +656,10 @@ pub(super) fn write_site_landing_page(
 
     // Prose docs cards
     for &(_, file, title) in prose_pages {
-        let (emoji, desc) = landing_card_meta(file);
+        let (_, desc) = landing_card_meta(file);
         let _ = writeln!(
             html,
             "<a href=\"docs/{file}\" class=\"landing-card\">\n\
-             <span class=\"landing-card-emoji\">{emoji}</span>\n\
              <h2>{title}</h2>\n\
              <p>{desc}</p>\n\
              </a>"
@@ -539,10 +669,7 @@ pub(super) fn write_site_landing_page(
     html.push_str("</div>\n"); // .landing-cards
 
     html.push_str("<div class=\"landing-links\">\n");
-    html.push_str(
-        "<a href=\"https://github.com/jamesc/beamtalk\">View on GitHub</a> &nbsp;·&nbsp; \
-         <a href=\"docs/known-limitations.html\">Known Limitations</a>\n",
-    );
+    html.push_str("<a href=\"https://github.com/jamesc/beamtalk\">View on GitHub</a>\n");
     html.push_str("</div>\n");
 
     html.push_str("</main>\n");

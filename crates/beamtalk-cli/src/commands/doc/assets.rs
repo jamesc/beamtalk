@@ -18,9 +18,9 @@ const CSS_STYLESHEET: &str = r":root {
   --bg: #FAFAF8;
   --fg: #111827;
   --fg-muted: #6B7280;
-  --accent: #DC2626;
-  --accent-hover: #B91C1C;
-  --accent-bg: #FFF1F2;
+  --accent: #1E3A8A;
+  --accent-hover: #1D4ED8;
+  --accent-bg: #EFF6FF;
   --border: #E5E7EB;
   --code-bg: #18181B;
   --code-fg: #E4E4E7;
@@ -33,8 +33,8 @@ const CSS_STYLESHEET: &str = r":root {
   --shadow: 0 1px 3px rgba(0,0,0,0.07);
   --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
   --radius: 8px;
-  --badge-abstract-bg: #FFF1F2;
-  --badge-abstract-fg: #9B1C1C;
+  --badge-abstract-bg: #EFF6FF;
+  --badge-abstract-fg: #1E3A8A;
   /* Syntax highlighting — tuned for dark code blocks */
   --hl-keyword: #C084FC;
   --hl-string: #86EFAC;
@@ -51,9 +51,9 @@ const CSS_STYLESHEET: &str = r":root {
     --bg: #0A0A09;
     --fg: #FAFAF8;
     --fg-muted: #9CA3AF;
-    --accent: #FF6B74;
-    --accent-hover: #FF8A91;
-    --accent-bg: #450A0A;
+    --accent: #60A5FA;
+    --accent-hover: #93C5FD;
+    --accent-bg: #1E3A8A;
     --border: #27272A;
     --code-bg: #111110;
     --code-fg: #E4E4E7;
@@ -63,8 +63,8 @@ const CSS_STYLESHEET: &str = r":root {
     --nav-bg: #0A0A09;
     --shadow: 0 1px 3px rgba(0,0,0,0.4);
     --shadow-md: 0 4px 12px rgba(0,0,0,0.5);
-    --badge-abstract-bg: #450A0A;
-    --badge-abstract-fg: #FCA5A5;
+    --badge-abstract-bg: #1E3A8A;
+    --badge-abstract-fg: #93C5FD;
   }
 }
 
@@ -101,7 +101,7 @@ body {
   flex-shrink: 0;
 }
 .nav-logo:hover { color: var(--fg); text-decoration: none; }
-.nav-logo img { display: block; height: 28px; width: auto; }
+.nav-logo img { display: block; height: 32px; width: auto; }
 
 .nav-links {
   display: flex;
@@ -244,16 +244,13 @@ body {
   }
   .sidebar-toggle { display: block; }
   .main-content { margin-left: 0; padding: 2rem 1.25rem; padding-top: 3.5rem; }
-  .nav-links a:not(.nav-github):not(:first-child) { display: none; }
+  .nav-links a:not(.nav-github) { display: none; }
 
   /* Collapse TOC to single column */
   .toc ul { column-count: 1; }
 
   /* Make tables scroll horizontally */
   table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-
-  /* Scale hero heading */
-  .landing-hero-text h1 { font-size: 2rem; }
 
   /* Scale page headings */
   h1 { font-size: 1.5rem; }
@@ -275,8 +272,8 @@ body {
   .landing-cta { flex-direction: column; }
   .btn-primary, .btn-secondary { width: 100%; text-align: center; }
 
-  /* Smallest heading */
-  .landing-hero-text h1 { font-size: 1.75rem; }
+  /* Landing logo on smallest screens */
+  .landing-logo img { height: 36px; }
 
   /* Reduce method card padding */
   .method { padding: 1rem; }
@@ -284,8 +281,17 @@ body {
 }
 
 /* --- Typography --- */
-a { color: var(--accent); text-decoration: none; }
-a:hover { color: var(--accent-hover); text-decoration: underline; }
+a { color: inherit; text-decoration: none; }
+a:hover { color: inherit; }
+
+/* Underline links in running prose text, tables, and lists */
+.main-content p a,
+.method-doc p a,
+.class-doc p a,
+.readme p a,
+.main-content table a,
+.prose-content table a,
+.prose-content li a { text-decoration: underline; }
 
 h1 {
   font-size: 1.875rem;
@@ -349,11 +355,13 @@ th {
 tbody tr:hover { background: var(--sidebar-bg); }
 
 /* --- Lists --- */
-.class-doc ul, .class-doc ol, .method-doc ul, .method-doc ol, .readme ul, .readme ol {
+.class-doc ul, .class-doc ol, .method-doc ul, .method-doc ol, .readme ul, .readme ol,
+.prose-content ul, .prose-content ol {
   margin-bottom: 0.875rem;
   padding-left: 1.5rem;
 }
-.class-doc li, .method-doc li, .readme li { margin-bottom: 0.3rem; }
+.class-doc li, .method-doc li, .readme li,
+.prose-content li { margin-bottom: 0.3rem; }
 
 /* --- Breadcrumb --- */
 .breadcrumb {
@@ -483,7 +491,7 @@ tbody tr:hover { background: var(--sidebar-bg); }
 /* --- ADR list --- */
 .adr-list { list-style: none; padding: 0; margin: 1.5rem 0; }
 .adr-list li { margin: 0.4rem 0; font-size: 0.95rem; }
-.adr-list a { color: var(--accent); text-decoration: none; }
+.adr-list a { text-decoration: none; }
 .adr-list a:hover { text-decoration: underline; }
 
 /* --- Inherited methods --- */
@@ -541,7 +549,14 @@ footer {
 @media (max-width: 860px) {
   .landing-hero { grid-template-columns: 1fr; gap: 2.5rem; }
   .landing-content { padding: 2.5rem 1.5rem 2rem; }
+  .landing-logo img { height: 44px; }
 }
+
+.landing-logo {
+  display: block;
+  margin-bottom: 1.25rem;
+}
+.landing-logo img { height: 56px; width: auto; }
 
 .landing-hero-text h1 {
   font-size: 2.75rem;
@@ -610,7 +625,7 @@ footer {
   margin-left: 0.5rem;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.72rem;
-  color: #52525B;
+  color: #A1A1AA;
 }
 .code-window-body { padding: 1.25rem 1.5rem; }
 .code-window-body pre {
@@ -650,7 +665,6 @@ footer {
   transform: translateY(-1px);
   text-decoration: none;
 }
-.landing-card-emoji { font-size: 1.35rem; margin-bottom: 0.65rem; display: block; }
 .landing-card h2 {
   font-size: 0.95rem;
   margin-top: 0; margin-bottom: 0.4rem;
@@ -669,6 +683,7 @@ footer {
   font-size: 0.875rem;
   color: var(--fg-muted);
 }
+.landing-links a:hover { text-decoration: underline; }
 
 /* --- Prose pages --- */
 .prose-content { max-width: 760px; }
