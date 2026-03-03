@@ -45,8 +45,14 @@ handle(<<"eval">>, Params, Msg, SessionPid) ->
 handle(<<"clear">>, _Params, Msg, SessionPid) ->
     ok = beamtalk_repl_shell:clear_bindings(SessionPid),
     beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1);
-handle(<<"bindings">>, _Params, Msg, SessionPid) ->
-    {ok, Bindings} = beamtalk_repl_shell:get_bindings(SessionPid),
+handle(<<"bindings">>, Params, Msg, SessionPid) ->
+    %% If the client provides a `session` param, look up that session's PID from the
+    %% registry. This allows the VS Code extension (which has its own empty WS session)
+    %% to request bindings for the user's REPL terminal session instead.
+    TargetPid = beamtalk_session_table:resolve_pid(
+        maps:get(<<"session">>, Params, undefined), SessionPid
+    ),
+    {ok, Bindings} = beamtalk_repl_shell:get_bindings(TargetPid),
     %% ADR 0019 Phase 3: Filter out workspace convenience bindings from display.
     UserBindings = maps:without(beamtalk_workspace_config:binding_names(), Bindings),
     beamtalk_repl_protocol:encode_bindings(

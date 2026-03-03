@@ -37,7 +37,7 @@
     code_change/3
 ]).
 
--define(TABLE, beamtalk_instance_registry).
+-define(INSTANCE_REGISTRY, beamtalk_instance_registry).
 
 -type class_name() :: atom().
 
@@ -72,7 +72,7 @@ unregister(Class, Pid) when is_atom(Class), is_pid(Pid) ->
 %% check and when the caller uses the pid. Callers must handle `noproc` errors.
 -spec all(class_name()) -> [pid()].
 all(Class) when is_atom(Class) ->
-    [Pid || {_, Pid} <- ets:lookup(?TABLE, Class), erlang:is_process_alive(Pid)].
+    [Pid || {_, Pid} <- ets:lookup(?INSTANCE_REGISTRY, Class), erlang:is_process_alive(Pid)].
 
 %% @doc Count the live instances of a class.
 %% More efficient than `length(all(Class))` for large instance counts.
@@ -86,7 +86,7 @@ count(Class) when is_atom(Class) ->
             end
         end,
         0,
-        ets:lookup(?TABLE, Class)
+        ets:lookup(?INSTANCE_REGISTRY, Class)
     ).
 
 %% @doc Iterate all live instances of a class with a function.
@@ -103,7 +103,7 @@ each(Class, Fun) when is_atom(Class), is_function(Fun, 1) ->
 init([]) ->
     %% Create the ETS table owned by this process so it survives
     %% until the gen_server terminates
-    ?TABLE = ets:new(?TABLE, [named_table, public, bag]),
+    ?INSTANCE_REGISTRY = ets:new(?INSTANCE_REGISTRY, [named_table, public, bag]),
     {ok, #state{}}.
 
 %% @private
@@ -115,7 +115,7 @@ handle_call({register, Class, Pid}, _From, State) ->
             {reply, ok, State};
         false ->
             %% Insert into ETS
-            ets:insert(?TABLE, {Class, Pid}),
+            ets:insert(?INSTANCE_REGISTRY, {Class, Pid}),
             %% Monitor the process for auto-cleanup
             Ref = erlang:monitor(process, Pid),
             NewMonitors = maps:put(Key, Ref, State#state.monitors),
@@ -126,7 +126,7 @@ handle_call({unregister, Class, Pid}, _From, State) ->
     case maps:take(Key, State#state.monitors) of
         {Ref, NewMonitors} ->
             erlang:demonitor(Ref, [flush]),
-            ets:delete_object(?TABLE, {Class, Pid}),
+            ets:delete_object(?INSTANCE_REGISTRY, {Class, Pid}),
             {reply, ok, State#state{monitors = NewMonitors}};
         error ->
             %% Not registered, but that's ok
@@ -143,13 +143,13 @@ handle_cast(_Msg, State) ->
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     %% Find which classes this Pid was registered under
     %% This is more efficient than scanning all monitors when there are many instances
-    Matches = ets:match(?TABLE, {'$1', Pid}),
+    Matches = ets:match(?INSTANCE_REGISTRY, {'$1', Pid}),
     Classes = [Class || [Class] <- Matches],
 
     %% Remove from ETS
     lists:foreach(
         fun(Class) ->
-            ets:delete_object(?TABLE, {Class, Pid})
+            ets:delete_object(?INSTANCE_REGISTRY, {Class, Pid})
         end,
         Classes
     ),

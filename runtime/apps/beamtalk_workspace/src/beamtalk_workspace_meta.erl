@@ -37,7 +37,7 @@
     code_change/3
 ]).
 
--define(ETS_TABLE, beamtalk_workspace_registry).
+-define(WORKSPACE_META_TABLE, beamtalk_workspace_registry).
 % Debounce disk writes to every 2 seconds
 -define(PERSIST_DELAY_MS, 2000).
 
@@ -189,9 +189,11 @@ init(InitialMetadata) ->
     Now = erlang:system_time(second),
 
     %% Create ETS table for workspace registry (if not already exists)
-    case ets:whereis(?ETS_TABLE) of
+    case ets:whereis(?WORKSPACE_META_TABLE) of
         undefined ->
-            _Tid = ets:new(?ETS_TABLE, [named_table, public, set, {read_concurrency, true}]);
+            _Tid = ets:new(?WORKSPACE_META_TABLE, [
+                named_table, public, set, {read_concurrency, true}
+            ]);
         _Tid ->
             % Table already exists
             ok
@@ -362,10 +364,10 @@ schedule_persist(#state{persist_timer = OldTimer} = State) ->
 %% @private
 %% Store state in ETS for fast read access
 store_state_in_ets(State) ->
-    case ets:whereis(?ETS_TABLE) of
+    case ets:whereis(?WORKSPACE_META_TABLE) of
         % Table doesn't exist yet, skip
         undefined -> ok;
-        _Tid -> ets:insert(?ETS_TABLE, {metadata, State})
+        _Tid -> ets:insert(?WORKSPACE_META_TABLE, {metadata, State})
     end.
 
 %% @private

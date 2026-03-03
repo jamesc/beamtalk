@@ -182,7 +182,7 @@ websocket_info(
     State = #ws_state{session_mon = MonRef, session_id = SessionId}
 ) ->
     ?LOG_INFO("Session process terminated, closing WebSocket", #{session => SessionId}),
-    ets:delete(beamtalk_sessions, SessionId),
+    beamtalk_session_table:delete(SessionId),
     {[{close, 1011, <<"Session terminated">>}], State#ws_state{
         authenticated = false,
         session_id = undefined,
@@ -298,8 +298,8 @@ start_or_resume_session(undefined, State) ->
     create_session(SessionId, State);
 start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
     %% Try to resume existing session
-    case ets:lookup(beamtalk_sessions, ResumeId) of
-        [{ResumeId, Pid}] when is_pid(Pid) ->
+    case beamtalk_session_table:lookup(ResumeId) of
+        {ok, Pid} ->
             case is_process_alive(Pid) of
                 true ->
                     MonRef = erlang:monitor(process, Pid),
@@ -327,14 +327,14 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                     }};
                 false ->
                     %% Session process died — clean up and create new
-                    ets:delete(beamtalk_sessions, ResumeId),
+                    beamtalk_session_table:delete(ResumeId),
                     ?LOG_INFO("Resumed session expired, creating new", #{
                         old_session => ResumeId,
                         peer => State#ws_state.peer
                     }),
                     create_session(beamtalk_repl_server:generate_session_id(), State)
             end;
-        _ ->
+        error ->
             %% Session not found — create new
             ?LOG_INFO("Resume session not found, creating new", #{
                 requested_session => ResumeId,
@@ -353,7 +353,7 @@ create_session(SessionId, State) ->
     case beamtalk_session_sup:start_session(SessionId) of
         {ok, SessionPid} ->
             MonRef = erlang:monitor(process, SessionPid),
-            ets:insert(beamtalk_sessions, {SessionId, SessionPid}),
+            beamtalk_session_table:insert(SessionId, SessionPid),
             ?LOG_INFO("WebSocket auth succeeded, session created", #{
                 session => SessionId,
                 session_pid => SessionPid,

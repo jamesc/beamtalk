@@ -104,10 +104,10 @@ handle(<<"interrupt">>, _Params, Msg, SessionPid) ->
             undefined ->
                 SessionPid;
             TargetSession ->
-                case ets:lookup(beamtalk_sessions, TargetSession) of
-                    [{_, Pid}] ->
+                case beamtalk_session_table:lookup(TargetSession) of
+                    {ok, Pid} ->
                         Pid;
-                    [] ->
+                    error ->
                         ?LOG_WARNING("Interrupt target session not found", #{
                             session => TargetSession
                         }),
