@@ -1494,6 +1494,15 @@ get_session_bindings_dead_pid_returns_empty_test() ->
 %%%   create session → insert into ETS → verify resolve_pid → get_session_bindings
 
 %% BT-1045: The protocol decoder strips "session" from params (into Msg.session).
+%% Verify that a bindings op with session field has session in Msg, not in Params.
+bindings_op_session_field_is_in_msg_not_params_test() ->
+    Json = <<"{\"op\":\"bindings\",\"id\":\"t1\",\"session\":\"sid-abc\"}">>,
+    {ok, Msg} = beamtalk_repl_protocol:decode(Json),
+    Params = beamtalk_repl_protocol:get_params(Msg),
+    %% session must be in Msg, not in Params
+    ?assertEqual(<<"sid-abc">>, beamtalk_repl_protocol:get_session(Msg)),
+    ?assertNot(maps:is_key(<<"session">>, Params)).
+
 %% Verify that a complete op with session field has session in Msg, not in Params.
 complete_op_session_field_is_in_msg_not_params_test() ->
     Json =
