@@ -335,7 +335,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @doc Get all registered class names.
 %%
-%% Delegates to live_class_entries/0 to get live class pid entries,
+%% Delegates to beamtalk_class_registry:live_class_entries/0 to get live class pid entries,
 %% then extracts just the class names.
 -spec handle_all_classes() -> [atom()].
 handle_all_classes() ->
