@@ -6,9 +6,15 @@
 
 ## How It Works
 
-1. This template file is deployed on container start via `postStartCommand` in `devcontainer.json`
-2. During setup, `envsubst` copies this template to `~/.config/amp/settings.json` inside the container (no environment variable substitution currently occurs)
-3. Amp reads `~/.config/amp/settings.json` automatically on startup
+1. This repository provides `amp-settings.json` in `.devcontainer/` as a template for your Amp CLI config.
+2. Amp reads `~/.config/amp/settings.json` automatically on startup (if the file exists).
+3. Currently, there is **no** `postStartCommand` or setup script wired up to copy this template for you — you must create the config manually inside the container, for example:
+   ```bash
+   mkdir -p ~/.config/amp
+   cp .devcontainer/amp-settings.json ~/.config/amp/settings.json
+   ```
+
+The `~/.config/amp/` directory is persisted via a Docker volume (`beamtalk-amp-state`), so this only needs to be done once.
 
 ## Authentication
 
@@ -31,8 +37,7 @@ Amp automatically reads `AGENTS.md` (and `CLAUDE.md`) from the repository root a
 
 To change the default configuration:
 1. Edit `amp-settings.json` in `.devcontainer/`
-2. Rebuild the devcontainer
-3. The new config will be applied on next container start
+2. Re-copy it into the container: `cp .devcontainer/amp-settings.json ~/.config/amp/settings.json`
 
 ## License
 
