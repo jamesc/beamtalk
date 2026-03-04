@@ -188,7 +188,7 @@ pub enum MutationKind {
 /// assert_eq!(result.diagnostics.len(), 0);
 /// ```
 pub fn analyse(module: &Module) -> AnalysisResult {
-    analyse_full(module, &[], false, false)
+    analyse_full(module, &[], false, false, vec![])
 }
 
 /// Analyse a module with pre-defined variables (for REPL context).
@@ -202,7 +202,7 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// services. Pre-defining known variables is essential for REPL contexts where
 /// users build up state incrementally across multiple evaluations.
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
-    analyse_full(module, known_vars, false, false)
+    analyse_full(module, known_vars, false, false, vec![])
 }
 
 /// Analyse a module with compiler options controlling stdlib-specific behaviour.
@@ -215,6 +215,7 @@ pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -
         &[],
         options.stdlib_mode,
         options.skip_module_expression_lint,
+        vec![],
     )
 }
 
@@ -228,110 +229,11 @@ pub fn analyse_with_known_vars_and_classes(
     known_vars: &[&str],
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
 ) -> AnalysisResult {
-    analyse_full_with_pre_classes(module, known_vars, false, false, pre_loaded_classes)
+    analyse_full(module, known_vars, false, false, pre_loaded_classes)
 }
 
 /// Internal: full analysis with all knobs.
 fn analyse_full(
-    module: &Module,
-    known_vars: &[&str],
-    stdlib_mode: bool,
-    skip_module_expression_lint: bool,
-) -> AnalysisResult {
-    let mut result = AnalysisResult::new();
-
-    // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
-    let (hierarchy_result, hierarchy_diags) =
-        ClassHierarchy::build_with_options(module, stdlib_mode);
-    // build_with_options is infallible; propagate any diagnostics it produced
-    result.class_hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
-    result.diagnostics.extend(hierarchy_diags);
-
-    // Phase 1: Name Resolution
-    let mut name_resolver = NameResolver::new();
-    name_resolver.define_known_vars(known_vars, module.span);
-    name_resolver.resolve_module(module);
-    result.diagnostics.extend(name_resolver.take_diagnostics());
-
-    // Extract scope from NameResolver to pass to Analyser
-    // This eliminates duplicate scope building - the scope already contains:
-    // - Built-in identifiers (true, false, nil)
-    // - Known REPL variables
-    // - All variable bindings from name resolution
-    let scope = name_resolver.into_scope();
-
-    // Phase 2: Type Checking (ADR 0025 Phase 1 — zero-syntax inference)
-    let mut type_checker = TypeChecker::new();
-    type_checker.check_module(module, &result.class_hierarchy);
-    result.diagnostics.extend(type_checker.take_diagnostics());
-    let type_map = type_checker.take_type_map();
-
-    // Phase 3: Block Context Analysis (captures, mutations, context determination)
-    // Receive scope from NameResolver and TypeMap from TypeChecker
-    let mut analyser = Analyser::with_scope(scope, type_map);
-
-    analyser.analyse_module(module);
-    result.diagnostics.extend(analyser.result.diagnostics);
-    result.block_info = analyser.result.block_info;
-
-    // Phase 4: Abstract instantiation check (BT-105)
-    validators::check_abstract_instantiation(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
-
-    // Phase 5: Class-aware diagnostics (BT-563)
-    validators::check_actor_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
-    validators::check_new_field_names(module, &result.class_hierarchy, &mut result.diagnostics);
-    validators::check_class_variable_access(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
-    validators::check_empty_method_bodies(module, &mut result.diagnostics);
-    validators::check_value_slot_assignment(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
-    // BT-919: Reject cast (!) on value types
-    validators::check_cast_on_value_type(module, &result.class_hierarchy, &mut result.diagnostics);
-    // BT-950: Warn on redundant assignment (x := x)
-    validators::check_redundant_assignment(module, &mut result.diagnostics);
-    // BT-953: Hint on self capture in collection HOF blocks (deadlock risk)
-    validators::check_self_capture_in_actor_block(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
-    // BT-955: Warn on literal boolean conditions (always true / always false)
-    validators::check_literal_boolean_condition(module, &mut result.diagnostics);
-    // BT-1052: Error on -> Nil return type on Value instance methods
-    validators::check_value_nil_return(module, &result.class_hierarchy, &mut result.diagnostics);
-
-    // BT-951/BT-979: Lint on effect-free statements (suppressed during normal compile).
-    // Module-level expressions are checked by default; set skip_module_expression_lint
-    // to opt out (bootstrap-test compilation uses this).
-    validators::check_effect_free_statements(
-        module,
-        &mut result.diagnostics,
-        skip_module_expression_lint,
-    );
-
-    // Phase 6: Module-level validation (BT-349)
-    let module_diags = module_validator::validate_single_class(module);
-    result.diagnostics.extend(module_diags);
-
-    result
-}
-
-/// Internal: full analysis with pre-loaded class hierarchy injection (ADR 0050 Phase 4).
-///
-/// Mirrors `analyse_full` exactly, but injects `pre_loaded_classes` into the
-/// hierarchy after Phase 0 (build) and before Phase 2 (`TypeChecker`). This allows
-/// REPL-session user classes to be visible to the `TypeChecker`.
-fn analyse_full_with_pre_classes(
     module: &Module,
     known_vars: &[&str],
     stdlib_mode: bool,
@@ -348,9 +250,11 @@ fn analyse_full_with_pre_classes(
     result.diagnostics.extend(hierarchy_diags);
 
     // ADR 0050 Phase 4: inject REPL-session class metadata before TypeChecking
-    result
-        .class_hierarchy
-        .add_from_beam_meta(pre_loaded_classes);
+    if !pre_loaded_classes.is_empty() {
+        result
+            .class_hierarchy
+            .add_from_beam_meta(pre_loaded_classes);
+    }
 
     // Phase 1: Name Resolution
     let mut name_resolver = NameResolver::new();
