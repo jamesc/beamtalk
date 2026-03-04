@@ -184,21 +184,29 @@ open_port() ->
 %%   {exit_status, Status}  — port exited before responding
 %%   timeout                — port did not respond within Timeout ms
 %%   port_not_available     — port is closed (badarg from port_command)
+%%   decode_error           — response could not be decoded (unexpected atoms)
 -spec send_port_request(port(), map(), timeout()) ->
-    {ok, term()} | {exit_status, non_neg_integer()} | timeout | port_not_available.
+    {ok, term()} | {exit_status, non_neg_integer()} | timeout | port_not_available | decode_error.
 send_port_request(Port, Request, Timeout) ->
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
         true ->
             receive
                 {Port, {data, ResponseBin}} ->
-                    %% [safe] prevents atom exhaustion: all response atoms are
-                    %% literals in this module and guaranteed to exist.
-                    {ok, binary_to_term(ResponseBin, [safe])};
+                    try binary_to_term(ResponseBin, [safe]) of
+                        %% [safe] prevents atom exhaustion: all response atoms are
+                        %% literals in this module and guaranteed to exist.
+                        Response -> {ok, Response}
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error", #{port => Port}),
+                            decode_error
+                    end;
                 {Port, {exit_status, Status}} ->
                     {exit_status, Status}
             after Timeout ->
-                flush_port_messages(Port),
+                %% Close the port so any late response cannot poison the next request.
+                catch port_close(Port),
                 timeout
             end
     catch
@@ -253,7 +261,9 @@ do_compile(Port, Source, Options) ->
         timeout ->
             {error, [<<"Compiler port timed out">>]};
         port_not_available ->
-            {error, [<<"Compiler port is not available">>]}
+            {error, [<<"Compiler port is not available">>]};
+        decode_error ->
+            {error, [<<"Compiler port response is malformed">>]}
     end.
 
 %% Send a diagnostics request via the port.
@@ -268,7 +278,9 @@ do_diagnostics(Port, Source) ->
         timeout ->
             {error, [<<"Compiler port timed out">>]};
         port_not_available ->
-            {error, [<<"Compiler port is not available">>]}
+            {error, [<<"Compiler port is not available">>]};
+        decode_error ->
+            {error, [<<"Compiler port response is malformed">>]}
     end.
 
 %% Send a version request via the port.
@@ -282,7 +294,9 @@ do_version(Port) ->
         timeout ->
             {error, timeout};
         port_not_available ->
-            {error, port_not_available}
+            {error, port_not_available};
+        decode_error ->
+            {error, decode_error}
     end.
 
 %% @private Drain any stale messages from a port after a timeout.

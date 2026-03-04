@@ -102,16 +102,21 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
         true ->
             receive
                 {Port, {data, ResponseBin}} ->
-                    %% [safe] prevents atom exhaustion: all response atoms are
-                    %% literals in this module and guaranteed to exist.
-                    Response = binary_to_term(ResponseBin, [safe]),
-                    handle_response(Response);
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response ->
+                            handle_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error", #{port => Port}),
+                            {error, [<<"Compiler port response is malformed">>]}
+                    end;
                 {Port, {exit_status, Status}} ->
                     ?LOG_ERROR("Compiler port exited", #{status => Status}),
                     {error, [<<"Compiler port exited unexpectedly">>]}
             after 30000 ->
                 ?LOG_ERROR("Compiler port timeout", #{port => Port}),
-                flush_port_messages(Port),
+                %% Close the port so any late response cannot poison the next request.
+                catch port_close(Port),
                 {error, [<<"Compiler port timed out">>]}
             end
     catch
@@ -126,17 +131,6 @@ close(Port) ->
     port_close(Port).
 
 %%% Internal functions
-
-%% @private Drain any stale messages from a port after a timeout.
-%% Prevents late responses from being consumed by the next request's receive.
--spec flush_port_messages(port()) -> ok.
-flush_port_messages(Port) ->
-    receive
-        {Port, {data, _}} -> flush_port_messages(Port);
-        {Port, {exit_status, _}} -> ok
-    after 0 ->
-        ok
-    end.
 
 %% @private Handle ETF response from the compiler port.
 %% BT-571: Extended to handle class_definition and method_definition responses
