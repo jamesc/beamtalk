@@ -7,6 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { findMethodDeclaration } from "./textUtils";
 import {
   LanguageClient,
   type LanguageClientOptions,
@@ -550,6 +551,8 @@ async function captureSessionId(
 }
 
 
+export { findMethodDeclaration } from "./textUtils";
+
 function replCommand(): string {
   const config = vscode.workspace.getConfiguration("beamtalk");
   const ephemeral = config.get<boolean>("repl.ephemeral", false);
@@ -870,39 +873,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
 
-      // Find the method declaration position via regex.
-      // Note: executeDocumentSymbolProvider is not used here because openTextDocument
-      // does not trigger textDocument/didOpen to the LSP — symbols are only available
-      // for files already open in an editor. The regex is the reliable primary approach.
+      // Find the method declaration position by scanning line by line.
+      // Beamtalk declarations: `class selector =>` (class-side), `selector =>` (instance-side).
       // LSP go-to-definition is used *after* showTextDocument below for precise navigation.
       const text = document.getText();
-      const escaped = method.selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      // `method <selector>` matches both instance (`method foo`) and class-side
-      // (`class method foo`) declarations since both contain `method <selector>`.
-      const pattern = new RegExp(`\\bmethod\\s+(${escaped})(?=\\s|$)`, "g");
-      let position: vscode.Position | undefined;
-      let methodMatch: RegExpExecArray | null;
-      while ((methodMatch = pattern.exec(text)) !== null) {
-        // Skip matches on comment lines (Beamtalk uses // comments).
-        const lineStart = text.lastIndexOf("\n", methodMatch.index) + 1;
-        const linePrefix = text.slice(lineStart, methodMatch.index).trimStart();
-        if (!linePrefix.startsWith("//")) {
-          position = document.positionAt(
-            methodMatch.index + methodMatch[0].indexOf(method.selector)
-          );
-          break;
-        }
+      let declOffset = findMethodDeclaration(text, method.selector, method.side);
+      if (declOffset === -1) declOffset = text.indexOf(method.selector);
+      if (declOffset === -1) {
+        await vscode.window.showInformationMessage(
+          `Method '${method.selector}' not found in source for ${classInfo.name}`
+        );
+        return;
       }
-      if (!position) {
-        const idx = text.indexOf(method.selector);
-        if (idx === -1) {
-          await vscode.window.showInformationMessage(
-            `Method '${method.selector}' not found in source for ${classInfo.name}`
-          );
-          return;
-        }
-        position = document.positionAt(idx);
-      }
+      const position = document.positionAt(declOffset);
 
       // Try LSP go-to-definition for a precise location. If LSP is unavailable or
       // returns no results, fall back to the text-search position — don't fail.
