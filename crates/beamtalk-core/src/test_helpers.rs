@@ -23,7 +23,7 @@ pub fn unique_temp_dir(prefix: &str) -> PathBuf {
 /// Test-only helpers: parsing, codegen assertions, and AST builders.
 ///
 /// Gated on `#[cfg(any(test, feature = "test"))]` to avoid prod binary
-/// bloat while allowing dependent crates to opt in via the `test-support` Cargo
+/// bloat while allowing dependent crates to opt in via the `test` Cargo
 /// feature in their `[dev-dependencies]`.
 #[cfg(any(test, feature = "test"))]
 pub mod test_support {
