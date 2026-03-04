@@ -658,7 +658,8 @@ export class WorkspaceTreeDataProvider
   private _classItem(node: ClassItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.Collapsed);
     item.iconPath = new vscode.ThemeIcon("symbol-class");
-    item.contextValue = "class-item";
+    const hasSource = !!node.info.source_file && node.info.source_file !== "unknown";
+    item.contextValue = hasSource ? "class-item" : "class-item-no-source";
     if (node.info.actor_count !== undefined && node.info.actor_count > 0) {
       item.description = `${node.info.actor_count} instance${node.info.actor_count !== 1 ? "s" : ""}`;
     }
@@ -683,12 +684,15 @@ export class WorkspaceTreeDataProvider
   private _methodItem(node: MethodItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.method.selector, vscode.TreeItemCollapsibleState.None);
     item.iconPath = new vscode.ThemeIcon("symbol-method");
-    item.contextValue = "method-item";
-    item.command = {
-      command: "beamtalk.navigateToMethod",
-      title: "Go to Definition",
-      arguments: [node],
-    };
+    const hasSource = !!node.classInfo.source_file && node.classInfo.source_file !== "unknown";
+    item.contextValue = hasSource ? "method-item" : "method-item-no-source";
+    if (hasSource) {
+      item.command = {
+        command: "beamtalk.navigateToMethod",
+        title: "Go to Definition",
+        arguments: [node],
+      };
+    }
     return item;
   }
 
@@ -708,12 +712,15 @@ export class WorkspaceTreeDataProvider
   private _stateVarItem(node: StateVarItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.stateVar.name, vscode.TreeItemCollapsibleState.None);
     item.iconPath = new vscode.ThemeIcon("symbol-field");
-    item.contextValue = "state-item";
-    item.command = {
-      command: "beamtalk.navigateToStateVar",
-      title: "Go to Definition",
-      arguments: [node],
-    };
+    const hasSource = !!node.classInfo.source_file && node.classInfo.source_file !== "unknown";
+    item.contextValue = hasSource ? "state-item" : "state-item-no-source";
+    if (hasSource) {
+      item.command = {
+        command: "beamtalk.navigateToStateVar",
+        title: "Go to Definition",
+        arguments: [node],
+      };
+    }
     return item;
   }
 
