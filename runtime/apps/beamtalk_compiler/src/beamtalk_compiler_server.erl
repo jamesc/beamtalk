@@ -137,7 +137,7 @@ resolve_completion_type(Expression) ->
         gen_server:call(?MODULE, {resolve_completion_type, Expression}, 5000)
     catch
         exit:{noproc, _} -> {error, type_unknown};
-        exit:{timeout, _} -> {error, type_unknown}
+        exit:timeout -> {error, type_unknown}
     end.
 
 %% @doc Register a class with its metadata in the compiler server cache.

@@ -172,6 +172,11 @@ resolve_completion_type(Port, Expression, ClassHierarchy) ->
                     {error, type_unknown}
             after 5000 ->
                 %% Use a shorter timeout for completion — latency budget per ADR 0045.
+                ?LOG_ERROR("Compiler port timeout during completion type resolution", #{
+                    port => Port
+                }),
+                %% Close the port so any late response cannot poison the next request.
+                catch port_close(Port),
                 {error, type_unknown}
             end
     catch
