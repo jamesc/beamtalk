@@ -76,6 +76,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0047](0047-return-type-arrow-token-disambiguation.md) | Return Type Arrow Token Disambiguation | Accepted | 2026-03-02 |
 | [0048](0048-class-side-method-syntax.md) | Class-Side Method Syntax Redesign | Proposed | 2026-03-02 |
 | [0049](0049-remove-method-level-sealed.md) | Remove Method-Level `sealed` — Infer Protection from `@primitive`/`@intrinsic` | Proposed | 2026-03-02 |
+| [0050](0050-incremental-compiler-class-hierarchy.md) | Incremental Compiler ClassHierarchy via BEAM Metadata Streaming | Proposed | 2026-03-04 |
 
 ## Creating New ADRs
 
