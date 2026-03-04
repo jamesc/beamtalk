@@ -2051,10 +2051,13 @@ impl CoreErlangGenerator {
         // field_types: map of field name → declared type atom or 'none'
         let field_types_doc = Self::meta_field_types_map(&class.state);
 
+        // Compute auto-slot methods once and share across method_info / class_method_info
+        let auto =
+            crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class);
         let method_info_doc =
-            Self::meta_method_info_map(&Self::meta_instance_method_entries(class));
+            Self::meta_method_info_map(&Self::meta_instance_method_entries(class, auto.as_ref()));
         let class_method_info_doc =
-            Self::meta_method_info_map(&Self::meta_class_method_entries(class));
+            Self::meta_method_info_map(&Self::meta_class_method_entries(class, auto.as_ref()));
 
         Ok(docvec![
             "'__beamtalk_meta'/0 = fun () ->\n",
@@ -2173,16 +2176,17 @@ impl CoreErlangGenerator {
 
     /// Collects `MethodInfoEntry` tuples for all primary instance methods of `class`,
     /// including auto-generated slot methods for Value subclasses.
-    fn meta_instance_method_entries(class: &ClassDefinition) -> Vec<MethodInfoEntry> {
+    fn meta_instance_method_entries(
+        class: &ClassDefinition,
+        auto: Option<&crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods>,
+    ) -> Vec<MethodInfoEntry> {
         let mut entries: Vec<MethodInfoEntry> = class
             .methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
             .map(Self::meta_method_entry)
             .collect();
-        if let Some(auto) =
-            crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class)
-        {
+        if let Some(auto) = auto {
             use crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods;
             for field in &auto.getters {
                 entries.push((field.clone(), 0, None, vec![]));
@@ -2201,16 +2205,17 @@ impl CoreErlangGenerator {
 
     /// Collects `MethodInfoEntry` tuples for all primary class methods of `class`,
     /// including the auto-generated keyword constructor for Value subclasses.
-    fn meta_class_method_entries(class: &ClassDefinition) -> Vec<MethodInfoEntry> {
+    fn meta_class_method_entries(
+        class: &ClassDefinition,
+        auto: Option<&crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods>,
+    ) -> Vec<MethodInfoEntry> {
         let mut entries: Vec<MethodInfoEntry> = class
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
             .map(Self::meta_method_entry)
             .collect();
-        if let Some(auto) =
-            crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class)
-        {
+        if let Some(auto) = auto {
             if let Some(kw_sel) = &auto.keyword_constructor {
                 let arity = class.state.len();
                 entries.push((kw_sel.clone(), arity, None, vec![None; arity]));
