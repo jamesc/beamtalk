@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
-import { extractStateVarInfo } from "./textUtils";
+import { extractMethodDocComment, extractStateVarInfo } from "./textUtils";
 import type {
   ActorInfo,
   BindingsMap,
@@ -417,7 +417,7 @@ export class WorkspaceTreeDataProvider
           element.classInfo.source_file,
           element.method.selector,
           element.method.side === "class" ? "class-method" : "method"
-        )) ?? this._methodTooltipFallback(element.method);
+        )) ?? (await this._methodDocCommentTooltip(element)) ?? this._methodTooltipFallback(element.method);
       return item;
     }
     if (element.kind === "state-item") {
@@ -515,6 +515,27 @@ export class WorkspaceTreeDataProvider
     return new vscode.MarkdownString(
       `**${method.selector}**\n\n_${method.side === "instance" ? "instance" : "class"} method_`
     );
+  }
+
+  /**
+   * Read source text and extract `///` doc comment for the method.
+   * Used as a fallback when LSP hover is unavailable (file not open in editor).
+   */
+  private async _methodDocCommentTooltip(
+    element: MethodItemNode
+  ): Promise<vscode.MarkdownString | undefined> {
+    const sourceFile = element.classInfo.source_file;
+    if (!sourceFile || sourceFile === "unknown") return undefined;
+    try {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
+      const comment = extractMethodDocComment(doc.getText(), element.method.selector, element.method.side);
+      if (!comment) return undefined;
+      const md = new vscode.MarkdownString(comment);
+      md.isTrusted = true;
+      return md;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

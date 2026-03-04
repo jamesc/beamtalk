@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { findMethodDeclaration, extractStateVarInfo } from "../textUtils";
+import { findMethodDeclaration, extractStateVarInfo, extractMethodDocComment } from "../textUtils";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -297,5 +297,52 @@ Value subclass: SchemeLambda
     const src = `Object subclass: Foo\n  // state: x = 1\n  state: x = 2\n`;
     const info = extractStateVarInfo(src, "x");
     expect(info!.defaultValue).toBe("2");
+  });
+});
+
+// ─── extractMethodDocComment tests ───────────────────────────────────────────
+
+const WITH_DOCS = `\
+Object subclass: Foo
+
+  /// Runs the program.
+  class run => self new run
+
+  /// Execute the main loop.
+  ///
+  /// Reads from stdin until EOF.
+  run =>
+    42
+`;
+
+describe("extractMethodDocComment", () => {
+  it("extracts single-line doc for class method", () => {
+    const doc = extractMethodDocComment(WITH_DOCS, "run", "class");
+    expect(doc).toBe("Runs the program.");
+  });
+
+  it("extracts multi-line doc for instance method", () => {
+    const doc = extractMethodDocComment(WITH_DOCS, "run", "instance");
+    expect(doc).toBe("Execute the main loop.\n\nReads from stdin until EOF.");
+  });
+
+  it("class and instance run get different docs", () => {
+    const classDoc = extractMethodDocComment(WITH_DOCS, "run", "class");
+    const instanceDoc = extractMethodDocComment(WITH_DOCS, "run", "instance");
+    expect(classDoc).not.toBe(instanceDoc);
+  });
+
+  it("returns undefined when no doc comment", () => {
+    const src = `Object subclass: Foo\n  run => 42\n`;
+    expect(extractMethodDocComment(src, "run", "instance")).toBeUndefined();
+  });
+
+  it("returns undefined for unknown selector", () => {
+    expect(extractMethodDocComment(WITH_DOCS, "nonexistent", "instance")).toBeUndefined();
+  });
+
+  it("works with keyword selectors (env.bt lookup:)", () => {
+    const doc = extractMethodDocComment(ENV_BT, "lookup:", "instance");
+    expect(doc).toBe("Look up `name` in this frame, then walk parent frames until found.");
   });
 });

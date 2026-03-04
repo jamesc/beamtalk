@@ -83,6 +83,54 @@ export function findStateVarDeclaration(text: string, name: string): number {
   return -1;
 }
 
+/**
+ * Extract `///` doc comment lines immediately preceding a method declaration.
+ *
+ * Returns the comment text with `///` prefixes stripped, or undefined if no
+ * doc comment is found. Correctly distinguishes class-side from instance-side,
+ * so `run` (class) and `run` (instance) get the right comment.
+ */
+export function extractMethodDocComment(
+  text: string,
+  selector: string,
+  side: "instance" | "class"
+): string | undefined {
+  const headRe = methodHeadPattern(selector);
+  const lines = text.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    if (trimmed.startsWith("//")) continue;
+
+    let matched = false;
+    if (side === "class") {
+      if (trimmed.startsWith("class ")) {
+        matched = headRe.test(trimmed.slice(6).trimStart());
+      }
+    } else {
+      if (!trimmed.startsWith("class ")) {
+        matched = headRe.test(trimmed);
+      }
+    }
+    if (!matched) continue;
+
+    // Collect /// lines immediately above, stopping at blank lines or non-/// lines
+    const docLines: string[] = [];
+    for (let j = i - 1; j >= 0; j--) {
+      const t = lines[j].trimStart();
+      if (t.startsWith("/// ")) {
+        docLines.unshift(t.slice(4));
+      } else if (t === "///") {
+        docLines.unshift("");
+      } else {
+        break;
+      }
+    }
+    return docLines.length > 0 ? docLines.join("\n") : undefined;
+  }
+  return undefined;
+}
+
 export function findMethodDeclaration(
   text: string,
   selector: string,
