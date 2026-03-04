@@ -494,3 +494,70 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    fn codegen(src: &str) -> String {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        crate::codegen::core_erlang::generate_module(
+            &module,
+            crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        )
+        .expect("codegen should succeed")
+    }
+
+    #[test]
+    fn test_repeat_generates_infinite_letrec_loop() {
+        // repeat generates a letrec that loops forever (no condition check)
+        let src = "Actor subclass: Server\n  state: x = 0\n\n  run =>\n    [42] repeat\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("letrec"),
+            "repeat should generate a letrec. Got:\n{code}"
+        );
+        // repeat uses a simple loop function that recurses unconditionally
+        assert!(
+            !code.contains("case apply"),
+            "repeat should NOT have a case on a condition. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_times_repeat_with_field_mutation_threads_actor_state() {
+        // timesRepeat: with field mutation generates state-threading loop with StateAcc
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    3 timesRepeat: [self.n := self.n + 1]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("letrec"),
+            "timesRepeat: with mutation should generate a letrec. Got:\n{code}"
+        );
+        assert!(
+            code.contains("StateAcc"),
+            "timesRepeat: with mutation should thread state via StateAcc. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "timesRepeat: body should update 'n' via maps:put. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_to_do_with_field_mutation_generates_counted_loop_with_state() {
+        // to:do: with field mutation generates a counted loop with state threading
+        let src = "Actor subclass: Ctr\n  state: sum = 0\n\n  run =>\n    1 to: 5 do: [:i | self.sum := self.sum + i]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("letrec"),
+            "to:do: with mutation should generate a letrec. Got:\n{code}"
+        );
+        assert!(
+            code.contains("StateAcc"),
+            "to:do: with mutation should thread state via StateAcc. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('sum'"),
+            "to:do: body should update 'sum' via maps:put. Got:\n{code}"
+        );
+    }
+}

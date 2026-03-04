@@ -327,3 +327,89 @@ impl CoreErlangGenerator {
         Ok((Document::Vec(docs), final_version))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    fn codegen(src: &str) -> String {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        crate::codegen::core_erlang::generate_module(
+            &module,
+            crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        )
+        .expect("codegen should succeed")
+    }
+
+    #[test]
+    fn test_if_true_with_field_mutation_generates_inline_case() {
+        // Actor ifTrue: with field mutation compiles to inline case (not runtime dispatch)
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  inc: flag =>\n    flag ifTrue: [self.n := self.n + 1].\n    self.n\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("case "),
+            "ifTrue: with field mutation should generate inline case. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "True branch should update 'n' via maps:put. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("'beamtalk_message_dispatch':'send'"),
+            "ifTrue: with mutation should NOT use runtime dispatch. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_if_false_with_field_mutation_generates_inline_case() {
+        // Actor ifFalse: with field mutation compiles to inline case with false branch mutating
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  dec: flag =>\n    flag ifFalse: [self.n := self.n - 1].\n    self.n\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("case "),
+            "ifFalse: with field mutation should generate inline case. Got:\n{code}"
+        );
+        // False branch maps:put happens in the '<false>' arm
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "False branch should update 'n' via maps:put. Got:\n{code}"
+        );
+        // True arm returns nil with unchanged state
+        assert!(
+            code.contains("'nil'"),
+            "True arm of ifFalse: should return nil. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_conditional_branch_empty_block_returns_nil_with_state() {
+        // An empty block in ifTrue: should produce {'nil', State} for the branch
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  noop: flag =>\n    flag ifTrue: [self.n := 0].\n    self.n\n";
+        let code = codegen(src);
+        // The false arm of ifTrue: always returns {'nil', unchanged_state}
+        assert!(
+            code.contains("'nil'"),
+            "Conditional branches should return nil in non-taken arm. Got:\n{code}"
+        );
+        assert!(
+            code.contains("StateAcc"),
+            "Branch bodies should use StateAcc naming. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_if_true_if_false_with_mutations_generates_two_threaded_branches() {
+        // ifTrue:ifFalse: with mutations in both branches generates two threaded arms
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  toggle: flag =>\n    flag ifTrue: [self.n := 1] ifFalse: [self.n := 0].\n    self.n\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("case "),
+            "ifTrue:ifFalse: with mutations should generate inline case. Got:\n{code}"
+        );
+        // maps:put should appear at least twice (once per branch)
+        let put_count = code.matches("maps':'put'('n'").count();
+        assert!(
+            put_count >= 2,
+            "Both branches should call maps:put for 'n'. Found {put_count}. Got:\n{code}"
+        );
+    }
+}

@@ -1279,3 +1279,67 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    fn codegen(src: &str) -> String {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        crate::codegen::core_erlang::generate_module(
+            &module,
+            crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        )
+        .expect("codegen should succeed")
+    }
+
+    #[test]
+    fn test_list_do_pure_generates_foreach() {
+        // Pure do: (no mutations) generates lists:foreach
+        let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items do: [:item | item]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("'lists':'foreach'"),
+            "Pure do: should generate lists:foreach. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_list_collect_generates_map() {
+        // collect: (no mutations) generates lists:map
+        let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items collect: [:item | item]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("'lists':'map'"),
+            "collect: should generate lists:map. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_list_inject_into_generates_collection_ops_wrapper() {
+        // inject:into: (no mutations) delegates to beamtalk_collection_ops:inject_into
+        // which adapts the Erlang lists:foldl(Fun, Acc, List) argument order to
+        // Beamtalk's Block(Acc, Elem) convention (BT-820).
+        let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items inject: 0 into: [:acc :item | acc + item]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("'beamtalk_collection_ops':'inject_into'"),
+            "inject:into: should delegate to beamtalk_collection_ops:inject_into. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_list_do_with_field_mutation_threads_state() {
+        // do: with field mutation generates a state-threading foldl (not foreach)
+        let src = "Actor subclass: Ctr\n  state: sum = 0\n\n  run: items =>\n    items do: [:item | self.sum := self.sum + item]\n";
+        let code = codegen(src);
+        // Mutation-threading uses foldl to thread state
+        assert!(
+            code.contains("'lists':'foldl'"),
+            "do: with mutation should use lists:foldl for state threading. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('sum'"),
+            "do: body should update 'sum' via maps:put. Got:\n{code}"
+        );
+    }
+}

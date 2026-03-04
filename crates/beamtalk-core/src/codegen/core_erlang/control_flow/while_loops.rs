@@ -419,3 +419,74 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    fn codegen(src: &str) -> String {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        crate::codegen::core_erlang::generate_module(
+            &module,
+            crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        )
+        .expect("codegen should succeed")
+    }
+
+    #[test]
+    fn test_while_true_simple_generates_letrec() {
+        // Pure whileTrue: (no mutations) generates a letrec-based loop
+        let src = "Actor subclass: Runner\n  state: x = 0\n\n  run =>\n    [false] whileTrue: [42]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("letrec"),
+            "whileTrue: should generate a letrec for the loop. Got:\n{code}"
+        );
+        assert!(
+            code.contains("<'true'> when 'true'"),
+            "whileTrue: should match true to continue. Got:\n{code}"
+        );
+        assert!(
+            code.contains("<'false'> when 'true' -> 'nil'"),
+            "whileTrue: should return nil when condition is false. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_while_false_simple_generates_letrec_with_opposite_pattern() {
+        // Pure whileFalse: (no mutations) generates a letrec matching false to continue
+        let src = "Actor subclass: Runner\n  state: x = 0\n\n  run =>\n    [false] whileFalse: [42]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("letrec"),
+            "whileFalse: should generate a letrec. Got:\n{code}"
+        );
+        assert!(
+            code.contains("<'false'> when 'true' ->"),
+            "whileFalse: should continue when condition is false. Got:\n{code}"
+        );
+        assert!(
+            code.contains("<'true'> when 'true' -> 'nil'"),
+            "whileFalse: should stop when condition is true. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_while_true_with_field_mutation_threads_actor_state() {
+        // whileTrue: with field mutation uses actor state threading (not simple letrec)
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    [self.n < 10] whileTrue: [self.n := self.n + 1]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("letrec"),
+            "whileTrue: with mutation should generate a letrec. Got:\n{code}"
+        );
+        // State-threading variant uses 'while'/1 with StateAcc parameter
+        assert!(
+            code.contains("'while'/1"),
+            "Mutating whileTrue: should use 'while'/1 with state parameter. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "whileTrue: body should update 'n' via maps:put. Got:\n{code}"
+        );
+    }
+}
