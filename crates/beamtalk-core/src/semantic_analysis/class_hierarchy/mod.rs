@@ -803,18 +803,16 @@ impl ClassHierarchy {
             let selector = method.selector.name();
             let key = (selector.clone(), method.kind);
             if let Some(&first_span) = seen.get(&key) {
-                let mut diag = Diagnostic::error(
-                    format!("Duplicate {label} `{selector}` in class `{class_name}`"),
-                    method.span,
-                );
-                diag.hint = Some(
-                    format!(
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!("Duplicate {label} `{selector}` in class `{class_name}`"),
+                        method.span,
+                    )
+                    .with_hint(format!(
                         "A {label} with this selector is already defined at offset {}",
                         first_span.start()
-                    )
-                    .into(),
+                    )),
                 );
-                diagnostics.push(diag);
             } else {
                 seen.insert(key, method.span);
             }

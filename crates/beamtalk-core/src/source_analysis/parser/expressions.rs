@@ -677,18 +677,19 @@ impl Parser {
                 let period_span = self.tokens[self.current - 1].span();
                 if self.check(&TokenKind::RightBracket) {
                     // Trailing period before ']' — not needed
-                    let mut diag =
-                        Diagnostic::lint("unnecessary trailing `.` before `]`", period_span);
-                    diag.hint = Some("Remove the trailing `.`".into());
-                    self.diagnostics.push(diag);
+                    self.diagnostics.push(
+                        Diagnostic::lint("unnecessary trailing `.` before `]`", period_span)
+                            .with_hint("Remove the trailing `.`"),
+                    );
                 } else if !self.is_at_end() && self.current_token().has_leading_newline() {
                     // Period immediately before a newline — newline already separates statements
-                    let mut diag = Diagnostic::lint(
-                        "unnecessary `.` — the following newline already separates statements",
-                        period_span,
+                    self.diagnostics.push(
+                        Diagnostic::lint(
+                            "unnecessary `.` — the following newline already separates statements",
+                            period_span,
+                        )
+                        .with_hint("Remove the `.` and rely on the newline"),
                     );
-                    diag.hint = Some("Remove the `.` and rely on the newline".into());
-                    self.diagnostics.push(diag);
                 }
             } else if self.match_token(&TokenKind::Bang) {
                 // Cast terminator — mark the last expression as a cast if it's a MessageSend.
