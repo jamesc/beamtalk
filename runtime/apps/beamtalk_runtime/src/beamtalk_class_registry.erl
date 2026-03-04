@@ -102,7 +102,7 @@ live_class_entries() ->
 %% Returns a list of {beamtalk_object, ClassTag, ModuleName, Pid} tuples for
 %% all user-defined classes that are still alive. Dead processes are silently
 %% filtered out. Returns [] if the pg process group is not running.
--type user_class_entry() :: {beamtalk_object, term(), module(), pid()}.
+-type user_class_entry() :: {beamtalk_object, atom(), module(), pid()}.
 -spec user_classes() -> [user_class_entry()].
 user_classes() ->
     try

@@ -405,6 +405,46 @@ get_method_return_type_test_() ->
         ]}.
 
 %%% ============================================================================
+%%% user_classes tests (BT-1092)
+%%% ============================================================================
+
+user_classes_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pg_started(),
+            ClassInfo = #{superclass => none, methods => #{}, class_methods => #{}},
+            {ok, Pid} = beamtalk_object_class:start_link('UserClassesTestClass1092', ClassInfo),
+            Pid
+        end,
+        fun(Pid) ->
+            catch gen_server:stop(Pid)
+        end,
+        [
+            {"returns a list", fun() ->
+                Result = beamtalk_class_registry:user_classes(),
+                ?assert(is_list(Result))
+            end},
+            {"excludes classes without source file", fun() ->
+                %% Test class has no compiled BEAM module with beamtalk_source
+                %% attribute, so it should be filtered out by user_classes/0
+                Result = beamtalk_class_registry:user_classes(),
+                Tags = [Tag || {beamtalk_object, Tag, _Mod, _Pid} <- Result],
+                ?assertNot(lists:member('UserClassesTestClass1092 class', Tags))
+            end},
+            {"entries are {beamtalk_object, Tag, Mod, Pid} tuples", fun() ->
+                Result = beamtalk_class_registry:user_classes(),
+                lists:foreach(
+                    fun({beamtalk_object, Tag, Mod, Pid}) ->
+                        ?assert(is_atom(Tag)),
+                        ?assert(is_atom(Mod)),
+                        ?assert(is_pid(Pid))
+                    end,
+                    Result
+                )
+            end}
+        ]}.
+
+%%% ============================================================================
 %%% ADR 0032 Phase 1: invalidate_subclass_flattened_tables removed
 %%% ============================================================================
 %% The rebuild broadcast (invalidate_subclass_flattened_tables) was removed in
