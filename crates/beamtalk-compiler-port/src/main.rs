@@ -124,7 +124,6 @@ fn term_to_bool(term: &Term) -> Option<bool> {
 }
 
 /// Extract an atom name string from a Term.
-#[allow(dead_code)] // used in Task 5 (wire class_hierarchy into compile paths)
 fn term_to_atom(term: &Term) -> Option<String> {
     match term {
         Term::Atom(a) => Some(a.name.clone()),
@@ -133,7 +132,6 @@ fn term_to_atom(term: &Term) -> Option<String> {
 }
 
 /// Extract an unsigned integer from a Term (`FixInteger` only).
-#[allow(dead_code)] // used in Task 5 (wire class_hierarchy into compile paths)
 fn term_to_usize(term: &Term) -> Option<usize> {
     match term {
         Term::FixInteger(n) => usize::try_from(n.value).ok(),
@@ -142,7 +140,6 @@ fn term_to_usize(term: &Term) -> Option<usize> {
 }
 
 /// Extract a list of atom strings from a Term.
-#[allow(dead_code)] // used in Task 5 (wire class_hierarchy into compile paths)
 fn term_to_atom_list(term: &Term) -> Vec<ecow::EcoString> {
     match term {
         Term::List(list) => list
@@ -156,7 +153,6 @@ fn term_to_atom_list(term: &Term) -> Vec<ecow::EcoString> {
 }
 
 /// Extract an atom→atom map from a Term (for `field_types`).
-#[allow(dead_code)] // used in Task 5 (wire class_hierarchy into compile paths)
 fn term_to_atom_atom_map(
     term: &Term,
 ) -> std::collections::HashMap<ecow::EcoString, ecow::EcoString> {
@@ -181,7 +177,6 @@ fn term_to_atom_atom_map(
 ///
 /// Each entry: `selector_atom => #{arity => int, param_types => [atom...], return_type => atom}`.
 /// Returns empty Vec on missing key or malformed data (graceful degradation).
-#[allow(dead_code)] // used in Task 5 (wire class_hierarchy into compile paths)
 fn parse_method_infos_from_map(
     m: &Map,
     key: &str,
@@ -247,7 +242,6 @@ fn parse_method_infos_from_map(
 ///
 /// Returns `None` if `term` is not a map. Degrades gracefully on missing keys
 /// (old-format modules without `method_info` etc.).
-#[allow(dead_code)] // used in Task 5 (wire class_hierarchy into compile paths)
 fn parse_class_info_from_meta_term(
     class_name: &str,
     term: &Term,
@@ -311,7 +305,6 @@ fn parse_class_info_from_meta_term(
 ///
 /// Skips stdlib builtins — the Rust `ClassHierarchy::with_builtins()` already has
 /// richer data for them. Degrades gracefully on malformed entries (silently skipped).
-#[allow(dead_code)] // used in Task 5 (wire class_hierarchy into compile paths)
 fn parse_class_hierarchy_from_term(
     term: &Term,
 ) -> Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> {
@@ -567,6 +560,12 @@ fn handle_compile_expression(request: &Map) -> Term {
         },
     };
 
+    // ADR 0050 Phase 4: Extract optional class_hierarchy for REPL session user classes.
+    let pre_class_hierarchy = match map_get(request, "class_hierarchy") {
+        None => vec![],
+        Some(term) => parse_class_hierarchy_from_term(term),
+    };
+
     // Parse the expression
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
@@ -574,10 +573,11 @@ fn handle_compile_expression(request: &Map) -> Term {
     // Run semantic analysis with known REPL variables
     let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
     let mut all_diagnostics =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars(
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
             &module,
             parse_diagnostics,
             &known_var_refs,
+            pre_class_hierarchy.clone(),
         );
 
     // Run @primitive validation
@@ -622,6 +622,7 @@ fn handle_compile_expression(request: &Map) -> Term {
             &warnings,
             &class_superclass_index,
             class_module_index,
+            pre_class_hierarchy,
         );
     }
 
@@ -680,6 +681,7 @@ fn handle_inline_class_definition(
     warnings: &[String],
     class_superclass_index: &std::collections::HashMap<String, String>,
     class_module_index: std::collections::HashMap<String, String>,
+    pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
 ) -> Term {
     let mut module = module;
     let mut warnings = warnings.to_vec();
@@ -745,7 +747,8 @@ fn handle_inline_class_definition(
             .with_workspace_mode(true)
             .with_source(source)
             .with_class_superclass_index(class_superclass_index.clone())
-            .with_class_module_index(class_module_index),
+            .with_class_module_index(class_module_index)
+            .with_class_hierarchy(pre_class_hierarchy),
     ) {
         Ok(code) => class_definition_ok_response(
             &code,
@@ -773,16 +776,23 @@ fn handle_compile(request: &Map) -> Term {
         .and_then(term_to_bool)
         .unwrap_or(true);
 
+    // ADR 0050 Phase 4: Extract optional class_hierarchy for REPL session user classes.
+    let pre_class_hierarchy = match map_get(request, "class_hierarchy") {
+        None => vec![],
+        Some(term) => parse_class_hierarchy_from_term(term),
+    };
+
     // Parse the source
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
     // Run semantic analysis
     let mut all_diagnostics =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars(
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
             &module,
             parse_diagnostics,
             &[],
+            pre_class_hierarchy.clone(),
         );
 
     // Run @primitive validation
@@ -909,6 +919,7 @@ fn handle_compile(request: &Map) -> Term {
             .with_source(&source)
             .with_class_module_index(class_module_index)
             .with_class_superclass_index(class_superclass_index)
+            .with_class_hierarchy(pre_class_hierarchy)
             .with_source_path_opt(source_path.as_deref()),
     ) {
         Ok(code) => compile_ok_response(&code, &module_name, &classes, &warning_msgs),
@@ -1207,6 +1218,56 @@ mod tests {
         assert_eq!(info.class_methods.len(), 1);
         assert_eq!(info.class_methods[0].selector.as_str(), "new");
         assert_eq!(info.class_methods[0].arity, 0);
+    }
+
+    /// ADR 0050 Phase 4: class_hierarchy in compile_expression request is accepted
+    /// and does not cause errors (backward-compatible optional key).
+    #[test]
+    fn compile_expression_accepts_class_hierarchy_key() {
+        use eetf::{FixInteger, List};
+
+        let method_info = Map::from([(
+            atom("value"),
+            Term::from(Map::from([
+                (atom("arity"), Term::from(FixInteger::from(0))),
+                (atom("param_types"), Term::from(List::from(vec![]))),
+                (atom("return_type"), atom("Integer")),
+            ])),
+        )]);
+        let counter_meta = Map::from([
+            (atom("class"), atom("Counter")),
+            (atom("superclass"), atom("Object")),
+            (atom("meta_version"), Term::from(FixInteger::from(2))),
+            (atom("is_sealed"), atom("false")),
+            (atom("is_abstract"), atom("false")),
+            (atom("is_value"), atom("false")),
+            (atom("is_typed"), atom("false")),
+            (atom("fields"), Term::from(List::from(vec![]))),
+            (atom("field_types"), Term::from(Map::from([]))),
+            (atom("method_info"), Term::from(method_info)),
+            (atom("class_method_info"), Term::from(Map::from([]))),
+            (atom("class_variables"), Term::from(List::from(vec![]))),
+        ]);
+        let class_hierarchy_term =
+            Term::from(Map::from([(atom("Counter"), Term::from(counter_meta))]));
+
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (atom("source"), binary("1 + 1.")),
+            (atom("module"), binary("bt@test_repl")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+            (atom("class_hierarchy"), Term::from(class_hierarchy_term)),
+        ]);
+
+        let response = handle_compile_expression(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "compile_expression with class_hierarchy should succeed: {response:?}"
+        );
     }
 
     #[test]
