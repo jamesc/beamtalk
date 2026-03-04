@@ -150,6 +150,61 @@ describe("findMethodDeclaration — env.bt", () => {
   });
 });
 
+// ─── lambda.bt tests ─────────────────────────────────────────────────────────
+// Mirrors examples/sicp/src/scheme/lambda.bt — class-side keyword selector
+// with 3 parts: `withParams:body:env:`.
+
+const LAMBDA_BT = `\
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SchemeLambda — a user-defined Scheme procedure (closure).
+///
+/// ## Examples
+/// \`\`\`beamtalk
+/// lam := SchemeLambda withParams: #("x") body: bodyExpr env: env
+/// \`\`\`
+Value subclass: SchemeLambda
+  state: params = #()
+  state: body = nil
+  state: closureEnv = nil
+
+  class withParams: p body: b env: e =>
+    SchemeLambda new: #{#params => p, #body => b, #closureEnv => e}
+
+  params => self.params
+  body => self.body
+  closureEnv => self.closureEnv
+`;
+
+describe("findMethodDeclaration — lambda.bt", () => {
+  it("finds class-side withParams:body:env: keyword selector", () => {
+    const offset = findMethodDeclaration(LAMBDA_BT, "withParams:body:env:", "class");
+    expect(offset).not.toBe(-1);
+    const line = lineOf(LAMBDA_BT, offset);
+    expect(LAMBDA_BT.split("\n")[line]).toMatch(/class\s+withParams:.*body:.*env:/);
+  });
+
+  it("does not find withParams:body:env: on instance side (it's class-only)", () => {
+    expect(findMethodDeclaration(LAMBDA_BT, "withParams:body:env:", "instance")).toBe(-1);
+  });
+
+  it("finds params unary instance method", () => {
+    const offset = findMethodDeclaration(LAMBDA_BT, "params", "instance");
+    expect(offset).not.toBe(-1);
+    const line = lineOf(LAMBDA_BT, offset);
+    expect(LAMBDA_BT.split("\n")[line]).toMatch(/^\s*params\s*=>/);
+  });
+
+  it("does not match withParams: appearing in doc comment example", () => {
+    // The doc comment contains `lam := SchemeLambda withParams: ...`
+    const offset = findMethodDeclaration(LAMBDA_BT, "withParams:body:env:", "class");
+    const line = lineOf(LAMBDA_BT, offset);
+    expect(LAMBDA_BT.split("\n")[line].trimStart()).not.toMatch(/^\/\//);
+    expect(LAMBDA_BT.split("\n")[line]).toContain("class withParams:");
+  });
+});
+
 // ─── Edge-case tests ─────────────────────────────────────────────────────────
 
 describe("findMethodDeclaration — edge cases", () => {
