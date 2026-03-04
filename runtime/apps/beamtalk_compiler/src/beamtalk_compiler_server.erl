@@ -166,8 +166,10 @@ init(_Args) ->
     {ok, #state{port = Port, classes = Classes}}.
 
 handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From, State) ->
+    %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
+    Options1 = Options#{class_hierarchy => State#state.classes},
     Result = beamtalk_compiler_port:compile_expression(
-        State#state.port, Source, ModuleName, KnownVars, Options
+        State#state.port, Source, ModuleName, KnownVars, Options1
     ),
     {reply, Result, State};
 handle_call({compile, Source, Options}, _From, State) ->
@@ -337,12 +339,19 @@ do_compile(Port, Source, Options) ->
             0 -> Request2;
             _ -> Request2#{class_superclass_index => ClassSuperclassIndex}
         end,
-    Request =
+    Request4 =
         case map_size(ClassModuleIndex) of
             0 -> Request3;
             _ -> Request3#{class_module_index => ClassModuleIndex}
         end,
-    case send_port_request(Port, Request, 30000) of
+    %% ADR 0050 Phase 4: Inject accumulated class metadata into the port request.
+    Classes = maps:get(class_hierarchy, Options, #{}),
+    RequestFinal =
+        case map_size(Classes) of
+            0 -> Request4;
+            _ -> Request4#{class_hierarchy => Classes}
+        end,
+    case send_port_request(Port, RequestFinal, 30000) of
         {ok, Response} ->
             handle_compile_response(Response);
         {exit_status, Status} ->
