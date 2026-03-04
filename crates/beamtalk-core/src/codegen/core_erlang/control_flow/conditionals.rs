@@ -341,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn test_if_true_with_field_mutation_generates_inline_case() {
+    fn test_if_true_mutation_bypasses_runtime_dispatch() {
         // Actor ifTrue: with field mutation compiles to inline case (not runtime dispatch)
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  inc: flag =>\n    flag ifTrue: [self.n := self.n + 1].\n    self.n\n";
         let code = codegen(src);
@@ -360,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn test_if_false_with_field_mutation_generates_inline_case() {
+    fn test_if_false_mutation_threads_state_in_false_arm() {
         // Actor ifFalse: with field mutation compiles to inline case with false branch mutating
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  dec: flag =>\n    flag ifFalse: [self.n := self.n - 1].\n    self.n\n";
         let code = codegen(src);
@@ -381,14 +381,14 @@ mod tests {
     }
 
     #[test]
-    fn test_conditional_branch_empty_block_returns_nil_with_state() {
-        // An empty block in ifTrue: should produce {'nil', State} for the branch
-        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  noop: flag =>\n    flag ifTrue: [self.n := 0].\n    self.n\n";
+    fn test_non_taken_branch_returns_nil_with_unchanged_state() {
+        // The non-taken branch of an inline conditional returns {'nil', State}
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  noop: flag =>\n    flag ifTrue: [self.n := self.n + 1].\n    self.n\n";
         let code = codegen(src);
         // The false arm of ifTrue: always returns {'nil', unchanged_state}
         assert!(
-            code.contains("'nil'"),
-            "Conditional branches should return nil in non-taken arm. Got:\n{code}"
+            code.contains("{'nil',"),
+            "Non-taken branch should return nil paired with state. Got:\n{code}"
         );
         assert!(
             code.contains("StateAcc"),
