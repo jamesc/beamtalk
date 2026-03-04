@@ -159,20 +159,6 @@ pub(crate) fn core_erlang_binary_string(s: &str) -> Document<'static> {
     Document::String(format!("#{{{}}}#", segments.join(",")))
 }
 
-/// Generates a call to a `_ops` Erlang module's dispatch/3 function.
-pub(crate) fn ops_dispatch(module: &str, selector: &str, params: &[String]) -> Document<'static> {
-    let mut parts: Vec<Document<'static>> = vec![Document::String(format!(
-        "call '{module}':'dispatch'('{selector}', ["
-    ))];
-    for (i, param) in params.iter().enumerate() {
-        if i > 0 {
-            parts.push(Document::Str(", "));
-        }
-        parts.push(Document::String(param.clone()));
-    }
-    parts.push(Document::Str("], Self)"));
-    Document::Vec(parts)
-}
 
 #[cfg(test)]
 mod tests {

@@ -9,7 +9,7 @@
 //! `CompiledMethod`, `JSON`, `Regex`, `Symbol`.
 
 use super::super::document::Document;
-use super::{binary_bif, ops_dispatch, param};
+use super::{binary_bif, param};
 use crate::docvec;
 
 /// Symbol primitive implementations (BT-273).
@@ -48,10 +48,26 @@ pub(crate) fn generate_compiled_method_bif(
     selector: &str,
     params: &[String],
 ) -> Option<Document<'static>> {
+    let _ = params; // all CompiledMethod selectors are zero-param instance reads
     match selector {
-        "selector" | "source" | "doc" | "argumentCount" | "printString" | "asString" => Some(
-            ops_dispatch("beamtalk_compiled_method_ops", selector, params),
-        ),
+        "selector" => Some(Document::Str(
+            "call 'beamtalk_compiled_method_ops':'dispatch'('selector', [], Self)",
+        )),
+        "source" => Some(Document::Str(
+            "call 'beamtalk_compiled_method_ops':'dispatch'('source', [], Self)",
+        )),
+        "doc" => Some(Document::Str(
+            "call 'beamtalk_compiled_method_ops':'dispatch'('doc', [], Self)",
+        )),
+        "argumentCount" => Some(Document::Str(
+            "call 'beamtalk_compiled_method_ops':'dispatch'('argumentCount', [], Self)",
+        )),
+        "printString" => Some(Document::Str(
+            "call 'beamtalk_compiled_method_ops':'dispatch'('printString', [], Self)",
+        )),
+        "asString" => Some(Document::Str(
+            "call 'beamtalk_compiled_method_ops':'dispatch'('asString', [], Self)",
+        )),
         _ => None,
     }
 }
