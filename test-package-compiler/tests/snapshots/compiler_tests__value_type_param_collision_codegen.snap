@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 76
 expression: core_erlang
 ---
 module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
@@ -118,6 +117,14 @@ module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/
       'superclass' => 'Object',
       'fields' => [],
       'methods' => [{'compute:', 1}],
-      'class_methods' => []}~
+      'class_methods' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'field_types' => ~{}~,
+      'method_info' => ~{'compute:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~}~,
+      'class_method_info' => ~{}~
+    }~
 
 end

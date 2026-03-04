@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 76
 expression: core_erlang
 ---
 module 'stdlib_class_set' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'includes:'/2, 'add:'/2, 'remove:'/2, 'union:'/2, 'intersection:'/2, 'difference:'/2, 'isSubsetOf:'/2, 'asList'/1, 'fromList:'/2, 'do:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
@@ -180,6 +179,14 @@ call 'beamtalk_set_ops':'do'(Self, _block9)
       'superclass' => 'Object',
       'fields' => ['elements'],
       'methods' => [{'size', 0}, {'isEmpty', 0}, {'includes:', 1}, {'add:', 1}, {'remove:', 1}, {'union:', 1}, {'intersection:', 1}, {'difference:', 1}, {'isSubsetOf:', 1}, {'asList', 0}, {'fromList:', 1}, {'do:', 1}],
-      'class_methods' => []}~
+      'class_methods' => [],
+      'is_sealed' => 'true',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'field_types' => ~{'elements' => 'none'}~,
+      'method_info' => ~{'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'isEmpty' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'includes:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'add:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'remove:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'union:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'intersection:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'difference:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'isSubsetOf:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'asList' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'fromList:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'do:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~}~,
+      'class_method_info' => ~{}~
+    }~
 
 end
