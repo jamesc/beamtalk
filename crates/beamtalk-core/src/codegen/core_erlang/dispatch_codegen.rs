@@ -1981,7 +1981,10 @@ mod tests {
             output.contains("beamtalk_message_dispatch':'send'("),
             "unary send should use unified dispatch. Got: {output}"
         );
-        assert!(output.contains("'increment'"), "should include selector atom. Got: {output}");
+        assert!(
+            output.contains("'increment'"),
+            "should include selector atom. Got: {output}"
+        );
     }
 
     #[test]
@@ -2009,7 +2012,10 @@ mod tests {
             output.contains("beamtalk_dispatch':'super'("),
             "super send should use beamtalk_dispatch:super. Got: {output}"
         );
-        assert!(output.contains("'initialize'"), "should include selector. Got: {output}");
+        assert!(
+            output.contains("'initialize'"),
+            "should include selector. Got: {output}"
+        );
     }
 
     #[test]
@@ -2021,7 +2027,10 @@ mod tests {
             output.contains("'spawn'()"),
             "spawn should call spawn/0. Got: {output}"
         );
-        assert!(output.contains("counter"), "spawn should reference module. Got: {output}");
+        assert!(
+            output.contains("counter"),
+            "spawn should reference module. Got: {output}"
+        );
     }
 
     #[test]

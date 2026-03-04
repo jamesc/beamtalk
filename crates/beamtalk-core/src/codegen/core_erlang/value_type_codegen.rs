@@ -1972,10 +1972,10 @@ impl CoreErlangGenerator {
 #[cfg(test)]
 mod tests {
     use crate::ast::{ClassDefinition, ClassKind, Identifier, Literal, Module, StateDeclaration};
+    use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::codegen::core_erlang::value_type_codegen::{
         AutoSlotMethods, compute_auto_slot_methods,
     };
-    use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::source_analysis::Span;
 
     fn s() -> Span {
@@ -2010,7 +2010,10 @@ mod tests {
 
     #[test]
     fn test_with_star_selector_multi_char() {
-        assert_eq!(AutoSlotMethods::with_star_selector("firstName"), "withFirstName:");
+        assert_eq!(
+            AutoSlotMethods::with_star_selector("firstName"),
+            "withFirstName:"
+        );
     }
 
     #[test]

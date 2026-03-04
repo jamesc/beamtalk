@@ -1513,7 +1513,9 @@ impl CoreErlangGenerator {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{Block, BlockParameter, Expression, ExpressionStatement, Identifier, Literal, MapPair};
+    use crate::ast::{
+        Block, BlockParameter, Expression, ExpressionStatement, Identifier, Literal, MapPair,
+    };
     use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::source_analysis::Span;
 
@@ -1542,9 +1544,18 @@ mod tests {
         )];
         let doc = generator.generate_map_literal(&pairs).unwrap();
         let output = doc.to_pretty_string();
-        assert!(output.contains("'x'"), "map key should be atom. Got: {output}");
-        assert!(output.contains('1'), "map value should be integer. Got: {output}");
-        assert!(output.contains("=>"), "map should use => syntax. Got: {output}");
+        assert!(
+            output.contains("'x'"),
+            "map key should be atom. Got: {output}"
+        );
+        assert!(
+            output.contains('1'),
+            "map value should be integer. Got: {output}"
+        );
+        assert!(
+            output.contains("=>"),
+            "map should use => syntax. Got: {output}"
+        );
     }
 
     #[test]
@@ -1575,7 +1586,10 @@ mod tests {
             output.contains("beamtalk_array_ops':'from_list'"),
             "array should call from_list. Got: {output}"
         );
-        assert!(output.contains("42"), "array should contain element. Got: {output}");
+        assert!(
+            output.contains("42"),
+            "array should contain element. Got: {output}"
+        );
     }
 
     #[test]
@@ -1605,8 +1619,14 @@ mod tests {
         );
         let doc = generator.generate_block(&block).unwrap();
         let output = doc.to_pretty_string();
-        assert!(output.contains("fun ()"), "block header should be 'fun ()'. Got: {output}");
-        assert!(output.contains("99"), "block body should contain literal. Got: {output}");
+        assert!(
+            output.contains("fun ()"),
+            "block header should be 'fun ()'. Got: {output}"
+        );
+        assert!(
+            output.contains("99"),
+            "block body should contain literal. Got: {output}"
+        );
     }
 
     #[test]
@@ -1619,7 +1639,13 @@ mod tests {
         );
         let doc = generator.generate_block(&block).unwrap();
         let output = doc.to_pretty_string();
-        assert!(output.contains("fun ("), "block should start with 'fun ('. Got: {output}");
-        assert!(output.contains("->"), "block should have arrow. Got: {output}");
+        assert!(
+            output.contains("fun ("),
+            "block should start with 'fun ('. Got: {output}"
+        );
+        assert!(
+            output.contains("->"),
+            "block should have arrow. Got: {output}"
+        );
     }
 }

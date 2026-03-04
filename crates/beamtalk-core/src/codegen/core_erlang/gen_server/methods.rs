@@ -2352,7 +2352,11 @@ mod tests {
             file_trailing_comments: Vec::new(),
         };
         let doc = generator.generate_register_class(&module).unwrap();
-        assert_eq!(doc.to_pretty_string(), "", "empty module should produce empty doc");
+        assert_eq!(
+            doc.to_pretty_string(),
+            "",
+            "empty module should produce empty doc"
+        );
     }
 
     #[test]
