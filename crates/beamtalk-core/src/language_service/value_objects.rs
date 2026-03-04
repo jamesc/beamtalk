@@ -279,8 +279,11 @@ pub struct DocumentSymbol {
     pub name: EcoString,
     /// Symbol kind.
     pub kind: DocumentSymbolKind,
-    /// Source span of the symbol.
+    /// Source span of the full symbol (used for `range` in LSP).
     pub span: Span,
+    /// Source span of the symbol name only (used for `selection_range` in LSP).
+    /// Defaults to `span` when not set.
+    pub name_span: Option<Span>,
     /// Children (e.g., methods inside a class).
     pub children: Vec<DocumentSymbol>,
 }

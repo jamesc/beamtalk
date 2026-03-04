@@ -177,11 +177,12 @@ fn find_hover_in_declarations(
 ) -> Option<HoverInfo> {
     for class in &module.classes {
         if offset >= class.name.span.start() && offset < class.name.span.end() {
-            return Some(class_reference_hover_info(
-                &class.name.name,
-                class.name.span,
-                hierarchy,
-            ));
+            let mut hover =
+                class_reference_hover_info(&class.name.name, class.name.span, hierarchy);
+            if let Some(doc) = &class.doc_comment {
+                hover = hover.with_documentation(doc.clone());
+            }
+            return Some(hover);
         }
         if let Some(superclass) = &class.superclass {
             if offset >= superclass.span.start() && offset < superclass.span.end() {

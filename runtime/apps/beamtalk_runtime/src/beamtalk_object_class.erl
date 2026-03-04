@@ -44,7 +44,9 @@
     class_send/3,
     set_class_var/3,
     update_class/2,
-    local_class_methods/1
+    local_class_methods/1,
+    local_class_methods_map/1,
+    local_instance_methods/1
 ]).
 
 %% gen_server callbacks
@@ -150,8 +152,18 @@ methods(ClassPid) ->
 %% @doc Get local class-side method selectors (not inherited).
 -spec local_class_methods(pid()) -> [selector()].
 local_class_methods(ClassPid) ->
-    ClassMethods = gen_server:call(ClassPid, get_local_class_methods),
-    maps:keys(ClassMethods).
+    maps:keys(local_class_methods_map(ClassPid)).
+
+%% @doc Get the full local class-side methods map (selector => info).
+-spec local_class_methods_map(pid()) -> #{selector() => map()}.
+local_class_methods_map(ClassPid) ->
+    gen_server:call(ClassPid, get_local_class_methods).
+
+%% @doc Get local instance-side method selectors (not inherited).
+-spec local_instance_methods(pid()) -> [selector()].
+local_instance_methods(ClassPid) ->
+    {ok, InstanceMethods} = gen_server:call(ClassPid, get_instance_methods),
+    maps:keys(InstanceMethods).
 
 %% @doc Get the superclass name.
 -spec superclass(pid()) -> class_name() | none.

@@ -138,10 +138,16 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
     {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
     TrackedModules = beamtalk_repl_modules:list_modules(Tracker),
     RegistryPid = whereis(beamtalk_actor_registry),
+    %% Build a module-atom → Beamtalk-class-name map so the UI shows class names,
+    %% not BEAM module atoms. Without this, names like 'beamtalk_counter_v1_abc' appear
+    %% instead of 'Counter', and the methods op fails because it looks up by class name.
+    ModToClass = module_to_class_name_map(),
     ModulesWithInfo = lists:map(
         fun({ModName, ModInfo}) ->
             ActorCount = beamtalk_repl_modules:get_actor_count(ModName, RegistryPid, Tracker),
-            Info = beamtalk_repl_modules:format_module_info(ModInfo, ActorCount),
+            Info0 = beamtalk_repl_modules:format_module_info(ModInfo, ActorCount),
+            ClassName = maps:get(ModName, ModToClass, maps:get(name, Info0)),
+            Info = Info0#{name => ClassName},
             {ModName, Info}
         end,
         TrackedModules
@@ -159,13 +165,17 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
                             true ->
                                 false;
                             false ->
+                                ClassName = maps:get(
+                                    ModName, ModToClass, atom_to_binary(ModName, utf8)
+                                ),
+                                ResolvedPath =
+                                    case SourcePath of
+                                        undefined -> resolve_source_path(ModName);
+                                        _ -> SourcePath
+                                    end,
                                 Info = #{
-                                    name => atom_to_binary(ModName, utf8),
-                                    source_file =>
-                                        case SourcePath of
-                                            undefined -> "unknown";
-                                            _ -> SourcePath
-                                        end,
+                                    name => ClassName,
+                                    source_file => ResolvedPath,
                                     actor_count => 0,
                                     load_time => 0,
                                     time_ago => "startup"
@@ -326,3 +336,43 @@ resolve_class_to_module(ClassName, [Pid | Rest]) ->
         _:_ ->
             resolve_class_to_module(ClassName, Rest)
     end.
+
+%% @private
+%% @doc Resolve a source path for a module when workspace_meta has none.
+%% Reads the beamtalk_source module attribute embedded by the compiler (BT-845/BT-860).
+-spec resolve_source_path(atom()) -> string().
+resolve_source_path(ModName) ->
+    try
+        Attrs = erlang:get_module_info(ModName, attributes),
+        case proplists:get_value(beamtalk_source, Attrs) of
+            [Path] when is_list(Path), Path =/= "" -> Path;
+            _ -> "unknown"
+        end
+    catch
+        _:_ -> "unknown"
+    end.
+
+%% @private
+%% @doc Build a map from BEAM module atom to Beamtalk class name binary.
+%% Queries all registered class processes in a single pass.
+-spec module_to_class_name_map() -> #{atom() => binary()}.
+module_to_class_name_map() ->
+    Pids =
+        try
+            beamtalk_class_registry:all_classes()
+        catch
+            _:_ -> []
+        end,
+    lists:foldl(
+        fun(Pid, Acc) ->
+            try
+                ModAtom = gen_server:call(Pid, module_name, 500),
+                ClassName = gen_server:call(Pid, class_name, 500),
+                Acc#{ModAtom => atom_to_binary(ClassName, utf8)}
+            catch
+                _:_ -> Acc
+            end
+        end,
+        #{},
+        Pids
+    ).

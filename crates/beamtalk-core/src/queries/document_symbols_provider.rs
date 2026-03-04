@@ -30,6 +30,7 @@ pub fn compute_document_symbols(module: &Module) -> Vec<DocumentSymbol> {
                 name: state_var.name.name.clone(),
                 kind: DocumentSymbolKind::Field,
                 span: state_var.span,
+                name_span: None,
                 children: vec![],
             });
         }
@@ -40,6 +41,7 @@ pub fn compute_document_symbols(module: &Module) -> Vec<DocumentSymbol> {
                 name: method.selector.name(),
                 kind: DocumentSymbolKind::Method,
                 span: method.span,
+                name_span: None,
                 children: vec![],
             });
         }
@@ -50,6 +52,7 @@ pub fn compute_document_symbols(module: &Module) -> Vec<DocumentSymbol> {
                 name: method.selector.name(),
                 kind: DocumentSymbolKind::ClassMethod,
                 span: method.span,
+                name_span: None,
                 children: vec![],
             });
         }
@@ -59,6 +62,7 @@ pub fn compute_document_symbols(module: &Module) -> Vec<DocumentSymbol> {
             name: format!("{} (class)", class.name.name).into(),
             kind: DocumentSymbolKind::Class,
             span: class.span,
+            name_span: Some(class.name.span),
             children,
         });
     }

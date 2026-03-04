@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
+import { extractMethodDocComment, extractStateVarInfo } from "./textUtils";
 import type {
   ActorInfo,
   BindingsMap,
   ClassInfo,
   ConnectionState,
   MethodInfo,
+  StateVarInfo,
   PushEvent,
   WorkspaceClient,
 } from "./workspaceClient";
@@ -63,6 +65,18 @@ export interface MethodItemNode {
   readonly classInfo: ClassInfo;
 }
 
+export interface StateGroupNode {
+  readonly kind: "state-group";
+  readonly classInfo: ClassInfo;
+  readonly stateVars: StateVarItemNode[];
+}
+
+export interface StateVarItemNode {
+  readonly kind: "state-item";
+  readonly stateVar: StateVarInfo;
+  readonly classInfo: ClassInfo;
+}
+
 export interface InspectFieldNode {
   readonly kind: "inspect-field";
   readonly key: string;
@@ -79,6 +93,8 @@ export type WorkspaceNode =
   | BindingItemNode
   | ActorItemNode
   | ClassItemNode
+  | StateGroupNode
+  | StateVarItemNode
   | MethodGroupNode
   | MethodItemNode
   | InspectFieldNode;
@@ -126,8 +142,11 @@ export class WorkspaceTreeDataProvider
   /** Cached inspect results keyed by "actor:<pid>". */
   private readonly inspectCache = new Map<string, Record<string, unknown>>();
 
-  /** Cached methods results keyed by class name. */
-  private readonly methodsCache = new Map<string, MethodInfo[]>();
+  /** Cached methods+stateVars results keyed by class name. */
+  private readonly methodsCache = new Map<
+    string,
+    { methods: MethodInfo[]; stateVars: StateVarInfo[] }
+  >();
 
   private readonly disposeHandlers: Array<() => void> = [];
 
@@ -285,6 +304,10 @@ export class WorkspaceTreeDataProvider
         return this._actorItem(element);
       case "class-item":
         return this._classItem(element);
+      case "state-group":
+        return this._stateGroupItem(element);
+      case "state-item":
+        return this._stateVarItem(element);
       case "method-group":
         return this._methodGroupItem(element);
       case "method-item":
@@ -347,28 +370,201 @@ export class WorkspaceTreeDataProvider
       case "class-item": {
         const cached = this.methodsCache.get(element.info.name);
         if (cached) {
-          return this._methodGroups(cached, element.info);
+          return this._classChildren(cached, element.info);
         }
         const activeClient = this.client;
         if (!activeClient || this.connectionState !== "connected") {
           return [];
         }
         try {
-          const methods = await activeClient.methods(element.info.name);
+          const result = await activeClient.methods(element.info.name);
           // Guard: client may have changed while methods() was in-flight
           if (this.client !== activeClient) return [];
-          this.methodsCache.set(element.info.name, methods);
-          return this._methodGroups(methods, element.info);
+          this.methodsCache.set(element.info.name, result);
+          return this._classChildren(result, element.info);
         } catch {
           return [];
         }
       }
+
+      case "state-group":
+        return element.stateVars;
 
       case "method-group":
         return element.methods;
 
       default:
         return [];
+    }
+  }
+
+  // ─── resolveTreeItem (lazy hover tooltips) ───────────────────────────────
+
+  async resolveTreeItem(
+    item: vscode.TreeItem,
+    element: WorkspaceNode,
+    _token: vscode.CancellationToken
+  ): Promise<vscode.TreeItem | undefined> {
+    if (element.kind === "class-item") {
+      item.tooltip =
+        (await this._lspHoverTooltip(element.info.source_file, element.info.name, "class")) ??
+        this._classTooltipFallback(element.info);
+      return item;
+    }
+    if (element.kind === "method-item") {
+      item.tooltip =
+        (await this._lspHoverTooltip(
+          element.classInfo.source_file,
+          element.method.selector,
+          element.method.side === "class" ? "class-method" : "method"
+        )) ??
+        (await this._methodDocCommentTooltip(element)) ??
+        this._methodTooltipFallback(element.method);
+      return item;
+    }
+    if (element.kind === "state-item") {
+      item.tooltip = await this._stateVarTooltip(element);
+      return item;
+    }
+    return undefined;
+  }
+
+  private async _lspHoverTooltip(
+    sourceFile: string | undefined,
+    symbol: string,
+    kind: "class" | "method" | "class-method" | "field"
+  ): Promise<vscode.MarkdownString | undefined> {
+    if (!sourceFile || sourceFile === "unknown") return undefined;
+    try {
+      const uri = vscode.Uri.file(sourceFile);
+      await vscode.workspace.openTextDocument(uri);
+
+      // Use the LSP document symbol provider to find the exact position — no regex.
+      const docSymbols = await vscode.commands.executeCommand<
+        vscode.DocumentSymbol[] | vscode.SymbolInformation[]
+      >("vscode.executeDocumentSymbolProvider", uri);
+
+      const pos = this._findSymbolPosition(docSymbols ?? [], symbol, kind);
+      if (!pos) return undefined;
+
+      const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+        "vscode.executeHoverProvider",
+        uri,
+        pos
+      );
+      if (!hovers || hovers.length === 0) return undefined;
+      const md = new vscode.MarkdownString();
+      for (const hover of hovers) {
+        const contents = Array.isArray(hover.contents) ? hover.contents : [hover.contents];
+        for (const c of contents) {
+          if (typeof c === "string") md.appendMarkdown(c);
+          else if (c && "value" in c && c.value) md.appendMarkdown(c.value);
+        }
+      }
+      return md.value ? md : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Find the position of a class, method, or field symbol from document symbols. */
+  private _findSymbolPosition(
+    symbols: vscode.DocumentSymbol[] | vscode.SymbolInformation[],
+    name: string,
+    kind: "class" | "method" | "class-method" | "field"
+  ): vscode.Position | undefined {
+    const targetKind =
+      kind === "class"
+        ? [vscode.SymbolKind.Class]
+        : kind === "field"
+          ? [vscode.SymbolKind.Field]
+          : [vscode.SymbolKind.Method, vscode.SymbolKind.Function];
+
+    for (const sym of symbols) {
+      // Class symbols are named "ClassName (class)" per ADR 0013 — strip the suffix for matching.
+      const symBaseName =
+        sym.kind === vscode.SymbolKind.Class ? sym.name.replace(/ \(class\)$/, "") : sym.name;
+      if (targetKind.includes(sym.kind) && symBaseName === name) {
+        if ("range" in sym) {
+          // DocumentSymbol
+          return sym.selectionRange.start;
+        } else {
+          // SymbolInformation
+          return sym.location.range.start;
+        }
+      }
+      // Recurse into children (DocumentSymbol only)
+      if ("children" in sym && sym.children.length > 0) {
+        const found = this._findSymbolPosition(sym.children, name, kind);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
+
+  private _classTooltipFallback(info: ClassInfo): vscode.MarkdownString {
+    const md = new vscode.MarkdownString(`**${info.name}**`);
+    if (info.actor_count !== undefined && info.actor_count > 0) {
+      md.appendMarkdown(
+        `\n\n${info.actor_count} running instance${info.actor_count !== 1 ? "s" : ""}`
+      );
+    }
+    return md;
+  }
+
+  private _methodTooltipFallback(method: MethodInfo): vscode.MarkdownString {
+    return new vscode.MarkdownString(
+      `**${method.selector}**\n\n_${method.side === "instance" ? "instance" : "class"} method_`
+    );
+  }
+
+  /**
+   * Read source text and extract `///` doc comment for the method.
+   * Used as a fallback when LSP hover is unavailable (file not open in editor).
+   */
+  private async _methodDocCommentTooltip(
+    element: MethodItemNode
+  ): Promise<vscode.MarkdownString | undefined> {
+    const sourceFile = element.classInfo.source_file;
+    if (!sourceFile || sourceFile === "unknown") return undefined;
+    try {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
+      const comment = extractMethodDocComment(
+        doc.getText(),
+        element.method.selector,
+        element.method.side
+      );
+      if (!comment) return undefined;
+      const md = new vscode.MarkdownString(comment);
+      return md;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Build a tooltip for a state variable item by reading its declaration from source.
+   * Shows the default value and inline comment (e.g. `// List of parameter name strings`).
+   */
+  private async _stateVarTooltip(element: StateVarItemNode): Promise<vscode.MarkdownString> {
+    const { classInfo, stateVar } = element;
+    const fallback = new vscode.MarkdownString(`**${stateVar.name}**\n\n_state variable_`);
+    if (!classInfo.source_file || classInfo.source_file === "unknown") return fallback;
+    try {
+      const uri = vscode.Uri.file(classInfo.source_file);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const info = extractStateVarInfo(doc.getText(), stateVar.name);
+      if (!info) return fallback;
+      const md = new vscode.MarkdownString(`**${stateVar.name}**`);
+      if (info.defaultValue !== undefined) {
+        md.appendMarkdown(`\n\nDefault: \`${info.defaultValue}\``);
+      }
+      if (info.comment) {
+        md.appendMarkdown(`\n\n${info.comment}`);
+      }
+      return md;
+    } catch {
+      return fallback;
     }
   }
 
@@ -464,8 +660,8 @@ export class WorkspaceTreeDataProvider
   private _classItem(node: ClassItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.Collapsed);
     item.iconPath = new vscode.ThemeIcon("symbol-class");
-    item.contextValue = "class-item";
-    item.tooltip = node.info.source_file ? `Source: ${node.info.source_file}` : node.info.name;
+    const hasSource = !!node.info.source_file && node.info.source_file !== "unknown";
+    item.contextValue = hasSource ? "class-item" : "class-item-no-source";
     if (node.info.actor_count !== undefined && node.info.actor_count > 0) {
       item.description = `${node.info.actor_count} instance${node.info.actor_count !== 1 ? "s" : ""}`;
     }
@@ -490,13 +686,41 @@ export class WorkspaceTreeDataProvider
   private _methodItem(node: MethodItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.method.selector, vscode.TreeItemCollapsibleState.None);
     item.iconPath = new vscode.ThemeIcon("symbol-method");
-    item.contextValue = "method-item";
-    item.tooltip = node.method.name !== node.method.selector ? node.method.name : undefined;
-    item.command = {
-      command: "beamtalk.navigateToMethod",
-      title: "Go to Definition",
-      arguments: [node],
-    };
+    const hasSource = !!node.classInfo.source_file && node.classInfo.source_file !== "unknown";
+    item.contextValue = hasSource ? "method-item" : "method-item-no-source";
+    if (hasSource) {
+      item.command = {
+        command: "beamtalk.navigateToMethod",
+        title: "Go to Definition",
+        arguments: [node],
+      };
+    }
+    return item;
+  }
+
+  private _stateGroupItem(node: StateGroupNode): vscode.TreeItem {
+    const count = node.stateVars.length;
+    const state =
+      count > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None;
+    const item = new vscode.TreeItem("State", state);
+    item.iconPath = new vscode.ThemeIcon("symbol-field");
+    item.description = count > 0 ? `(${count})` : "(none)";
+    item.contextValue = "state-group";
+    return item;
+  }
+
+  private _stateVarItem(node: StateVarItemNode): vscode.TreeItem {
+    const item = new vscode.TreeItem(node.stateVar.name, vscode.TreeItemCollapsibleState.None);
+    item.iconPath = new vscode.ThemeIcon("symbol-field");
+    const hasSource = !!node.classInfo.source_file && node.classInfo.source_file !== "unknown";
+    item.contextValue = hasSource ? "state-item" : "state-item-no-source";
+    if (hasSource) {
+      item.command = {
+        command: "beamtalk.navigateToStateVar",
+        title: "Go to Definition",
+        arguments: [node],
+      };
+    }
     return item;
   }
 
@@ -511,23 +735,33 @@ export class WorkspaceTreeDataProvider
 
   // ─── Private: helpers ────────────────────────────────────────────────────
 
-  private _methodGroups(methods: MethodInfo[], classInfo: ClassInfo): MethodGroupNode[] {
+  private _classChildren(
+    result: { methods: MethodInfo[]; stateVars: StateVarInfo[] },
+    classInfo: ClassInfo
+  ): WorkspaceNode[] {
+    const { methods, stateVars } = result;
     const instance = methods.filter((m) => m.side === "instance");
     const classSide = methods.filter((m) => m.side === "class");
-    const toItems = (ms: MethodInfo[]): MethodItemNode[] =>
+    const toMethodItems = (ms: MethodInfo[]): MethodItemNode[] =>
       ms.map((m) => ({ kind: "method-item" as const, method: m, classInfo }));
+    const stateVarItems: StateVarItemNode[] = stateVars.map((sv) => ({
+      kind: "state-item" as const,
+      stateVar: sv,
+      classInfo,
+    }));
     return [
+      { kind: "state-group" as const, classInfo, stateVars: stateVarItems },
       {
         kind: "method-group" as const,
         side: "instance",
         classInfo,
-        methods: toItems(instance),
+        methods: toMethodItems(instance),
       },
       {
         kind: "method-group" as const,
         side: "class",
         classInfo,
-        methods: toItems(classSide),
+        methods: toMethodItems(classSide),
       },
     ];
   }

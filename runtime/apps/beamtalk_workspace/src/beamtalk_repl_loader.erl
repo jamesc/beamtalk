@@ -19,6 +19,7 @@
     load_class_module/3,
     reload_method_definition/4,
     activate_module/2,
+    activate_module/3,
     register_classes/2,
     trigger_hot_reload/2,
     reload_class_file/1,
@@ -144,9 +145,16 @@ reload_method_definition(MethodInfo, Warnings, Expression, State) ->
 %% and update workspace metadata.
 -spec activate_module(atom(), [map()]) -> ok.
 activate_module(ModuleName, Classes) ->
+    activate_module(ModuleName, Classes, undefined).
+
+%% @doc Activate a loaded module with an optional source path for workspace metadata.
+%% Passing SourcePath ensures the source file is recorded in workspace_meta so that
+%% new VS Code sessions (which have an empty session tracker) can still navigate to source.
+-spec activate_module(atom(), [map()], string() | undefined) -> ok.
+activate_module(ModuleName, Classes, SourcePath) ->
     register_classes(Classes, ModuleName),
     trigger_hot_reload(ModuleName, Classes),
-    beamtalk_workspace_meta:register_module(ModuleName),
+    beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
     beamtalk_workspace_meta:update_activity().
 
 %% @doc Register loaded classes by calling the module's register_class/0 function.
@@ -251,7 +259,7 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
         end,
     case code:load_binary(ModuleName, LoadPath, Binary) of
         {module, ModuleName} ->
-            activate_module(ModuleName, ClassNames),
+            activate_module(ModuleName, ClassNames, SourcePath),
             NewState1 = maybe_add_loaded_module(ModuleName, State),
             NewState2 = track_module_source(ModuleName, SourcePath, NewState1),
             NewState3 = store_file_class_sources(ClassNames, Source, NewState2),
@@ -421,7 +429,7 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
                 ok ->
                     case code:load_binary(ModuleName, Path, Binary) of
                         {module, ModuleName} ->
-                            activate_module(ModuleName, ClassNames),
+                            activate_module(ModuleName, ClassNames, Path),
                             ok;
                         {error, Reason} ->
                             {error, {load_error, Reason}}

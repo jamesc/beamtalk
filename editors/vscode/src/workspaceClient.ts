@@ -34,6 +34,10 @@ export interface MethodInfo {
   side: "instance" | "class";
 }
 
+export interface StateVarInfo {
+  name: string;
+}
+
 export type BindingsMap = Record<string, unknown>;
 
 export interface SessionInfo {
@@ -225,12 +229,18 @@ export class WorkspaceClient {
     return resp.state ?? {};
   }
 
-  /** List all methods for a loaded class (instance and class-side). */
-  async methods(className: string): Promise<MethodInfo[]> {
+  /** List all methods and state vars for a loaded class. */
+  async methods(className: string): Promise<{ methods: MethodInfo[]; stateVars: StateVarInfo[] }> {
     const resp = (await this._request({ op: "methods", class: className })) as {
       methods?: Array<{ name: string; selector: string; side: "instance" | "class" }>;
+      state_vars?: string[];
     };
-    return resp.methods ?? [];
+    const methods = Array.isArray(resp.methods) ? resp.methods : [];
+    const stateVarsRaw = Array.isArray(resp.state_vars) ? resp.state_vars : [];
+    return {
+      methods,
+      stateVars: stateVarsRaw.map((name) => ({ name })),
+    };
   }
 
   /** List all active sessions in the workspace. */

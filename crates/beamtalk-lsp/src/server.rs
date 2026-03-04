@@ -1200,6 +1200,7 @@ fn to_lsp_symbol(
         .map(|c| to_lsp_symbol(c, source))
         .collect();
 
+    let selection_range = sym.name_span.map_or(range, |s| span_to_range(s, source));
     tower_lsp::lsp_types::DocumentSymbol {
         name: sym.name.to_string(),
         kind: match sym.kind {
@@ -1211,7 +1212,7 @@ fn to_lsp_symbol(
         tags: None,
         deprecated: None,
         range,
-        selection_range: range,
+        selection_range,
         children: Some(children),
     }
 }

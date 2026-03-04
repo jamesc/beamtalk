@@ -379,7 +379,7 @@ activate_project_module(ModuleName) ->
 -spec extract_source_path(module()) -> string() | undefined.
 extract_source_path(ModuleName) ->
     try
-        Attrs = ModuleName:module_info(attributes),
+        Attrs = erlang:get_module_info(ModuleName, attributes),
         case proplists:get_value(beamtalk_source, Attrs) of
             [Path] when is_list(Path) -> Path;
             _ -> undefined

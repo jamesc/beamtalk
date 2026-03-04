@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Launch an Extension Development Host that loads the extension from
+      // editors/vscode/ (the local build tree) and opens the repo root as the
+      // workspace. Run "just build-vscode" first to get bin/ and initial out/.
+      // Use the "Watch Extension" task in a separate terminal for hot recompile.
+      "name": "Extension: Run Dev",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/editors/vscode",
+        "${workspaceFolder}"
+      ],
+      "outFiles": ["${workspaceFolder}/editors/vscode/out/**/*.js"],
+      "preLaunchTask": "extension: compile"
+    }
+  ]
+}

@@ -1099,11 +1099,19 @@ impl CoreErlangGenerator {
             // classMethods: class method specs (spawn/new + user-defined)
             let mut class_method_entries: Vec<Document<'static>> = Vec::new();
             if self.context == CodeGenContext::Actor {
-                class_method_entries.push(Document::Str("'spawn' => ~{'arity' => 0}~"));
-                class_method_entries.push(Document::Str("'spawnWith:' => ~{'arity' => 1}~"));
+                class_method_entries.push(Document::Str(
+                    "'spawn' => ~{'arity' => 0, 'injected' => 'true'}~",
+                ));
+                class_method_entries.push(Document::Str(
+                    "'spawnWith:' => ~{'arity' => 1, 'injected' => 'true'}~",
+                ));
             } else {
-                class_method_entries.push(Document::Str("'new' => ~{'arity' => 0}~"));
-                class_method_entries.push(Document::Str("'new:' => ~{'arity' => 1}~"));
+                class_method_entries.push(Document::Str(
+                    "'new' => ~{'arity' => 0, 'injected' => 'true'}~",
+                ));
+                class_method_entries.push(Document::Str(
+                    "'new:' => ~{'arity' => 1, 'injected' => 'true'}~",
+                ));
             }
             // BT-411: User-defined class methods
             for method in &class.class_methods {

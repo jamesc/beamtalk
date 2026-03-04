@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // One-shot compile: tsc produces editors/vscode/out/**/*.js from src/.
+      // Used as the preLaunchTask for "Extension: Run Dev".
+      "label": "extension: compile",
+      "type": "shell",
+      "command": "npm run compile",
+      "options": { "cwd": "${workspaceFolder}/editors/vscode" },
+      "group": "build",
+      "presentation": { "reveal": "silent" },
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      // Incremental watch mode. Run this in a terminal while developing so
+      // changes are recompiled automatically — then reload the dev host with
+      // Ctrl+Shift+P → "Developer: Reload Window".
+      "label": "extension: watch",
+      "type": "shell",
+      "command": "npm run watch",
+      "options": { "cwd": "${workspaceFolder}/editors/vscode" },
+      "group": "build",
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": ["$tsc-watch"]
+    }
+  ]
+}
