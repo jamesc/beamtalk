@@ -188,7 +188,7 @@ pub enum MutationKind {
 /// assert_eq!(result.diagnostics.len(), 0);
 /// ```
 pub fn analyse(module: &Module) -> AnalysisResult {
-    analyse_full(module, &[], false, false)
+    analyse_full(module, &[], false, false, vec![])
 }
 
 /// Analyse a module with pre-defined variables (for REPL context).
@@ -202,7 +202,7 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// services. Pre-defining known variables is essential for REPL contexts where
 /// users build up state incrementally across multiple evaluations.
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
-    analyse_full(module, known_vars, false, false)
+    analyse_full(module, known_vars, false, false, vec![])
 }
 
 /// Analyse a module with compiler options controlling stdlib-specific behaviour.
@@ -215,7 +215,21 @@ pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -
         &[],
         options.stdlib_mode,
         options.skip_module_expression_lint,
+        vec![],
     )
+}
+
+/// Analyse a module with pre-defined variables and pre-loaded class entries
+/// from BEAM metadata (ADR 0050 Phase 4).
+///
+/// `pre_loaded_classes` are injected into the `ClassHierarchy` *before*
+/// `TypeChecking`, so user-defined REPL classes are visible to the `TypeChecker`.
+pub fn analyse_with_known_vars_and_classes(
+    module: &Module,
+    known_vars: &[&str],
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+) -> AnalysisResult {
+    analyse_full(module, known_vars, false, false, pre_loaded_classes)
 }
 
 /// Internal: full analysis with all knobs.
@@ -224,6 +238,7 @@ fn analyse_full(
     known_vars: &[&str],
     stdlib_mode: bool,
     skip_module_expression_lint: bool,
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
 ) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
@@ -233,6 +248,13 @@ fn analyse_full(
     // build_with_options is infallible; propagate any diagnostics it produced
     result.class_hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
     result.diagnostics.extend(hierarchy_diags);
+
+    // ADR 0050 Phase 4: inject REPL-session class metadata before TypeChecking
+    if !pre_loaded_classes.is_empty() {
+        result
+            .class_hierarchy
+            .add_from_beam_meta(pre_loaded_classes);
+    }
 
     // Phase 1: Name Resolution
     let mut name_resolver = NameResolver::new();
@@ -3885,5 +3907,46 @@ mod tests {
             result.diagnostics
         );
         assert!(actor_warnings[0].message.contains("Counter"));
+    }
+
+    // ── ADR 0050 Phase 4: analyse_with_known_vars_and_classes ──
+
+    #[test]
+    fn analyse_with_known_vars_and_classes_injects_user_class_into_hierarchy() {
+        use crate::semantic_analysis::class_hierarchy::ClassInfo;
+
+        let pre_class = ClassInfo {
+            name: EcoString::from("UserClass"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+        };
+
+        let src = "42.";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+        let result = analyse_with_known_vars_and_classes(&module, &[], vec![pre_class]);
+        assert!(
+            result.class_hierarchy.has_class("UserClass"),
+            "UserClass should be visible in the hierarchy after injection"
+        );
+    }
+
+    #[test]
+    fn analyse_with_known_vars_and_classes_empty_is_equivalent_to_base() {
+        let src = "1 + 2.";
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+        let result_base = analyse_with_known_vars(&module, &[]);
+        let result_new = analyse_with_known_vars_and_classes(&module, &[], vec![]);
+        // Same number of diagnostics (both should be empty for valid source)
+        assert_eq!(result_base.diagnostics.len(), result_new.diagnostics.len());
     }
 }

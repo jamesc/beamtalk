@@ -92,10 +92,17 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
             _ -> Request0#{class_superclass_index => SuperclassIndex}
         end,
     %% Include module index for correct cross-directory class references.
-    Request =
+    Request2 =
         case map_size(ModuleIndex) of
             0 -> Request1;
             _ -> Request1#{class_module_index => ModuleIndex}
+        end,
+    %% ADR 0050 Phase 4: Forward class hierarchy to the Rust compiler port.
+    ClassHierarchy = maps:get(class_hierarchy, Options, #{}),
+    Request =
+        case map_size(ClassHierarchy) of
+            0 -> Request2;
+            _ -> Request2#{class_hierarchy => ClassHierarchy}
         end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of

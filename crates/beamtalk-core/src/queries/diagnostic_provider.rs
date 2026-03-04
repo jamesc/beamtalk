@@ -83,6 +83,29 @@ pub fn compute_diagnostics_with_known_vars(
     all_diagnostics
 }
 
+/// Computes diagnostics with pre-defined REPL variables and pre-loaded class
+/// entries from BEAM metadata (ADR 0050 Phase 4).
+///
+/// `pre_loaded_classes` are injected into the `ClassHierarchy` before `TypeChecking`,
+/// making REPL-session user classes visible to the `TypeChecker`.
+#[must_use]
+pub fn compute_diagnostics_with_known_vars_and_classes(
+    module: &crate::ast::Module,
+    parse_diagnostics: Vec<Diagnostic>,
+    known_vars: &[&str],
+    pre_loaded_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
+) -> Vec<Diagnostic> {
+    let mut all_diagnostics = parse_diagnostics;
+    let analysis_result = crate::semantic_analysis::analyse_with_known_vars_and_classes(
+        module,
+        known_vars,
+        pre_loaded_classes,
+    );
+    all_diagnostics.extend(analysis_result.diagnostics);
+    apply_expect_directives(module, &mut all_diagnostics);
+    all_diagnostics
+}
+
 /// Applies `@expect` directives to suppress matching diagnostics.
 ///
 /// For each `@expect category` directive in the module, any diagnostic

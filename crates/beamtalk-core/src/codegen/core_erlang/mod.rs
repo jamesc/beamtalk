@@ -276,6 +276,10 @@ pub struct CodegenOptions {
     /// bypass the sealed-superclass check. This allows stdlib classes like Character
     /// (which extends sealed Integer) to load correctly via their `on_load` hooks.
     stdlib_mode: bool,
+    /// ADR 0050 Phase 4: pre-loaded class entries from BEAM metadata.
+    /// Injected into the `ClassHierarchy` before codegen so user-defined REPL
+    /// classes are visible to `is_actor_class` and related checks.
+    pre_class_hierarchy: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
 }
 
 impl CodegenOptions {
@@ -290,6 +294,7 @@ impl CodegenOptions {
             class_superclass_index: std::collections::HashMap::new(),
             source_path: None,
             stdlib_mode: false,
+            pre_class_hierarchy: Vec::new(),
         }
     }
 
@@ -347,6 +352,17 @@ impl CodegenOptions {
         index: std::collections::HashMap<String, String>,
     ) -> Self {
         self.class_superclass_index = index;
+        self
+    }
+
+    /// ADR 0050 Phase 4: pre-load user-class entries from BEAM metadata into
+    /// the `CodegenOptions` so `generate_module` injects them into the hierarchy.
+    #[must_use]
+    pub fn with_class_hierarchy(
+        mut self,
+        classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
+    ) -> Self {
+        self.pre_class_hierarchy = classes;
         self
     }
 
@@ -458,9 +474,13 @@ pub fn generate_module_with_warnings(
     let mut hierarchy =
         hierarchy_result.map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
 
-    // BT-894: Enrich hierarchy with cross-file superclass information so that
-    // is_actor_class can resolve the full inheritance chain for classes whose
-    // parents are defined in other files.
+    // ADR 0050 Phase 4: inject richer user-class entries from BEAM metadata first,
+    // so that add_external_superclasses (which uses contains_key before inserting)
+    // does not overwrite BEAM data with partial stubs.
+    hierarchy.add_from_beam_meta(options.pre_class_hierarchy);
+
+    // BT-894: Backfill missing cross-file superclass stubs (only for classes not
+    // already present from build() or BEAM metadata).
     hierarchy.add_external_superclasses(&options.class_superclass_index);
 
     // BT-1005: Writeback inferred return types into the AST before codegen so

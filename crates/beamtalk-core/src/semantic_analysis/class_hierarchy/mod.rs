@@ -230,6 +230,20 @@ impl ClassHierarchy {
         }
     }
 
+    /// Populate the hierarchy with user-class entries pre-deserialized from
+    /// `__beamtalk_meta/0` maps (ADR 0050 Phase 4).
+    ///
+    /// Skips builtins (stdlib has richer data) and classes already present
+    /// in the hierarchy (AST-derived entries from `build()` are authoritative
+    /// over cached BEAM metadata, which may be stale during redefinition).
+    pub fn add_from_beam_meta(&mut self, classes: Vec<ClassInfo>) {
+        for info in classes {
+            if !Self::is_builtin_class(&info.name) {
+                self.classes.entry(info.name.clone()).or_insert(info);
+            }
+        }
+    }
+
     /// Returns the ordered superclass chain for a class (excluding the class itself).
     ///
     /// Example: `superclass_chain("Counter")` → `["Actor", "Object", "ProtoObject"]`
@@ -3002,6 +3016,122 @@ mod tests {
                 EcoString::from("ProtoObject")
             ],
             "UnknownClass superclass chain should reach ClassB"
+        );
+    }
+
+    // --- ADR 0050 Phase 4: add_from_beam_meta tests ---
+
+    #[test]
+    fn add_from_beam_meta_inserts_non_builtin_class() {
+        let mut h = ClassHierarchy::with_builtins();
+        let info = ClassInfo {
+            name: EcoString::from("Counter"),
+            superclass: Some(EcoString::from("Actor")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![EcoString::from("count")],
+            state_types: HashMap::new(),
+            methods: vec![MethodInfo {
+                selector: EcoString::from("value"),
+                arity: 0,
+                kind: MethodKind::Primary,
+                defined_in: EcoString::from("Counter"),
+                is_sealed: false,
+                return_type: Some(EcoString::from("Integer")),
+                param_types: vec![],
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+        };
+        h.add_from_beam_meta(vec![info]);
+        assert!(h.has_class("Counter"));
+        let cls = h.get_class("Counter").unwrap();
+        assert_eq!(cls.superclass.as_deref(), Some("Actor"));
+        assert_eq!(cls.methods.len(), 1);
+        assert_eq!(cls.methods[0].selector.as_str(), "value");
+    }
+
+    #[test]
+    fn add_from_beam_meta_preserves_existing_entries() {
+        let mut h = ClassHierarchy::with_builtins();
+        // Simulate AST-derived entry (from ClassHierarchy::build)
+        let ast_info = ClassInfo {
+            name: EcoString::from("Counter"),
+            superclass: Some(EcoString::from("Actor")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![EcoString::from("count")],
+            state_types: HashMap::new(),
+            methods: vec![MethodInfo {
+                selector: EcoString::from("increment"),
+                arity: 0,
+                kind: MethodKind::Primary,
+                defined_in: EcoString::from("Counter"),
+                is_sealed: false,
+                return_type: None,
+                param_types: vec![],
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+        };
+        h.classes.insert(EcoString::from("Counter"), ast_info);
+
+        // Stale cache entry with different method
+        let cache_info = ClassInfo {
+            name: EcoString::from("Counter"),
+            superclass: Some(EcoString::from("Object")),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![MethodInfo {
+                selector: EcoString::from("old_method"),
+                arity: 0,
+                kind: MethodKind::Primary,
+                defined_in: EcoString::from("Counter"),
+                is_sealed: false,
+                return_type: None,
+                param_types: vec![],
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+        };
+        h.add_from_beam_meta(vec![cache_info]);
+
+        // AST-derived entry should win
+        let cls = h.get_class("Counter").unwrap();
+        assert_eq!(cls.superclass.as_deref(), Some("Actor"));
+        assert_eq!(cls.methods[0].selector.as_str(), "increment");
+    }
+
+    #[test]
+    fn add_from_beam_meta_skips_builtins() {
+        let mut h = ClassHierarchy::with_builtins();
+        let original_method_count = h.get_class("Integer").unwrap().methods.len();
+        let stub = ClassInfo {
+            name: EcoString::from("Integer"),
+            superclass: None,
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+        };
+        h.add_from_beam_meta(vec![stub]);
+        // Built-in should be unchanged
+        assert_eq!(
+            h.get_class("Integer").unwrap().methods.len(),
+            original_method_count
         );
     }
 }

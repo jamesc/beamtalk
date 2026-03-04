@@ -5902,3 +5902,39 @@ Actor subclass: Counter
         "Untyped param `value` must not be mis-inferred as state field Integer. Got:\n{code}"
     );
 }
+
+// ============================================================================
+// ADR 0050 Phase 4: CodegenOptions::with_class_hierarchy
+// ============================================================================
+
+#[test]
+fn generate_module_with_pre_class_hierarchy_does_not_panic() {
+    use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    use std::collections::HashMap;
+
+    let src = "Object subclass: MyService\n  greet => \"hello\"";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+
+    let pre_class = ClassInfo {
+        name: ecow::EcoString::from("Helper"),
+        superclass: Some(ecow::EcoString::from("Object")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_value: false,
+        state: vec![],
+        state_types: HashMap::new(),
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+    };
+
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@my_service")
+            .with_workspace_mode(true)
+            .with_class_hierarchy(vec![pre_class]),
+    );
+    assert!(result.is_ok(), "generate_module should succeed: {result:?}");
+}
