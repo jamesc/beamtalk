@@ -2070,4 +2070,24 @@ mod tests {
             "binary + should compile to erlang arithmetic. Got: {output}"
         );
     }
+
+    #[test]
+    fn test_generate_cast_send_actor_self_uses_safe_dispatch() {
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.context = crate::codegen::core_erlang::CodeGenContext::Actor;
+        let receiver = Expression::Identifier(Identifier::new("self", s()));
+        let selector = MessageSelector::Unary("doIt".into());
+        let doc = generator
+            .generate_cast_send(&receiver, &selector, &[])
+            .unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("safe_dispatch"),
+            "actor self cast should use safe_dispatch. Got: {output}"
+        );
+        assert!(
+            output.contains("'ok'"),
+            "actor self cast should return 'ok'. Got: {output}"
+        );
+    }
 }

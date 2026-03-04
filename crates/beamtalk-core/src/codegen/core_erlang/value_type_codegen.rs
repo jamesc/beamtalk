@@ -1994,10 +1994,23 @@ mod tests {
                 span: s(),
             })
             .collect();
-        ClassDefinition::new(
+        let mut class = ClassDefinition::new(
             Identifier::new(name, s()),
             Identifier::new("Value", s()),
             state,
+            vec![],
+            s(),
+        );
+        // Explicitly set class_kind to avoid relying on constructor inference
+        class.class_kind = ClassKind::Value;
+        class
+    }
+
+    fn make_actor_class(name: &str) -> ClassDefinition {
+        ClassDefinition::new(
+            Identifier::new(name, s()),
+            Identifier::new("Actor", s()),
+            vec![],
             vec![],
             s(),
         )
@@ -2018,8 +2031,7 @@ mod tests {
 
     #[test]
     fn test_compute_auto_slot_methods_actor_returns_none() {
-        let mut class = make_value_class("Counter", &["count"]);
-        class.class_kind = ClassKind::Actor;
+        let class = make_actor_class("Counter");
         assert!(
             compute_auto_slot_methods(&class).is_none(),
             "actor classes should not get auto slot methods"

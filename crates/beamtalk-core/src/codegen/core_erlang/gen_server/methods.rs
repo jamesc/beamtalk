@@ -2341,7 +2341,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_register_class_empty_module_returns_nil() {
+    fn test_generate_register_class_empty_module_renders_empty() {
         let mut generator = CoreErlangGenerator::new("test");
         let module = Module {
             classes: vec![],

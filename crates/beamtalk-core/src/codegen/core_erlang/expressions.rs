@@ -1549,7 +1549,7 @@ mod tests {
             "map key should be atom. Got: {output}"
         );
         assert!(
-            output.contains('1'),
+            output.contains("=> 1"),
             "map value should be integer. Got: {output}"
         );
         assert!(
