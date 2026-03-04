@@ -1350,6 +1350,68 @@ mod tests {
         );
     }
 
+    // --- resolve_completion_type tests (BT-1068) ---
+
+    #[test]
+    fn resolve_completion_type_string_literal() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_completion_type")),
+            (atom("expression"), binary("\"hello\"")),
+        ]);
+        let response = handle_resolve_completion_type(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")));
+        assert_eq!(
+            map_get(m, "class_name").and_then(term_to_string),
+            Some("String".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_completion_type_parenthesized_binary_send() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_completion_type")),
+            (atom("expression"), binary("(\"foo\" ++ \"bar\")")),
+        ]);
+        let response = handle_resolve_completion_type(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")));
+        assert_eq!(
+            map_get(m, "class_name").and_then(term_to_string),
+            Some("String".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_completion_type_unknown_expression() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_completion_type")),
+            (atom("expression"), binary("unknownVar")),
+        ]);
+        let response = handle_resolve_completion_type(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("not_found")));
+    }
+
+    #[test]
+    fn resolve_completion_type_empty_expression() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_completion_type")),
+            (atom("expression"), binary("")),
+        ]);
+        let response = handle_resolve_completion_type(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("not_found")));
+    }
+
     #[test]
     fn parse_class_hierarchy_skips_builtins() {
         use eetf::{FixInteger, List};

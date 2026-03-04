@@ -1503,4 +1503,66 @@ mod tests {
             "Actor instance should offer 'isAlive'. Got: {labels:?}"
         );
     }
+
+    // --- resolve_expression_type tests (BT-1068) ---
+
+    #[test]
+    fn resolve_expression_type_string_literal() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("\"hello\"", &hierarchy);
+        assert_eq!(result.as_deref(), Some("String"));
+    }
+
+    #[test]
+    fn resolve_expression_type_integer_literal() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("42", &hierarchy);
+        assert_eq!(result.as_deref(), Some("Integer"));
+    }
+
+    #[test]
+    fn resolve_expression_type_parenthesized() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("(\"hello\")", &hierarchy);
+        assert_eq!(result.as_deref(), Some("String"));
+    }
+
+    #[test]
+    fn resolve_expression_type_binary_send() {
+        // "foo" ++ "bar" should resolve to String (String#++: returns String)
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("\"foo\" ++ \"bar\"", &hierarchy);
+        assert_eq!(result.as_deref(), Some("String"));
+    }
+
+    #[test]
+    fn resolve_expression_type_parenthesized_binary_send() {
+        // ("foo" ++ "bar") should resolve to String
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("(\"foo\" ++ \"bar\")", &hierarchy);
+        assert_eq!(result.as_deref(), Some("String"));
+    }
+
+    #[test]
+    fn resolve_expression_type_chained_sends() {
+        // "hello" size — String#size returns Integer
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("\"hello\" size", &hierarchy);
+        assert_eq!(result.as_deref(), Some("Integer"));
+    }
+
+    #[test]
+    fn resolve_expression_type_empty_source() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("", &hierarchy);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn resolve_expression_type_unknown_variable() {
+        // Bare variable with no bindings — type is Dynamic
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("x", &hierarchy);
+        assert_eq!(result, None);
+    }
 }
