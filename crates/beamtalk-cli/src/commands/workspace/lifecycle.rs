@@ -221,13 +221,18 @@ impl std::fmt::Display for WorkspaceStatus {
 
 /// Extract a workspace ID string from a workspace directory path.
 ///
-/// Returns `None` for paths that lack a valid UTF-8 filename (e.g. paths ending
-/// in `..` or containing non-UTF-8 characters) so callers can skip them cleanly.
+/// Returns `None` for paths that lack a valid UTF-8 filename, have an empty
+/// name, or whose name doesn't pass `validate_workspace_name` (e.g. paths
+/// ending in `..`, non-UTF-8 characters, or unexpected directory entries).
+/// Callers can safely skip `None` entries.
 fn workspace_id_from_path(path: &Path) -> Option<String> {
-    path.file_name()
+    let id = path
+        .file_name()
         .and_then(|n| n.to_str())
         .filter(|s| !s.is_empty())
-        .map(str::to_owned)
+        .map(str::to_owned)?;
+    validate_workspace_name(&id).ok()?;
+    Some(id)
 }
 
 /// Probe a workspace node's liveness and opportunistically clean up stale files.

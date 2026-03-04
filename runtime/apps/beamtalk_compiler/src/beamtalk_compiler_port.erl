@@ -102,7 +102,9 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
         true ->
             receive
                 {Port, {data, ResponseBin}} ->
-                    Response = binary_to_term(ResponseBin),
+                    %% [safe] prevents atom exhaustion: all response atoms are
+                    %% literals in this module and guaranteed to exist.
+                    Response = binary_to_term(ResponseBin, [safe]),
                     handle_response(Response);
                 {Port, {exit_status, Status}} ->
                     ?LOG_ERROR("Compiler port exited", #{status => Status}),

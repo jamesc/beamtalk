@@ -192,7 +192,9 @@ send_port_request(Port, Request, Timeout) ->
         true ->
             receive
                 {Port, {data, ResponseBin}} ->
-                    {ok, binary_to_term(ResponseBin)};
+                    %% [safe] prevents atom exhaustion: all response atoms are
+                    %% literals in this module and guaranteed to exist.
+                    {ok, binary_to_term(ResponseBin, [safe])};
                 {Port, {exit_status, Status}} ->
                     {exit_status, Status}
             after Timeout ->
