@@ -22,14 +22,16 @@ pub fn unique_temp_dir(prefix: &str) -> PathBuf {
 
 /// Test-only helpers: parsing, codegen assertions, and AST builders.
 ///
-/// These are gated on `#[cfg(test)]` to avoid any prod binary bloat.
-#[cfg(test)]
+/// Gated on `#[cfg(any(test, feature = "test"))]` to avoid prod binary
+/// bloat while allowing dependent crates to opt in via the `test-support` Cargo
+/// feature in their `[dev-dependencies]`.
+#[cfg(any(test, feature = "test"))]
 pub mod test_support {
     use crate::ast::{
         ClassDefinition, ClassKind, CommentAttachment, Expression, ExpressionStatement, Identifier,
         MessageSelector, MethodDefinition, Module,
     };
-    use crate::source_analysis::{Span, lex_with_eof, parse};
+    use crate::source_analysis::{Severity, Span, lex_with_eof, parse};
 
     /// Parses a Beamtalk source string and returns the [`Module`] AST.
     ///
@@ -41,11 +43,15 @@ pub mod test_support {
     /// Panics if the source contains parse errors.
     pub fn parse_bt(source: &str) -> Module {
         let (module, diagnostics) = parse(lex_with_eof(source));
-        if !diagnostics.is_empty() {
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        if !errors.is_empty() {
             let msgs: Vec<_> = diagnostics.iter().map(|d| format!("{d:?}")).collect();
             panic!(
-                "parse_bt: source produced {} diagnostic(s):\n  {}\n\nSource:\n{}",
-                diagnostics.len(),
+                "parse_bt: source produced {} parse error(s):\n  {}\n\nSource:\n{}",
+                errors.len(),
                 msgs.join("\n  "),
                 source
             );
