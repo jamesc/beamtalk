@@ -474,13 +474,14 @@ pub fn generate_module_with_warnings(
     let mut hierarchy =
         hierarchy_result.map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
 
-    // BT-894: Enrich hierarchy with cross-file superclass information so that
-    // is_actor_class can resolve the full inheritance chain for classes whose
-    // parents are defined in other files.
-    hierarchy.add_external_superclasses(&options.class_superclass_index);
-
-    // ADR 0050 Phase 4: inject user-class entries from BEAM metadata
+    // ADR 0050 Phase 4: inject richer user-class entries from BEAM metadata first,
+    // so that add_external_superclasses (which uses contains_key before inserting)
+    // does not overwrite BEAM data with partial stubs.
     hierarchy.add_from_beam_meta(options.pre_class_hierarchy);
+
+    // BT-894: Backfill missing cross-file superclass stubs (only for classes not
+    // already present from build() or BEAM metadata).
+    hierarchy.add_external_superclasses(&options.class_superclass_index);
 
     // BT-1005: Writeback inferred return types into the AST before codegen so
     // that unannotated methods appear in the emitted `method_return_types` map.

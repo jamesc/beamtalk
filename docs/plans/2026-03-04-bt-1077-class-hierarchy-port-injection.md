@@ -1,6 +1,5 @@
 # BT-1077: ClassHierarchy Port Injection Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Wire user-class metadata from the Erlang `beamtalk_compiler_server` class cache into each Rust port request, deserializing it into a full `ClassHierarchy` so the TypeChecker and codegen can see REPL-defined classes.
 
@@ -130,14 +129,14 @@ Add after the `add_external_superclasses` method (around line 231 in mod.rs):
 /// Populate the hierarchy with user-class entries pre-deserialized from
 /// `__beamtalk_meta/0` maps (ADR 0050 Phase 4).
 ///
-/// Skips classes already in `with_builtins()` — the stdlib has richer
-/// data than what `__beamtalk_meta/0` provides.
-/// Overwrites any existing user-class entry with the same name, allowing
-/// incremental REPL session updates.
+/// Skips builtins (`with_builtins()` has richer data than `__beamtalk_meta/0`).
+/// Preserves AST-derived entries already in the hierarchy — those come from
+/// `ClassHierarchy::build()` and are authoritative over cached BEAM metadata,
+/// which may be stale during redefinition.
 pub fn add_from_beam_meta(&mut self, classes: Vec<ClassInfo>) {
     for info in classes {
         if !Self::is_builtin_class(&info.name) {
-            self.classes.insert(info.name.clone(), info);
+            self.classes.entry(info.name.clone()).or_insert(info);
         }
     }
 }

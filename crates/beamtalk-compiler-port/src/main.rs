@@ -196,9 +196,7 @@ fn parse_method_infos_from_map(
             let Term::Map(info_map) = info_term else {
                 return None;
             };
-            let arity = map_get(info_map, "arity")
-                .and_then(term_to_usize)
-                .unwrap_or(0);
+            let arity = map_get(info_map, "arity").and_then(term_to_usize)?;
             let return_type = map_get(info_map, "return_type")
                 .and_then(term_to_atom)
                 .and_then(|s| {
@@ -1265,6 +1263,50 @@ mod tests {
             map_get(m, "status"),
             Some(&atom("ok")),
             "compile_expression with class_hierarchy should succeed: {response:?}"
+        );
+    }
+
+    /// ADR 0050 Phase 4: `class_hierarchy` in `compile` request is accepted
+    /// and does not cause errors (backward-compatible optional key).
+    #[test]
+    fn compile_accepts_class_hierarchy_key() {
+        use eetf::{FixInteger, List};
+
+        let counter_meta = Map::from([
+            (atom("class"), atom("Counter")),
+            (atom("superclass"), atom("Actor")),
+            (atom("meta_version"), Term::from(FixInteger::from(2))),
+            (atom("is_sealed"), atom("false")),
+            (atom("is_abstract"), atom("false")),
+            (atom("is_value"), atom("false")),
+            (atom("is_typed"), atom("false")),
+            (atom("fields"), Term::from(List::from(vec![]))),
+            (atom("field_types"), Term::from(Map::from([]))),
+            (atom("method_info"), Term::from(Map::from([]))),
+            (atom("class_method_info"), Term::from(Map::from([]))),
+            (atom("class_variables"), Term::from(List::from(vec![]))),
+        ]);
+        let class_hierarchy_term =
+            Term::from(Map::from([(atom("Counter"), Term::from(counter_meta))]));
+
+        let request = Map::from([
+            (atom("command"), atom("compile")),
+            (
+                atom("source"),
+                binary("Object subclass: MyThing\n  hello => 42"),
+            ),
+            (atom("module_name"), binary("bt@my_thing")),
+            (atom("class_hierarchy"), class_hierarchy_term),
+        ]);
+
+        let response = handle_compile(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "compile with class_hierarchy should succeed: {response:?}"
         );
     }
 

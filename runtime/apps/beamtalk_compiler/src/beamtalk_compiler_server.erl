@@ -173,7 +173,9 @@ handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From,
     ),
     {reply, Result, State};
 handle_call({compile, Source, Options}, _From, State) ->
-    Result = do_compile(State#state.port, Source, Options),
+    %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
+    Options1 = Options#{class_hierarchy => State#state.classes},
+    Result = do_compile(State#state.port, Source, Options1),
     {reply, Result, State};
 handle_call({diagnostics, Source}, _From, State) ->
     Result = do_diagnostics(State#state.port, Source),
