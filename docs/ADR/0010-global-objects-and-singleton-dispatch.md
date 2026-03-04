@@ -1,7 +1,58 @@
 # ADR 0010: Global Objects and Singleton Dispatch
 
 ## Status
-Implemented (2026-02-15)
+Implemented (2026-02-15). Phase 1 gen_server deprecation in progress (BT-1093).
+
+## Migration Status (BT-1093)
+
+The ADR describes Phases 1–4 of the singleton dispatch implementation. All four phases are complete. A follow-on migration (tracked under BT-1093) is deprecating the **legacy gen_server implementations** (`beamtalk_interface.erl`, `beamtalk_workspace_interface.erl`) in favour of the **compiled Beamtalk dispatch path** (`beamtalk_interface_primitives.erl`, `beamtalk_workspace_interface_primitives.erl`).
+
+> **Terminology note:** In the context of BT-1093, "Phase 1" refers to the gen_server implementations and "Phase 2" refers to the compiled dispatch (primitives) implementations. These are different from the ADR's own Phase 1–4 implementation steps.
+
+### Current state (2026-03-04)
+
+| Module | Type | Lines | Status |
+|---|---|---|---|
+| `beamtalk_interface.erl` | Phase 1 gen_server | ~800 | **Legacy — scheduled for removal (BT-1110)** |
+| `beamtalk_interface_primitives.erl` | Phase 2 compiled dispatch | ~527 | **Active — used by compiled Beamtalk class** |
+| `beamtalk_workspace_interface.erl` | Phase 1 gen_server | ~923 | **Legacy — scheduled for removal (BT-1111)** |
+| `beamtalk_workspace_interface_primitives.erl` | Phase 2 compiled dispatch | ~460 | **Active — used by compiled Beamtalk class** |
+
+The workspace supervisor (`beamtalk_workspace_sup`) already starts the **compiled** Beamtalk classes (`bt@stdlib@beamtalk_interface`, `bt@stdlib@workspace_interface`) as the `Beamtalk` and `Workspace` singletons. The gen_server Phase 1 modules are no longer used at runtime for these singletons.
+
+### Remaining callers of Phase 1 gen_server modules
+
+**beamtalk_workspace_interface.erl (Phase 1):**
+- `beamtalk_repl_shell.erl` — calls `get_session_bindings/0` (which delegates to Phase 2)
+- `beamtalk_repl_ops_dev.erl` — calls `get_session_bindings/0`
+- `beamtalk_repl_eval.erl` — calls `get_user_bindings/0`
+- Unit tests in `beamtalk_workspace_interface_tests.erl`
+
+**beamtalk_interface.erl (Phase 1):**
+- Unit tests in `beamtalk_interface_tests.erl`
+- Test helpers in `beamtalk_workspace_binding_tests.erl`, `beamtalk_workspace_bootstrap_tests.erl`
+
+### Primitive function coverage: Phase 1 vs Phase 2
+
+Both interface pairs have **full primitive parity** as of 2026-03-04:
+
+**BeamtalkInterface primitives** (allClasses, classNamed:, globals, help:, help:selector:, version) — identical in both phases.
+
+**WorkspaceInterface primitives** (actors, actorAt:, classes, load:, globals, bind:as:, unbind:) — identical in both phases. The selectors `actorsOf:`, `testClasses`, `test`, `test:` that exist only in Phase 1 are now implemented as Beamtalk-level methods in `stdlib/src/WorkspaceInterface.bt` (not native primitives).
+
+### Migration sequence
+
+1. **BT-1108** (S, unblocked): Switch REPL callers (`repl_shell`, `repl_ops_dev`, `repl_eval`) to call `beamtalk_workspace_interface_primitives` directly.
+2. **BT-1109** (M, unblocked): Add unit tests for `beamtalk_interface_primitives` and `beamtalk_workspace_interface_primitives`.
+3. **BT-1110** (M, blocked by BT-1109): Delete `beamtalk_interface.erl` and its Phase 1 tests.
+4. **BT-1111** (M, blocked by BT-1108 + BT-1109): Delete `beamtalk_workspace_interface.erl` and its Phase 1 tests.
+
+### Completion criteria
+
+Migration is complete when:
+- `beamtalk_interface.erl` and `beamtalk_workspace_interface.erl` are deleted
+- All callers use `beamtalk_interface_primitives` and `beamtalk_workspace_interface_primitives` directly (or via the compiled `.bt` path)
+- `just ci` passes with no references to the deleted modules
 
 ## Context
 
