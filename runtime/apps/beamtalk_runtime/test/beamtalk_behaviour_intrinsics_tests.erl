@@ -75,12 +75,13 @@ class_class_test_() ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1088BiClassClass', #{}, #{}),
-                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                %% Metaclass tag
-                ?assertEqual('Metaclass', MetaObj#beamtalk_object.class),
-                %% Same pid wrapped
-                ?assertEqual(Pid, MetaObj#beamtalk_object.pid),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                    ?assertEqual('Metaclass', MetaObj#beamtalk_object.class),
+                    ?assertEqual(Pid, MetaObj#beamtalk_object.pid)
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -94,10 +95,14 @@ class_name_test_() ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1088BiClassName', #{}, #{}),
-                ?assertEqual(
-                    'BT1088BiClassName', beamtalk_behaviour_intrinsics:className(ClassObj)
-                ),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    ?assertEqual(
+                        'BT1088BiClassName',
+                        beamtalk_behaviour_intrinsics:className(ClassObj)
+                    )
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -111,10 +116,13 @@ class_local_methods_empty_test_() ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1088BiNoMethods', #{}, #{}),
-                Methods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
-                ?assert(is_list(Methods)),
-                ?assertEqual([], Methods),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    Methods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
+                    ?assert(is_list(Methods)),
+                    ?assertEqual([], Methods)
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -129,10 +137,13 @@ class_local_methods_with_methods_test_() ->
                     #{},
                     #{'getValue' => MethodFun, 'setValue:' => MethodFun}
                 ),
-                Methods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
-                ?assert(lists:member('getValue', Methods)),
-                ?assert(lists:member('setValue:', Methods)),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    Methods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
+                    ?assert(lists:member('getValue', Methods)),
+                    ?assert(lists:member('setValue:', Methods))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -146,9 +157,12 @@ class_field_names_empty_test_() ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1088BiNoFields', #{}, #{}),
-                Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
-                ?assert(is_list(Fields)),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
+                    ?assert(is_list(Fields))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -162,11 +176,14 @@ class_field_names_with_fields_test_() ->
                     #{x => 0, y => 0},
                     #{}
                 ),
-                Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
-                ?assert(is_list(Fields)),
-                ?assert(lists:member(x, Fields)),
-                ?assert(lists:member(y, Fields)),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
+                    ?assert(is_list(Fields)),
+                    ?assert(lists:member(x, Fields)),
+                    ?assert(lists:member(y, Fields))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -185,8 +202,13 @@ class_includes_selector_true_test_() ->
                     #{},
                     #{'increment' => MethodFun}
                 ),
-                ?assert(beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'increment')),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    ?assert(
+                        beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'increment')
+                    )
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -196,10 +218,13 @@ class_includes_selector_false_test_() ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1088BiSelectorFalse', #{}, #{}),
-                ?assertNot(
-                    beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'nonExistent')
-                ),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    ?assertNot(
+                        beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'nonExistent')
+                    )
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -213,8 +238,11 @@ class_doc_nil_initially_test_() ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1088BiDocNil', #{}, #{}),
-                ?assertEqual(nil, beamtalk_behaviour_intrinsics:classDoc(ClassObj)),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    ?assertEqual(nil, beamtalk_behaviour_intrinsics:classDoc(ClassObj))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -224,13 +252,14 @@ class_set_doc_and_get_test_() ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1088BiDocSet', #{}, #{}),
-                Doc = <<"This is a test class">>,
-                RetObj = beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc),
-                %% setDoc returns Self
-                ?assertEqual(ClassObj, RetObj),
-                %% doc is now set
-                ?assertEqual(Doc, beamtalk_behaviour_intrinsics:classDoc(ClassObj)),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    Doc = <<"This is a test class">>,
+                    RetObj = beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc),
+                    ?assertEqual(ClassObj, RetObj),
+                    ?assertEqual(Doc, beamtalk_behaviour_intrinsics:classDoc(ClassObj))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -249,11 +278,15 @@ class_set_method_doc_test_() ->
                     #{},
                     #{'myMethod' => MethodFun}
                 ),
-                Doc = <<"Does something useful">>,
-                RetObj = beamtalk_behaviour_intrinsics:classSetMethodDoc(ClassObj, 'myMethod', Doc),
-                %% Returns Self
-                ?assertEqual(ClassObj, RetObj),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    Doc = <<"Does something useful">>,
+                    RetObj = beamtalk_behaviour_intrinsics:classSetMethodDoc(
+                        ClassObj, 'myMethod', Doc
+                    ),
+                    ?assertEqual(ClassObj, RetObj)
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -263,11 +296,14 @@ class_doc_for_nonexistent_method_test_() ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1088BiDocForMethod', #{}, #{}),
-                ?assertEqual(
-                    nil,
-                    beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'nosuchMethod')
-                ),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    ?assertEqual(
+                        nil,
+                        beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'nosuchMethod')
+                    )
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
@@ -281,9 +317,12 @@ class_subclasses_empty_test_() ->
         [
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1088BiLeafClass', #{}, #{}),
-                Subclasses = beamtalk_behaviour_intrinsics:classSubclasses(ClassObj),
-                ?assert(is_list(Subclasses)),
-                gen_server:stop(Pid, normal, 5000)
+                try
+                    Subclasses = beamtalk_behaviour_intrinsics:classSubclasses(ClassObj),
+                    ?assert(is_list(Subclasses))
+                after
+                    catch gen_server:stop(Pid, normal, 5000)
+                end
             end)
         ]
     end}.
