@@ -789,3 +789,299 @@ class_name_to_module_test() ->
     %% Consecutive uppercase: only insert _ when transitioning from lowercase to uppercase
     ?assertEqual('bt@abc', beamtalk_primitive:class_name_to_module('ABC')),
     ?assertEqual('bt@htmlparser', beamtalk_primitive:class_name_to_module('HTMLParser')).
+
+%%% ============================================================================
+%%% display_string/1 Tests
+%%%
+%%% Key differences from print_string/1:
+%%%   - Strings returned as-is (no surrounding quotes)
+%%%   - Atoms rendered without '#' prefix
+%%% ============================================================================
+
+display_string_integer_test() ->
+    ?assertEqual(<<"42">>, beamtalk_primitive:display_string(42)),
+    ?assertEqual(<<"-7">>, beamtalk_primitive:display_string(-7)),
+    ?assertEqual(<<"0">>, beamtalk_primitive:display_string(0)).
+
+display_string_float_test() ->
+    Result = beamtalk_primitive:display_string(3.14),
+    ?assert(is_binary(Result)),
+    ?assert(byte_size(Result) > 0).
+
+display_string_string_no_quotes_test() ->
+    %% Strings are returned as-is, without surrounding quotes (unlike print_string)
+    ?assertEqual(<<"hello">>, beamtalk_primitive:display_string(<<"hello">>)),
+    ?assertEqual(<<>>, beamtalk_primitive:display_string(<<>>)),
+    ?assertEqual(<<"with spaces">>, beamtalk_primitive:display_string(<<"with spaces">>)).
+
+display_string_boolean_test() ->
+    ?assertEqual(<<"true">>, beamtalk_primitive:display_string(true)),
+    ?assertEqual(<<"false">>, beamtalk_primitive:display_string(false)).
+
+display_string_nil_test() ->
+    ?assertEqual(<<"nil">>, beamtalk_primitive:display_string(nil)).
+
+display_string_atom_no_hash_test() ->
+    %% Atoms are rendered without '#' prefix (unlike print_string/1)
+    ?assertEqual(<<"hello">>, beamtalk_primitive:display_string(hello)),
+    ?assertEqual(<<"ok">>, beamtalk_primitive:display_string(ok)),
+    ?assertEqual(<<"error">>, beamtalk_primitive:display_string(error)).
+
+display_string_list_test() ->
+    ?assertEqual(<<"#(1, 2, 3)">>, beamtalk_primitive:display_string([1, 2, 3])),
+    ?assertEqual(<<"#()">>, beamtalk_primitive:display_string([])).
+
+display_string_list_of_strings_test() ->
+    %% List elements use display_string (no quotes on strings)
+    Result = beamtalk_primitive:display_string([<<"a">>, <<"b">>]),
+    ?assertEqual(<<"#(a, b)">>, Result).
+
+display_string_catchall_test() ->
+    %% Pids use fallback io_lib:format path
+    Result = beamtalk_primitive:display_string(self()),
+    ?assert(is_binary(Result)).
+
+display_string_unicode_string_test() ->
+    %% Valid UTF-8 binary is returned as-is
+    Str = <<"héllo"/utf8>>,
+    ?assertEqual(Str, beamtalk_primitive:display_string(Str)).
+
+%%% ============================================================================
+%%% send/3 — Boolean dispatch
+%%% ============================================================================
+
+send_boolean_not_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual(false, beamtalk_primitive:send(true, 'not', [])),
+        ?assertEqual(true, beamtalk_primitive:send(false, 'not', []))
+    end}.
+
+send_boolean_if_true_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        Block = fun() -> yes end,
+        ?assertEqual(yes, beamtalk_primitive:send(true, 'ifTrue:', [Block])),
+        %% false ifTrue: [block] returns false (self), not nil
+        ?assertEqual(false, beamtalk_primitive:send(false, 'ifTrue:', [Block]))
+    end}.
+
+send_boolean_if_false_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        Block = fun() -> no end,
+        %% true ifFalse: [block] returns true (self), not nil
+        ?assertEqual(true, beamtalk_primitive:send(true, 'ifFalse:', [Block])),
+        ?assertEqual(no, beamtalk_primitive:send(false, 'ifFalse:', [Block]))
+    end}.
+
+send_boolean_if_true_if_false_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        TBlock = fun() -> yes end,
+        FBlock = fun() -> no end,
+        ?assertEqual(yes, beamtalk_primitive:send(true, 'ifTrue:ifFalse:', [TBlock, FBlock])),
+        ?assertEqual(no, beamtalk_primitive:send(false, 'ifTrue:ifFalse:', [TBlock, FBlock]))
+    end}.
+
+send_boolean_class_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual('True', beamtalk_primitive:send(true, 'class', [])),
+        ?assertEqual('False', beamtalk_primitive:send(false, 'class', []))
+    end}.
+
+%%% ============================================================================
+%%% send/3 — Nil dispatch
+%%% ============================================================================
+
+send_nil_is_nil_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual(true, beamtalk_primitive:send(nil, 'isNil', []))
+    end}.
+
+send_nil_if_nil_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        Block = fun() -> found_nil end,
+        ?assertEqual(found_nil, beamtalk_primitive:send(nil, 'ifNil:', [Block]))
+    end}.
+
+send_nil_class_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual('UndefinedObject', beamtalk_primitive:send(nil, 'class', []))
+    end}.
+
+%%% ============================================================================
+%%% send/3 — Block dispatch
+%%% ============================================================================
+
+%% Note: 'value' and 'value:' use @intrinsic (blockValue/blockValue1) which requires
+%% compiler-generated call sites; they cannot be called reflectively via send/3.
+%% Use valueWithArguments: or test directly via the block module exports instead.
+
+send_block_valueWithArguments_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        Block = fun(X, Y) -> X + Y end,
+        ?assertEqual(7, beamtalk_primitive:send(Block, 'valueWithArguments:', [[3, 4]]))
+    end}.
+
+send_block_arity_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual(0, beamtalk_primitive:send(fun() -> ok end, 'arity', [])),
+        ?assertEqual(1, beamtalk_primitive:send(fun(_) -> ok end, 'arity', [])),
+        ?assertEqual(2, beamtalk_primitive:send(fun(_, _) -> ok end, 'arity', []))
+    end}.
+
+send_block_class_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual('Block', beamtalk_primitive:send(fun() -> ok end, 'class', []))
+    end}.
+
+%%% ============================================================================
+%%% send/3 — Symbol dispatch
+%%% ============================================================================
+
+send_symbol_class_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual('Symbol', beamtalk_primitive:send(hello, 'class', [])),
+        ?assertEqual('Symbol', beamtalk_primitive:send(ok, 'class', []))
+    end}.
+
+send_symbol_equality_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        %% Symbol uses =:= (Erlang term equality), not =
+        ?assertEqual(true, beamtalk_primitive:send(hello, '=:=', [hello])),
+        ?assertEqual(false, beamtalk_primitive:send(hello, '=:=', [world]))
+    end}.
+
+send_symbol_print_string_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertEqual(<<"#hello">>, beamtalk_primitive:send(hello, 'printString', []))
+    end}.
+
+%%% ============================================================================
+%%% send/3 — Extended integer arithmetic
+%%% ============================================================================
+
+send_integer_subtraction_test() ->
+    ?assertEqual(34, beamtalk_primitive:send(42, '-', [8])).
+
+send_integer_multiplication_test() ->
+    ?assertEqual(21, beamtalk_primitive:send(3, '*', [7])).
+
+send_integer_less_than_test() ->
+    ?assertEqual(true, beamtalk_primitive:send(3, '<', [5])),
+    ?assertEqual(false, beamtalk_primitive:send(5, '<', [3])).
+
+send_integer_greater_than_test() ->
+    ?assertEqual(true, beamtalk_primitive:send(5, '>', [3])),
+    ?assertEqual(false, beamtalk_primitive:send(3, '>', [5])).
+
+send_integer_less_than_or_equal_test() ->
+    ?assertEqual(true, beamtalk_primitive:send(3, '<=', [3])),
+    ?assertEqual(true, beamtalk_primitive:send(2, '<=', [3])),
+    ?assertEqual(false, beamtalk_primitive:send(4, '<=', [3])).
+
+send_integer_greater_than_or_equal_test() ->
+    ?assertEqual(true, beamtalk_primitive:send(3, '>=', [3])),
+    ?assertEqual(true, beamtalk_primitive:send(4, '>=', [3])),
+    ?assertEqual(false, beamtalk_primitive:send(2, '>=', [3])).
+
+send_integer_equality_test() ->
+    %% Integer uses =:= (Erlang exact equality), not =
+    ?assertEqual(true, beamtalk_primitive:send(42, '=:=', [42])),
+    ?assertEqual(false, beamtalk_primitive:send(42, '=:=', [43])).
+
+send_integer_abs_test() ->
+    ?assertEqual(5, beamtalk_primitive:send(-5, 'abs', [])),
+    ?assertEqual(5, beamtalk_primitive:send(5, 'abs', [])).
+
+send_integer_negated_test() ->
+    ?assertEqual(-42, beamtalk_primitive:send(42, 'negated', [])),
+    ?assertEqual(42, beamtalk_primitive:send(-42, 'negated', [])).
+
+%%% ============================================================================
+%%% send/3 — Extended float arithmetic
+%%% ============================================================================
+
+send_float_subtraction_test() ->
+    Result = beamtalk_primitive:send(5.0, '-', [2.0]),
+    ?assert(abs(Result - 3.0) < 0.0001).
+
+send_float_multiplication_test() ->
+    Result = beamtalk_primitive:send(2.5, '*', [4.0]),
+    ?assert(abs(Result - 10.0) < 0.0001).
+
+send_float_less_than_test() ->
+    ?assertEqual(true, beamtalk_primitive:send(1.0, '<', [2.0])),
+    ?assertEqual(false, beamtalk_primitive:send(2.0, '<', [1.0])).
+
+send_float_abs_test() ->
+    Result = beamtalk_primitive:send(-3.14, 'abs', []),
+    ?assert(abs(Result - 3.14) < 0.0001).
+
+%%% ============================================================================
+%%% send/3 — Extended string operations
+%%% ============================================================================
+
+send_string_size_test() ->
+    ?assertEqual(5, beamtalk_primitive:send(<<"hello">>, 'size', [])),
+    ?assertEqual(0, beamtalk_primitive:send(<<>>, 'size', [])).
+
+send_string_equality_test() ->
+    %% String uses =:= (Erlang exact equality), not =
+    ?assertEqual(true, beamtalk_primitive:send(<<"hello">>, '=:=', [<<"hello">>])),
+    ?assertEqual(false, beamtalk_primitive:send(<<"hello">>, '=:=', [<<"world">>])).
+
+%%% ============================================================================
+%%% send/3 — does_not_understand error cases
+%%% ============================================================================
+
+send_dnu_unknown_method_on_integer_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = does_not_understand,
+                class = 'Integer',
+                selector = 'fooBarBaz'
+            }
+        },
+        beamtalk_primitive:send(42, 'fooBarBaz', [])
+    ).
+
+send_dnu_unknown_method_on_string_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = does_not_understand,
+                class = 'String',
+                selector = 'nonExistentMethod'
+            }
+        },
+        beamtalk_primitive:send(<<"hello">>, 'nonExistentMethod', [])
+    ).
+
+send_dnu_unknown_method_on_boolean_test_() ->
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = does_not_understand,
+                    class = 'True',
+                    selector = 'unknownBoolMethod'
+                }
+            },
+            beamtalk_primitive:send(true, 'unknownBoolMethod', [])
+        )
+    end}.
+
+send_dnu_unknown_method_on_float_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = does_not_understand,
+                class = 'Float',
+                selector = 'fooBarBaz'
+            }
+        },
+        beamtalk_primitive:send(3.14, 'fooBarBaz', [])
+    ).
