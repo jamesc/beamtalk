@@ -28,6 +28,10 @@ proptest.workspace = true
 
 [features]
 default = []
+## Expose `test_helpers::test_support` for use in dependent crates' dev-dependencies.
+## Add `beamtalk-core = { features = ["test"] }` to the dependent crate's
+## `[dev-dependencies]` section to enable this.
+test = []
 
 [lints]
 workspace = true
