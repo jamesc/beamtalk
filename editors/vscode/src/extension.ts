@@ -37,6 +37,12 @@ let replTerminal: vscode.Terminal | undefined;
 /** True while `beamtalk repl` is actively running inside replTerminal. */
 let replRunning = false;
 
+/** Update replRunning and sync the VS Code context so toolbar buttons respond. */
+function setReplRunning(value: boolean): void {
+  replRunning = value;
+  void vscode.commands.executeCommand("setContext", "beamtalk.replRunning", value);
+}
+
 type ResolvedServerPath = {
   serverPath: string;
   warning?: string;
@@ -59,11 +65,15 @@ function fileExists(pathLike: string): boolean {
  *
  * Returns the absolute path to `{sysroot}/bin/beamtalk-lsp[.exe]`, or null
  * if `beamtalk` is not on PATH or the binary is absent from the sysroot.
+ *
+ * @param beamtalkBin - Path or command name for the `beamtalk` CLI binary.
+ *   Defaults to bare `"beamtalk"` (PATH lookup). Override with
+ *   `beamtalk.binary.path` to use a dev build such as `./target/debug/beamtalk`.
  */
-function findLspViaSysroot(): Promise<string | null> {
+function findLspViaSysroot(beamtalkBin = "beamtalk"): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(
-      "beamtalk",
+      beamtalkBin,
       ["--print-sysroot"],
       { encoding: "utf8", timeout: 5000, windowsHide: true },
       (error, stdout) => {
@@ -99,14 +109,18 @@ function lspIsOnPath(): Promise<boolean> {
  *
  * Resolution order:
  * 1. User-configured override (`beamtalk.server.path`)
- * 2. Sysroot discovery via `beamtalk --print-sysroot` → `{sysroot}/bin/beamtalk-lsp`
- * 3. Bare `beamtalk-lsp` command name (requires PATH)
+ * 2. Extension-bundled binary: `{extensionPath}/bin/beamtalk-lsp[.exe]`
+ *    (populated by `just build-vscode` in dev, bundled in .vsix for release)
+ * 3. Sysroot discovery via `beamtalk --print-sysroot` → `{sysroot}/bin/beamtalk-lsp`
+ *    Uses `beamtalk.binary.path` if configured, otherwise bare `beamtalk`.
+ * 4. Bare `beamtalk-lsp` command name (requires PATH)
  *
  * Returns null if Beamtalk is not installed and no override is configured.
  */
 async function resolveServerPath(context: vscode.ExtensionContext): Promise<ResolvedServerPath> {
   const config = vscode.workspace.getConfiguration("beamtalk");
   const override = config.get<string>("server.path", "").trim();
+  const beamtalkBin = config.get<string>("binary.path", "").trim() || "beamtalk";
   let warning: string | undefined;
 
   // 1. Explicit user override
@@ -136,17 +150,28 @@ async function resolveServerPath(context: vscode.ExtensionContext): Promise<Reso
 
     warning =
       `Configured beamtalk.server.path does not exist: ${override}. ` +
-      "Falling back to automatic discovery (sysroot, then PATH).";
+      "Falling back to automatic discovery (bundled bin/, sysroot, then PATH).";
     // Path-like override was invalid: warn and fall through.
   }
 
-  // 2. Sysroot discovery via `beamtalk --print-sysroot`
-  const sysrootLsp = await findLspViaSysroot();
+  // 2. Extension-bundled binary — present in dev (just build-vscode) and .vsix releases.
+  //    Checked before sysroot so both dev builds and standalone extension installs work
+  //    without requiring `beamtalk` on PATH.
+  const bundledLsp = withPlatformExecutable(
+    path.join(context.extensionPath, "bin", "beamtalk-lsp")
+  );
+  if (fileExists(bundledLsp)) {
+    return { serverPath: bundledLsp, warning };
+  }
+
+  // 3. Sysroot discovery via `beamtalk --print-sysroot` (or configured binary).
+  //    In dev mode, `beamtalk.binary.path` should point to `./target/debug/beamtalk`.
+  const sysrootLsp = await findLspViaSysroot(beamtalkBin);
   if (sysrootLsp) {
     return { serverPath: sysrootLsp, warning };
   }
 
-  // 3. Fall back to bare PATH lookup — only if beamtalk-lsp is available
+  // 4. Fall back to bare PATH lookup — only if beamtalk-lsp is available
   if (await lspIsOnPath()) {
     return { serverPath: "beamtalk-lsp", warning };
   }
@@ -501,7 +526,7 @@ async function captureSessionId(
         if (replTerminal !== terminal) {
           break;
         }
-        replRunning = true;
+        setReplRunning(true);
         workspaceTreeProvider?.setSessionId(sessionId);
         // Don't break — keep reading. The REPL may reconnect and emit a new
         // session ID (BT-1021); we need to pick up the updated value.
@@ -514,13 +539,41 @@ async function captureSessionId(
   } catch {
     // Stream ended (terminal closed or shell integration disconnected) — no-op.
   }
+
+  // Stream ended — the REPL process exited (e.g. user typed :q).
+  // Clear the session so bindings disappear and the Start button returns.
+  if (replTerminal === terminal) {
+    setReplRunning(false);
+    workspaceTreeProvider?.setSessionId(null);
+    outputChannel?.info("REPL session ended; session bindings cleared.");
+  }
+}
+
+/**
+ * Find the index of a method declaration (`method <selector>`) in source text.
+ * Returns the index of the selector within the declaration, or -1 if not found.
+ */
+function findMethodDeclaration(text: string, selector: string): number {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Use (?=\s|$) instead of \b — keyword selectors end with ":" (e.g. "from:to:")
+  // which is a non-word char, so \b fails to match there.
+  const pattern = new RegExp(`\\bmethod\\s+(${escaped})(?=\\s|$)`);
+  const match = pattern.exec(text);
+  if (match && match.index !== undefined) {
+    return match.index + match[0].indexOf(selector);
+  }
+  return -1;
 }
 
 function replCommand(): string {
-  const ephemeral = vscode.workspace
-    .getConfiguration("beamtalk")
-    .get<boolean>("repl.ephemeral", false);
-  return ephemeral ? "beamtalk repl -e" : "beamtalk repl";
+  const config = vscode.workspace.getConfiguration("beamtalk");
+  const ephemeral = config.get<boolean>("repl.ephemeral", false);
+  // beamtalk.binary.path lets dev builds point to e.g. ./target/debug/beamtalk
+  // so that `beamtalk repl` picks up freshly-compiled Erlang runtime code.
+  const beamtalkBin = config.get<string>("binary.path", "").trim() || "beamtalk";
+  // Quote the binary path in case it contains spaces (e.g. "/path/to my/beamtalk").
+  const quoted = beamtalkBin.includes(" ") ? `"${beamtalkBin}"` : beamtalkBin;
+  return ephemeral ? `${quoted} repl -e` : `${quoted} repl`;
 }
 
 /**
@@ -552,7 +605,7 @@ function startReplCommand(context: vscode.ExtensionContext): void {
     cwd,
   });
   replTerminal.show();
-  replRunning = true;
+  setReplRunning(true);
 
   const terminal = replTerminal;
 
@@ -612,7 +665,7 @@ function setupTerminalMonitoring(context: vscode.ExtensionContext): void {
         return;
       }
       replTerminal = undefined;
-      replRunning = false;
+      setReplRunning(false);
       // Clear session ID — bindings from the closed session are gone.
       workspaceTreeProvider?.setSessionId(null);
       outputChannel?.info("Beamtalk Session terminal closed; session bindings cleared.");
@@ -642,6 +695,10 @@ function setupTerminalMonitoring(context: vscode.ExtensionContext): void {
 // ─── Extension activation ─────────────────────────────────────────────────────
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  // Reset context state on each activation — VS Code persists setContext values
+  // across extension host restarts, so we must re-initialise on every activation.
+  setReplRunning(false);
+
   const stdlibProvider = new StdlibContentProvider();
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider("beamtalk-stdlib", stdlibProvider)
@@ -778,43 +835,50 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("beamtalk.navigateToMethod", async (node: MethodItemNode) => {
       const { classInfo, method } = node;
 
-      // Determine the source URI: file URI for user classes, virtual URI for stdlib.
-      // The runtime sends "unknown" when no source file is recorded (e.g. eval-defined classes).
+      // Only navigate if the runtime recorded a source file path.
+      // "unknown" means the class was defined in the REPL or loaded without a path.
       const sourceFile = classInfo.source_file;
-      const hasSourceFile = sourceFile && sourceFile !== "unknown";
-      let uri: vscode.Uri;
-      if (hasSourceFile) {
-        uri = vscode.Uri.file(sourceFile);
-      } else {
-        uri = vscode.Uri.parse(`beamtalk-stdlib:///${classInfo.name}.bt`);
+      if (!sourceFile || sourceFile === "unknown") {
+        await vscode.window.showInformationMessage(
+          `No source file recorded for class ${classInfo.name}`
+        );
+        return;
       }
 
+      const uri = vscode.Uri.file(sourceFile);
       let document: vscode.TextDocument;
       try {
         document = await vscode.workspace.openTextDocument(uri);
       } catch {
-        await vscode.window.showInformationMessage("Source not available");
+        await vscode.window.showInformationMessage(
+          `Cannot open source for ${classInfo.name}: ${sourceFile}`
+        );
         return;
       }
 
-      // Find the selector in the source file to get an approximate position for LSP.
+      // Find the method declaration in the source file.
+      // Prefer `method <selector>` to avoid false positives on call sites or comments.
       const text = document.getText();
-      const selectorIndex = text.indexOf(method.selector);
+      const methodDeclIndex = findMethodDeclaration(text, method.selector);
+      const selectorIndex =
+        methodDeclIndex !== -1 ? methodDeclIndex : text.indexOf(method.selector);
       if (selectorIndex === -1) {
-        await vscode.window.showInformationMessage("Source not available");
+        await vscode.window.showInformationMessage(
+          `Method '${method.selector}' not found in source for ${classInfo.name}`
+        );
         return;
       }
       const position = document.positionAt(selectorIndex);
 
-      // Use LSP go-to-definition to find the exact definition location.
-      // The provider may return Location[] or LocationLink[] depending on the LSP server.
+      // Try LSP go-to-definition for a precise location. If LSP is unavailable or
+      // returns no results, fall back to the text-search position — don't fail.
       let locations: Array<vscode.Location | vscode.LocationLink> | undefined;
       try {
         locations = await vscode.commands.executeCommand<
           Array<vscode.Location | vscode.LocationLink>
         >("vscode.executeDefinitionProvider", uri, position);
       } catch {
-        // LSP not available — fall back to navigating to the selector position.
+        // LSP not available — fall through to direct navigation.
       }
 
       if (locations && locations.length > 0) {
@@ -822,11 +886,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const targetUri = "targetUri" in loc ? loc.targetUri : loc.uri;
         const targetRange = "targetRange" in loc ? loc.targetRange : loc.range;
         await vscode.window.showTextDocument(targetUri, { selection: targetRange });
-      } else if (locations !== undefined) {
-        // LSP responded but found no definition.
-        await vscode.window.showInformationMessage("Source not available");
       } else {
-        // LSP not available: navigate directly to the selector position.
+        // LSP unavailable or returned no results — navigate to the method declaration.
         await vscode.window.showTextDocument(document, {
           selection: new vscode.Range(position, position),
         });
@@ -834,10 +895,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
-  // ─── Start REPL command (BT-1025) ──────────────────────────────────────────
+  // ─── Start / Stop REPL commands (BT-1025) ──────────────────────────────────
 
   context.subscriptions.push(
     vscode.commands.registerCommand("beamtalk.startRepl", () => startReplCommand(context))
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("beamtalk.stopRepl", () => {
+      // Close the REPL terminal — clears the session and bindings,
+      // but leaves the workspace connection up so classes/actors remain visible.
+      if (replTerminal && replTerminal.exitStatus === undefined) {
+        replTerminal.dispose();
+      }
+    })
   );
 
   // ─── Auto-connect + terminal monitoring (BT-1025) ──────────────────────────

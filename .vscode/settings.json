@@ -1,0 +1,13 @@
+{
+  // Dev-mode settings for working on Beamtalk itself.
+  // These point VS Code at the local build tree so you don't need a
+  // system-installed 'beamtalk'. Run 'just build-vscode' first to populate
+  // editors/vscode/bin/ and editors/vscode/out/.
+  //
+  // 'beamtalk.binary.path' is used for:
+  //   - 'beamtalk repl' in the integrated terminal (picks up freshly-compiled
+  //     Erlang runtime from runtime/_build/default/lib/ automatically)
+  //   - 'beamtalk --print-sysroot' sysroot discovery for beamtalk-lsp
+  //     (though the bundled bin/beamtalk-lsp is checked first)
+  "beamtalk.binary.path": "${workspaceFolder}/target/debug/beamtalk"
+}

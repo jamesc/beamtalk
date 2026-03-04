@@ -52,6 +52,11 @@
         "icon": "$(terminal-bash)"
       },
       {
+        "command": "beamtalk.stopRepl",
+        "title": "Beamtalk: End Session",
+        "icon": "$(debug-stop)"
+      },
+      {
         "command": "beamtalk.restartServer",
         "title": "Beamtalk: Restart Language Server"
       },
@@ -100,7 +105,12 @@
       "view/title": [
         {
           "command": "beamtalk.startRepl",
-          "when": "view == beamtalk.workspaceExplorer",
+          "when": "view == beamtalk.workspaceExplorer && !beamtalk.replRunning",
+          "group": "navigation"
+        },
+        {
+          "command": "beamtalk.stopRepl",
+          "when": "view == beamtalk.workspaceExplorer && beamtalk.replRunning",
           "group": "navigation"
         },
         {
@@ -197,10 +207,15 @@
       "type": "object",
       "title": "Beamtalk",
       "properties": {
+        "beamtalk.binary.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the 'beamtalk' CLI binary. Leave empty to use PATH. Set to e.g. '${workspaceFolder}/target/debug/beamtalk' in dev mode so that 'beamtalk repl' uses the current build and picks up freshly-compiled Erlang runtime code."
+        },
         "beamtalk.server.path": {
           "type": "string",
           "default": "",
-          "description": "Override path to the beamtalk-lsp binary. Leave empty to use automatic discovery via 'beamtalk --print-sysroot'."
+          "description": "Override path to the beamtalk-lsp binary. Leave empty to use automatic discovery (bundled bin/, sysroot, then PATH)."
         },
         "beamtalk.trace.server": {
           "type": "string",
