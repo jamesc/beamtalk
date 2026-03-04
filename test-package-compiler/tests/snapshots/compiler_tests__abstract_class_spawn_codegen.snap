@@ -118,14 +118,12 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
     ~{'class' => 'Shape',
       'superclass' => 'Actor',
       'fields' => [],
-      'methods' => [{'area', 0}],
-      'class_methods' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'true',
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{}~,
-      'method_info' => ~{'area' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~,
+      'method_info' => ~{'area' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
     }~
 
@@ -134,22 +132,24 @@ module 'abstract_class_spawn' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
         let _BuilderState0 = ~{
             'className' => 'Shape',
             'superclassRef' => 'Actor',
-            'fieldSpecs' => ~{}~,
-            'methodSpecs' => ~{'area' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
-            'modifiers' => ['abstract'],
             'moduleName' => 'abstract_class_spawn',
-            'classMethods' => ~{
-                'spawn' => ~{'arity' => 0, 'injected' => 'true'}~,
-                'spawnWith:' => ~{'arity' => 1, 'injected' => 'true'}~
-            }~,
             'methodSource' => ~{'area' => #{#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<82>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']])}#}~,
             'methodSignatures' => ~{'area' => #{#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']])}#}~,
             'classMethodSignatures' => ~{}~,
-            'methodReturnTypes' => ~{}~,
-            'classMethodReturnTypes' => ~{}~,
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
+            'meta' => ~{'class' => 'Shape',
+      'superclass' => 'Actor',
+      'fields' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'true',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'field_types' => ~{}~,
+      'method_info' => ~{'area' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
+      'class_method_info' => ~{}~
+    }~,
             'isConstructible' => 'false'
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of

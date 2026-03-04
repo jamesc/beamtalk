@@ -1007,44 +1007,31 @@ fn test_class_registration_generation() {
         "Should include beamtalk_class attribute with class and superclass. Got:\n{code}"
     );
 
-    // Check methodSpecs
+    // BT-1078: methodSpecs, fieldSpecs, classMethods removed from BuilderState.
+    // Methods and fields now live in meta map.
     assert!(
-        code.contains("'methodSpecs' => ~{"),
-        "Should include methodSpecs map. Got:\n{code}"
+        code.contains("'meta' => ~{"),
+        "Should include meta map in builder state. Got:\n{code}"
+    );
+    // Check method_info contains instance methods with arity
+    assert!(
+        code.contains("'method_info' => ~{"),
+        "Should include method_info in meta map. Got:\n{code}"
     );
     assert!(
-        code.contains("'increment' => ~{'arity' => 0, 'is_sealed' => 'false'}~"),
-        "Should include increment method with arity and sealed flag. Got:\n{code}"
+        code.contains("'class_method_info' => ~{"),
+        "Should include class_method_info in meta map. Got:\n{code}"
     );
+    // Check fields in meta
     assert!(
-        code.contains("'getValue' => ~{'arity' => 0, 'is_sealed' => 'false'}~"),
-        "Should include getValue method with arity and sealed flag. Got:\n{code}"
-    );
-
-    // Check fieldSpecs (map with defaults, not list)
-    assert!(
-        code.contains("'fieldSpecs' => ~{'value' => 0}~"),
-        "Should include fieldSpecs map with defaults. Got:\n{code}"
-    );
-
-    // Check classMethods map
-    assert!(
-        code.contains("'classMethods' => ~{"),
-        "Should include classMethods map. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'spawn' => ~{'arity' => 0, 'injected' => 'true'}~"),
-        "Should include spawn class method with injected flag. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'spawnWith:' => ~{'arity' => 1, 'injected' => 'true'}~"),
-        "Should include spawnWith: class method with injected flag. Got:\n{code}"
+        code.contains("'fields' => ['value']"),
+        "Should include fields in meta map. Got:\n{code}"
     );
 
-    // Check modifiers list
+    // BT-1078: modifiers removed from BuilderState; is_sealed/is_abstract now in meta map
     assert!(
-        code.contains("'modifiers' => []"),
-        "Should include empty modifiers list. Got:\n{code}"
+        code.contains("'is_sealed' => 'false'"),
+        "Should include is_sealed in meta map. Got:\n{code}"
     );
 
     // Check function returns ok
@@ -1151,9 +1138,10 @@ fn test_multiple_classes_registration() {
         code.contains("'className' => 'Counter'"),
         "Should include Counter metadata. Got:\n{code}"
     );
+    // BT-1078: fieldSpecs removed from BuilderState; fields now in meta map
     assert!(
-        code.contains("'fieldSpecs' => ~{'value' => 0}~"),
-        "Should include Counter fieldSpecs. Got:\n{code}"
+        code.contains("'fields' => ['value']"),
+        "Should include Counter fields in meta. Got:\n{code}"
     );
 
     assert!(
@@ -1165,8 +1153,8 @@ fn test_multiple_classes_registration() {
         "Should include Logger metadata. Got:\n{code}"
     );
     assert!(
-        code.contains("'fieldSpecs' => ~{'messages' => 0}~"),
-        "Should include Logger fieldSpecs. Got:\n{code}"
+        code.contains("'fields' => ['messages']"),
+        "Should include Logger fields in meta. Got:\n{code}"
     );
 
     // Should use let-binding chain to sequence registrations
@@ -2214,11 +2202,14 @@ Actor subclass: Counter
         .expect("codegen should succeed")
         .code;
 
-    // The writeback pass should have populated method_return_types with
-    // 'getValue' => 'Integer' (inferred from the state variable type).
+    // The writeback pass should have populated return_type in meta.method_info
+    // with 'Integer' (inferred from the state variable type).
+    // BT-1078: return types now live in meta.method_info, not methodReturnTypes.
     assert!(
-        code.contains("'getValue' => 'Integer'"),
-        "method_return_types should contain inferred return type for unannotated getValue. Got:\n{code}"
+        code.contains(
+            "'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~"
+        ),
+        "meta.method_info should contain inferred return type for unannotated getValue. Got:\n{code}"
     );
 }
 
@@ -2236,10 +2227,12 @@ Actor subclass: Counter
         .expect("codegen should succeed")
         .code;
 
-    // Explicit annotation takes precedence — still appears correctly.
+    // Explicit annotation takes precedence — still appears correctly in meta.method_info.
     assert!(
-        code.contains("'getValue' => 'Integer'"),
-        "Explicitly annotated method should appear in method_return_types. Got:\n{code}"
+        code.contains(
+            "'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~"
+        ),
+        "Explicitly annotated method should appear in meta.method_info. Got:\n{code}"
     );
 }
 
@@ -2258,8 +2251,10 @@ Actor subclass: Greeter
         .code;
 
     assert!(
-        code.contains("'answer' => 'Integer'"),
-        "method_return_types should contain inferred Integer for literal-returning method. Got:\n{code}"
+        code.contains(
+            "'answer' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~"
+        ),
+        "meta.method_info should contain inferred Integer for literal-returning method. Got:\n{code}"
     );
 }
 
@@ -2281,8 +2276,10 @@ Counter >> getValue => value
         .code;
 
     assert!(
-        code.contains("'getValue' => 'Integer'"),
-        "method_return_types should contain inferred Integer for standalone getValue. Got:\n{code}"
+        code.contains(
+            "'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~"
+        ),
+        "meta.method_info should contain inferred Integer for standalone getValue. Got:\n{code}"
     );
 }
 
