@@ -30,10 +30,13 @@
 %%% ============================================================================
 
 %% Minimal setup: pg process group + ETS hierarchy table.
+%% Use start_link result instead of whereis/2 to avoid TOCTOU race under
+%% parallel test execution (another process can start pg between the check
+%% and the call, making the {ok, _} match fail).
 setup_minimal() ->
-    case whereis(pg) of
-        undefined -> {ok, _} = pg:start_link();
-        _ -> ok
+    case pg:start_link() of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
     end,
     beamtalk_class_registry:ensure_hierarchy_table(),
     [].
@@ -45,9 +48,11 @@ teardown_pids(Pids) ->
     ).
 
 %% Full runtime setup used for class_send integration tests.
+%% Pattern-match return values so setup failures produce clear errors
+%% rather than confusing downstream test failures.
 setup_runtime() ->
-    application:ensure_all_started(beamtalk_runtime),
-    beamtalk_stdlib:init(),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    ok = beamtalk_stdlib:init(),
     ok.
 
 teardown_runtime(_) ->
@@ -469,8 +474,18 @@ test_class_send_new() ->
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     ?assertNotEqual(undefined, CounterPid),
     Result = beamtalk_class_dispatch:class_send(CounterPid, spawn, []),
-    %% spawn returns a beamtalk_object (Counter actor instance with pid)
-    ?assertMatch(#beamtalk_object{class = 'Counter'}, Result).
+    try
+        %% spawn returns a beamtalk_object (Counter actor instance with pid)
+        ?assertMatch(#beamtalk_object{class = 'Counter'}, Result)
+    after
+        %% Clean up the spawned actor process to prevent cross-test leakage.
+        case Result of
+            #beamtalk_object{pid = ActorPid} when is_pid(ActorPid) ->
+                catch gen_server:stop(ActorPid, normal, 5000);
+            _ ->
+                ok
+        end
+    end.
 
 %% class_send for a selector not defined anywhere raises does_not_understand.
 test_class_send_dnu() ->
@@ -501,62 +516,78 @@ test_class_send_user_method() ->
 
 %%% ============================================================================
 %%% 7. class_name_from_pid — via registered/unregistered processes
+%%%
+%%% class_name_from_pid/1 is private but reachable via the self-instantiation
+%%% error path: class_send(self(), spawn, []) when ClassPid =:= self() and the
+%%% process dictionary has no beamtalk_class_name key calls
+%%% handle_self_instantiation_error → class_name_from_pid(self()).
 %%% ============================================================================
 
 class_name_from_pid_test_() ->
     {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
         [
-            {"registered process with beamtalk_class_ prefix extracts class name",
+            {"beamtalk_class_ prefix extracted as class name",
                 fun test_class_name_from_registered_pid/0},
-            {"unregistered process returns unknown", fun test_class_name_from_unregistered_pid/0},
-            {"process registered with different prefix returns unknown",
+            {"unregistered process yields unknown class name",
+                fun test_class_name_from_unregistered_pid/0},
+            {"wrong-prefix registered process yields unknown class name",
                 fun test_class_name_from_wrong_prefix/0}
         ]
     end}.
 
-%% A process registered as beamtalk_class_<ClassName> yields <ClassName>.
+%% Process registered as beamtalk_class_<ClassName>: class_name_from_pid/1
+%% strips the prefix and returns <ClassName> as the class atom.
 test_class_name_from_registered_pid() ->
-    %% Spawn a dummy process, register it with the expected name, then call
-    %% class_send(undefined, ...) to observe the class_not_found hint, or
-    %% test class_name_from_pid indirectly via start_test_class which registers
-    %% the process as beamtalk_class_<ClassName>.
-    ClassName = 'BT1085NameTest',
-    {ok, Pid} = start_test_class(ClassName, erlang),
+    ClassName = 'BT1085NameTestPid',
+    RegName = list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)),
+    register(RegName, self()),
     try
-        %% The gen_server registers itself — call class_send to trigger the path
-        %% that reads the registered name (via class_send → DNU → class_name_from_pid).
-        %% We just verify the class started and is registered.
-        ?assertNotEqual(undefined, beamtalk_class_registry:whereis_class(ClassName))
+        %% Trigger the self-instantiation error path:
+        %%   class_send(self(), spawn, []) → handle_self_instantiation →
+        %%   handle_self_instantiation_error → class_name_from_pid(self()).
+        %% Process dict has no beamtalk_class_name so error path fires.
+        %% class_name_from_pid reads registered_name, strips prefix, returns ClassName.
+        ?assertError(
+            #{error := #beamtalk_error{kind = instantiation_error, class = ClassName}},
+            beamtalk_class_dispatch:class_send(self(), spawn, [])
+        )
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        unregister(RegName)
     end.
 
-%% An unregistered (anonymous) process → class_send(undefined,...) raises class_not_found.
+%% An anonymous (unregistered) process: class_name_from_pid/1 returns `unknown`.
 test_class_name_from_unregistered_pid() ->
-    %% The class_name_from_pid private function is exercised indirectly when
-    %% class_send is called with a pid that is not a registered class process.
-    %% Verify that class_send(undefined, ...) correctly raises class_not_found
-    %% (this is tested in test_class_send_undefined but confirmed here for
-    %% completeness of the pid-handling section).
-    ?assertError(
-        #{error := #beamtalk_error{kind = class_not_found}},
-        beamtalk_class_dispatch:class_send(undefined, anySelector, [])
-    ).
-
-%% Process registered under a non-class name → handle_self_instantiation error path.
-test_class_name_from_wrong_prefix() ->
-    Pid = spawn(fun() ->
-        register(bt1085_test_process_not_a_class, self()),
-        receive
-            stop -> ok
+    Parent = self(),
+    %% Spawn a fresh, completely unregistered process.  Its process dict is
+    %% empty so handle_self_instantiation_error fires, and class_name_from_pid
+    %% finds no registered_name → returns `unknown`.
+    spawn(fun() ->
+        try
+            beamtalk_class_dispatch:class_send(self(), spawn, [])
+        catch
+            error:#{error := Error} ->
+                Parent ! {error_received, Error}
         end
     end),
-    timer:sleep(10),
+    receive
+        {error_received, #beamtalk_error{kind = instantiation_error, class = unknown}} ->
+            ok
+    after 5000 ->
+        ?assert(false)
+    end.
+
+%% Process registered under a non-beamtalk_class_ prefix: class_name_from_pid/1
+%% sees a registered name but the prefix does not match, so it returns `unknown`.
+test_class_name_from_wrong_prefix() ->
+    RegName = bt1085_test_process_wrong_prefix,
+    register(RegName, self()),
     try
-        %% The process is registered but not under beamtalk_class_ prefix.
-        ?assert(is_pid(Pid))
+        ?assertError(
+            #{error := #beamtalk_error{kind = instantiation_error, class = unknown}},
+            beamtalk_class_dispatch:class_send(self(), spawn, [])
+        )
     after
-        Pid ! stop
+        unregister(RegName)
     end.
 
 %%% ============================================================================
@@ -568,7 +599,10 @@ class_method_chain_traversal_test_() ->
         [
             {"selector found in parent class is returned", fun test_chain_finds_parent_method/0},
             {"selector not in any ancestor returns not_found", fun test_chain_not_found_anywhere/0},
-            {"max depth guard: class with cycle terminates", fun test_chain_depth_limit/0}
+            {"max depth guard fires at depth > 20 via 22-class chain",
+                fun test_chain_depth_limit/0},
+            {"ETS-missing class terminates with none before depth guard",
+                fun test_chain_none_termination/0}
         ]
     end}.
 
@@ -620,12 +654,56 @@ test_chain_not_found_anywhere() ->
         catch gen_server:stop(Pid, normal, 5000)
     end.
 
-%% A chain with depth > ?MAX_HIERARCHY_DEPTH terminates gracefully.
-%% We test the none-termination path by calling handle_class_method_call
-%% on a class whose hierarchy is not registered in ETS (superclass_from_ets returns none).
+%% The ?MAX_HIERARCHY_DEPTH guard terminates runaway chain walks gracefully.
+%%
+%% Build 22 actual class processes (BT1085Depth0 … BT1085Depth21) where each
+%% has the next as its superclass, and BT1085Depth21 points to the non-running
+%% BT1085Depth22.  The walk increments the depth counter at each level:
+%%   BT1085Depth1 → depth 0, BT1085Depth2 → depth 1, …, BT1085Depth21 → depth 20,
+%%   BT1085Depth22 → depth 21 (21 > MAX_HIERARCHY_DEPTH=20) → guard fires.
 test_chain_depth_limit() ->
+    %% Build a 22-process chain; the 22nd class's superclass is a phantom name
+    %% (not started) so the depth guard fires before any lookup attempt on it.
+    N = 21,
+    Names = [
+        list_to_atom("BT1085Depth" ++ integer_to_list(I))
+     || I <- lists:seq(0, N)
+    ],
+    PhantomName = list_to_atom("BT1085Depth" ++ integer_to_list(N + 1)),
+    Pids = lists:map(
+        fun(I) ->
+            Name = lists:nth(I + 1, Names),
+            Superclass =
+                if
+                    I < N -> lists:nth(I + 2, Names);
+                    true -> PhantomName
+                end,
+            {ok, Pid} = beamtalk_object_class:start_link(Name, #{
+                superclass => Superclass,
+                module => bt1085_depth_test_nonexistent,
+                class_methods => #{},
+                class_state => #{}
+            }),
+            Pid
+        end,
+        lists:seq(0, N)
+    ),
+    try
+        %% Walk from BT1085Depth0; depth guard fires at depth 21 before
+        %% touching the phantom BT1085Depth22.
+        Result = beamtalk_class_dispatch:handle_class_method_call(
+            chainDepthTestSelector, [], hd(Names), bt1085_depth_test_nonexistent, #{}, #{}
+        ),
+        ?assertEqual({error, not_found}, Result)
+    after
+        lists:foreach(fun(P) -> catch gen_server:stop(P, normal, 5000) end, Pids)
+    end.
+
+%% ETS-missing class (superclass_from_ets returns none) terminates immediately.
+%% This is the common fast path; the depth guard above covers the deep-chain path.
+test_chain_none_termination() ->
     ClassName = 'BT1085NoChain',
-    %% Class not in ETS so superclass_from_ets returns none immediately.
+    %% Class not in ETS so superclass_from_ets returns none on first call.
     Result = beamtalk_class_dispatch:handle_class_method_call(
         anySelector, [], ClassName, some_module, #{}, #{}
     ),
