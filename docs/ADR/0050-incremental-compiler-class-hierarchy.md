@@ -291,7 +291,7 @@ Notify compiler server from `beamtalk_workspace` after each compilation, rather 
 
 ### Negative
 
-- Every compile request now includes the full class cache in the port payload (bounded growth: tens of classes per session, kilobytes of ETF)
+- Every compile request now includes the full class cache in the port payload. Growth is bounded by session size — measure ETF payload size at realistic session scales (50–100 loaded classes) before assuming it is negligible. If payload grows beyond ~1MB, revisit the stateful port option (Option B) or add payload pruning (only send classes referenced in the current compilation unit).
 - `beamtalk_object_class:init/1` gains a conditional notification cast
 - `__beamtalk_meta/0` codegen is more complex (additional fields)
 
@@ -344,6 +344,8 @@ Notify compiler server from `beamtalk_workspace` after each compilation, rather 
 The `__beamtalk_meta/0` format change is managed across two phases:
 
 **Phase 1 (additive, backward-compatible)**: New keys are added alongside existing keys. The current `methods => [{atom(), integer()}]` tuple-list format is preserved. New `method_info => #{atom() => #{...}}` map is added in parallel. All existing consumers (`beamtalk_behaviour_intrinsics.erl`, reflection tests, snapshot tests) continue working unchanged and are migrated to the new keys.
+
+**Format versioning**: Crash recovery scans all loaded modules, which may include classes compiled before this ADR (old `__beamtalk_meta/0` format, missing `method_info`, `field_types`, flags). Recovery must treat absent keys as their zero values (`method_info => #{}`, `is_sealed => false`, etc.) rather than crashing. Consider adding a `meta_version => 2` key in Phase 1 so recovery can distinguish old-format modules and skip or degrade gracefully.
 
 **Phase 4 (breaking, after consumers migrated)**: Old tuple-list format removed. By this point all consumers read from the new map keys. This is an internal change — `__beamtalk_meta/0` is not part of the public BEAM interop API (ADR 0028).
 
