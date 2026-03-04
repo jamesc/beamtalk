@@ -97,6 +97,7 @@ fn prose_nav(active_file: &str, prose_pages: &[(&str, &str, &str)]) -> String {
     html.push_str("<li><a href=\"../\">Home</a></li>\n");
     html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
     html.push_str("<li><a href=\"../docs/language-features.html\">Documentation</a></li>\n");
+    html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
     html.push_str("</ul>\n");
 
     html.push_str("<div class=\"sidebar-section-label\">Documentation</div>\n");
@@ -478,6 +479,7 @@ fn adr_nav(active_file: &str, adrs: &[AdrInfo]) -> String {
     html.push_str("<li><a href=\"../\">Home</a></li>\n");
     html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
     html.push_str("<li><a href=\"../docs/language-features.html\">Documentation</a></li>\n");
+    html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
     html.push_str("</ul>\n");
 
     html.push_str("<div class=\"sidebar-section-label\">Architecture Decisions</div>\n");
