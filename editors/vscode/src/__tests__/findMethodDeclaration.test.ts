@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { findMethodDeclaration, extractStateVarInfo, extractMethodDocComment } from "../textUtils";
+import { findMethodDeclaration, findStateVarDeclaration, extractStateVarInfo, extractMethodDocComment } from "../textUtils";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -297,6 +297,41 @@ Value subclass: SchemeLambda
     const src = `Object subclass: Foo\n  // state: x = 1\n  state: x = 2\n`;
     const info = extractStateVarInfo(src, "x");
     expect(info!.defaultValue).toBe("2");
+  });
+});
+
+// ─── findStateVarDeclaration tests ───────────────────────────────────────────
+
+describe("findStateVarDeclaration", () => {
+  it("finds a state var and returns offset pointing at the name", () => {
+    const src = `Object subclass: Foo\n  state: count = 0\n`;
+    const offset = findStateVarDeclaration(src, "count");
+    expect(offset).not.toBe(-1);
+    expect(src.slice(offset, offset + 5)).toBe("count");
+  });
+
+  it("handles a variable named 'state' without matching the prefix", () => {
+    const src = `Object subclass: Foo\n  state: state = nil\n`;
+    const offset = findStateVarDeclaration(src, "state");
+    expect(offset).not.toBe(-1);
+    // Must point at the variable name, not the `state:` keyword
+    expect(src.slice(offset, offset + 5)).toBe("state");
+    // The `state` at offset must be followed by ` = `, not `:`
+    expect(src[offset + 5]).toBe(" ");
+  });
+
+  it("returns -1 for unknown variable", () => {
+    const src = `Object subclass: Foo\n  state: count = 0\n`;
+    expect(findStateVarDeclaration(src, "nonexistent")).toBe(-1);
+  });
+
+  it("skips comment lines", () => {
+    const src = `Object subclass: Foo\n  // state: x = 1\n  state: x = 2\n`;
+    const offset = findStateVarDeclaration(src, "x");
+    expect(offset).not.toBe(-1);
+    // Should be on the non-comment line
+    const line = src.slice(0, offset).split("\n").length - 1;
+    expect(src.split("\n")[line].trimStart()).not.toMatch(/^\/\//);
   });
 });
 

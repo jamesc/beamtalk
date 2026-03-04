@@ -2,15 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Find a method declaration in Beamtalk source text.
- *
- * - Class-side: matches `class selector =>` (trimmed line prefix)
- * - Instance-side: matches `selector =>` at start of trimmed line (excludes `class selector` lines)
- * - Skips comment lines (trimmed starting with `//`)
- *
- * Returns the character offset of the selector within the text, or -1 if not found.
- */
-/**
  * Build a regex matching a Beamtalk method head (selector + optional params + `=>`).
  *
  * Unary selectors (`run`) match `run =>`.
@@ -69,14 +60,17 @@ export function extractStateVarInfo(
  */
 export function findStateVarDeclaration(text: string, name: string): number {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`^state:\\s+(${esc})\\s*=`);
+  const re = new RegExp(`^(state:\\s+)${esc}\\s*=`);
   const lines = text.split("\n");
   let offset = 0;
   for (const line of lines) {
     const trimmed = line.trimStart();
     if (!trimmed.startsWith("//")) {
       const m = re.exec(trimmed);
-      if (m) return offset + line.indexOf(m[1]);
+      if (m) {
+        const indent = line.length - trimmed.length;
+        return offset + indent + m[1].length;
+      }
     }
     offset += line.length + 1;
   }
