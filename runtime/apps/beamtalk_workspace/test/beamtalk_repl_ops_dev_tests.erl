@@ -314,3 +314,68 @@ walk_chain_class_multi_class_selectors_test() ->
 walk_chain_class_unknown_selector_test() ->
     Result = beamtalk_repl_ops_dev:walk_chain_class('Integer', [unknownMethod]),
     ?assertEqual(undefined, Result).
+
+%%====================================================================
+%% handle/4 -- docs with non-existing class (badarg path)
+%%====================================================================
+
+handle_docs_unknown_class_returns_error_test() ->
+    Msg = make_msg(<<"docs">>, <<"doc-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"docs">>, #{<<"class">> => <<"NonExistentDocClass999">>}, Msg, self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
+
+%%====================================================================
+%% parse_receiver_and_prefix/1 -- additional edge cases
+%%====================================================================
+
+parse_tab_separated_test() ->
+    %% Tabs are treated as whitespace separators
+    ?assertEqual(
+        {<<"Integer">>, <<"s">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Integer\ts">>)
+    ).
+
+parse_underscore_prefix_test() ->
+    %% Underscores are identifier chars
+    ?assertEqual(
+        {undefined, <<"_foo">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"_foo">>)
+    ).
+
+parse_multi_keyword_selector_test() ->
+    %% Multi-keyword selector like "ifTrue:ifFalse:" is one prefix token
+    ?assertEqual(
+        {<<"x">>, <<"ifTrue:ifFalse:">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"x ifTrue:ifFalse:">>)
+    ).
+
+%%====================================================================
+%% handle/4 -- describe deprecated ops
+%%====================================================================
+
+handle_describe_deprecated_ops_have_migrate_to_test() ->
+    Msg = make_msg(<<"describe">>, <<"d-dep">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    Ops = maps:get(<<"ops">>, Decoded),
+    DocsOp = maps:get(<<"docs">>, Ops),
+    ?assertEqual(true, maps:get(<<"deprecated">>, DocsOp)),
+    ?assert(maps:is_key(<<"migrate_to">>, DocsOp)).
+
+%%====================================================================
+%% handle/4 -- complete new format with no cursor
+%%====================================================================
+
+handle_complete_new_format_empty_prefix_test() ->
+    %% New format without cursor field falls back to get_completions
+    Msg = make_msg(<<"complete">>, <<"c-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"complete">>, #{<<"code">> => <<>>}, Msg, self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual([], maps:get(<<"completions">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
