@@ -54,7 +54,7 @@ do_eval(Expression, State, Subscriber) ->
 
     SessionBindings = beamtalk_repl_state:get_bindings(State),
     %% BT-881: Merge workspace user bindings into session bindings.
-    WorkspaceUserBindings = beamtalk_workspace_interface:get_user_bindings(),
+    WorkspaceUserBindings = beamtalk_workspace_interface_primitives:get_user_bindings(),
     WorkspaceOnlyBindings = maps:without(maps:keys(SessionBindings), WorkspaceUserBindings),
     Bindings0 = maps:merge(WorkspaceUserBindings, SessionBindings),
     Bindings = maps:put(?WORKSPACE_BINDINGS_KEY, WorkspaceOnlyBindings, Bindings0),
@@ -97,7 +97,7 @@ do_show_codegen(Expression, State) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
     SessionBindings = beamtalk_repl_state:get_bindings(State),
-    WorkspaceUserBindings = beamtalk_workspace_interface:get_user_bindings(),
+    WorkspaceUserBindings = beamtalk_workspace_interface_primitives:get_user_bindings(),
     Bindings = maps:merge(WorkspaceUserBindings, SessionBindings),
     SourceBin = list_to_binary(Expression),
     ModNameBin = iolist_to_binary(["beamtalk_repl_codegen_", integer_to_list(Counter)]),

@@ -316,11 +316,11 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 
 %% @private BT-883: Inject workspace globals (minus class objects) as session bindings.
-%% Walks Workspace globals via beamtalk_workspace_interface:get_session_bindings/0
+%% Walks Workspace globals via beamtalk_workspace_interface_primitives:get_session_bindings/0
 %% instead of the hardcoded singletons list. Returns singletons (Transcript,
 %% Beamtalk, Workspace) plus any user-registered bind:as: names.
 inject_workspace_bindings(Bindings) ->
-    maps:merge(Bindings, beamtalk_workspace_interface:get_session_bindings()).
+    maps:merge(Bindings, beamtalk_workspace_interface_primitives:get_session_bindings()).
 
 %% @private Refresh workspace bindings in session state after an eval.
 %% Removes stale workspace-injected keys and overlays fresh ETS bindings,
@@ -329,7 +329,7 @@ inject_workspace_bindings(Bindings) ->
 -spec refresh_ws_bindings(beamtalk_repl_state:state()) -> beamtalk_repl_state:state().
 refresh_ws_bindings(State) ->
     InjectedWsKeys = beamtalk_repl_state:get_injected_ws_keys(State),
-    FreshWs = beamtalk_workspace_interface:get_session_bindings(),
+    FreshWs = beamtalk_workspace_interface_primitives:get_session_bindings(),
     CurrentBindings = beamtalk_repl_state:get_bindings(State),
     WithoutStaleWs = maps:without(InjectedWsKeys, CurrentBindings),
     FreshBindings = maps:merge(FreshWs, WithoutStaleWs),
