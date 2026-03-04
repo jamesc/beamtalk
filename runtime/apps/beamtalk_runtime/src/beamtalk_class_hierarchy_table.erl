@@ -3,7 +3,7 @@
 
 %%% @doc ETS table owner for the beamtalk_class_hierarchy table.
 %%%
-%%% **DDD Context:** Runtime — Class System
+%%% **DDD Context:** Object System Context
 %%%
 %%% Encapsulates all direct ETS access to the `beamtalk_class_hierarchy` table,
 %%% which stores `{ClassName, SuperclassName | none}` pairs for O(1) hierarchy

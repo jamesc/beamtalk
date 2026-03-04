@@ -12,7 +12,7 @@
 %%% - beamtalk_workspace_bootstrap — to wire class variables
 %%% - beamtalk_repl_ops_eval / beamtalk_repl_ops_dev — to filter workspace binding names
 %%%
-%%% **DDD Context:** Workspace
+%%% **DDD Context:** Workspace Context
 
 -module(beamtalk_workspace_config).
 

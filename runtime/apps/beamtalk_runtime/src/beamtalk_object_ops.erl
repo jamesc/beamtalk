@@ -3,7 +3,7 @@
 
 %%% @doc Object base class implementation (ADR 0006 Phase 1b).
 %%%
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** Object System Context
 %%%
 %%% This module provides the shared reflection, display, and utility methods
 %%% inherited by all Beamtalk objects. It is registered as Object's runtime

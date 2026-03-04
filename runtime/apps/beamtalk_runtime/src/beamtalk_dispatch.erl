@@ -3,7 +3,7 @@
 
 %%% @doc Method dispatch domain service (DDD).
 %%%
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** Object System Context
 %%%
 %%% This module provides the unified dispatch service for Beamtalk method calls,
 %%% implementing runtime hierarchy walking and method resolution. It replaces

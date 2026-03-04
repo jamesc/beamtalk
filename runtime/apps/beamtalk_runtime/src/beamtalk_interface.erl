@@ -3,7 +3,7 @@
 
 %%% @doc BeamtalkInterface actor - Beamtalk system introspection singleton.
 %%%
-%%% **DDD Context:** Runtime
+%%% **DDD Context:** Object System Context
 %%%
 %%% This gen_server implements the BeamtalkInterface actor that backs the
 %%% `Beamtalk` global object. It provides system-wide introspection:

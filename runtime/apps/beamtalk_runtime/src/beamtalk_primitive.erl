@@ -3,7 +3,7 @@
 
 %%% @doc Primitive type dispatch and reflection.
 %%%
-%%% **DDD Context:** Object System
+%%% **DDD Context:** Object System Context
 %%%
 %%% Provides uniform dispatch and class identity for primitive types (integers,
 %%% strings, etc.) and tagged maps. Enables reflection like `42 class` → `'Integer'`.

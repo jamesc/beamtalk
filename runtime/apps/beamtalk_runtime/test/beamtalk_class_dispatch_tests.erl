@@ -3,7 +3,7 @@
 
 %%% @doc EUnit tests for BT-999: undef classification in class method dispatch.
 %%%
-%%% **DDD Context:** Runtime — Object System
+%%% **DDD Context:** Object System Context
 %%%
 %%% Tests that invoke_class_method converts dispatch-level `error:undef` into
 %%% structured `#beamtalk_error{}` records, distinguishing:

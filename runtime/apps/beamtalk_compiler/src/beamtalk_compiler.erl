@@ -3,7 +3,7 @@
 
 %% @doc Public API for the Beamtalk compiler (ADR 0022).
 %%
-%%% **DDD Context:** Compilation (Anti-Corruption Layer boundary)
+%%% **DDD Context:** Compilation (Anti-Corruption Layer)
 %%
 %% This module is the single entry point for all compilation via OTP Port.
 %%

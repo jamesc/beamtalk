@@ -3,7 +3,7 @@
 
 %%% @doc DateTime class implementation — date/time via Erlang calendar/os modules.
 %%%
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** Object System Context
 %%%
 %%% Provides class-side constructors for creating UTC datetime values and
 %%% instance methods for access, arithmetic, comparison, and formatting.

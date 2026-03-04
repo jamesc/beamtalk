@@ -3,7 +3,7 @@
 
 %%% @doc Class method dispatch for Beamtalk class objects.
 %%%
-%%% **DDD Context:** Object System
+%%% **DDD Context:** Object System Context
 %%%
 %%% Handles class-level message sending protocol, translating Beamtalk messages
 %%% to gen_server calls. Also provides helpers for class method execution

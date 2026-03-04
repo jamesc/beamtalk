@@ -3,7 +3,7 @@
 
 %%% @doc Op handlers for sessions, clone, close, health, and shutdown operations.
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Extracted from beamtalk_repl_server (BT-705).
 

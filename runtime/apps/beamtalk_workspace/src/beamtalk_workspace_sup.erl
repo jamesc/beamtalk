@@ -3,7 +3,7 @@
 
 %%% @doc Per-workspace supervisor
 %%%
-%%% **DDD Context:** Workspace
+%%% **DDD Context:** Workspace Context
 %%%
 %%% This supervisor manages all components of a persistent workspace:
 %%% - Actor registry (workspace-wide actor tracking)

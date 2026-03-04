@@ -3,7 +3,7 @@
 
 %%% @doc Minimal ClassBuilder bootstrap stub for ADR 0038 (ClassBuilder Protocol Phase 1).
 %%%
-%%% **DDD Context:** Object System
+%%% **DDD Context:** Object System Context
 %%%
 %%% This module acts as the implementation module for the 'ClassBuilder' class,
 %%% enabling ADR 0038 Phase 1: pre-wiring ClassBuilder in the bootstrap sequence

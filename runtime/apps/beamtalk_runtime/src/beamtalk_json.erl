@@ -3,7 +3,7 @@
 
 %%% @doc JSON class implementation — JSON encoding/decoding via jsx.
 %%%
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** Object System Context
 %%%
 %%% JSON provides class-side methods for parsing and generating JSON strings.
 %%% Wraps the `jsx` library with proper type mapping and structured error handling.

@@ -7,7 +7,7 @@
 %%% access. Wraps `#beamtalk_error{}' records as exception hierarchy value
 %%% type objects (tagged maps). Called by compiler-generated try/catch code.
 %%%
-%%% **DDD Context:** Runtime — Error Handling
+%%% **DDD Context:** Object System Context
 %%%
 %%% Exception objects are value types (tagged maps), not actors.
 %%% The `$beamtalk_class' is set based on error kind (BT-452), or from the

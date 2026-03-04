@@ -3,7 +3,7 @@
 
 %%% @doc REPL documentation helper — fetches and formats runtime docs.
 %%%
-%%% **DDD Context:** REPL — Documentation
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Provides documentation lookup for `:help ClassName` and
 %%% `:help ClassName selector` commands. Uses the runtime-embedded

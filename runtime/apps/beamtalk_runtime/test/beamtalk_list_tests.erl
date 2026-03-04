@@ -1,6 +1,6 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
-%%% **DDD Context:** Runtime
+%%% **DDD Context:** Object System Context
 
 %% @doc Integration tests for List compiled dispatch and primitive send.
 %%

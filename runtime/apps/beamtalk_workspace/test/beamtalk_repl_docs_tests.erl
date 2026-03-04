@@ -3,7 +3,7 @@
 
 %%% @doc Unit tests for beamtalk_repl_docs module
 %%%
-%%% **DDD Context:** REPL — Documentation
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Tests runtime-embedded documentation formatting and error handling.
 %%% Uses pure formatting functions for unit tests, and running runtime

@@ -3,7 +3,7 @@
 
 %%% @doc IO capture for Beamtalk REPL evaluation.
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Captures stdout during eval by temporarily replacing the group_leader
 %%% with a custom IO server process.

@@ -3,7 +3,7 @@
 
 %%% @doc Instance tracking registry for Beamtalk.
 %%%
-%%% **DDD Context:** Object System
+%%% **DDD Context:** Object System Context
 %%
 %% Tracks all instances of each class to support Smalltalk-style reflection:
 %% - `allInstances` - get all instances of a class

@@ -3,7 +3,7 @@
 
 %%% @doc Primitive implementations for the TranscriptStream singleton actor.
 %%%
-%%% **DDD Context:** Runtime
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Implements the `@primitive` methods for the TranscriptStream class. The
 %%% compiled Beamtalk actor (`bt@stdlib@transcript_stream`) delegates all

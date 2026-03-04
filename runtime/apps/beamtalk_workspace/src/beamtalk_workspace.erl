@@ -3,7 +3,7 @@
 
 %%% @doc Workspace API for managing workspace-level operations.
 %%%
-%%% **DDD Context:** Workspace
+%%% **DDD Context:** Workspace Context
 %%%
 %%% This module provides a high-level API for querying workspace state.
 %%% It delegates to beamtalk_workspace_meta for workspace metadata.

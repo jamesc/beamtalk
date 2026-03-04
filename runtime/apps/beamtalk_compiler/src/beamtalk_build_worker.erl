@@ -3,7 +3,7 @@
 
 %% @doc Batch compiler worker for `beamtalk build' (ADR 0022, Phase 3).
 %%
-%% DDD Context: Compilation (Build Pipeline)
+%%% **DDD Context:** Compilation (Anti-Corruption Layer)
 %%
 %% Replaces `compile.escript' with an in-memory compilation pipeline.
 %% Uses `core_scan:string/1' → `core_parse:parse/1' → `compile:forms/2'

@@ -3,7 +3,7 @@
 
 %%% @doc Primitive implementations for the BeamtalkInterface singleton actor.
 %%%
-%%% **DDD Context:** Runtime
+%%% **DDD Context:** Object System Context
 %%%
 %%% Implements the `@primitive` methods for the BeamtalkInterface class. The
 %%% compiled Beamtalk actor (`bt@stdlib@beamtalk_interface`) delegates all

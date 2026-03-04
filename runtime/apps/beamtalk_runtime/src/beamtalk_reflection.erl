@@ -3,7 +3,7 @@
 
 %%% @doc Reflection services for instance variable access.
 %%%
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** Object System Context
 %%%
 %%% This domain service provides uniform access to instance variables
 %%% (fields) on Beamtalk objects. It extracts the reflection logic that

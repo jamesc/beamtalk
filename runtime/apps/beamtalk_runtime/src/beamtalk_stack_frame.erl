@@ -8,7 +8,7 @@
 %%%   {Module, Function, ArityOrArgs, Location}
 %%% where Location is [{file, File}, {line, Line}] or [].
 %%%
-%%% **DDD Context:** Runtime — Error Handling
+%%% **DDD Context:** Object System Context
 %%%
 %%% StackFrame objects are value types (tagged maps) with fields:
 %%% ```

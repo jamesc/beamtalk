@@ -3,7 +3,7 @@
 
 %%% @doc Instance creation logic for Beamtalk classes.
 %%%
-%%% **DDD Context:** Runtime — Class System
+%%% **DDD Context:** Object System Context
 %%%
 %%% Handles the spawn and new protocols for creating class instances.
 %%% Contains the logic for compiled class instantiation, abstract

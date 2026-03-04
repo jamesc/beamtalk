@@ -3,7 +3,7 @@
 
 %%% @doc Op handlers for actors, inspect, kill, and interrupt operations.
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Extracted from beamtalk_repl_server (BT-705).
 

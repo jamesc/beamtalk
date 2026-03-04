@@ -14,7 +14,7 @@
 %%%
 %%% Singleton mapping derived from beamtalk_workspace_config:singletons/0.
 %%%
-%%% **DDD Context:** Workspace
+%%% **DDD Context:** Workspace Context
 
 -module(beamtalk_workspace_bootstrap).
 -behaviour(gen_server).

@@ -3,7 +3,7 @@
 
 %%% @doc Workspace interface - actor introspection singleton.
 %%%
-%%% **DDD Context:** Workspace
+%%% **DDD Context:** Workspace Context
 %%%
 %%% This gen_server implements all WorkspaceInterface methods as Erlang
 %%% primitives. The Beamtalk source in stdlib/src/WorkspaceInterface.bt

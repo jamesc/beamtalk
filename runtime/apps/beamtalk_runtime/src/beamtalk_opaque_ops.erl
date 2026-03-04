@@ -3,7 +3,7 @@
 
 %% @doc Formatting helpers for opaque BEAM types (Pid, Port, Reference).
 %%
-%%% **DDD Context:** Runtime
+%%% **DDD Context:** Object System Context
 %%
 %% These types are opaque Erlang values with no direct binary conversion
 %% BIF. We use `erlang:pid_to_list/1` etc. and convert to binary with

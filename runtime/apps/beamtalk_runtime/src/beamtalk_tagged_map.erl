@@ -3,7 +3,7 @@
 
 %%% @doc Tagged map value object — centralizes tagged-map operations.
 %%%
-%%% **DDD Context:** Runtime Context — Value Object
+%%% **DDD Context:** Object System Context
 %%%
 %%% A "tagged map" is an Erlang map with a `'$beamtalk_class'` key that
 %%% identifies its type. Tagged maps represent:
