@@ -48,6 +48,8 @@ pub(super) fn generate_prose_docs(
         );
     }
 
+    render_docs_index(prose_pages, &docs_output)?;
+
     let mut rendered_count = 0;
     for &(source_file, output_file, title) in prose_pages {
         let source = docs_source.join(source_file);
@@ -68,7 +70,7 @@ pub(super) fn generate_prose_docs(
         html.push_str("<main class=\"main-content prose-content\">\n");
         html.push_str("<div class=\"breadcrumb\">");
         html.push_str("<a href=\"../\">Home</a> &rsaquo; ");
-        html.push_str("<a href=\"language-features.html\">Docs</a> &rsaquo; ");
+        html.push_str("<a href=\"index.html\">Documentation</a> &rsaquo; ");
         html.push_str(&html_escape(title));
         html.push_str("</div>\n");
         html.push_str(&render_doc(&markdown));
@@ -87,6 +89,38 @@ pub(super) fn generate_prose_docs(
     Ok(())
 }
 
+/// Render the docs index page listing all prose documentation pages.
+fn render_docs_index(
+    prose_pages: &[(&str, &str, &str)],
+    docs_output: &Utf8Path,
+) -> Result<()> {
+    let mut html = String::new();
+    html.push_str(&page_header("Documentation — Beamtalk", "../style.css", "../"));
+    html.push_str("<div class=\"page-wrapper\">\n");
+    html.push_str(SIDEBAR_TOGGLE);
+    html.push_str(&prose_nav("index.html", prose_pages));
+    html.push_str("<main class=\"main-content prose-content\">\n");
+    html.push_str("<div class=\"breadcrumb\">");
+    html.push_str("<a href=\"../\">Home</a> &rsaquo; ");
+    html.push_str("Documentation");
+    html.push_str("</div>\n");
+    html.push_str("<h1>Documentation</h1>\n");
+    html.push_str("<ul>\n");
+    for &(_, file, title) in prose_pages {
+        let _ = writeln!(html, "<li><a href=\"{file}\">{title}</a></li>", file = file, title = html_escape(title));
+    }
+    html.push_str("</ul>\n");
+    html.push_str("</main>\n");
+    html.push_str(&page_footer_simple());
+
+    let index_path = docs_output.join("index.html");
+    fs::write(&index_path, html)
+        .into_diagnostic()
+        .wrap_err("Failed to write docs/index.html")?;
+    debug!("Generated {index_path}");
+    Ok(())
+}
+
 /// Build navigation sidebar for prose documentation pages.
 fn prose_nav(active_file: &str, prose_pages: &[(&str, &str, &str)]) -> String {
     let mut html = String::new();
@@ -96,7 +130,7 @@ fn prose_nav(active_file: &str, prose_pages: &[(&str, &str, &str)]) -> String {
     html.push_str("<ul class=\"sidebar-nav\">\n");
     html.push_str("<li><a href=\"../\">Home</a></li>\n");
     html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
-    html.push_str("<li><a href=\"../docs/language-features.html\">Documentation</a></li>\n");
+    html.push_str("<li><a href=\"../docs/\">Documentation</a></li>\n");
     html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
     html.push_str("</ul>\n");
 
@@ -478,7 +512,7 @@ fn adr_nav(active_file: &str, adrs: &[AdrInfo]) -> String {
     html.push_str("<ul class=\"sidebar-nav\">\n");
     html.push_str("<li><a href=\"../\">Home</a></li>\n");
     html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
-    html.push_str("<li><a href=\"../docs/language-features.html\">Documentation</a></li>\n");
+    html.push_str("<li><a href=\"../docs/\">Documentation</a></li>\n");
     html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
     html.push_str("</ul>\n");
 
