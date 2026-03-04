@@ -19,7 +19,7 @@ use crate::unparse::unparse_method_display_signature;
 
 /// Tuple representing a method entry for `method_info` / `class_method_info` meta maps.
 ///
-/// Fields: (`erlang_selector`, `arity`, `return_type`, `param_types`)
+/// Fields: (`erlang_selector`, `arity`, `return_type`, `param_types`, `is_sealed`)
 type MethodInfoEntry = (String, usize, Option<String>, Vec<Option<String>>, bool);
 
 impl CoreErlangGenerator {
@@ -1210,7 +1210,9 @@ impl CoreErlangGenerator {
                         // making Module:'__beamtalk_meta'() unavailable at registration time.
                         line(),
                         "'meta' => ",
-                        Self::build_meta_map_doc(class, module),
+                        // include_standalone: true — standalone methods included in BuilderState.meta
+                        // so that init/1 can register their return types during on_load.
+                        Self::build_meta_map_doc(class, module, true),
                         if is_non_constructible {
                             docvec![",", line(), "'isConstructible' => 'false'"]
                         } else {
@@ -1749,7 +1751,8 @@ impl CoreErlangGenerator {
         Ok(docvec![
             "'__beamtalk_meta'/0 = fun () ->\n",
             "    ",
-            Self::build_meta_map_doc(class, module),
+            // include_standalone: false — standalone methods are runtime-patched, not static
+            Self::build_meta_map_doc(class, module, false),
             "\n\n",
         ])
     }
@@ -1762,7 +1765,17 @@ impl CoreErlangGenerator {
     /// ADR 0050 Phase 5: `erlang:function_exported/3` returns `false` during `on_load`,
     /// so `__beamtalk_meta/0` cannot be called from within the `on_load` callback chain.
     /// Including this map literal in `BuilderState` makes the data available during `init/1`.
-    fn build_meta_map_doc(class: &ClassDefinition, module: &Module) -> Document<'static> {
+    ///
+    /// When `include_standalone` is `false` (used for `__beamtalk_meta/0`), standalone
+    /// Tonel-style methods (`module.method_definitions`) are excluded — they are
+    /// runtime-patched and deliberately absent from the static meta. When `true`
+    /// (used for `BuilderState.meta`), standalone methods are included so that
+    /// return-type information is available to `init/1` during `on_load`.
+    fn build_meta_map_doc(
+        class: &ClassDefinition,
+        module: &Module,
+        include_standalone: bool,
+    ) -> Document<'static> {
         let class_name = class.name.name.to_string();
         let superclass_name = class
             .superclass
@@ -1794,11 +1807,13 @@ impl CoreErlangGenerator {
             class,
             module,
             auto.as_ref(),
+            include_standalone,
         ));
         let class_method_info_doc = Self::meta_method_info_map(&Self::meta_class_method_entries(
             class,
             module,
             auto.as_ref(),
+            include_standalone,
         ));
 
         docvec![
@@ -1888,6 +1903,7 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
         module: &Module,
         auto: Option<&crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods>,
+        include_standalone: bool,
     ) -> Vec<MethodInfoEntry> {
         let sealed = class.is_sealed;
         let mut entries: Vec<MethodInfoEntry> = class
@@ -1896,13 +1912,16 @@ impl CoreErlangGenerator {
             .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| Self::meta_method_entry(m, sealed))
             .collect();
-        // BT-1005: Include standalone instance methods for this class (Primary only).
-        for standalone in module.method_definitions.iter().filter(|m| {
-            m.class_name.name == class.name.name
-                && !m.is_class_method
-                && m.method.kind == MethodKind::Primary
-        }) {
-            entries.push(Self::meta_method_entry(&standalone.method, sealed));
+        // BT-1005: Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
+        // but included in BuilderState.meta so init/1 can register their return types.
+        if include_standalone {
+            for standalone in module.method_definitions.iter().filter(|m| {
+                m.class_name.name == class.name.name
+                    && !m.is_class_method
+                    && m.method.kind == MethodKind::Primary
+            }) {
+                entries.push(Self::meta_method_entry(&standalone.method, sealed));
+            }
         }
         if let Some(auto) = auto {
             use crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods;
@@ -1928,6 +1947,7 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
         module: &Module,
         auto: Option<&crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods>,
+        include_standalone: bool,
     ) -> Vec<MethodInfoEntry> {
         let sealed = class.is_sealed;
         let mut entries: Vec<MethodInfoEntry> = class
@@ -1936,13 +1956,16 @@ impl CoreErlangGenerator {
             .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| Self::meta_method_entry(m, sealed))
             .collect();
-        // BT-1005: Include standalone class methods for this class (Primary only).
-        for standalone in module.method_definitions.iter().filter(|m| {
-            m.class_name.name == class.name.name
-                && m.is_class_method
-                && m.method.kind == MethodKind::Primary
-        }) {
-            entries.push(Self::meta_method_entry(&standalone.method, sealed));
+        // BT-1005: Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
+        // but included in BuilderState.meta so init/1 can register their return types.
+        if include_standalone {
+            for standalone in module.method_definitions.iter().filter(|m| {
+                m.class_name.name == class.name.name
+                    && m.is_class_method
+                    && m.method.kind == MethodKind::Primary
+            }) {
+                entries.push(Self::meta_method_entry(&standalone.method, sealed));
+            }
         }
         if let Some(auto) = auto {
             if let Some(kw_sel) = &auto.keyword_constructor {
