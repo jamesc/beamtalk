@@ -303,7 +303,7 @@ validate_date(Y, Mo, D, Selector) ->
     end.
 
 -spec validate_time(integer(), integer(), integer(), atom()) -> ok.
-validate_time(H, Mi, S, Selector) when
+validate_time(H, Mi, S, _Selector) when
     H >= 0, H =< 23, Mi >= 0, Mi =< 59, S >= 0, S =< 59
 ->
     ok;
