@@ -223,7 +223,7 @@ pub fn get_node_info(workspace_id: &str) -> Result<Option<NodeInfo>> {
             return Err(miette!(
                 "Failed to read node info {}: {e}",
                 node_info_path.display()
-            ))
+            ));
         }
     };
     let info: NodeInfo = serde_json::from_str(&content).into_diagnostic()?;
