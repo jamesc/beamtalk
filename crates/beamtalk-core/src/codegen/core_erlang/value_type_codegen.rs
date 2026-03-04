@@ -1989,7 +1989,7 @@ mod tests {
                 name: Identifier::new(*slot_name, s()),
                 type_annotation: None,
                 default_value: Some(crate::ast::Expression::Literal(Literal::Integer(0), s())),
-                comments: Default::default(),
+                comments: crate::ast::CommentAttachment::default(),
                 doc_comment: None,
                 span: s(),
             })

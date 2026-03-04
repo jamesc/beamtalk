@@ -1543,7 +1543,7 @@ mod tests {
         let doc = generator.generate_map_literal(&pairs).unwrap();
         let output = doc.to_pretty_string();
         assert!(output.contains("'x'"), "map key should be atom. Got: {output}");
-        assert!(output.contains("1"), "map value should be integer. Got: {output}");
+        assert!(output.contains('1'), "map value should be integer. Got: {output}");
         assert!(output.contains("=>"), "map should use => syntax. Got: {output}");
     }
 
