@@ -6,7 +6,6 @@ Helper scripts for development workflows.
 
 | Script | Location | Description |
 |--------|----------|-------------|
-| `smoke-test.sh` | `scripts/` | Verify devcontainer is working (run inside container) |
 | `compile_fixtures.escript` | `runtime/apps/beamtalk_runtime/test_fixtures/` | Compile Beamtalk test fixtures for runtime tests (portable) |
 
 ---
