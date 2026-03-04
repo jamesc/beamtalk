@@ -631,6 +631,40 @@ immutable_primitive_error(Class, FieldName) ->
 
 ---
 
+## Workspace→Runtime Cross-Context Coupling Rules
+
+The Workspace context (DDD Context: `Workspace Context`) is a *customer* of the Object System context and Hot Reload context. Direct calls from workspace source files to runtime internals are permitted **only** for the functions in the approved API listed below.
+
+### Approved Cross-Context API
+
+Workspace source files (`beamtalk_workspace/src/*.erl`) may call the following runtime functions directly:
+
+| Module | Approved Functions |
+|---|---|
+| `beamtalk_class_registry` | `all_classes/0`, `whereis_class/1`, `inherits_from/2`, `class_object_tag/1`, `class_display_name/1`, `is_class_name/1`, `drain_class_warnings_by_names/1`, `drain_pending_load_errors_by_names/1`, `get_method_return_type/2`, `get_class_method_return_type/2` |
+| `beamtalk_object_class` | `class_name/1`, `module_name/1`, `set_class_var/3`, `start_link/2`, `methods/1`, `local_class_methods/1`, `local_class_methods_map/1`, `local_instance_methods/1`, `instance_variables/1`, `superclass/1` |
+| `beamtalk_dispatch` | `lookup/5` |
+| `beamtalk_reflection` | `field_names/1` |
+| `beamtalk_hot_reload` | `trigger_code_change/2`, `trigger_code_change/3`, `code_change/3` |
+
+### Rules
+
+1. **Only call approved functions.** Any call to a runtime module function not in the table above requires explicit justification and team review.
+
+2. **Mark unapproved calls.** If a workspace file must call a non-approved runtime function temporarily, add a comment:
+   ```erlang
+   %% CROSS-CONTEXT: calling beamtalk_XXX:foo/2 directly — see BT-1106 for facade work
+   beamtalk_XXX:foo(A, B)
+   ```
+
+3. **Prefer `beamtalk_workspace_interface` as the internal facade.** When adding new workspace functionality that needs runtime access, add a helper to `beamtalk_workspace_interface` or `beamtalk_workspace_interface_primitives` rather than calling runtime modules directly from deep inside REPL ops handlers.
+
+4. **No calls from runtime to workspace.** The dependency is one-way: Workspace → Object System / Hot Reload. Runtime modules must never import or call workspace modules.
+
+5. **Follow-up:** BT-1106 tracks creation of a dedicated `beamtalk_runtime_api` facade module to consolidate and enforce this boundary programmatically.
+
+---
+
 ## Common BEAM Pitfalls ⚠️
 
 **Gotchas that commonly bite developers coming from other languages:**
