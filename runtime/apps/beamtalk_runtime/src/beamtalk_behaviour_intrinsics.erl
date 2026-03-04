@@ -163,7 +163,7 @@ classLocalMethods(Self) ->
     Module = beamtalk_object_class:module_name(ClassPid),
     case meta_for_module(Module) of
         {ok, Meta} ->
-            [Sel || {Sel, _Arity} <- maps:get(methods, Meta)];
+            maps:keys(maps:get(method_info, Meta));
         not_available ->
             gen_server:call(ClassPid, methods)
     end.
@@ -200,7 +200,7 @@ classMethods(Self) ->
             Methods =
                 case meta_for_module(Module) of
                     {ok, Meta} ->
-                        [Sel || {Sel, _Arity} <- maps:get(methods, Meta)];
+                        maps:keys(maps:get(method_info, Meta));
                     not_available ->
                         gen_server:call(CPid, methods)
                 end,
