@@ -289,16 +289,6 @@ Loaded Counter
 | `GH_TOKEN` | GitHub authentication for devcontainers | `gh auth login`, then `$env:GH_TOKEN = (gh auth token)` |
 | `LINEAR_API_TOKEN` | Linear issue tracking | Get from [Linear API settings](https://linear.app/settings/api) |
 
-#### Optional: Devcontainer CLI
-
-For worktree-based parallel development, install the devcontainer CLI:
-
-```bash
-npm install -g @devcontainers/cli
-```
-
-**Note:** The `worktree-new` scripts will auto-install this if missing.
-
 ### Quick Start: Basic Development
 
 **VS Code (Recommended):**
@@ -320,117 +310,6 @@ The devcontainer includes all dependencies pre-configured:
 - GitHub CLI (`gh`) with authentication
 - GitHub Copilot CLI for AI assistance
 - VS Code extensions for Rust, TOML, Erlang, GitHub, Linear
-
-### Advanced: Parallel Development with Worktrees
-
-Git worktrees enable **multiple Copilot agents working in parallel** on different branches, each in its own isolated devcontainer.
-
-#### Why Worktrees?
-
-- **Parallel work** — Multiple agents on different issues simultaneously
-- **Isolation** — Each worktree has its own build artifacts, IDE state, and port
-- **No stashing** — Switch context without stashing uncommitted changes
-- **Container per branch** — Each worktree runs in its own devcontainer
-
-#### Directory Structure
-
-```text
-~/source/
-├── beamtalk/               # Main repository (origin)
-│   ├── .git/               # Main Git directory
-│   ├── .devcontainer/
-│   ├── crates/
-│   └── ...
-│
-├── BT-99-feature/          # Worktree #1 (sibling directory)
-│   ├── .git                # File pointing to ../beamtalk/.git/worktrees/BT-99-feature
-│   ├── crates/
-│   └── ...
-│
-└── BT-123-another/         # Worktree #2 (sibling directory)
-    ├── .git                # File pointing to ../beamtalk/.git/worktrees/BT-123-another
-    ├── crates/
-    └── ...
-```
-
-**Key points:**
-- Worktrees are created as **sibling directories** to the main repo
-- Worktree scripts do not write per-worktree `.env` overrides
-
-#### Environment Variables
-
-**Required for worktree devcontainers:**
-
-| Variable | Purpose | How to Set |
-|----------|---------|------------|
-| `GH_TOKEN` | GitHub authentication | `gh auth login`, then `$env:GH_TOKEN = (gh auth token)` |
-
-**Optional for Linear integration:**
-
-| Variable | Purpose | Where to Set |
-|----------|---------|--------------|
-| `LINEAR_API_TOKEN` | Linear issue tracking | Host environment |
-
-**Setting environment variables permanently (Windows):**
-
-```powershell
-# GitHub: authenticate first, then set GH_TOKEN
-gh auth login
-$env:GH_TOKEN = (gh auth token)  # Set for current session
-# Or add to your PowerShell profile for persistence
-
-# Linear: store securely, retrieve at runtime
-```
-
-> **Note:** Linux/Mac instructions will be added once the scripts are tested.
-
-#### Creating a Worktree
-
-```powershell
-# From main repo directory
-.\scripts\worktree-new.ps1 BT-99-feature
-
-# Create new branch from main
-.\scripts\worktree-new.ps1 -Branch BT-99 -BaseBranch main
-```
-
-**What happens:**
-1. Creates worktree as sibling directory to main repo
-2. Checks out the branch (creates from base if new)
-3. Starts devcontainer with all services
-4. Opens bash shell inside container
-
-**Port assignment:**
-- REPL ports are OS-assigned (ephemeral) by default — no port conflicts
-- Override with `--port` flag or `BEAMTALK_REPL_PORT` env var
-
-#### Removing a Worktree
-
-```powershell
-.\scripts\worktree-rm.ps1 BT-99-feature
-
-# Force remove (discard uncommitted changes)
-.\scripts\worktree-rm.ps1 -Branch BT-99 -Force
-```
-
-**What happens:**
-1. Stops and removes the devcontainer
-2. Removes the Docker volume (target cache)
-3. Fixes `.git` file if modified by container
-4. Removes the worktree directory
-5. Optionally deletes the branch (prompts for confirmation)
-
-#### Cleaning Up Orphaned Containers
-
-If you deleted worktree directories manually, clean up leftover containers:
-
-```powershell
-.\scripts\worktree-cleanup.ps1        # Interactive
-.\scripts\worktree-cleanup.ps1 -DryRun # Preview only
-.\scripts\worktree-cleanup.ps1 -NoConfirm # Auto-confirm
-```
-
-See [scripts/README.md](scripts/README.md) for detailed documentation.
 
 ### GitHub Integration
 
@@ -455,7 +334,7 @@ gh auth login
 
 Set your identity for commits:
 
-**Option 1: Environment variables (recommended for worktrees)**
+**Option 1: Environment variables**
 ```bash
 export GIT_USER_NAME="Your Name"
 export GIT_USER_EMAIL="you@example.com"
@@ -498,8 +377,6 @@ git config --global commit.gpgsign true
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/id_ed25519_signing
 ```
-
-> **Note:** For worktrees, the `worktree-new.ps1` script copies the signing key into the container and configures git if `GIT_SIGNING_KEY` environment variable is set. It does not automatically start or configure `ssh-agent`.
 
 ### Installed Tools & Extensions
 
@@ -573,13 +450,6 @@ gh auth status
 
 # If failed, login manually
 gh auth login
-```
-
-#### Worktree `.git` file corruption
-
-```powershell
-# If `.git` file points to container paths, fix it:
-.\scripts\worktree-rm.ps1 BT-99 -Force  # Will auto-fix before removal
 ```
 
 #### Port conflicts

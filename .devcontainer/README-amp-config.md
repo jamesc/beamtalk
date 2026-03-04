@@ -6,7 +6,7 @@
 
 ## How It Works
 
-1. This template file is deployed on container start by `scripts/worktree-up.ps1`
+1. This template file is deployed on container start via `postStartCommand` in `devcontainer.json`
 2. During setup, `envsubst` copies this template to `~/.config/amp/settings.json` inside the container (no environment variable substitution currently occurs)
 3. Amp reads `~/.config/amp/settings.json` automatically on startup
 
@@ -31,7 +31,7 @@ Amp automatically reads `AGENTS.md` (and `CLAUDE.md`) from the repository root a
 
 To change the default configuration:
 1. Edit `amp-settings.json` in `.devcontainer/`
-2. Rebuild the devcontainer (or re-run worktree-up)
+2. Rebuild the devcontainer
 3. The new config will be applied on next container start
 
 ## License
