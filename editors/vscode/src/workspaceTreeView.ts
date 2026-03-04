@@ -372,6 +372,82 @@ export class WorkspaceTreeDataProvider
     }
   }
 
+  // ─── resolveTreeItem (lazy hover tooltips) ───────────────────────────────
+
+  async resolveTreeItem(
+    item: vscode.TreeItem,
+    element: WorkspaceNode,
+    _token: vscode.CancellationToken
+  ): Promise<vscode.TreeItem | undefined> {
+    if (element.kind === "class-item") {
+      item.tooltip =
+        (await this._lspHoverTooltip(element.info.source_file, element.info.name, "class")) ??
+        this._classTooltipFallback(element.info);
+      return item;
+    }
+    if (element.kind === "method-item") {
+      item.tooltip =
+        (await this._lspHoverTooltip(
+          element.classInfo.source_file,
+          element.method.selector,
+          "method"
+        )) ?? this._methodTooltipFallback(element.method);
+      return item;
+    }
+    return undefined;
+  }
+
+  private async _lspHoverTooltip(
+    sourceFile: string | undefined,
+    symbol: string,
+    kind: "class" | "method"
+  ): Promise<vscode.MarkdownString | undefined> {
+    if (!sourceFile || sourceFile === "unknown") return undefined;
+    try {
+      const uri = vscode.Uri.file(sourceFile);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const text = doc.getText();
+      const idx =
+        kind === "class" ? findClassDeclaration(text, symbol) : findMethodDeclaration(text, symbol);
+      if (idx === -1) return undefined;
+      const pos = doc.positionAt(idx);
+      const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
+        "vscode.executeHoverProvider",
+        uri,
+        pos
+      );
+      if (!hovers || hovers.length === 0) return undefined;
+      const md = new vscode.MarkdownString();
+      md.isTrusted = true;
+      for (const hover of hovers) {
+        const contents = Array.isArray(hover.contents) ? hover.contents : [hover.contents];
+        for (const c of contents) {
+          if (typeof c === "string") md.appendMarkdown(c);
+          else if (c && "value" in c && c.value) md.appendMarkdown(c.value);
+        }
+      }
+      return md.value ? md : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private _classTooltipFallback(info: ClassInfo): vscode.MarkdownString {
+    const md = new vscode.MarkdownString(`**${info.name}**`);
+    if (info.actor_count !== undefined && info.actor_count > 0) {
+      md.appendMarkdown(
+        `\n\n${info.actor_count} running instance${info.actor_count !== 1 ? "s" : ""}`
+      );
+    }
+    return md;
+  }
+
+  private _methodTooltipFallback(method: MethodInfo): vscode.MarkdownString {
+    return new vscode.MarkdownString(
+      `**${method.selector}**\n\n_${method.side === "instance" ? "instance" : "class"} method_`
+    );
+  }
+
   // ─── Private: TreeItem builders ──────────────────────────────────────────
 
   private _connectedRootItem(): vscode.TreeItem {
@@ -465,7 +541,6 @@ export class WorkspaceTreeDataProvider
     const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.Collapsed);
     item.iconPath = new vscode.ThemeIcon("symbol-class");
     item.contextValue = "class-item";
-    item.tooltip = node.info.source_file ? `Source: ${node.info.source_file}` : node.info.name;
     if (node.info.actor_count !== undefined && node.info.actor_count > 0) {
       item.description = `${node.info.actor_count} instance${node.info.actor_count !== 1 ? "s" : ""}`;
     }
@@ -491,7 +566,6 @@ export class WorkspaceTreeDataProvider
     const item = new vscode.TreeItem(node.method.selector, vscode.TreeItemCollapsibleState.None);
     item.iconPath = new vscode.ThemeIcon("symbol-method");
     item.contextValue = "method-item";
-    item.tooltip = node.method.name !== node.method.selector ? node.method.name : undefined;
     item.command = {
       command: "beamtalk.navigateToMethod",
       title: "Go to Definition",
@@ -658,4 +732,22 @@ export class WorkspaceTreeDataProvider
         });
     }
   }
+}
+
+// ─── Module-level helpers for symbol position finding ────────────────────────
+
+function findClassDeclaration(text: string, className: string): number {
+  const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`\\b(?:class|actor)\\s+${escaped}(?=\\s|$)`, "m");
+  const match = pattern.exec(text);
+  if (!match) return -1;
+  return match.index + match[0].indexOf(className);
+}
+
+function findMethodDeclaration(text: string, selector: string): number {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`\\bmethod\\s+(${escaped})(?=\\s|$)`);
+  const match = pattern.exec(text);
+  if (!match || match.index === undefined) return -1;
+  return match.index + match[0].indexOf(selector);
 }

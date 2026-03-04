@@ -725,7 +725,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(workspaceTreeProvider);
 
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider("beamtalk.workspaceExplorer", workspaceTreeProvider)
+    vscode.window.createTreeView("beamtalk.workspaceExplorer", {
+      treeDataProvider: workspaceTreeProvider,
+    })
   );
 
   // ─── Transcript View (BT-1024) ─────────────────────────────────────────────
