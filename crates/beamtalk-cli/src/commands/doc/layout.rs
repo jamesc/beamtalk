@@ -47,9 +47,9 @@ pub(super) fn page_header(title: &str, css: &str, nav_prefix: &str) -> String {
         );
         let logo = format!(
             "<picture>\
-             <source srcset=\"{nav_prefix}images/beamtalk-logo-dark.svg\" \
+             <source srcset=\"{nav_prefix}images/beamtalk-icon-dark.svg\" \
              media=\"(prefers-color-scheme: dark)\">\
-             <img src=\"{nav_prefix}images/beamtalk-logo-light.svg\" \
+             <img src=\"{nav_prefix}images/beamtalk-icon-light.svg\" \
              alt=\"Beamtalk\" height=\"28\">\
              </picture>"
         );
