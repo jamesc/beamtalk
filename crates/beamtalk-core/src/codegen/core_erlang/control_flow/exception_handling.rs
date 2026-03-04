@@ -617,18 +617,15 @@ mod tests {
     }
 
     #[test]
-    fn test_on_do_generates_try_catch_structure() {
-        // Basic on:do: with no mutations generates a try/catch via closure approach
+    fn test_on_do_generates_try_catch_with_nlr_passthrough() {
+        // on:do: generates a try/catch via closure approach with exception wrapping,
+        // class matching, and NLR passthrough (re-raises $bt_nlr throws)
         let src =
             "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] on: Error do: [:e | 0]\n";
         let code = codegen(src);
         assert!(
             code.contains("try apply"),
             "on:do: should generate a try/catch via apply. Got:\n{code}"
-        );
-        assert!(
-            code.contains("catch <"),
-            "on:do: should have a catch clause. Got:\n{code}"
         );
         assert!(
             code.contains("'beamtalk_exception_handler':'ensure_wrapped'"),
@@ -638,41 +635,31 @@ mod tests {
             code.contains("'beamtalk_exception_handler':'matches_class'"),
             "on:do: should check the class via matches_class. Got:\n{code}"
         );
-    }
-
-    #[test]
-    fn test_ensure_generates_try_after_with_cleanup() {
-        // ensure: generates a try/of/catch with cleanup applied in both branches
-        let src = "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] ensure: [0]\n";
-        let code = codegen(src);
-        assert!(
-            code.contains("try"),
-            "ensure: should generate a try expression. Got:\n{code}"
-        );
-        assert!(
-            code.contains("catch <"),
-            "ensure: should have a catch clause. Got:\n{code}"
-        );
-        assert!(
-            code.contains("primop 'raw_raise'"),
-            "ensure: catch should re-raise the exception. Got:\n{code}"
-        );
-    }
-
-    #[test]
-    fn test_on_do_reraises_nlr_throws() {
-        // on:do: must not swallow non-local returns — they must be re-raised
-        let src =
-            "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] on: Error do: [:e | 0]\n";
-        let code = codegen(src);
-        // The generated catch clause must match the NLR pattern and re-raise
+        // NLR throws must be re-raised, not caught by on:do:
         assert!(
             code.contains("'$bt_nlr'"),
-            "on:do: should detect and re-raise NLR throws. Got:\n{code}"
+            "on:do: should detect NLR throws. Got:\n{code}"
         );
         assert!(
             code.contains("primop 'raw_raise'"),
             "on:do: should re-raise NLR throws via raw_raise. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_ensure_generates_try_of_catch_with_cleanup() {
+        // ensure: generates a try/of/catch (not Core Erlang try/after) with cleanup
+        // applied in both success and error paths
+        let src = "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] ensure: [0]\n";
+        let code = codegen(src);
+        // ensure:-specific pattern: cleanup is applied via `do apply` in the catch clause
+        assert!(
+            code.contains("do apply"),
+            "ensure: catch should run cleanup via 'do apply'. Got:\n{code}"
+        );
+        assert!(
+            code.contains("primop 'raw_raise'"),
+            "ensure: catch should re-raise after cleanup. Got:\n{code}"
         );
     }
 }

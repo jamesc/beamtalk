@@ -342,7 +342,8 @@ mod tests {
 
     #[test]
     fn test_if_true_mutation_bypasses_runtime_dispatch() {
-        // Actor ifTrue: with field mutation compiles to inline case (not runtime dispatch)
+        // Actor ifTrue: with field mutation compiles to inline case (not runtime dispatch).
+        // Also verifies the non-taken (false) branch returns {'nil', State}.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  inc: flag =>\n    flag ifTrue: [self.n := self.n + 1].\n    self.n\n";
         let code = codegen(src);
         assert!(
@@ -356,6 +357,15 @@ mod tests {
         assert!(
             !code.contains("'beamtalk_message_dispatch':'send'"),
             "ifTrue: with mutation should NOT use runtime dispatch. Got:\n{code}"
+        );
+        // Non-taken branch returns {'nil', unchanged_state} with StateAcc naming
+        assert!(
+            code.contains("{'nil',"),
+            "Non-taken branch should return {{'nil', State}}. Got:\n{code}"
+        );
+        assert!(
+            code.contains("StateAcc"),
+            "Branch bodies should use StateAcc naming. Got:\n{code}"
         );
     }
 
@@ -373,26 +383,10 @@ mod tests {
             code.contains("maps':'put'('n'"),
             "False branch should update 'n' via maps:put. Got:\n{code}"
         );
-        // True arm returns nil with unchanged state
-        assert!(
-            code.contains("'nil'"),
-            "True arm of ifFalse: should return nil. Got:\n{code}"
-        );
-    }
-
-    #[test]
-    fn test_non_taken_branch_returns_nil_with_unchanged_state() {
-        // The non-taken branch of an inline conditional returns {'nil', State}
-        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  noop: flag =>\n    flag ifTrue: [self.n := self.n + 1].\n    self.n\n";
-        let code = codegen(src);
-        // The false arm of ifTrue: always returns {'nil', unchanged_state}
+        // True arm returns nil with unchanged state, as {'nil', State}
         assert!(
             code.contains("{'nil',"),
-            "Non-taken branch should return nil paired with state. Got:\n{code}"
-        );
-        assert!(
-            code.contains("StateAcc"),
-            "Branch bodies should use StateAcc naming. Got:\n{code}"
+            "True arm of ifFalse: should return {{'nil', State}}. Got:\n{code}"
         );
     }
 

@@ -442,6 +442,11 @@ mod tests {
             code.contains("letrec"),
             "whileTrue: should generate a letrec for the loop. Got:\n{code}"
         );
+        // Simple variant evaluates condition via case apply (distinguishing it from repeat)
+        assert!(
+            code.contains("case apply"),
+            "whileTrue: should evaluate condition via case apply. Got:\n{code}"
+        );
         assert!(
             code.contains("<'true'> when 'true'"),
             "whileTrue: should match true to continue. Got:\n{code}"
