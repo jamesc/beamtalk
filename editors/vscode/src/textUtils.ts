@@ -136,18 +136,23 @@ export function findMethodDeclaration(
 
   for (const line of lines) {
     const trimmed = line.trimStart();
+    const indent = line.length - trimmed.length;
     if (!trimmed.startsWith("//")) {
       if (side === "class") {
         // Strip the leading `class ` and match the head against the remainder.
         if (trimmed.startsWith("class ")) {
           const afterClass = trimmed.slice(6).trimStart();
           const m = headRe.exec(afterClass);
-          if (m) return offset + line.indexOf(m[1]);
+          if (m) {
+            // Offset: line start + indent + "class " + extra whitespace
+            const classPrefix = 6 + (trimmed.length - 6 - afterClass.length);
+            return offset + indent + classPrefix;
+          }
         }
       } else {
         if (!trimmed.startsWith("class ")) {
           const m = headRe.exec(trimmed);
-          if (m) return offset + line.indexOf(m[1]);
+          if (m) return offset + indent;
         }
       }
     }
