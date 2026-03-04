@@ -278,20 +278,20 @@ Value subclass: SchemeLambda
   it("extracts default value and inline comment", () => {
     const info = extractStateVarInfo(LAMBDA_STATE, "params");
     expect(info).not.toBeUndefined();
-    expect(info!.defaultValue).toBe("#()");
-    expect(info!.comment).toBe("List of parameter name strings");
+    expect(info?.defaultValue).toBe("#()");
+    expect(info?.comment).toBe("List of parameter name strings");
   });
 
   it("extracts nil default with comment", () => {
     const info = extractStateVarInfo(LAMBDA_STATE, "body");
-    expect(info!.defaultValue).toBe("nil");
-    expect(info!.comment).toBe("Unevaluated body expression (AST)");
+    expect(info?.defaultValue).toBe("nil");
+    expect(info?.comment).toBe("Unevaluated body expression (AST)");
   });
 
   it("extracts default without comment", () => {
     const info = extractStateVarInfo(LAMBDA_STATE, "simple");
-    expect(info!.defaultValue).toBe("42");
-    expect(info!.comment).toBeUndefined();
+    expect(info?.defaultValue).toBe("42");
+    expect(info?.comment).toBeUndefined();
   });
 
   it("returns undefined for unknown var", () => {
@@ -301,7 +301,7 @@ Value subclass: SchemeLambda
   it("skips comment lines", () => {
     const src = `Object subclass: Foo\n  // state: x = 1\n  state: x = 2\n`;
     const info = extractStateVarInfo(src, "x");
-    expect(info!.defaultValue).toBe("2");
+    expect(info?.defaultValue).toBe("2");
   });
 });
 

@@ -796,7 +796,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
 
-      const className = node!.info.name;
+      const className = node?.info.name;
+      if (!className) return;
 
       // Find the class declaration position via regex.
       // Note: executeDocumentSymbolProvider is not used here because openTextDocument
@@ -807,14 +808,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       // Beamtalk class declarations use `SuperClass subclass: ClassName` syntax.
       const pattern = new RegExp(`\\bsubclass:\\s+(${escaped})(?=\\s|$)`, "g");
-      let classMatch: RegExpExecArray | null;
-      while ((classMatch = pattern.exec(text)) !== null) {
+      let classMatch = pattern.exec(text);
+      while (classMatch !== null) {
         const lineStart = text.lastIndexOf("\n", classMatch.index) + 1;
         const linePrefix = text.slice(lineStart, classMatch.index).trimStart();
         if (!linePrefix.startsWith("//")) {
           position = document.positionAt(classMatch.index + classMatch[0].indexOf(className));
           break;
         }
+        classMatch = pattern.exec(text);
       }
 
       await vscode.window.showTextDocument(document, {
