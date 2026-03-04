@@ -19,7 +19,7 @@
 %%% @see beamtalk_tagged_map
 -module(beamtalk_reflection).
 
--export([field_names/1, read_field/2, write_field/3, inspect_string/1]).
+-export([field_names/1, read_field/2, write_field/3, inspect_string/1, source_file_from_module/1]).
 
 %%% ============================================================================
 %%% Public API
@@ -72,6 +72,25 @@ inspect_string(State) when is_map(State) ->
             _ -> iolist_to_binary([<<" (">>, lists:join(<<", ">>, FieldStrs), <<")">>])
         end,
     iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8), FieldsPart]).
+
+%% @doc Read the beamtalk_source file path from a compiled module's attributes.
+%%
+%% Uses erlang:get_module_info/2 BIF instead of Mod:module_info/1 because
+%% Beamtalk modules compiled from Core Erlang via compile:forms(_, [from_core])
+%% do not export module_info/0,1. The BIF works regardless of exports.
+%% Returns nil for stdlib/bootstrap/dynamically-created classes.
+-spec source_file_from_module(atom()) -> binary() | 'nil'.
+source_file_from_module(ModuleName) ->
+    try erlang:get_module_info(ModuleName, attributes) of
+        Attrs ->
+            case lists:keyfind(beamtalk_source, 1, Attrs) of
+                {beamtalk_source, [Path]} when is_binary(Path) -> Path;
+                {beamtalk_source, [Path]} when is_list(Path) -> list_to_binary(Path);
+                _ -> nil
+            end
+    catch
+        error:badarg -> nil
+    end.
 
 %% @private
 %% @doc Format a field key as binary.

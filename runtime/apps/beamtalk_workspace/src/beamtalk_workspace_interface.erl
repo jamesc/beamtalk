@@ -591,7 +591,7 @@ handle_classes() ->
                 try
                     ClassName = beamtalk_object_class:class_name(Pid),
                     ModuleName = beamtalk_object_class:module_name(Pid),
-                    case source_file_from_module(ModuleName) of
+                    case beamtalk_reflection:source_file_from_module(ModuleName) of
                         nil ->
                             false;
                         _SourceFile ->
@@ -821,23 +821,6 @@ maybe_warn_loaded_class(AtomName) ->
             end;
         false ->
             ok
-    end.
-
-%% @doc Read beamtalk_source attribute from a module's attributes.
-%% Uses erlang:get_module_info/2 BIF instead of Mod:module_info/1 because
-%% Beamtalk modules compiled from Core Erlang do not export module_info.
-%% Returns nil for stdlib/bootstrap/ClassBuilder-created classes.
--spec source_file_from_module(atom()) -> binary() | 'nil'.
-source_file_from_module(ModuleName) ->
-    try erlang:get_module_info(ModuleName, attributes) of
-        Attrs ->
-            case lists:keyfind(beamtalk_source, 1, Attrs) of
-                {beamtalk_source, [Path]} when is_binary(Path) -> Path;
-                {beamtalk_source, [Path]} when is_list(Path) -> list_to_binary(Path);
-                _ -> nil
-            end
-    catch
-        error:badarg -> nil
     end.
 
 %% @doc Return a human-readable type name for an Erlang/Beamtalk value.
