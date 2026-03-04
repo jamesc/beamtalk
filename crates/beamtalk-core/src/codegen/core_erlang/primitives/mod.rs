@@ -159,7 +159,6 @@ pub(crate) fn core_erlang_binary_string(s: &str) -> Document<'static> {
     Document::String(format!("#{{{}}}#", segments.join(",")))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
