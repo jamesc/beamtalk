@@ -603,3 +603,63 @@ impl CoreErlangGenerator {
         Ok((Document::Vec(docs), result_var, final_state_version))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    fn codegen(src: &str) -> String {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        crate::codegen::core_erlang::generate_module(
+            &module,
+            crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+        )
+        .expect("codegen should succeed")
+    }
+
+    #[test]
+    fn test_on_do_generates_try_catch_with_nlr_passthrough() {
+        // on:do: generates a try/catch via closure approach with exception wrapping,
+        // class matching, and NLR passthrough (re-raises $bt_nlr throws)
+        let src =
+            "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] on: Error do: [:e | 0]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("try apply"),
+            "on:do: should generate a try/catch via apply. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'beamtalk_exception_handler':'ensure_wrapped'"),
+            "on:do: should wrap the error via ensure_wrapped. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'beamtalk_exception_handler':'matches_class'"),
+            "on:do: should check the class via matches_class. Got:\n{code}"
+        );
+        // NLR throws must be re-raised, not caught by on:do:
+        assert!(
+            code.contains("'$bt_nlr'"),
+            "on:do: should detect NLR throws. Got:\n{code}"
+        );
+        assert!(
+            code.contains("primop 'raw_raise'"),
+            "on:do: should re-raise NLR throws via raw_raise. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_ensure_generates_try_of_catch_with_cleanup() {
+        // ensure: generates a try/of/catch (not Core Erlang try/after) with cleanup
+        // applied in both success and error paths
+        let src = "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] ensure: [0]\n";
+        let code = codegen(src);
+        // ensure:-specific pattern: cleanup is applied via `do apply` in the catch clause
+        assert!(
+            code.contains("do apply"),
+            "ensure: catch should run cleanup via 'do apply'. Got:\n{code}"
+        );
+        assert!(
+            code.contains("primop 'raw_raise'"),
+            "ensure: catch should re-raise after cleanup. Got:\n{code}"
+        );
+    }
+}
