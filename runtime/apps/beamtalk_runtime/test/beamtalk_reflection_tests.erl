@@ -87,3 +87,31 @@ write_field_preserves_other_fields_test() ->
     ?assertEqual(20, maps:get(b, NewState)),
     ?assertEqual(3, maps:get(c, NewState)),
     ?assertEqual('Obj', maps:get('$beamtalk_class', NewState)).
+
+%%% ============================================================================
+%%% source_file_from_module/1 tests
+%%% ============================================================================
+
+source_file_from_module_returns_nil_for_stdlib_module_test() ->
+    %% Standard Erlang/OTP modules have no beamtalk_source attribute
+    ?assertEqual(nil, beamtalk_reflection:source_file_from_module(lists)).
+
+source_file_from_module_returns_nil_for_nonexistent_module_test() ->
+    ?assertEqual(nil, beamtalk_reflection:source_file_from_module('NonExistentModule_BT_1091')).
+
+source_file_from_module_returns_nil_for_beamtalk_runtime_module_test() ->
+    %% beamtalk_reflection itself is compiled without beamtalk_source attribute
+    ?assertEqual(nil, beamtalk_reflection:source_file_from_module(beamtalk_reflection)).
+
+source_file_from_module_returns_path_for_compiled_bt_module_test() ->
+    %% Beamtalk-compiled modules have a beamtalk_source attribute
+    case code:ensure_loaded('bt@counter') of
+        {module, 'bt@counter'} ->
+            PathBin = beamtalk_reflection:source_file_from_module('bt@counter'),
+            ?assert(is_binary(PathBin)),
+            PathStr = binary_to_list(PathBin),
+            ?assert(lists:suffix("counter.bt", PathStr));
+        {error, _} ->
+            %% Skip if stdlib not compiled
+            ok
+    end.
