@@ -729,7 +729,7 @@ get_session_bindings(SessionPid) ->
 -spec get_workspace_bindings() -> map().
 get_workspace_bindings() ->
     try
-        beamtalk_workspace_interface:get_session_bindings()
+        beamtalk_workspace_interface_primitives:get_session_bindings()
     catch
         _:_ -> #{}
     end.
