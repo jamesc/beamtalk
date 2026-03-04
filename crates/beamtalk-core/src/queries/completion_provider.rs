@@ -817,6 +817,31 @@ fn deduplicate_completions(completions: &mut Vec<Completion>) {
     });
 }
 
+/// Resolve the inferred type of an expression for REPL completion fallback (BT-1068).
+///
+/// Parses `source` as a Beamtalk expression, runs type inference using `hierarchy`,
+/// and returns the class name of the last top-level expression's type.
+///
+/// Returns `None` when:
+/// - No top-level expression was parsed (empty or only class/method definitions)
+/// - The type cannot be statically determined (`Dynamic`)
+///
+/// Used by the `resolve_completion_type` compiler port command to handle complex
+/// expressions that `tokenise_send_chain/1` cannot parse (parenthesised
+/// subexpressions, binary message chains, keyword sends mid-chain).
+#[must_use]
+pub fn resolve_expression_type(source: &str, hierarchy: &ClassHierarchy) -> Option<String> {
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _diagnostics) = crate::source_analysis::parse(tokens);
+    let last_expr = module.expressions.last()?;
+    let span = last_expr.expression.span();
+    let type_map = crate::semantic_analysis::infer_types(&module, hierarchy);
+    match type_map.get(span) {
+        Some(InferredType::Known(class_name)) => Some(class_name.to_string()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Unit tests for code completion functionality.

@@ -16,6 +16,7 @@
 -export([
     open/0, open/1,
     compile_expression/4, compile_expression/5,
+    resolve_completion_type/3,
     close/1
 ]).
 
@@ -132,6 +133,52 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
             {error, [<<"Compiler port is not available">>]}
     end.
 
+%% @doc Resolve the type of an expression for REPL completion fallback (BT-1068).
+%%
+%% Sends an ETF-encoded `resolve_completion_type' request and returns
+%% `{ok, ClassName}' when the type is statically known, or
+%% `{error, type_unknown}' when the type cannot be determined.
+%%
+%% `ClassHierarchy' is the accumulated class cache map from
+%% `beamtalk_compiler_server' (ADR 0050 Phase 4).
+-spec resolve_completion_type(port(), binary(), #{atom() => map()}) ->
+    {ok, atom()} | {error, type_unknown}.
+resolve_completion_type(Port, Expression, ClassHierarchy) ->
+    Request0 = #{
+        command => resolve_completion_type,
+        expression => Expression
+    },
+    Request =
+        case map_size(ClassHierarchy) of
+            0 -> Request0;
+            _ -> Request0#{class_hierarchy => ClassHierarchy}
+        end,
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response ->
+                            handle_resolve_response(Response)
+                    catch
+                        error:badarg ->
+                            {error, type_unknown}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during completion type resolution", #{
+                        status => Status
+                    }),
+                    {error, type_unknown}
+            after 5000 ->
+                %% Use a shorter timeout for completion — latency budget per ADR 0045.
+                {error, type_unknown}
+            end
+    catch
+        error:badarg ->
+            {error, type_unknown}
+    end.
+
 %% @doc Close the compiler port.
 -spec close(port()) -> true.
 close(Port) ->
@@ -196,6 +243,19 @@ handle_response(#{status := error, diagnostics := Diagnostics}) ->
 handle_response(Other) ->
     ?LOG_ERROR("Unexpected compiler response", #{response => Other}),
     {error, [<<"Unexpected compiler response">>]}.
+
+%% @private Handle ETF response from a resolve_completion_type request.
+%% Returns `{ok, ClassName}' when the class name is a known existing atom,
+%% or `{error, type_unknown}' for not-found or malformed responses.
+-spec handle_resolve_response(map()) -> {ok, atom()} | {error, type_unknown}.
+handle_resolve_response(#{status := ok, class_name := ClassName}) when is_binary(ClassName) ->
+    try binary_to_existing_atom(ClassName, utf8) of
+        Atom -> {ok, Atom}
+    catch
+        error:badarg -> {error, type_unknown}
+    end;
+handle_resolve_response(_) ->
+    {error, type_unknown}.
 
 %% Try to pretty-print textual Core Erlang using Erlang's core parser/pretty-printer.
 %% Falls back to the original Core Erlang text on any failure.

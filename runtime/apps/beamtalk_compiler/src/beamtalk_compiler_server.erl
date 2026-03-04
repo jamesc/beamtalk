@@ -26,7 +26,8 @@
     diagnostics/1,
     version/0,
     compile_core_erlang/1,
-    register_class/2
+    register_class/2,
+    resolve_completion_type/1
 ]).
 
 %% gen_server callbacks
@@ -121,6 +122,24 @@ clear_classes() ->
     gen_server:call(?MODULE, clear_classes, 5000).
 -endif.
 
+%% @doc Resolve the type of an expression for REPL completion fallback (BT-1068).
+%%
+%% `Expression' is the receiver expression-up-to-cursor with the incomplete
+%% prefix already stripped. The class hierarchy is injected automatically from
+%% the server state (ADR 0050 Phase 4).
+%%
+%% Returns `{ok, ClassName}' when the type is statically known, or
+%% `{error, type_unknown}' when the type cannot be determined or the compiler
+%% is unavailable.
+-spec resolve_completion_type(binary()) -> {ok, atom()} | {error, type_unknown}.
+resolve_completion_type(Expression) ->
+    try
+        gen_server:call(?MODULE, {resolve_completion_type, Expression}, 5000)
+    catch
+        exit:{noproc, _} -> {error, type_unknown};
+        exit:{timeout, _} -> {error, type_unknown}
+    end.
+
 %% @doc Register a class with its metadata in the compiler server cache.
 %%
 %% ADR 0050 Phase 3: Fire-and-forget cast. Silently dropped if the server is
@@ -176,6 +195,12 @@ handle_call({compile, Source, Options}, _From, State) ->
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = do_compile(State#state.port, Source, Options1),
+    {reply, Result, State};
+handle_call({resolve_completion_type, Expression}, _From, State) ->
+    %% BT-1068: Forward class hierarchy so user-defined classes are visible.
+    Result = beamtalk_compiler_port:resolve_completion_type(
+        State#state.port, Expression, State#state.classes
+    ),
     {reply, Result, State};
 handle_call({diagnostics, Source}, _From, State) ->
     Result = do_diagnostics(State#state.port, Source),
