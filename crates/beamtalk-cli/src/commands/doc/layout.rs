@@ -25,7 +25,7 @@ pub(super) fn page_header(title: &str, css: &str, nav_prefix: &str) -> String {
         String::new()
     } else {
         format!(
-            "<a href=\"{nav_prefix}docs/language-features.html\">Language</a>\n\
+            "<a href=\"{nav_prefix}docs/\">Language</a>\n\
              <a href=\"{nav_prefix}docs/architecture.html\">Architecture</a>\n\
              <a href=\"{nav_prefix}apidocs/\">API</a>\n"
         )
@@ -47,9 +47,9 @@ pub(super) fn page_header(title: &str, css: &str, nav_prefix: &str) -> String {
         );
         let logo = format!(
             "<picture>\
-             <source srcset=\"{nav_prefix}images/beamtalk-logo-dark.svg\" \
+             <source srcset=\"{nav_prefix}images/beamtalk-icon-dark.svg\" \
              media=\"(prefers-color-scheme: dark)\">\
-             <img src=\"{nav_prefix}images/beamtalk-logo-light.svg\" \
+             <img src=\"{nav_prefix}images/beamtalk-icon-light.svg\" \
              alt=\"Beamtalk\" height=\"28\">\
              </picture>"
         );
@@ -125,7 +125,7 @@ pub(super) fn build_sidebar_html(classes: &[ClassInfo], asset_prefix: &str) -> S
         let _ = writeln!(html, "<li><a href=\"{asset_prefix}\">Home</a></li>");
         let _ = writeln!(
             html,
-            "<li><a href=\"{asset_prefix}docs/language-features.html\">Documentation</a></li>"
+            "<li><a href=\"{asset_prefix}docs/\">Documentation</a></li>"
         );
         html.push_str("</ul>\n");
     }

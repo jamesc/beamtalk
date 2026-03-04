@@ -144,7 +144,7 @@ pub fn start_detached_node(
 
     // Format web_port for Erlang (BT-689)
     let web_port_erl = match web_port {
-        Some(p) => format!("{p}"),
+        Some(p) => p.to_string(),
         None => "undefined".to_string(),
     };
 

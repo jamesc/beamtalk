@@ -35,8 +35,7 @@
 -export([
     handle_compile_response/1,
     handle_diagnostics_response/1,
-    handle_version_response/1,
-    flush_port_messages/1
+    handle_version_response/1
 ]).
 -endif.
 
@@ -177,6 +176,43 @@ open_port() ->
             error(Err)
     end.
 
+%% Send a request via the port and receive the response.
+%%
+%% Returns:
+%%   {ok, Response}         — decoded ETF response from the port
+%%   {exit_status, Status}  — port exited before responding
+%%   timeout                — port did not respond within Timeout ms
+%%   port_not_available     — port is closed (badarg from port_command)
+%%   decode_error           — response could not be decoded (unexpected atoms)
+-spec send_port_request(port(), map(), timeout()) ->
+    {ok, term()} | {exit_status, non_neg_integer()} | timeout | port_not_available | decode_error.
+send_port_request(Port, Request, Timeout) ->
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        %% [safe] prevents atom exhaustion: all response atoms are
+                        %% literals in this module and guaranteed to exist.
+                        Response -> {ok, Response}
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error", #{port => Port}),
+                            decode_error
+                    end;
+                {Port, {exit_status, Status}} ->
+                    {exit_status, Status}
+            after Timeout ->
+                %% Close the port so any late response cannot poison the next request.
+                catch port_close(Port),
+                timeout
+            end
+    catch
+        error:badarg ->
+            port_not_available
+    end.
+
 %% Send a compile (file) request via the port.
 do_compile(Port, Source, Options) ->
     StdlibMode = maps:get(stdlib_mode, Options, false),
@@ -215,79 +251,51 @@ do_compile(Port, Source, Options) ->
             0 -> Request3;
             _ -> Request3#{class_module_index => ClassModuleIndex}
         end,
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    Response = binary_to_term(ResponseBin),
-                    handle_compile_response(Response);
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during compile", #{status => Status}),
-                    {error, [<<"Compiler port exited unexpectedly">>]}
-            after 30000 ->
-                flush_port_messages(Port),
-                {error, [<<"Compiler port timed out">>]}
-            end
-    catch
-        error:badarg ->
-            {error, [<<"Compiler port is not available">>]}
+    case send_port_request(Port, Request, 30000) of
+        {ok, Response} ->
+            handle_compile_response(Response);
+        {exit_status, Status} ->
+            ?LOG_ERROR("Compiler port exited during compile", #{status => Status}),
+            {error, [<<"Compiler port exited unexpectedly">>]};
+        timeout ->
+            {error, [<<"Compiler port timed out">>]};
+        port_not_available ->
+            {error, [<<"Compiler port is not available">>]};
+        decode_error ->
+            {error, [<<"Compiler port response is malformed">>]}
     end.
 
 %% Send a diagnostics request via the port.
 do_diagnostics(Port, Source) ->
-    Request = #{
-        command => diagnostics,
-        source => Source
-    },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    Response = binary_to_term(ResponseBin),
-                    handle_diagnostics_response(Response);
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during diagnostics", #{status => Status}),
-                    {error, [<<"Compiler port exited unexpectedly">>]}
-            after 30000 ->
-                flush_port_messages(Port),
-                {error, [<<"Compiler port timed out">>]}
-            end
-    catch
-        error:badarg ->
-            {error, [<<"Compiler port is not available">>]}
+    Request = #{command => diagnostics, source => Source},
+    case send_port_request(Port, Request, 30000) of
+        {ok, Response} ->
+            handle_diagnostics_response(Response);
+        {exit_status, Status} ->
+            ?LOG_ERROR("Compiler port exited during diagnostics", #{status => Status}),
+            {error, [<<"Compiler port exited unexpectedly">>]};
+        timeout ->
+            {error, [<<"Compiler port timed out">>]};
+        port_not_available ->
+            {error, [<<"Compiler port is not available">>]};
+        decode_error ->
+            {error, [<<"Compiler port response is malformed">>]}
     end.
 
 %% Send a version request via the port.
 do_version(Port) ->
     Request = #{command => version},
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    Response = binary_to_term(ResponseBin),
-                    handle_version_response(Response);
-                {Port, {exit_status, _}} ->
-                    {error, port_exited}
-            after 5000 ->
-                flush_port_messages(Port),
-                {error, timeout}
-            end
-    catch
-        error:badarg ->
-            {error, port_not_available}
-    end.
-
-%% @private Drain any stale messages from a port after a timeout.
-%% Prevents late responses from being consumed by the next request's receive.
-flush_port_messages(Port) ->
-    receive
-        {Port, {data, _}} -> flush_port_messages(Port);
-        {Port, {exit_status, _}} -> ok
-    after 0 ->
-        ok
+    case send_port_request(Port, Request, 5000) of
+        {ok, Response} ->
+            handle_version_response(Response);
+        {exit_status, _} ->
+            {error, port_exited};
+        timeout ->
+            {error, timeout};
+        port_not_available ->
+            {error, port_not_available};
+        decode_error ->
+            {error, decode_error}
     end.
 
 %% Handle response from compile command.

@@ -13,13 +13,12 @@
 use std::net::TcpStream;
 use std::time::Duration;
 
-use miette::{IntoDiagnostic, Result, miette};
+use miette::{Result, miette};
 
-use super::discovery;
 use super::node_state::{TCP_READ_TIMEOUT_MS, is_node_running};
 use super::storage::{
-    acquire_workspace_lock, cleanup_stale_node_info, generate_workspace_id, get_node_info,
-    read_workspace_cookie, workspace_exists,
+    acquire_workspace_lock, cleanup_stale_node_info, get_node_info, read_workspace_cookie,
+    workspace_exists,
 };
 use crate::commands::protocol::ProtocolClient;
 
@@ -184,15 +183,7 @@ fn force_kill_and_wait(pid: u32, host: &str, port: u16, timeout_secs: u64) -> Re
 /// mechanism. Falls back to OS-level force-kill if `force` is true or if
 /// graceful shutdown times out.
 pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
-    // Resolve workspace ID
-    let workspace_id = if let Some(name) = name_or_id {
-        super::lifecycle::resolve_workspace_id(name)?
-    } else {
-        let cwd = std::env::current_dir().into_diagnostic()?;
-        let project_root = discovery::discover_project_root(&cwd);
-        super::lifecycle::find_workspace_by_project_path(&project_root)?
-            .unwrap_or(generate_workspace_id(&project_root)?)
-    };
+    let workspace_id = super::lifecycle::resolve_workspace_id_or_cwd(name_or_id)?;
 
     // Serialize stop with create/start operations on the same workspace.
     // Prevents a concurrent get_or_start_workspace from observing "not running"

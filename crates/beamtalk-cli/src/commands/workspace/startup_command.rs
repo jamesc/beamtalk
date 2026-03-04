@@ -31,33 +31,8 @@ use miette::{Result, miette};
 pub(super) fn write_cookie_args_file(workspace_id: &str, cookie: &str) -> Result<PathBuf> {
     let args_file_path = super::storage::workspace_dir(workspace_id)?.join("vm.args");
     let content = format!("-setcookie {cookie}\n");
-
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&args_file_path)
-            .map_err(|e| miette!("Failed to write cookie args file: {e}"))?;
-
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| miette!("Failed to set cookie args file permissions: {e}"))?;
-
-        file.write_all(content.as_bytes())
-            .map_err(|e| miette!("Failed to write cookie args file: {e}"))?;
-    }
-
-    #[cfg(not(unix))]
-    {
-        std::fs::write(&args_file_path, content)
-            .map_err(|e| miette!("Failed to write cookie args file: {e}"))?;
-    }
-
+    super::storage::write_secure_file(&args_file_path, content.as_bytes())
+        .map_err(|e| miette!("Failed to write cookie args file: {e}"))?;
     Ok(args_file_path)
 }
 

@@ -44,15 +44,21 @@ const PROSE_PAGES: &[(&str, &str, &str)] = &[
         "installation.html",
         "Installation",
     ),
+    ("beamtalk-tooling.md", "tooling.html", "Tooling"),
     (
-        "beamtalk-language-features.md",
-        "language-features.html",
-        "Language Features",
+        "beamtalk-agent-native-development.md",
+        "agent-native-development.html",
+        "Agent-Native Development",
     ),
     (
         "beamtalk-principles.md",
         "principles.html",
         "Design Principles",
+    ),
+    (
+        "beamtalk-language-features.md",
+        "language-features.html",
+        "Language Features",
     ),
     (
         "beamtalk-syntax-rationale.md",
@@ -66,12 +72,6 @@ const PROSE_PAGES: &[(&str, &str, &str)] = &[
     ),
     ("beamtalk-ddd-model.md", "ddd-model.html", "Domain Model"),
     ("beamtalk-security.md", "security.html", "Security"),
-    (
-        "beamtalk-agent-native-development.md",
-        "agent-native-development.html",
-        "Agent-Native Development",
-    ),
-    ("beamtalk-tooling.md", "tooling.html", "Tooling"),
     (
         "known-limitations.md",
         "known-limitations.html",
@@ -687,7 +687,6 @@ mod tests {
         assert!(landing.contains("Beamtalk"));
         assert!(landing.contains("apidocs/"));
         assert!(landing.contains("docs/language-features.html"));
-        assert!(landing.contains("adr/"));
 
         // API docs in subdirectory
         assert!(out_dir.join("apidocs/index.html").exists());
@@ -708,8 +707,8 @@ mod tests {
         assert!(prose.contains("Language Features"));
         assert!(prose.contains("../style.css"));
         assert!(prose.contains("../apidocs/"));
-        // Prose nav includes ADR link
-        assert!(prose.contains("../adr/"));
+        // Prose nav includes Home link
+        assert!(prose.contains("../\">Home</a>"));
 
         // ADR index (no ADR dir in test, so directory is absent but run_site succeeds)
         // The adr/ dir is only created when docs/ADR/ exists in the source

@@ -186,18 +186,7 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
         is_atom(K),
         not is_internal_key(K)
     ],
-    SuperclassIndex = build_class_superclass_index(),
-    CompileOpts0 =
-        case map_size(SuperclassIndex) of
-            0 -> #{};
-            _ -> #{class_superclass_index => SuperclassIndex}
-        end,
-    ModuleIndex = build_class_module_index(),
-    CompileOpts =
-        case map_size(ModuleIndex) of
-            0 -> CompileOpts0;
-            _ -> CompileOpts0#{class_module_index => ModuleIndex}
-        end,
+    CompileOpts = add_class_indexes(#{}),
     wrap_compiler_errors(
         fun() ->
             case
@@ -250,10 +239,7 @@ compile_trailing_expressions(ClassInfo, ModuleName) ->
                 {ok, _TCompiledMod, TBinary} ->
                     {ok, TBinary, ModuleName};
                 {error, Reason} ->
-                    {error,
-                        iolist_to_binary(
-                            io_lib:format("Trailing expression compile error: ~p", [Reason])
-                        )}
+                    {error, format_core_error(Reason)}
             end;
         error ->
             none
@@ -295,18 +281,7 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride) ->
     Options0 = #{stdlib_mode => StdlibMode},
     Options1 = apply_module_name_override(Options0, ModuleNameOverride),
     Options2 = apply_source_path(Options1, Path),
-    SuperclassIndex = build_class_superclass_index(),
-    Options3 =
-        case map_size(SuperclassIndex) of
-            0 -> Options2;
-            _ -> Options2#{class_superclass_index => SuperclassIndex}
-        end,
-    ModuleIndex = build_class_module_index(),
-    Options =
-        case map_size(ModuleIndex) of
-            0 -> Options3;
-            _ -> Options3#{class_module_index => ModuleIndex}
-        end,
+    Options = add_class_indexes(Options2),
     wrap_compiler_errors(
         fun() ->
             case beamtalk_compiler:compile(SourceBin, Options) of
@@ -340,6 +315,24 @@ compile_file_core(CoreErlang, ModuleName, Classes) ->
             {ok, Binary, ClassNames, ModuleName};
         {error, Reason} ->
             {error, {core_compile_error, Reason}}
+    end.
+
+%% Build and merge class superclass and module indexes into a compile options map.
+%%
+%% Both indexes are conditionally included only when non-empty, keeping the
+%% protocol backward-compatible with older port binaries (BT-905, BT-907).
+-spec add_class_indexes(map()) -> map().
+add_class_indexes(Opts) ->
+    SuperclassIndex = build_class_superclass_index(),
+    Opts1 =
+        case map_size(SuperclassIndex) of
+            0 -> Opts;
+            _ -> Opts#{class_superclass_index => SuperclassIndex}
+        end,
+    ModuleIndex = build_class_module_index(),
+    case map_size(ModuleIndex) of
+        0 -> Opts1;
+        _ -> Opts1#{class_module_index => ModuleIndex}
     end.
 
 %% Apply module name override to options (BT-775).
