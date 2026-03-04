@@ -119,7 +119,7 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{'x' => 'Integer', 'y' => 'Integer'}~,
-      'method_info' => ~{'getX' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer'}~, 'getY' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer'}~, 'distanceTo:' => ~{'arity' => 1, 'param_types' => ['TypedPoint'], 'return_type' => 'Float'}~, 'printString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~,
+      'method_info' => ~{'getX' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~, 'getY' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~, 'distanceTo:' => ~{'arity' => 1, 'param_types' => ['TypedPoint'], 'return_type' => 'Float', 'is_sealed' => 'false'}~, 'printString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
     }~
         }~
@@ -143,7 +143,7 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{'x' => 'Integer', 'y' => 'Integer'}~,
-      'method_info' => ~{'getX' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer'}~, 'getY' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer'}~, 'distanceTo:' => ~{'arity' => 1, 'param_types' => ['TypedPoint'], 'return_type' => 'Float'}~, 'printString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~,
+      'method_info' => ~{'getX' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~, 'getY' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~, 'distanceTo:' => ~{'arity' => 1, 'param_types' => ['TypedPoint'], 'return_type' => 'Float', 'is_sealed' => 'false'}~, 'printString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
     }~
 

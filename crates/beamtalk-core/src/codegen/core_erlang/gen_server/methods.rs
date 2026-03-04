@@ -20,7 +20,7 @@ use crate::unparse::unparse_method_display_signature;
 /// Tuple representing a method entry for `method_info` / `class_method_info` meta maps.
 ///
 /// Fields: (`erlang_selector`, `arity`, `return_type`, `param_types`)
-type MethodInfoEntry = (String, usize, Option<String>, Vec<Option<String>>);
+type MethodInfoEntry = (String, usize, Option<String>, Vec<Option<String>>, bool);
 
 impl CoreErlangGenerator {
     /// Generates dispatch case clauses for all methods in a class definition.
@@ -1008,7 +1008,8 @@ impl CoreErlangGenerator {
     ///             'classMethodSignatures' => ~{}~,
     ///             'classState' => ~{}~,
     ///             'classDoc' => 'none',
-    ///             'methodDocs' => ~{}~
+    ///             'methodDocs' => ~{}~,
+    ///             'meta' => ~{...}~
     ///         }~
     ///         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
     ///             <{'ok', _Pid0}> when 'true' -> 'ok'
@@ -1888,11 +1889,12 @@ impl CoreErlangGenerator {
         module: &Module,
         auto: Option<&crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods>,
     ) -> Vec<MethodInfoEntry> {
+        let sealed = class.is_sealed;
         let mut entries: Vec<MethodInfoEntry> = class
             .methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(Self::meta_method_entry)
+            .map(|m| Self::meta_method_entry(m, sealed))
             .collect();
         // BT-1005: Include standalone instance methods for this class (Primary only).
         for standalone in module.method_definitions.iter().filter(|m| {
@@ -1900,12 +1902,12 @@ impl CoreErlangGenerator {
                 && !m.is_class_method
                 && m.method.kind == MethodKind::Primary
         }) {
-            entries.push(Self::meta_method_entry(&standalone.method));
+            entries.push(Self::meta_method_entry(&standalone.method, sealed));
         }
         if let Some(auto) = auto {
             use crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods;
             for field in &auto.getters {
-                entries.push((field.clone(), 0, None, vec![]));
+                entries.push((field.clone(), 0, None, vec![], sealed));
             }
             for field in &auto.setters {
                 entries.push((
@@ -1913,6 +1915,7 @@ impl CoreErlangGenerator {
                     1,
                     None,
                     vec![None],
+                    sealed,
                 ));
             }
         }
@@ -1926,11 +1929,12 @@ impl CoreErlangGenerator {
         module: &Module,
         auto: Option<&crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods>,
     ) -> Vec<MethodInfoEntry> {
+        let sealed = class.is_sealed;
         let mut entries: Vec<MethodInfoEntry> = class
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(Self::meta_method_entry)
+            .map(|m| Self::meta_method_entry(m, sealed))
             .collect();
         // BT-1005: Include standalone class methods for this class (Primary only).
         for standalone in module.method_definitions.iter().filter(|m| {
@@ -1938,19 +1942,19 @@ impl CoreErlangGenerator {
                 && m.is_class_method
                 && m.method.kind == MethodKind::Primary
         }) {
-            entries.push(Self::meta_method_entry(&standalone.method));
+            entries.push(Self::meta_method_entry(&standalone.method, sealed));
         }
         if let Some(auto) = auto {
             if let Some(kw_sel) = &auto.keyword_constructor {
                 let arity = class.state.len();
-                entries.push((kw_sel.clone(), arity, None, vec![None; arity]));
+                entries.push((kw_sel.clone(), arity, None, vec![None; arity], sealed));
             }
         }
         entries
     }
 
     /// Converts a `MethodDefinition` into a `MethodInfoEntry`.
-    fn meta_method_entry(m: &MethodDefinition) -> MethodInfoEntry {
+    fn meta_method_entry(m: &MethodDefinition, class_is_sealed: bool) -> MethodInfoEntry {
         let return_type = m.return_type.as_ref().map(|rt| rt.type_name().to_string());
         let param_types: Vec<Option<String>> = m
             .parameters
@@ -1966,6 +1970,7 @@ impl CoreErlangGenerator {
             m.selector.arity(),
             return_type,
             param_types,
+            m.is_sealed || class_is_sealed,
         )
     }
 
@@ -1979,7 +1984,7 @@ impl CoreErlangGenerator {
         }
         let mut parts: Vec<Document<'static>> = Vec::new();
         parts.push(Document::Str("~{"));
-        for (i, (sel, arity, return_type, param_types)) in methods.iter().enumerate() {
+        for (i, (sel, arity, return_type, param_types, is_sealed)) in methods.iter().enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
@@ -2004,6 +2009,7 @@ impl CoreErlangGenerator {
                 Some(name) => docvec!["'", Document::String(name.clone()), "'"],
                 None => Document::Str("'none'"),
             };
+            let is_sealed_doc = if *is_sealed { "'true'" } else { "'false'" };
             parts.push(docvec![
                 "'",
                 Document::String(sel.clone()),
@@ -2013,6 +2019,8 @@ impl CoreErlangGenerator {
                 param_types_doc,
                 ", 'return_type' => ",
                 return_type_doc,
+                ", 'is_sealed' => ",
+                Document::String(is_sealed_doc.to_string()),
                 "}~",
             ]);
         }

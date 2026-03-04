@@ -103,7 +103,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{}~,
-      'method_info' => ~{'lookupLiteral' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'lookupVariable:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~}~,
+      'method_info' => ~{'lookupLiteral' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'lookupVariable:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
     }~
         }~
@@ -127,7 +127,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{}~,
-      'method_info' => ~{'lookupLiteral' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'lookupVariable:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~}~,
+      'method_info' => ~{'lookupLiteral' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'lookupVariable:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
     }~
 

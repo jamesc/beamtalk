@@ -200,8 +200,8 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_ca
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{'value' => 'none'}~,
-      'method_info' => ~{'doNothing' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~,
-      'class_method_info' => ~{'classEmpty' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~
+      'method_info' => ~{'doNothing' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
+      'class_method_info' => ~{'classEmpty' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~
     }~
 
 'register_class'/0 = fun () ->
@@ -224,8 +224,8 @@ module 'empty_method_body' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_ca
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{'value' => 'none'}~,
-      'method_info' => ~{'doNothing' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~,
-      'class_method_info' => ~{'classEmpty' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~
+      'method_info' => ~{'doNothing' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
+      'class_method_info' => ~{'classEmpty' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~
     }~,
             'isConstructible' => 'false'
         }~

@@ -304,9 +304,12 @@ init({ClassName, ClassInfo}) ->
 
     %% ADR 0050 Phase 3: Notify compiler server of this class registration.
     %% Cast is fire-and-forget — silently dropped if the compiler server is not running.
-    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
-        true -> beamtalk_compiler_server:register_class(ClassName, Meta);
-        false -> ok
+    %% Use Meta map availability (not function_exported, which returns false during on_load).
+    case Meta of
+        CompilerMeta when is_map(CompilerMeta), map_size(CompilerMeta) > 0 ->
+            beamtalk_compiler_server:register_class(ClassName, CompilerMeta);
+        _ ->
+            ok
     end,
 
     %% BT-877: is_constructible may be set by the compiler via ClassBuilder.
@@ -732,24 +735,20 @@ read_meta(Module) ->
 %% @private Convert a method_info map from __beamtalk_meta/0 to the internal format.
 %%
 %% Returns {MethodMap, ReturnTypes} where:
-%%   MethodMap: selector => #{arity => N}
+%%   MethodMap: selector => #{arity => N, is_sealed => bool, ...}
 %%   ReturnTypes: selector => atom (only for non-none return types)
 %%
 %% Falls back to FallbackMethods when MetaMethodInfo is undefined (dynamic classes
 %% without __beamtalk_meta/0 pass method closures via ClassInfo instead).
+%%
+%% The full method info map is preserved (including is_sealed, param_types, etc.)
+%% because runtime tooling (e.g. :help) reads these keys from __method_info__.
 -spec meta_to_methods(map() | undefined, map()) -> {map(), map()}.
 meta_to_methods(undefined, FallbackMethods) ->
     %% No meta available: return fallback methods with empty return types.
     %% Callers that need to preserve explicit return_types must merge them separately.
     {FallbackMethods, #{}};
 meta_to_methods(MetaMethodInfo, _FallbackMethods) when is_map(MetaMethodInfo) ->
-    Methods = maps:map(
-        fun
-            (_Sel, #{arity := Arity}) -> #{arity => Arity};
-            (_Sel, Info) when is_map(Info) -> Info
-        end,
-        MetaMethodInfo
-    ),
     ReturnTypes = maps:filtermap(
         fun
             (_Sel, #{return_type := RT}) when RT =/= none -> {true, RT};
@@ -757,7 +756,7 @@ meta_to_methods(MetaMethodInfo, _FallbackMethods) when is_map(MetaMethodInfo) ->
         end,
         MetaMethodInfo
     ),
-    {Methods, ReturnTypes}.
+    {MetaMethodInfo, ReturnTypes}.
 
 %% @private Notify the compiler server of a hot-patch.
 %%

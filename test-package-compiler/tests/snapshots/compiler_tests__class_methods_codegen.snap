@@ -205,8 +205,8 @@ module 'class_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{'count' => 'none'}~,
-      'method_info' => ~{'increment' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'getCount' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~,
-      'class_method_info' => ~{'create' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'ClassVarCounter'}~, 'getCount' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~
+      'method_info' => ~{'increment' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'getCount' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
+      'class_method_info' => ~{'create' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'ClassVarCounter', 'is_sealed' => 'false'}~, 'getCount' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~
     }~
 
 'register_class'/0 = fun () ->
@@ -229,8 +229,8 @@ module 'class_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cast'/
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{'count' => 'none'}~,
-      'method_info' => ~{'increment' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'getCount' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~,
-      'class_method_info' => ~{'create' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'ClassVarCounter'}~, 'getCount' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~
+      'method_info' => ~{'increment' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'getCount' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
+      'class_method_info' => ~{'create' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'ClassVarCounter', 'is_sealed' => 'false'}~, 'getCount' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~
     }~,
             'isConstructible' => 'false'
         }~

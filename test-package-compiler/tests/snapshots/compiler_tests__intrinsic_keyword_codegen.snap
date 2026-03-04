@@ -102,7 +102,7 @@ call 'bt@stdlib@foo':'dispatch'('size', [], Self)
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{}~,
-      'method_info' => ~{'blockValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~,
+      'method_info' => ~{'blockValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
     }~
         }~
@@ -126,7 +126,7 @@ call 'bt@stdlib@foo':'dispatch'('size', [], Self)
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{}~,
-      'method_info' => ~{'blockValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~,
+      'method_info' => ~{'blockValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~, 'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
     }~
 

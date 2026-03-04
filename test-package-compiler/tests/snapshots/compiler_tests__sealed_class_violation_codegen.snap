@@ -99,7 +99,7 @@ call 'erlang':'*'(call 'beamtalk_future':'maybe_await'(Self), call 'beamtalk_fut
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{}~,
-      'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer'}~}~,
+      'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
     }~
         }~
@@ -123,7 +123,7 @@ call 'erlang':'*'(call 'beamtalk_future':'maybe_await'(Self), call 'beamtalk_fut
       'is_value' => 'false',
       'is_typed' => 'false',
       'field_types' => ~{}~,
-      'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer'}~}~,
+      'method_info' => ~{'doubled' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false'}~}~,
       'class_method_info' => ~{}~
     }~
 
