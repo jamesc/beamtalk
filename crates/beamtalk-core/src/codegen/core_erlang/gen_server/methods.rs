@@ -2303,3 +2303,120 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{
+        ClassDefinition, Expression, ExpressionStatement, Identifier, Literal, MessageSelector,
+        MethodDefinition, Module,
+    };
+    use crate::codegen::core_erlang::CoreErlangGenerator;
+    use crate::source_analysis::Span;
+
+    fn s() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn bare(expr: Expression) -> ExpressionStatement {
+        ExpressionStatement::bare(expr)
+    }
+
+    fn simple_unary_method(selector: &str) -> MethodDefinition {
+        MethodDefinition::new(
+            MessageSelector::Unary(selector.into()),
+            vec![],
+            vec![bare(Expression::Literal(Literal::Integer(42), s()))],
+            s(),
+        )
+    }
+
+    fn empty_actor_class(name: &str) -> ClassDefinition {
+        ClassDefinition::new(
+            Identifier::new(name, s()),
+            Identifier::new("Actor", s()),
+            vec![],
+            vec![],
+            s(),
+        )
+    }
+
+    #[test]
+    fn test_generate_register_class_empty_module_renders_empty() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let module = Module {
+            classes: vec![],
+            method_definitions: Vec::new(),
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let doc = generator.generate_register_class(&module).unwrap();
+        assert_eq!(
+            doc.to_pretty_string(),
+            "",
+            "empty module should produce empty doc"
+        );
+    }
+
+    #[test]
+    fn test_generate_register_class_includes_class_name() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let module = Module {
+            classes: vec![empty_actor_class("Counter")],
+            method_definitions: Vec::new(),
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let doc = generator.generate_register_class(&module).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'Counter'"),
+            "register_class should include class name atom. Got: {output}"
+        );
+        assert!(
+            output.contains("register_class"),
+            "register_class should define register_class/0. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_method_dispatch_unary_includes_selector() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let method = simple_unary_method("increment");
+        let doc = generator.generate_method_dispatch(&method, 2).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'increment'"),
+            "method dispatch should include selector atom. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_class_method_dispatches_empty_class() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let class = empty_actor_class("Counter");
+        let doc = generator
+            .generate_class_method_dispatches(&class, 2)
+            .unwrap();
+        assert_eq!(
+            doc.to_pretty_string(),
+            "",
+            "class with no methods should produce empty dispatch doc"
+        );
+    }
+
+    #[test]
+    fn test_generate_class_method_functions_empty_class() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let class = empty_actor_class("Counter");
+        let doc = generator.generate_class_method_functions(&class).unwrap();
+        assert_eq!(
+            doc.to_pretty_string(),
+            "",
+            "class with no class methods should produce empty doc"
+        );
+    }
+}

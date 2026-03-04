@@ -1968,3 +1968,127 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{ClassDefinition, ClassKind, Identifier, Literal, Module, StateDeclaration};
+    use crate::codegen::core_erlang::CoreErlangGenerator;
+    use crate::codegen::core_erlang::value_type_codegen::{
+        AutoSlotMethods, compute_auto_slot_methods,
+    };
+    use crate::source_analysis::Span;
+
+    fn s() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn make_value_class(name: &str, slots: &[&str]) -> ClassDefinition {
+        let state = slots
+            .iter()
+            .map(|slot_name| StateDeclaration {
+                name: Identifier::new(*slot_name, s()),
+                type_annotation: None,
+                default_value: Some(crate::ast::Expression::Literal(Literal::Integer(0), s())),
+                comments: crate::ast::CommentAttachment::default(),
+                doc_comment: None,
+                span: s(),
+            })
+            .collect();
+        let mut class = ClassDefinition::new(
+            Identifier::new(name, s()),
+            Identifier::new("Value", s()),
+            state,
+            vec![],
+            s(),
+        );
+        // Explicitly set class_kind to avoid relying on constructor inference
+        class.class_kind = ClassKind::Value;
+        class
+    }
+
+    fn make_actor_class(name: &str) -> ClassDefinition {
+        ClassDefinition::new(
+            Identifier::new(name, s()),
+            Identifier::new("Actor", s()),
+            vec![],
+            vec![],
+            s(),
+        )
+    }
+
+    #[test]
+    fn test_with_star_selector_single_char() {
+        assert_eq!(AutoSlotMethods::with_star_selector("x"), "withX:");
+    }
+
+    #[test]
+    fn test_with_star_selector_multi_char() {
+        assert_eq!(
+            AutoSlotMethods::with_star_selector("firstName"),
+            "withFirstName:"
+        );
+    }
+
+    #[test]
+    fn test_compute_auto_slot_methods_actor_returns_none() {
+        let class = make_actor_class("Counter");
+        assert!(
+            compute_auto_slot_methods(&class).is_none(),
+            "actor classes should not get auto slot methods"
+        );
+    }
+
+    #[test]
+    fn test_compute_auto_slot_methods_value_class_returns_getters_setters() {
+        let class = make_value_class("Point", &["x", "y"]);
+        let auto = compute_auto_slot_methods(&class).unwrap();
+        assert!(auto.getters.contains(&"x".to_string()));
+        assert!(auto.getters.contains(&"y".to_string()));
+        assert!(auto.setters.contains(&"x".to_string()));
+        assert!(auto.setters.contains(&"y".to_string()));
+    }
+
+    #[test]
+    fn test_compute_auto_slot_methods_keyword_constructor() {
+        let class = make_value_class("Point", &["x", "y"]);
+        let auto = compute_auto_slot_methods(&class).unwrap();
+        assert_eq!(
+            auto.keyword_constructor,
+            Some("x:y:".to_string()),
+            "should generate keyword constructor selector from slot names"
+        );
+    }
+
+    #[test]
+    fn test_compute_auto_slot_methods_no_slots() {
+        let class = make_value_class("Empty", &[]);
+        let auto = compute_auto_slot_methods(&class).unwrap();
+        assert!(auto.getters.is_empty());
+        assert!(auto.setters.is_empty());
+        assert!(auto.keyword_constructor.is_none());
+    }
+
+    #[test]
+    fn test_generate_value_type_module_includes_class_name() {
+        let class = make_value_class("Point", &["x", "y"]);
+        let module = Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let mut generator = CoreErlangGenerator::new("point");
+        let doc = generator.generate_value_type_module(&module).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'Point'"),
+            "generated module should reference class name. Got: {output}"
+        );
+        assert!(
+            output.contains("'new'"),
+            "generated module should include new constructor. Got: {output}"
+        );
+    }
+}
