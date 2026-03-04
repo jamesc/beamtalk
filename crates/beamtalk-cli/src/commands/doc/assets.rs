@@ -207,8 +207,11 @@ body {
 .main-content {
   margin-left: var(--sidebar-w);
   flex: 1;
+  min-width: 0;
   max-width: 860px;
   padding: 2.5rem 3rem;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .sidebar-toggle {
@@ -283,6 +286,7 @@ body {
 /* --- Typography --- */
 a { color: inherit; text-decoration: none; }
 a:hover { color: inherit; }
+img { max-width: 100%; height: auto; }
 
 /* Underline links in running prose text, tables, and lists */
 .main-content p a,
@@ -686,7 +690,7 @@ footer {
 .landing-links a:hover { text-decoration: underline; }
 
 /* --- Prose pages --- */
-.prose-content { max-width: 760px; }
+.prose-content { max-width: 760px; min-width: 0; overflow-wrap: break-word; word-break: break-word; }
 ";
 
 /// Write CSS stylesheet.
