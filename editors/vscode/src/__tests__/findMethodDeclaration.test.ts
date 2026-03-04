@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { findMethodDeclaration, findStateVarDeclaration, extractStateVarInfo, extractMethodDocComment } from "../textUtils";
+import {
+  findMethodDeclaration,
+  findStateVarDeclaration,
+  extractStateVarInfo,
+  extractMethodDocComment,
+} from "../textUtils";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 

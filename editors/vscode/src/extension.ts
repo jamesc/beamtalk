@@ -551,7 +551,6 @@ async function captureSessionId(
   }
 }
 
-
 export { findMethodDeclaration, findStateVarDeclaration } from "./textUtils";
 
 function replCommand(): string {

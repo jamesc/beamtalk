@@ -230,9 +230,7 @@ export class WorkspaceClient {
   }
 
   /** List all methods and state vars for a loaded class. */
-  async methods(
-    className: string
-  ): Promise<{ methods: MethodInfo[]; stateVars: StateVarInfo[] }> {
+  async methods(className: string): Promise<{ methods: MethodInfo[]; stateVars: StateVarInfo[] }> {
     const resp = (await this._request({ op: "methods", class: className })) as {
       methods?: Array<{ name: string; selector: string; side: "instance" | "class" }>;
       state_vars?: string[];

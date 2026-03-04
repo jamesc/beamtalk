@@ -16,9 +16,7 @@ function methodHeadPattern(selector: string): RegExp {
     return new RegExp(`^(${esc})\\s*=>`);
   }
   const parts = selector.split(":").filter((p) => p.length > 0);
-  const pat = parts
-    .map((p) => `${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\\s+\\w+`)
-    .join("\\s+");
+  const pat = parts.map((p) => `${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\\s+\\w+`).join("\\s+");
   return new RegExp(`^(${pat})\\s*=>`);
 }
 

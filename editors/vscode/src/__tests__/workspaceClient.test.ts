@@ -288,7 +288,11 @@ describe("WorkspaceClient.methods()", () => {
 
     const result = await promise;
     expect(result.methods).toHaveLength(2);
-    expect(result.methods[0]).toEqual({ name: "increment", selector: "increment", side: "instance" });
+    expect(result.methods[0]).toEqual({
+      name: "increment",
+      selector: "increment",
+      side: "instance",
+    });
     expect(result.stateVars).toEqual([{ name: "count" }]);
     client.dispose();
   });

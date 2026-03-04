@@ -417,7 +417,9 @@ export class WorkspaceTreeDataProvider
           element.classInfo.source_file,
           element.method.selector,
           element.method.side === "class" ? "class-method" : "method"
-        )) ?? (await this._methodDocCommentTooltip(element)) ?? this._methodTooltipFallback(element.method);
+        )) ??
+        (await this._methodDocCommentTooltip(element)) ??
+        this._methodTooltipFallback(element.method);
       return item;
     }
     if (element.kind === "state-item") {
@@ -528,7 +530,11 @@ export class WorkspaceTreeDataProvider
     if (!sourceFile || sourceFile === "unknown") return undefined;
     try {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(sourceFile));
-      const comment = extractMethodDocComment(doc.getText(), element.method.selector, element.method.side);
+      const comment = extractMethodDocComment(
+        doc.getText(),
+        element.method.selector,
+        element.method.side
+      );
       if (!comment) return undefined;
       const md = new vscode.MarkdownString(comment);
       md.isTrusted = true;
@@ -544,9 +550,7 @@ export class WorkspaceTreeDataProvider
    */
   private async _stateVarTooltip(element: StateVarItemNode): Promise<vscode.MarkdownString> {
     const { classInfo, stateVar } = element;
-    const fallback = new vscode.MarkdownString(
-      `**${stateVar.name}**\n\n_state variable_`
-    );
+    const fallback = new vscode.MarkdownString(`**${stateVar.name}**\n\n_state variable_`);
     if (!classInfo.source_file || classInfo.source_file === "unknown") return fallback;
     try {
       const uri = vscode.Uri.file(classInfo.source_file);
@@ -699,9 +703,7 @@ export class WorkspaceTreeDataProvider
   private _stateGroupItem(node: StateGroupNode): vscode.TreeItem {
     const count = node.stateVars.length;
     const state =
-      count > 0
-        ? vscode.TreeItemCollapsibleState.Expanded
-        : vscode.TreeItemCollapsibleState.None;
+      count > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None;
     const item = new vscode.TreeItem("State", state);
     item.iconPath = new vscode.ThemeIcon("symbol-field");
     item.description = count > 0 ? `(${count})` : "(none)";
@@ -893,4 +895,3 @@ export class WorkspaceTreeDataProvider
     }
   }
 }
-
