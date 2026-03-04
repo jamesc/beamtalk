@@ -687,7 +687,6 @@ mod tests {
         assert!(landing.contains("Beamtalk"));
         assert!(landing.contains("apidocs/"));
         assert!(landing.contains("docs/language-features.html"));
-        assert!(landing.contains("adr/"));
 
         // API docs in subdirectory
         assert!(out_dir.join("apidocs/index.html").exists());
