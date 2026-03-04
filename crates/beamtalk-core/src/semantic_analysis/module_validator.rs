@@ -28,15 +28,16 @@ pub fn validate_single_class(module: &Module) -> Vec<Diagnostic> {
         let names_list = class_names.join(", ");
 
         // Emit a single diagnostic pointing at the second class definition
-        let mut diag = Diagnostic::error(
-            format!(
-                "Multiple classes in one file is not supported. Found classes: {names_list}. \
-                 Each class should be in its own .bt file."
-            ),
-            module.classes[1].name.span,
+        diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "Multiple classes in one file is not supported. Found classes: {names_list}. \
+                     Each class should be in its own .bt file."
+                ),
+                module.classes[1].name.span,
+            )
+            .with_hint("Move this class to a separate .bt file."),
         );
-        diag.hint = Some("Move this class to a separate .bt file.".into());
-        diagnostics.push(diag);
     }
 
     diagnostics
