@@ -274,7 +274,7 @@ Originally proposed abstracting all process operations behind a `ProcessManager`
 ### Phase 3: Build script portability
 - ~~Replace `bash -c compile.sh` rebar3 hook with portable Erlang script~~ ✅ Done (`compile_fixtures.escript`)
 - ~~Add `set windows-shell` to Justfile~~ ✅ Done
-- ~~Create PowerShell equivalents for key scripts (or use `just` recipes directly)~~ ✅ Done (`scripts/worktree-*.ps1`)
+- ~~Create PowerShell equivalents for key scripts (or use `just` recipes directly)~~ ✅ Done (worktree scripts moved to multi-copilot repo)
 - Verify `just test-runtime` works on Windows
 
 **Affected components:** `beamtalk-cli` (process management, paths), runtime (Erlang build hooks, path handling), CI (workflow matrix), Justfile, documentation.
