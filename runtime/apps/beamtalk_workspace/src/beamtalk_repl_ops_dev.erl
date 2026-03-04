@@ -186,8 +186,9 @@ handle(<<"methods">>, Params, Msg, _SessionPid) ->
     %% BT-1026: Return instance and class-side methods for a loaded class.
     ClassBin = maps:get(<<"class">>, Params, <<>>),
     Methods = list_class_methods_for_ws(ClassBin),
+    StateVars = list_state_vars_for_ws(ClassBin),
     Base = base_protocol_response(Msg),
-    jsx:encode(Base#{<<"methods">> => Methods, <<"status">> => [<<"done">>]});
+    jsx:encode(Base#{<<"methods">> => Methods, <<"state_vars">> => StateVars, <<"status">> => [<<"done">>]});
 handle(<<"test">>, Params, Msg, _SessionPid) ->
     ClassName = maps:get(<<"class">>, Params, undefined),
     run_test_op(ClassName, Msg);
@@ -897,6 +898,22 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
                      || S <- ClassSelectors
                     ],
                     InstanceEntries ++ ClassEntries
+            end
+    end.
+
+%% @private
+-spec list_state_vars_for_ws(binary()) -> [binary()].
+list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
+        {error, badarg} ->
+            [];
+        {ok, ClassName} ->
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                undefined ->
+                    [];
+                Pid ->
+                    IVars = beamtalk_object_class:instance_variables(Pid),
+                    lists:sort([atom_to_binary(V, utf8) || V <- IVars])
             end
     end.
 

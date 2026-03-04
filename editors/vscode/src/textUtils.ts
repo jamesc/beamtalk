@@ -31,6 +31,27 @@ function methodHeadPattern(selector: string): RegExp {
   return new RegExp(`^(${pat})\\s*=>`);
 }
 
+/**
+ * Find a `state: varName = ...` declaration in Beamtalk source text.
+ *
+ * Returns the character offset of `varName`, or -1 if not found.
+ */
+export function findStateVarDeclaration(text: string, name: string): number {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^state:\\s+(${esc})\\s*=`);
+  const lines = text.split("\n");
+  let offset = 0;
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (!trimmed.startsWith("//")) {
+      const m = re.exec(trimmed);
+      if (m) return offset + line.indexOf(m[1]);
+    }
+    offset += line.length + 1;
+  }
+  return -1;
+}
+
 export function findMethodDeclaration(
   text: string,
   selector: string,

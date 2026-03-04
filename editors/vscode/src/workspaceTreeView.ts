@@ -8,6 +8,7 @@ import type {
   ClassInfo,
   ConnectionState,
   MethodInfo,
+  StateVarInfo,
   PushEvent,
   WorkspaceClient,
 } from "./workspaceClient";
@@ -63,6 +64,18 @@ export interface MethodItemNode {
   readonly classInfo: ClassInfo;
 }
 
+export interface StateGroupNode {
+  readonly kind: "state-group";
+  readonly classInfo: ClassInfo;
+  readonly stateVars: StateVarItemNode[];
+}
+
+export interface StateVarItemNode {
+  readonly kind: "state-item";
+  readonly stateVar: StateVarInfo;
+  readonly classInfo: ClassInfo;
+}
+
 export interface InspectFieldNode {
   readonly kind: "inspect-field";
   readonly key: string;
@@ -79,6 +92,8 @@ export type WorkspaceNode =
   | BindingItemNode
   | ActorItemNode
   | ClassItemNode
+  | StateGroupNode
+  | StateVarItemNode
   | MethodGroupNode
   | MethodItemNode
   | InspectFieldNode;
@@ -126,8 +141,11 @@ export class WorkspaceTreeDataProvider
   /** Cached inspect results keyed by "actor:<pid>". */
   private readonly inspectCache = new Map<string, Record<string, unknown>>();
 
-  /** Cached methods results keyed by class name. */
-  private readonly methodsCache = new Map<string, MethodInfo[]>();
+  /** Cached methods+stateVars results keyed by class name. */
+  private readonly methodsCache = new Map<
+    string,
+    { methods: MethodInfo[]; stateVars: StateVarInfo[] }
+  >();
 
   private readonly disposeHandlers: Array<() => void> = [];
 
@@ -285,6 +303,10 @@ export class WorkspaceTreeDataProvider
         return this._actorItem(element);
       case "class-item":
         return this._classItem(element);
+      case "state-group":
+        return this._stateGroupItem(element);
+      case "state-item":
+        return this._stateVarItem(element);
       case "method-group":
         return this._methodGroupItem(element);
       case "method-item":
@@ -347,22 +369,25 @@ export class WorkspaceTreeDataProvider
       case "class-item": {
         const cached = this.methodsCache.get(element.info.name);
         if (cached) {
-          return this._methodGroups(cached, element.info);
+          return this._classChildren(cached, element.info);
         }
         const activeClient = this.client;
         if (!activeClient || this.connectionState !== "connected") {
           return [];
         }
         try {
-          const methods = await activeClient.methods(element.info.name);
+          const result = await activeClient.methods(element.info.name);
           // Guard: client may have changed while methods() was in-flight
           if (this.client !== activeClient) return [];
-          this.methodsCache.set(element.info.name, methods);
-          return this._methodGroups(methods, element.info);
+          this.methodsCache.set(element.info.name, result);
+          return this._classChildren(result, element.info);
         } catch {
           return [];
         }
       }
+
+      case "state-group":
+        return element.stateVars;
 
       case "method-group":
         return element.methods;
@@ -394,13 +419,22 @@ export class WorkspaceTreeDataProvider
         )) ?? this._methodTooltipFallback(element.method);
       return item;
     }
+    if (element.kind === "state-item") {
+      item.tooltip =
+        (await this._lspHoverTooltip(
+          element.classInfo.source_file,
+          element.stateVar.name,
+          "field"
+        )) ?? new vscode.MarkdownString(`**${element.stateVar.name}**\n\n_state variable_`);
+      return item;
+    }
     return undefined;
   }
 
   private async _lspHoverTooltip(
     sourceFile: string | undefined,
     symbol: string,
-    kind: "class" | "method" | "class-method"
+    kind: "class" | "method" | "class-method" | "field"
   ): Promise<vscode.MarkdownString | undefined> {
     if (!sourceFile || sourceFile === "unknown") return undefined;
     try {
@@ -436,16 +470,18 @@ export class WorkspaceTreeDataProvider
     }
   }
 
-  /** Find the position of a class or method symbol from document symbols. */
+  /** Find the position of a class, method, or field symbol from document symbols. */
   private _findSymbolPosition(
     symbols: vscode.DocumentSymbol[] | vscode.SymbolInformation[],
     name: string,
-    kind: "class" | "method" | "class-method"
+    kind: "class" | "method" | "class-method" | "field"
   ): vscode.Position | undefined {
     const targetKind =
       kind === "class"
         ? [vscode.SymbolKind.Class]
-        : [vscode.SymbolKind.Method, vscode.SymbolKind.Function];
+        : kind === "field"
+          ? [vscode.SymbolKind.Field]
+          : [vscode.SymbolKind.Method, vscode.SymbolKind.Function];
 
     for (const sym of symbols) {
       // Class symbols are named "ClassName (class)" per ADR 0013 — strip the suffix for matching.
@@ -611,6 +647,31 @@ export class WorkspaceTreeDataProvider
     return item;
   }
 
+  private _stateGroupItem(node: StateGroupNode): vscode.TreeItem {
+    const count = node.stateVars.length;
+    const state =
+      count > 0
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.None;
+    const item = new vscode.TreeItem("State", state);
+    item.iconPath = new vscode.ThemeIcon("symbol-field");
+    item.description = count > 0 ? `(${count})` : "(none)";
+    item.contextValue = "state-group";
+    return item;
+  }
+
+  private _stateVarItem(node: StateVarItemNode): vscode.TreeItem {
+    const item = new vscode.TreeItem(node.stateVar.name, vscode.TreeItemCollapsibleState.None);
+    item.iconPath = new vscode.ThemeIcon("symbol-field");
+    item.contextValue = "state-item";
+    item.command = {
+      command: "beamtalk.navigateToStateVar",
+      title: "Go to Definition",
+      arguments: [node],
+    };
+    return item;
+  }
+
   private _inspectFieldItem(node: InspectFieldNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.key, vscode.TreeItemCollapsibleState.None);
     item.description = this._displayValue(node.value);
@@ -622,23 +683,33 @@ export class WorkspaceTreeDataProvider
 
   // ─── Private: helpers ────────────────────────────────────────────────────
 
-  private _methodGroups(methods: MethodInfo[], classInfo: ClassInfo): MethodGroupNode[] {
+  private _classChildren(
+    result: { methods: MethodInfo[]; stateVars: StateVarInfo[] },
+    classInfo: ClassInfo
+  ): WorkspaceNode[] {
+    const { methods, stateVars } = result;
     const instance = methods.filter((m) => m.side === "instance");
     const classSide = methods.filter((m) => m.side === "class");
-    const toItems = (ms: MethodInfo[]): MethodItemNode[] =>
+    const toMethodItems = (ms: MethodInfo[]): MethodItemNode[] =>
       ms.map((m) => ({ kind: "method-item" as const, method: m, classInfo }));
+    const stateVarItems: StateVarItemNode[] = stateVars.map((sv) => ({
+      kind: "state-item" as const,
+      stateVar: sv,
+      classInfo,
+    }));
     return [
+      { kind: "state-group" as const, classInfo, stateVars: stateVarItems },
       {
         kind: "method-group" as const,
         side: "instance",
         classInfo,
-        methods: toItems(instance),
+        methods: toMethodItems(instance),
       },
       {
         kind: "method-group" as const,
         side: "class",
         classInfo,
-        methods: toItems(classSide),
+        methods: toMethodItems(classSide),
       },
     ];
   }

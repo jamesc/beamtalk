@@ -96,6 +96,11 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "beamtalk.navigateToStateVar",
+        "title": "Go to Definition",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "beamtalk.openClassSource",
         "title": "Open Source",
         "icon": "$(go-to-file)"
@@ -178,6 +183,16 @@
         {
           "command": "beamtalk.navigateToMethod",
           "when": "view == beamtalk.workspaceExplorer && viewItem == method-item",
+          "group": "beamtalk@1"
+        },
+        {
+          "command": "beamtalk.navigateToStateVar",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == state-item",
+          "group": "inline"
+        },
+        {
+          "command": "beamtalk.navigateToStateVar",
+          "when": "view == beamtalk.workspaceExplorer && viewItem == state-item",
           "group": "beamtalk@1"
         }
       ]

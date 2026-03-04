@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { findMethodDeclaration } from "./textUtils";
+import { findMethodDeclaration, findStateVarDeclaration } from "./textUtils";
 import {
   LanguageClient,
   type LanguageClientOptions,
@@ -22,6 +22,7 @@ import type {
   BindingItemNode,
   ClassItemNode,
   MethodItemNode,
+  StateVarItemNode,
 } from "./workspaceTreeView";
 import { WorkspaceTreeDataProvider } from "./workspaceTreeView";
 
@@ -551,7 +552,7 @@ async function captureSessionId(
 }
 
 
-export { findMethodDeclaration } from "./textUtils";
+export { findMethodDeclaration, findStateVarDeclaration } from "./textUtils";
 
 function replCommand(): string {
   const config = vscode.workspace.getConfiguration("beamtalk");
@@ -910,6 +911,45 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         });
       }
     })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "beamtalk.navigateToStateVar",
+      async (node: StateVarItemNode) => {
+        const { classInfo, stateVar } = node;
+        const sourceFile = classInfo.source_file;
+        if (!sourceFile || sourceFile === "unknown") {
+          await vscode.window.showInformationMessage(
+            `No source file recorded for class ${classInfo.name}`
+          );
+          return;
+        }
+        const uri = vscode.Uri.file(sourceFile);
+        let document: vscode.TextDocument;
+        try {
+          document = await vscode.workspace.openTextDocument(uri);
+        } catch {
+          await vscode.window.showInformationMessage(
+            `Cannot open source for ${classInfo.name}: ${sourceFile}`
+          );
+          return;
+        }
+        const text = document.getText();
+        let declOffset = findStateVarDeclaration(text, stateVar.name);
+        if (declOffset === -1) declOffset = text.indexOf(stateVar.name);
+        if (declOffset === -1) {
+          await vscode.window.showInformationMessage(
+            `State variable '${stateVar.name}' not found in source for ${classInfo.name}`
+          );
+          return;
+        }
+        const position = document.positionAt(declOffset);
+        await vscode.window.showTextDocument(document, {
+          selection: new vscode.Range(position, position),
+        });
+      }
+    )
   );
 
   // ─── Start / Stop REPL commands (BT-1025) ──────────────────────────────────
