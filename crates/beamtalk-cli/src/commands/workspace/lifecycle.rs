@@ -219,6 +219,35 @@ impl std::fmt::Display for WorkspaceStatus {
     }
 }
 
+/// Extract a workspace ID string from a workspace directory path.
+///
+/// Returns `None` for paths that lack a valid UTF-8 filename (e.g. paths ending
+/// in `..` or containing non-UTF-8 characters) so callers can skip them cleanly.
+fn workspace_id_from_path(path: &Path) -> Option<String> {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
+
+/// Probe a workspace node's liveness and opportunistically clean up stale files.
+///
+/// Returns `(Running, Some(NodeInfo))` if the node is alive,
+/// or `(Stopped, None)` if the node is not running or has no `node.info`.
+/// Stale `node.info` files are removed when the node is detected as stopped.
+fn probe_node_status(workspace_id: &str) -> (WorkspaceStatus, Option<NodeInfo>) {
+    match get_node_info(workspace_id) {
+        Ok(Some(info)) if is_node_running(&info, Some(workspace_id)) => {
+            (WorkspaceStatus::Running, Some(info))
+        }
+        Ok(Some(_)) => {
+            let _ = cleanup_stale_node_info(workspace_id);
+            (WorkspaceStatus::Stopped, None)
+        }
+        _ => (WorkspaceStatus::Stopped, None),
+    }
+}
+
 /// List all workspaces found in `~/.beamtalk/workspaces/`.
 pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
     let workspaces_dir = workspaces_base_dir()?;
@@ -243,28 +272,17 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
             continue;
         }
 
-        let workspace_id = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
+        let Some(workspace_id) = workspace_id_from_path(&path) else {
+            continue;
+        };
 
         let Ok(metadata) = get_workspace_metadata(&workspace_id) else {
             continue;
         };
 
-        let (status, port, pid) = match get_node_info(&workspace_id) {
-            Ok(Some(info)) => {
-                if is_node_running(&info, Some(&workspace_id)) {
-                    (WorkspaceStatus::Running, Some(info.port), Some(info.pid))
-                } else {
-                    // Stale node.info — clean it up
-                    let _ = cleanup_stale_node_info(&workspace_id);
-                    (WorkspaceStatus::Stopped, None, None)
-                }
-            }
-            _ => (WorkspaceStatus::Stopped, None, None),
-        };
+        let (status, node) = probe_node_status(&workspace_id);
+        let port = node.as_ref().map(|i| i.port);
+        let pid = node.as_ref().map(|i| i.pid);
 
         summaries.push(WorkspaceSummary {
             workspace_id,
@@ -305,15 +323,7 @@ pub struct WorkspaceDetail {
 ///
 /// If `name_or_id` is `None`, attempts to find the workspace for the current directory.
 pub fn workspace_status(name_or_id: Option<&str>) -> Result<WorkspaceDetail> {
-    let workspace_id = if let Some(name) = name_or_id {
-        resolve_workspace_id(name)?
-    } else {
-        // Auto-detect: find workspace whose project_path matches current directory
-        let cwd = std::env::current_dir().into_diagnostic()?;
-        let project_root = discovery::discover_project_root(&cwd);
-        find_workspace_by_project_path(&project_root)?
-            .unwrap_or(generate_workspace_id(&project_root)?)
-    };
+    let workspace_id = resolve_workspace_id_or_cwd(name_or_id)?;
 
     if !workspace_exists(&workspace_id)? {
         return Err(miette!(
@@ -324,22 +334,10 @@ pub fn workspace_status(name_or_id: Option<&str>) -> Result<WorkspaceDetail> {
 
     let metadata = get_workspace_metadata(&workspace_id)?;
 
-    let (status, node_name, port, pid) = match get_node_info(&workspace_id) {
-        Ok(Some(info)) => {
-            if is_node_running(&info, Some(&workspace_id)) {
-                (
-                    WorkspaceStatus::Running,
-                    Some(info.node_name),
-                    Some(info.port),
-                    Some(info.pid),
-                )
-            } else {
-                let _ = cleanup_stale_node_info(&workspace_id);
-                (WorkspaceStatus::Stopped, None, None, None)
-            }
-        }
-        _ => (WorkspaceStatus::Stopped, None, None, None),
-    };
+    let (status, node) = probe_node_status(&workspace_id);
+    let node_name = node.as_ref().map(|i| i.node_name.clone());
+    let port = node.as_ref().map(|i| i.port);
+    let pid = node.as_ref().map(|i| i.pid);
 
     Ok(WorkspaceDetail {
         workspace_id,
@@ -373,11 +371,9 @@ pub(super) fn find_workspace_by_project_path(project_path: &Path) -> Result<Opti
             continue;
         }
 
-        let ws_id = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
+        let Some(ws_id) = workspace_id_from_path(&path) else {
+            continue;
+        };
 
         let Ok(metadata) = get_workspace_metadata(&ws_id) else {
             continue;
@@ -403,20 +399,22 @@ pub(super) fn find_workspace_by_project_path(project_path: &Path) -> Result<Opti
 /// consistency and prevent path traversal attacks.
 pub fn resolve_workspace_id(name_or_id: &str) -> Result<String> {
     let candidate = name_or_id.trim();
-
-    if candidate.is_empty() {
-        return Err(miette!("Workspace name cannot be empty"));
-    }
-
-    // Prevent path traversal and malformed filesystem paths
-    if candidate.contains('/') || candidate.contains('\\') || candidate.contains('\0') {
-        return Err(miette!(
-            "Invalid workspace name: must not contain path separators or null bytes"
-        ));
-    }
-
-    // Reuse the same validation as workspace creation (allowed charset)
     validate_workspace_name(candidate)?;
-
     Ok(candidate.to_string())
+}
+
+/// Resolve a workspace ID from an optional name/ID, falling back to the current directory.
+///
+/// If `name_or_id` is `Some`, delegates to [`resolve_workspace_id`].
+/// If `None`, discovers the project root from `cwd` and looks up (or generates)
+/// the workspace ID for that path.
+pub(super) fn resolve_workspace_id_or_cwd(name_or_id: Option<&str>) -> Result<String> {
+    if let Some(name) = name_or_id {
+        resolve_workspace_id(name)
+    } else {
+        let cwd = std::env::current_dir().into_diagnostic()?;
+        let project_root = discovery::discover_project_root(&cwd);
+        Ok(find_workspace_by_project_path(&project_root)?
+            .unwrap_or(generate_workspace_id(&project_root)?))
+    }
 }

@@ -189,6 +189,11 @@ impl BeamCompiler {
             backend,
         );
 
+        // Ensure output directory exists before dispatching to either backend.
+        std::fs::create_dir_all(&self.output_dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
+
         match backend {
             CompilerBackend::Port => {
                 // Try Port backend, fall back to escript if runtime not available
@@ -216,7 +221,8 @@ impl BeamCompiler {
         info!("Using Port backend for Core Erlang → BEAM compilation");
 
         // Find runtime and build -pa paths (canonicalize for absolute paths,
-        // since the BEAM node runs from temp_dir)
+        // since the BEAM node runs from temp_dir).
+        // Output directory is guaranteed to exist (created in compile_batch).
         let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().map_err(|_| {
             miette::miette!(
                 "Port backend requires the Beamtalk runtime.\n\
@@ -256,11 +262,6 @@ impl BeamCompiler {
                 RUNTIME_UNAVAILABLE_PREFIX,
             ));
         }
-
-        // Ensure output directory exists
-        std::fs::create_dir_all(&self.output_dir)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
 
         // Build -pa arguments: only compiler ebin needed (contains beamtalk_build_worker)
         #[cfg(windows)]
@@ -303,10 +304,7 @@ impl BeamCompiler {
         // Check if escript is available
         check_escript_available()?;
 
-        // Ensure output directory exists
-        std::fs::create_dir_all(&self.output_dir)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
+        // Output directory is guaranteed to exist (created in compile_batch).
 
         // Write compile.escript to a temporary file with unique name
         // Use both process ID and atomic counter to ensure uniqueness when tests run in parallel
@@ -493,7 +491,7 @@ impl BeamCompiler {
                 format!("Compilation failed:\n{}", error_messages.join("\n"))
             };
             debug!("Compilation failed with status: {:?}", status);
-            miette::bail!(error_msg);
+            miette::bail!("{}", error_msg);
         }
 
         debug!(

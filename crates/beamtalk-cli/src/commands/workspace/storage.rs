@@ -6,8 +6,6 @@
 //! **DDD Context:** CLI
 
 use std::fs;
-#[cfg(unix)]
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
@@ -151,6 +149,40 @@ pub fn save_workspace_metadata(metadata: &WorkspaceMetadata) -> Result<()> {
     Ok(())
 }
 
+/// Write `content` to `path` with owner-only permissions (0600 on Unix).
+///
+/// On Unix: creates the file with mode 0600 and enforces it via `fchmod` to handle
+/// pre-existing files with overly-permissive modes (e.g. from older versions).
+/// On non-Unix: falls back to a plain write without permission enforcement.
+pub(super) fn write_secure_file(path: &Path, content: &[u8]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .into_diagnostic()?;
+
+        // Enforce 0600 even on overwrite of a pre-existing file (uses fchmod).
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .into_diagnostic()?;
+
+        file.write_all(content).into_diagnostic()?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        fs::write(path, content).into_diagnostic()?;
+    }
+
+    Ok(())
+}
+
 /// Generate a unique Erlang cookie for a workspace.
 ///
 /// Uses URL-safe base64 (RFC 4648 §5) to avoid `+` and `/` characters,
@@ -167,38 +199,12 @@ pub fn generate_cookie() -> String {
 
 /// Save workspace cookie with secure permissions (owner read/write only).
 ///
-/// On Unix, the file is created with mode 0600 to avoid a TOCTOU race where
-/// the cookie could briefly be world-readable. Permissions are also enforced
-/// via `fchmod` on the open file descriptor so that pre-existing files with
-/// overly-permissive modes (e.g. from older versions) are tightened to 0600.
+/// Delegates to [`write_secure_file`] which creates the file with mode 0600
+/// and enforces it via `fchmod` so pre-existing files with overly-permissive
+/// modes are tightened on overwrite.
 pub fn save_workspace_cookie(workspace_id: &str, cookie: &str) -> Result<()> {
     let cookie_path = workspace_dir(workspace_id)?.join("cookie");
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&cookie_path)
-            .into_diagnostic()?;
-
-        // Ensure 0600 even on overwrite of a pre-existing file (uses fchmod).
-        file.set_permissions(fs::Permissions::from_mode(0o600))
-            .into_diagnostic()?;
-
-        file.write_all(cookie.as_bytes()).into_diagnostic()?;
-    }
-
-    #[cfg(not(unix))]
-    {
-        fs::write(&cookie_path, cookie).into_diagnostic()?;
-    }
-
-    Ok(())
+    write_secure_file(&cookie_path, cookie.as_bytes())
 }
 
 /// Read workspace cookie.
@@ -210,12 +216,16 @@ pub fn read_workspace_cookie(workspace_id: &str) -> Result<String> {
 /// Get node info for a workspace.
 pub fn get_node_info(workspace_id: &str) -> Result<Option<NodeInfo>> {
     let node_info_path = workspace_dir(workspace_id)?.join("node.info");
-
-    if !node_info_path.exists() {
-        return Ok(None);
-    }
-
-    let content = fs::read_to_string(&node_info_path).into_diagnostic()?;
+    let content = match fs::read_to_string(&node_info_path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(miette!(
+                "Failed to read node info {}: {e}",
+                node_info_path.display()
+            ))
+        }
+    };
     let info: NodeInfo = serde_json::from_str(&content).into_diagnostic()?;
     Ok(Some(info))
 }
@@ -288,10 +298,11 @@ pub fn remove_stale_runtime_files(workspace_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Clean up stale node info and runtime files for a workspace.
+/// Clean up stale runtime files for a workspace.
 ///
-/// Removes `node.info`, `port`, and `pid` files. Use when an orphaned workspace
-/// is detected (stale `node.info` but node not running) or after graceful shutdown.
+/// Removes `node.info`, `port`, `pid`, and `starting` files. Use when an orphaned
+/// workspace is detected (stale `node.info` but node not running) or after graceful
+/// shutdown. Delegates to [`remove_stale_runtime_files`].
 pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
     remove_stale_runtime_files(workspace_id)
 }
