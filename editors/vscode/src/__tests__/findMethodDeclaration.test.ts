@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { findMethodDeclaration } from "../textUtils";
+import { findMethodDeclaration, extractStateVarInfo } from "../textUtils";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -256,5 +256,46 @@ Object subclass: Foo
     const offset = findMethodDeclaration(src, "run", "instance");
     // The text at the offset should start with the selector
     expect(src.slice(offset, offset + 3)).toBe("run");
+  });
+});
+
+// ─── extractStateVarInfo tests ────────────────────────────────────────────────
+
+describe("extractStateVarInfo", () => {
+  const LAMBDA_STATE = `\
+Value subclass: SchemeLambda
+  state: params = #()  // List of parameter name strings
+  state: body = nil  // Unevaluated body expression (AST)
+  state: closureEnv = nil  // SchemeEnv actor at point of definition
+  state: simple = 42
+`;
+
+  it("extracts default value and inline comment", () => {
+    const info = extractStateVarInfo(LAMBDA_STATE, "params");
+    expect(info).not.toBeUndefined();
+    expect(info!.defaultValue).toBe("#()");
+    expect(info!.comment).toBe("List of parameter name strings");
+  });
+
+  it("extracts nil default with comment", () => {
+    const info = extractStateVarInfo(LAMBDA_STATE, "body");
+    expect(info!.defaultValue).toBe("nil");
+    expect(info!.comment).toBe("Unevaluated body expression (AST)");
+  });
+
+  it("extracts default without comment", () => {
+    const info = extractStateVarInfo(LAMBDA_STATE, "simple");
+    expect(info!.defaultValue).toBe("42");
+    expect(info!.comment).toBeUndefined();
+  });
+
+  it("returns undefined for unknown var", () => {
+    expect(extractStateVarInfo(LAMBDA_STATE, "nonexistent")).toBeUndefined();
+  });
+
+  it("skips comment lines", () => {
+    const src = `Object subclass: Foo\n  // state: x = 1\n  state: x = 2\n`;
+    const info = extractStateVarInfo(src, "x");
+    expect(info!.defaultValue).toBe("2");
   });
 });

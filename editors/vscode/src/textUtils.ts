@@ -32,6 +32,37 @@ function methodHeadPattern(selector: string): RegExp {
 }
 
 /**
+ * Extract display info from a `state: varName = default  // comment` declaration.
+ *
+ * Returns `{ defaultValue, comment }` where either may be undefined if not present.
+ * Returns undefined if the declaration is not found.
+ */
+export function extractStateVarInfo(
+  text: string,
+  name: string
+): { defaultValue?: string; comment?: string } | undefined {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Match `state: name = <rest>` — capture everything after `=`
+  const re = new RegExp(`^state:\\s+${esc}\\s*=\\s*(.+)$`);
+  for (const line of text.split("\n")) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("//")) continue;
+    const m = re.exec(trimmed);
+    if (!m) continue;
+    const rest = m[1]; // e.g. `#()  // List of parameter name strings`
+    const slashIdx = rest.indexOf(" //");
+    if (slashIdx >= 0) {
+      return {
+        defaultValue: rest.slice(0, slashIdx).trim() || undefined,
+        comment: rest.slice(slashIdx + 3).trim() || undefined,
+      };
+    }
+    return { defaultValue: rest.trim() || undefined };
+  }
+  return undefined;
+}
+
+/**
  * Find a `state: varName = ...` declaration in Beamtalk source text.
  *
  * Returns the character offset of `varName`, or -1 if not found.

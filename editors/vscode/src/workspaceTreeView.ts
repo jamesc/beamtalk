@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as vscode from "vscode";
+import { extractStateVarInfo } from "./textUtils";
 import type {
   ActorInfo,
   BindingsMap,
@@ -420,12 +421,7 @@ export class WorkspaceTreeDataProvider
       return item;
     }
     if (element.kind === "state-item") {
-      item.tooltip =
-        (await this._lspHoverTooltip(
-          element.classInfo.source_file,
-          element.stateVar.name,
-          "field"
-        )) ?? new vscode.MarkdownString(`**${element.stateVar.name}**\n\n_state variable_`);
+      item.tooltip = await this._stateVarTooltip(element);
       return item;
     }
     return undefined;
@@ -519,6 +515,34 @@ export class WorkspaceTreeDataProvider
     return new vscode.MarkdownString(
       `**${method.selector}**\n\n_${method.side === "instance" ? "instance" : "class"} method_`
     );
+  }
+
+  /**
+   * Build a tooltip for a state variable item by reading its declaration from source.
+   * Shows the default value and inline comment (e.g. `// List of parameter name strings`).
+   */
+  private async _stateVarTooltip(element: StateVarItemNode): Promise<vscode.MarkdownString> {
+    const { classInfo, stateVar } = element;
+    const fallback = new vscode.MarkdownString(
+      `**${stateVar.name}**\n\n_state variable_`
+    );
+    if (!classInfo.source_file || classInfo.source_file === "unknown") return fallback;
+    try {
+      const uri = vscode.Uri.file(classInfo.source_file);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const info = extractStateVarInfo(doc.getText(), stateVar.name);
+      if (!info) return fallback;
+      const md = new vscode.MarkdownString(`**${stateVar.name}**`);
+      if (info.defaultValue !== undefined) {
+        md.appendMarkdown(`\n\nDefault: \`${info.defaultValue}\``);
+      }
+      if (info.comment) {
+        md.appendMarkdown(`\n\n${info.comment}`);
+      }
+      return md;
+    } catch {
+      return fallback;
+    }
   }
 
   // ─── Private: TreeItem builders ──────────────────────────────────────────
