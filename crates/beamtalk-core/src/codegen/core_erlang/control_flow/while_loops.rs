@@ -435,7 +435,8 @@ mod tests {
     #[test]
     fn test_while_true_simple_generates_letrec() {
         // Pure whileTrue: (no mutations) generates a letrec-based loop
-        let src = "Actor subclass: Runner\n  state: x = 0\n\n  run =>\n    [false] whileTrue: [42]\n";
+        let src =
+            "Actor subclass: Runner\n  state: x = 0\n\n  run =>\n    [false] whileTrue: [42]\n";
         let code = codegen(src);
         assert!(
             code.contains("letrec"),
@@ -454,7 +455,8 @@ mod tests {
     #[test]
     fn test_while_false_simple_generates_letrec_with_opposite_pattern() {
         // Pure whileFalse: (no mutations) generates a letrec matching false to continue
-        let src = "Actor subclass: Runner\n  state: x = 0\n\n  run =>\n    [false] whileFalse: [42]\n";
+        let src =
+            "Actor subclass: Runner\n  state: x = 0\n\n  run =>\n    [false] whileFalse: [42]\n";
         let code = codegen(src);
         assert!(
             code.contains("letrec"),

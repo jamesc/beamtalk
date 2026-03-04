@@ -619,7 +619,8 @@ mod tests {
     #[test]
     fn test_on_do_generates_try_catch_structure() {
         // Basic on:do: with no mutations generates a try/catch via closure approach
-        let src = "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] on: Error do: [:e | 0]\n";
+        let src =
+            "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] on: Error do: [:e | 0]\n";
         let code = codegen(src);
         assert!(
             code.contains("try apply"),
@@ -661,7 +662,8 @@ mod tests {
     #[test]
     fn test_on_do_reraises_nlr_throws() {
         // on:do: must not swallow non-local returns — they must be re-raised
-        let src = "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] on: Error do: [:e | 0]\n";
+        let src =
+            "Actor subclass: Srv\n  state: x = 0\n\n  run =>\n    [42] on: Error do: [:e | 0]\n";
         let code = codegen(src);
         // The generated catch clause must match the NLR pattern and re-raise
         assert!(
