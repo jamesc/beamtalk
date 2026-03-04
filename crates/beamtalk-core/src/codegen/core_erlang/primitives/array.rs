@@ -11,11 +11,12 @@
 //!   `#{'$beamtalk_class' => 'Array', 'data' => ErlangArray}`
 
 use super::super::document::Document;
+use super::param;
 use crate::docvec;
 
 /// Array primitive implementations (BT-822).
 pub(crate) fn generate_array_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         "size" => Some(Document::Str("call 'beamtalk_array_ops':'size'(Self)")),
         "isEmpty" => Some(Document::Str("call 'beamtalk_array_ops':'is_empty'(Self)")),
@@ -30,7 +31,7 @@ pub(crate) fn generate_array_bif(selector: &str, params: &[String]) -> Option<Do
             ")"
         ]),
         "at:put:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_array_ops':'at_put'(Self, ",
                 p0.to_string(),
@@ -55,7 +56,7 @@ pub(crate) fn generate_array_bif(selector: &str, params: &[String]) -> Option<Do
             ")"
         ]),
         "inject:into:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_array_ops':'inject_into'(Self, ",
                 p0.to_string(),

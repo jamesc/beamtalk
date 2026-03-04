@@ -424,19 +424,17 @@ impl TypeChecker {
                                 _ => "receiver",
                             };
                             let field_name = field.name.as_str();
-                            let mut diag = Diagnostic::warning(
-                                format!(
-                                    "Cannot assign to `{recv_name}.{field_name}` — objects cannot mutate another object's state"
-                                ),
-                                *span,
-                            );
-                            diag.hint = Some(
-                                format!(
-                                    "Use `{recv_name} := {recv_name} {with_sel} newValue` to get an updated copy"
+                            self.diagnostics.push(
+                                Diagnostic::warning(
+                                    format!(
+                                        "Cannot assign to `{recv_name}.{field_name}` — objects cannot mutate another object's state"
+                                    ),
+                                    *span,
                                 )
-                                .into(),
+                                .with_hint(format!(
+                                    "Use `{recv_name} := {recv_name} {with_sel} newValue` to get an updated copy"
+                                )),
                             );
-                            self.diagnostics.push(diag);
                         }
                     }
                     _ => {}
@@ -878,16 +876,16 @@ impl TypeChecker {
             };
             if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
                 let param_pos = i + 1;
-                let mut diag = Diagnostic::warning(
-                    format!(
-                        "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
-                    ),
-                    span,
-                )
-                .with_category(DiagnosticCategory::Type);
-                diag.hint =
-                    Some(format!("Expected {expected_ty} (or a subclass), got {actual_ty}").into());
-                self.diagnostics.push(diag);
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        format!(
+                            "Argument {param_pos} of '{selector}' on {class_name} expects {expected_ty}, got {actual_ty}"
+                        ),
+                        span,
+                    )
+                    .with_category(DiagnosticCategory::Type)
+                    .with_hint(format!("Expected {expected_ty} (or a subclass), got {actual_ty}")),
+                );
             }
         }
     }
@@ -925,17 +923,16 @@ impl TypeChecker {
 
         if !Self::is_type_compatible(actual_ty, &expected_ty, hierarchy) {
             let selector = method.selector.name();
-            let mut diag = Diagnostic::warning(
-                format!(
-                    "Method '{selector}' in {class_name} declares return type {expected_ty}, but body returns {actual_ty}"
-                ),
-                method.span,
-            )
-            .with_category(DiagnosticCategory::Type);
-            diag.hint = Some(
-                format!("Declared -> {expected_ty}, inferred body type is {actual_ty}").into(),
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "Method '{selector}' in {class_name} declares return type {expected_ty}, but body returns {actual_ty}"
+                    ),
+                    method.span,
+                )
+                .with_category(DiagnosticCategory::Type)
+                .with_hint(format!("Declared -> {expected_ty}, inferred body type is {actual_ty}")),
             );
-            self.diagnostics.push(diag);
         }
     }
 
@@ -1002,17 +999,16 @@ impl TypeChecker {
             };
             if !Self::is_type_compatible(child_t, parent_t, hierarchy) {
                 let param_pos = i + 1;
-                let mut diag = Diagnostic::warning(
-                    format!(
-                        "Parameter {param_pos} of '{selector}' in {class_name} has type {child_t}, incompatible with parent's {parent_t}"
-                    ),
-                    method.span,
-                )
-                .with_category(DiagnosticCategory::Type);
-                diag.hint = Some(
-                    format!("Parent class {superclass} declares parameter type {parent_t}").into(),
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        format!(
+                            "Parameter {param_pos} of '{selector}' in {class_name} has type {child_t}, incompatible with parent's {parent_t}"
+                        ),
+                        method.span,
+                    )
+                    .with_category(DiagnosticCategory::Type)
+                    .with_hint(format!("Parent class {superclass} declares parameter type {parent_t}")),
                 );
-                self.diagnostics.push(diag);
             }
         }
     }
@@ -1036,13 +1032,16 @@ impl TypeChecker {
 
         // Arithmetic operators on numeric types require numeric arguments
         if is_arithmetic && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
-            let mut diag = Diagnostic::warning(
-                format!("`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"),
-                span,
-            )
-            .with_category(DiagnosticCategory::Type);
-            diag.hint = Some("Arithmetic operators require Integer or Float operands".into());
-            self.diagnostics.push(diag);
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"
+                    ),
+                    span,
+                )
+                .with_category(DiagnosticCategory::Type)
+                .with_hint("Arithmetic operators require Integer or Float operands"),
+            );
             return;
         }
 
@@ -1052,25 +1051,29 @@ impl TypeChecker {
             && arg_ty.as_str() != "String"
             && arg_ty.as_str() != "Symbol"
         {
-            let mut diag = Diagnostic::warning(
-                format!("`++` on String expects a String argument, got {arg_ty}"),
-                span,
-            )
-            .with_category(DiagnosticCategory::Type);
-            diag.hint = Some("Convert the argument to String first".into());
-            self.diagnostics.push(diag);
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    format!("`++` on String expects a String argument, got {arg_ty}"),
+                    span,
+                )
+                .with_category(DiagnosticCategory::Type)
+                .with_hint("Convert the argument to String first"),
+            );
             return;
         }
 
         // Comparison operators on numeric types require numeric arguments
         if is_comparison && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
-            let mut diag = Diagnostic::warning(
-                format!("`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"),
-                span,
-            )
-            .with_category(DiagnosticCategory::Type);
-            diag.hint = Some("Comparison operators require compatible types".into());
-            self.diagnostics.push(diag);
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "`{operator}` on {receiver_ty} expects a numeric argument, got {arg_ty}"
+                    ),
+                    span,
+                )
+                .with_category(DiagnosticCategory::Type)
+                .with_hint("Comparison operators require compatible types"),
+            );
         }
     }
 
@@ -1096,16 +1099,19 @@ impl TypeChecker {
             return; // No type annotation on this field
         };
         if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
-            let mut diag = Diagnostic::warning(
-                format!(
-                    "Type mismatch: field `{}` declared as {declared_type}, got {value_type}",
-                    field.name
-                ),
-                span,
-            )
-            .with_category(DiagnosticCategory::Type);
-            diag.hint = Some(format!("Expected {declared_type} but assigning {value_type}").into());
-            self.diagnostics.push(diag);
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "Type mismatch: field `{}` declared as {declared_type}, got {value_type}",
+                        field.name
+                    ),
+                    span,
+                )
+                .with_category(DiagnosticCategory::Type)
+                .with_hint(format!(
+                    "Expected {declared_type} but assigning {value_type}"
+                )),
+            );
         }
     }
 
@@ -1130,21 +1136,19 @@ impl TypeChecker {
                 continue; // Dynamic defaults are fine
             };
             if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
-                let mut diag = Diagnostic::warning(
-                    format!(
-                        "Type mismatch: state `{}` declared as {declared_type}, default is {value_type}",
-                        decl.name.name
-                    ),
-                    decl.span,
-                )
-                .with_category(DiagnosticCategory::Type);
-                diag.hint = Some(
-                    format!(
-                        "Default value type {value_type} is not compatible with {declared_type}"
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        format!(
+                            "Type mismatch: state `{}` declared as {declared_type}, default is {value_type}",
+                            decl.name.name
+                        ),
+                        decl.span,
                     )
-                    .into(),
+                    .with_category(DiagnosticCategory::Type)
+                    .with_hint(format!(
+                        "Default value type {value_type} is not compatible with {declared_type}"
+                    )),
                 );
-                self.diagnostics.push(diag);
             }
         }
     }
@@ -1236,7 +1240,7 @@ impl TypeChecker {
         if let Some(suggestion) =
             Self::find_similar_selector(class_name, selector, hierarchy, is_class_side)
         {
-            diag.hint = Some(format!("Did you mean '{suggestion}'?").into());
+            diag = diag.with_hint(format!("Did you mean '{suggestion}'?"));
         }
 
         self.diagnostics.push(diag);

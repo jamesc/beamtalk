@@ -12,15 +12,15 @@ use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
     Block, ClassDefinition, ClassKind, Expression, Literal, MessageSelector, MethodDefinition,
-    MethodKind, Module, StateDeclaration, TypeAnnotation,
+    MethodKind, Module, StateDeclaration,
 };
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
 
 /// Tuple representing a method entry for `method_info` / `class_method_info` meta maps.
 ///
-/// Fields: (`erlang_selector`, `arity`, `return_type`, `param_types`)
-type MethodInfoEntry = (String, usize, Option<String>, Vec<Option<String>>);
+/// Fields: (`erlang_selector`, `arity`, `return_type`, `param_types`, `is_sealed`)
+type MethodInfoEntry = (String, usize, Option<String>, Vec<Option<String>>, bool);
 
 impl CoreErlangGenerator {
     /// Generates dispatch case clauses for all methods in a class definition.
@@ -1002,10 +1002,14 @@ impl CoreErlangGenerator {
     ///         let _BuilderState0 = ~{
     ///             'className' => 'Counter',
     ///             'superclassRef' => 'Actor',
-    ///             'fieldSpecs' => ~{'value' => 0}~,
-    ///             'methodSpecs' => ~{...}~,
-    ///             'modifiers' => [],
-    ///             ...
+    ///             'moduleName' => 'class_definition',
+    ///             'methodSource' => ~{...}~,
+    ///             'methodSignatures' => ~{...}~,
+    ///             'classMethodSignatures' => ~{}~,
+    ///             'classState' => ~{}~,
+    ///             'classDoc' => 'none',
+    ///             'methodDocs' => ~{}~,
+    ///             'meta' => ~{...}~
     ///         }~
     ///         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
     ///             <{'ok', _Pid0}> when 'true' -> 'ok'
@@ -1016,7 +1020,7 @@ impl CoreErlangGenerator {
     ///     catch <CatchType, CatchError, CatchStack> ->
     ///         primop 'raw_raise'(CatchType, CatchError, CatchStack)
     /// ```
-    #[allow(clippy::too_many_lines)] // builds class metadata map with methods, fields, and source
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_register_class(
         &mut self,
         module: &Module,
@@ -1029,154 +1033,12 @@ impl CoreErlangGenerator {
         let mut class_docs = Vec::new();
 
         for (i, class) in module.classes.iter().enumerate() {
-            // Instance methods — used for methodSpecs and methodSource
+            // Instance methods — used for methodSource, methodSignatures, and methodDocs
             let instance_methods: Vec<_> = class
                 .methods
                 .iter()
                 .filter(|m| m.kind == MethodKind::Primary)
                 .collect();
-
-            // methodSpecs: selector => #{arity => N, is_sealed => bool}
-            let mut method_spec_docs: Vec<Document<'static>> = Vec::new();
-            for (m_idx, method) in instance_methods.iter().enumerate() {
-                if m_idx > 0 {
-                    method_spec_docs.push(Document::Str(", "));
-                }
-                let is_sealed = if method.is_sealed || class.is_sealed {
-                    "'true'"
-                } else {
-                    "'false'"
-                };
-                method_spec_docs.push(docvec![
-                    "'",
-                    Document::String(method.selector.name().to_string()),
-                    "' => ~{'arity' => ",
-                    Document::String(method.selector.arity().to_string()),
-                    ", 'is_sealed' => ",
-                    Document::String(is_sealed.to_string()),
-                    "}~",
-                ]);
-            }
-            let method_specs_doc = Document::Vec(method_spec_docs);
-
-            // fieldSpecs: field_name => default_value (map, not list)
-            let mut field_spec_docs: Vec<Document<'static>> = Vec::new();
-            for (s_idx, s) in class.state.iter().enumerate() {
-                if s_idx > 0 {
-                    field_spec_docs.push(Document::Str(", "));
-                }
-                let default_val = if let Some(ref default_value) = s.default_value {
-                    self.expression_doc(default_value)?
-                } else {
-                    Document::Str("'nil'")
-                };
-                field_spec_docs.push(docvec![
-                    "'",
-                    Document::String(s.name.name.to_string()),
-                    "' => ",
-                    default_val,
-                ]);
-            }
-            let field_specs_doc = Document::Vec(field_spec_docs);
-
-            // modifiers list
-            let mut modifiers: Vec<&str> = Vec::new();
-            if class.is_sealed {
-                modifiers.push("'sealed'");
-            }
-            if class.is_abstract {
-                modifiers.push("'abstract'");
-            }
-            let mut modifier_docs: Vec<Document<'static>> = Vec::new();
-            for (i, modifier) in modifiers.iter().enumerate() {
-                if i > 0 {
-                    modifier_docs.push(Document::Str(", "));
-                }
-                modifier_docs.push(Document::String((*modifier).to_string()));
-            }
-            let modifiers_doc = docvec!["[", Document::Vec(modifier_docs), "]"];
-
-            // classMethods: class method specs (spawn/new + user-defined)
-            let mut class_method_entries: Vec<Document<'static>> = Vec::new();
-            if self.context == CodeGenContext::Actor {
-                class_method_entries.push(Document::Str(
-                    "'spawn' => ~{'arity' => 0, 'injected' => 'true'}~",
-                ));
-                class_method_entries.push(Document::Str(
-                    "'spawnWith:' => ~{'arity' => 1, 'injected' => 'true'}~",
-                ));
-            } else {
-                class_method_entries.push(Document::Str(
-                    "'new' => ~{'arity' => 0, 'injected' => 'true'}~",
-                ));
-                class_method_entries.push(Document::Str(
-                    "'new:' => ~{'arity' => 1, 'injected' => 'true'}~",
-                ));
-            }
-            // BT-411: User-defined class methods
-            for method in &class.class_methods {
-                if method.kind == MethodKind::Primary {
-                    class_method_entries.push(docvec![
-                        "'",
-                        Document::String(method.selector.name().to_string()),
-                        "' => ~{'arity' => ",
-                        Document::String(method.selector.arity().to_string()),
-                        "}~",
-                    ]);
-                }
-            }
-            // BT-923: Auto-generated keyword constructor for Value subclass: classes.
-            // Register it so the class actor knows it exists and can route the call
-            // to 'class_<selector>'/N+2 in the compiled module.
-            if class.class_kind == ClassKind::Value && !class.state.is_empty() {
-                // Build keyword selector string without using format! in collect
-                let build_kw_sel = |state: &[crate::ast::StateDeclaration]| -> String {
-                    let mut sel = String::new();
-                    for s in state {
-                        sel.push_str(&s.name.name);
-                        sel.push(':');
-                    }
-                    sel
-                };
-                let expected_kw_sel = build_kw_sel(&class.state);
-                // Guard against collisions with built-in class selectors (new/new: for Value).
-                // Without this, a slot named e.g. "new" would produce a duplicate entry.
-                let collides_with_builtin = matches!(expected_kw_sel.as_str(), "new" | "new:");
-                let kw_selector_already_defined = class
-                    .class_methods
-                    .iter()
-                    .any(|m| m.kind == MethodKind::Primary && m.selector.name() == expected_kw_sel);
-                if !collides_with_builtin && !kw_selector_already_defined {
-                    let kw_sel = expected_kw_sel;
-                    let kw_arity = class.state.len();
-                    class_method_entries.push(docvec![
-                        "'",
-                        Document::String(kw_sel),
-                        "' => ~{'arity' => ",
-                        Document::String(kw_arity.to_string()),
-                        "}~",
-                    ]);
-                }
-            }
-
-            let num_entries = class_method_entries.len();
-            let class_methods_lines: Vec<_> = class_method_entries
-                .into_iter()
-                .enumerate()
-                .map(|(i, entry)| {
-                    if i < num_entries - 1 {
-                        docvec![line(), entry, ","]
-                    } else {
-                        docvec![line(), entry]
-                    }
-                })
-                .collect();
-            let class_methods_doc = docvec![
-                "'classMethods' => ~{",
-                nest(INDENT, Document::Vec(class_methods_lines)),
-                line(),
-                "}~,",
-            ];
 
             // BT-101: Method source
             let mut method_source_docs: Vec<Document<'static>> = Vec::new();
@@ -1234,106 +1096,6 @@ impl CoreErlangGenerator {
             }
             let class_method_sigs_doc = Document::Vec(class_method_sig_docs);
 
-            // BT-1002 / ADR 0045: Instance method return-type map (Simple/Self annotations).
-            // Selectors with None or non-Simple/Self return type are omitted (absence = dynamic).
-            let mut method_return_type_docs: Vec<Document<'static>> = Vec::new();
-            for method in &instance_methods {
-                let resolved_name = match &method.return_type {
-                    Some(TypeAnnotation::Simple(id)) => Some(id.name.to_string()),
-                    // Self resolves to the defining class at compile time
-                    Some(TypeAnnotation::SelfType { .. }) => Some(class.name.name.to_string()),
-                    _ => None,
-                };
-                if let Some(type_name) = resolved_name {
-                    if !method_return_type_docs.is_empty() {
-                        method_return_type_docs.push(Document::Str(", "));
-                    }
-                    method_return_type_docs.push(docvec![
-                        "'",
-                        Document::String(method.selector.name().to_string()),
-                        "' => '",
-                        Document::String(type_name),
-                        "'"
-                    ]);
-                }
-            }
-            // BT-1005: Include standalone instance methods for this class (Primary only).
-            for standalone in module.method_definitions.iter().filter(|m| {
-                m.class_name.name == class.name.name
-                    && !m.is_class_method
-                    && m.method.kind == MethodKind::Primary
-            }) {
-                let resolved_name = match &standalone.method.return_type {
-                    Some(TypeAnnotation::Simple(id)) => Some(id.name.to_string()),
-                    Some(TypeAnnotation::SelfType { .. }) => Some(class.name.name.to_string()),
-                    _ => None,
-                };
-                if let Some(type_name) = resolved_name {
-                    if !method_return_type_docs.is_empty() {
-                        method_return_type_docs.push(Document::Str(", "));
-                    }
-                    method_return_type_docs.push(docvec![
-                        "'",
-                        Document::String(standalone.method.selector.name().to_string()),
-                        "' => '",
-                        Document::String(type_name),
-                        "'"
-                    ]);
-                }
-            }
-            let method_return_types_doc = Document::Vec(method_return_type_docs);
-
-            // BT-1002 / ADR 0045: Class-side method return-type map (Simple/Self annotations).
-            let mut class_method_return_type_docs: Vec<Document<'static>> = Vec::new();
-            for method in class
-                .class_methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-            {
-                let resolved_name = match &method.return_type {
-                    Some(TypeAnnotation::Simple(id)) => Some(id.name.to_string()),
-                    Some(TypeAnnotation::SelfType { .. }) => Some(class.name.name.to_string()),
-                    _ => None,
-                };
-                if let Some(type_name) = resolved_name {
-                    if !class_method_return_type_docs.is_empty() {
-                        class_method_return_type_docs.push(Document::Str(", "));
-                    }
-                    class_method_return_type_docs.push(docvec![
-                        "'",
-                        Document::String(method.selector.name().to_string()),
-                        "' => '",
-                        Document::String(type_name),
-                        "'"
-                    ]);
-                }
-            }
-            // BT-1005: Include standalone class methods for this class (Primary only).
-            for standalone in module.method_definitions.iter().filter(|m| {
-                m.class_name.name == class.name.name
-                    && m.is_class_method
-                    && m.method.kind == MethodKind::Primary
-            }) {
-                let resolved_name = match &standalone.method.return_type {
-                    Some(TypeAnnotation::Simple(id)) => Some(id.name.to_string()),
-                    Some(TypeAnnotation::SelfType { .. }) => Some(class.name.name.to_string()),
-                    _ => None,
-                };
-                if let Some(type_name) = resolved_name {
-                    if !class_method_return_type_docs.is_empty() {
-                        class_method_return_type_docs.push(Document::Str(", "));
-                    }
-                    class_method_return_type_docs.push(docvec![
-                        "'",
-                        Document::String(standalone.method.selector.name().to_string()),
-                        "' => '",
-                        Document::String(type_name),
-                        "'"
-                    ]);
-                }
-            }
-            let class_method_return_types_doc = Document::Vec(class_method_return_type_docs);
-
             // BT-412: Class variable initial values
             let mut class_var_parts: Vec<Document<'static>> = Vec::new();
             for (cv_idx, cv) in class.class_variables.iter().enumerate() {
@@ -1389,7 +1151,9 @@ impl CoreErlangGenerator {
                 || self.context == CodeGenContext::Actor
                 || Self::has_raising_new(class);
 
-            // BT-837: Build ClassBuilder state map and call register/1
+            // ADR 0050 Phase 5: BuilderState carries only module/source/signature/doc metadata.
+            // Static fields (flags, fields, method signatures) are read from __beamtalk_meta/0
+            // by beamtalk_object_class:init/1.
             let class_doc = docvec![
                 line(),
                 "let _BuilderState",
@@ -1411,25 +1175,11 @@ impl CoreErlangGenerator {
                             "',"
                         ],
                         line(),
-                        "'fieldSpecs' => ~{",
-                        field_specs_doc,
-                        "}~,",
-                        line(),
-                        "'methodSpecs' => ~{",
-                        method_specs_doc,
-                        "}~,",
-                        line(),
-                        "'modifiers' => ",
-                        modifiers_doc,
-                        ",",
-                        line(),
                         docvec![
                             "'moduleName' => '",
                             Document::String(self.module_name.clone()),
                             "',"
                         ],
-                        line(),
-                        class_methods_doc,
                         line(),
                         "'methodSource' => ~{",
                         method_source_doc,
@@ -1443,14 +1193,6 @@ impl CoreErlangGenerator {
                         class_method_sigs_doc,
                         "}~,",
                         line(),
-                        "'methodReturnTypes' => ~{",
-                        method_return_types_doc,
-                        "}~,",
-                        line(),
-                        "'classMethodReturnTypes' => ~{",
-                        class_method_return_types_doc,
-                        "}~,",
-                        line(),
                         "'classState' => ~{",
                         class_vars_doc,
                         "}~,",
@@ -1461,7 +1203,16 @@ impl CoreErlangGenerator {
                         line(),
                         "'methodDocs' => ~{",
                         method_docs_doc,
-                        "}~",
+                        "}~,",
+                        // ADR 0050 Phase 5: Include meta map in BuilderState so that
+                        // beamtalk_object_class:init/1 can access it during on_load.
+                        // erlang:function_exported/3 returns false during on_load execution,
+                        // making Module:'__beamtalk_meta'() unavailable at registration time.
+                        line(),
+                        "'meta' => ",
+                        // include_standalone: true — standalone methods included in BuilderState.meta
+                        // so that init/1 can register their return types during on_load.
+                        Self::build_meta_map_doc(class, module, true),
                         if is_non_constructible {
                             docvec![",", line(), "'isConstructible' => 'false'"]
                         } else {
@@ -1997,6 +1748,34 @@ impl CoreErlangGenerator {
             return Ok(Document::Nil);
         };
 
+        Ok(docvec![
+            "'__beamtalk_meta'/0 = fun () ->\n",
+            "    ",
+            // include_standalone: false — standalone methods are runtime-patched, not static
+            Self::build_meta_map_doc(class, module, false),
+            "\n\n",
+        ])
+    }
+
+    /// Builds the Core Erlang map document for the static class metadata.
+    ///
+    /// Used by both `generate_meta_function` (for `__beamtalk_meta/0`) and
+    /// `generate_register_class` (for the `'meta'` key in `BuilderState`).
+    ///
+    /// ADR 0050 Phase 5: `erlang:function_exported/3` returns `false` during `on_load`,
+    /// so `__beamtalk_meta/0` cannot be called from within the `on_load` callback chain.
+    /// Including this map literal in `BuilderState` makes the data available during `init/1`.
+    ///
+    /// When `include_standalone` is `false` (used for `__beamtalk_meta/0`), standalone
+    /// Tonel-style methods (`module.method_definitions`) are excluded — they are
+    /// runtime-patched and deliberately absent from the static meta. When `true`
+    /// (used for `BuilderState.meta`), standalone methods are included so that
+    /// return-type information is available to `init/1` during `on_load`.
+    fn build_meta_map_doc(
+        class: &ClassDefinition,
+        module: &Module,
+        include_standalone: bool,
+    ) -> Document<'static> {
         let class_name = class.name.name.to_string();
         let superclass_name = class
             .superclass
@@ -2010,45 +1789,7 @@ impl CoreErlangGenerator {
             .map(|s| s.name.name.to_string())
             .collect();
 
-        // Build instance methods list (Primary methods only, using mangled selector names)
-        let mut methods: Vec<(String, usize)> = class
-            .methods
-            .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
-            .map(|m| (m.selector.to_erlang_atom(), m.selector.arity()))
-            .collect();
-
-        // Build class methods list (Primary methods only)
-        let mut class_methods: Vec<(String, usize)> = class
-            .class_methods
-            .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
-            .map(|m| (m.selector.to_erlang_atom(), m.selector.arity()))
-            .collect();
-
-        // BT-923: For `Value subclass:` classes, include auto-generated slot methods
-        // (getters, with*: setters, keyword constructor) so that reflection via
-        // `methods` / `allMethods` shows the full public interface.
-        if let Some(auto) =
-            crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class)
-        {
-            use crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods;
-            for field in &auto.getters {
-                methods.push((field.clone(), 0));
-            }
-            for field in &auto.setters {
-                let sel = AutoSlotMethods::with_star_selector(field);
-                methods.push((sel, 1));
-            }
-            if let Some(kw_sel) = &auto.keyword_constructor {
-                let arity = class.state.len();
-                class_methods.push((kw_sel.clone(), arity));
-            }
-        }
-
         let fields_doc = Self::meta_atom_list(&fields);
-        let methods_doc = Self::meta_method_tuple_list(&methods);
-        let class_methods_doc = Self::meta_method_tuple_list(&class_methods);
 
         // Boolean flags
         let is_sealed_doc = Self::meta_bool(class.is_sealed);
@@ -2062,23 +1803,26 @@ impl CoreErlangGenerator {
         // Compute auto-slot methods once and share across method_info / class_method_info
         let auto =
             crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class);
-        let method_info_doc =
-            Self::meta_method_info_map(&Self::meta_instance_method_entries(class, auto.as_ref()));
-        let class_method_info_doc =
-            Self::meta_method_info_map(&Self::meta_class_method_entries(class, auto.as_ref()));
+        let method_info_doc = Self::meta_method_info_map(&Self::meta_instance_method_entries(
+            class,
+            module,
+            auto.as_ref(),
+            include_standalone,
+        ));
+        let class_method_info_doc = Self::meta_method_info_map(&Self::meta_class_method_entries(
+            class,
+            module,
+            auto.as_ref(),
+            include_standalone,
+        ));
 
-        Ok(docvec![
-            "'__beamtalk_meta'/0 = fun () ->\n",
-            "    ~{'class' => '",
+        docvec![
+            "~{'class' => '",
             Document::String(class_name),
             "',\n      'superclass' => '",
             Document::String(superclass_name),
             "',\n      'fields' => ",
             fields_doc,
-            ",\n      'methods' => ",
-            methods_doc,
-            ",\n      'class_methods' => ",
-            class_methods_doc,
             ",\n      'is_sealed' => ",
             is_sealed_doc,
             ",\n      'is_abstract' => ",
@@ -2093,9 +1837,8 @@ impl CoreErlangGenerator {
             method_info_doc,
             ",\n      'class_method_info' => ",
             class_method_info_doc,
-            "\n    }~\n",
-            "\n",
-        ])
+            "\n    }~",
+        ]
     }
 
     /// Builds a Core Erlang atom list document from a slice of string names.
@@ -2113,32 +1856,6 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str(", "));
             }
             parts.push(docvec!["'", Document::String(name.clone()), "'"]);
-        }
-        parts.push(Document::Str("]"));
-        Document::Vec(parts)
-    }
-
-    /// Builds a Core Erlang list of `{Selector, Arity}` tuples.
-    ///
-    /// Example: `[("increment", 0), ("add:", 1)]` → `[{'increment', 0}, {'add:', 1}]`
-    /// Empty slice → `[]`
-    fn meta_method_tuple_list(methods: &[(String, usize)]) -> Document<'static> {
-        if methods.is_empty() {
-            return Document::Str("[]");
-        }
-        let mut parts: Vec<Document<'static>> = Vec::new();
-        parts.push(Document::Str("["));
-        for (i, (sel, arity)) in methods.iter().enumerate() {
-            if i > 0 {
-                parts.push(Document::Str(", "));
-            }
-            parts.push(docvec![
-                "{'",
-                Document::String(sel.clone()),
-                "', ",
-                Document::String(arity.to_string()),
-                "}",
-            ]);
         }
         parts.push(Document::Str("]"));
         Document::Vec(parts)
@@ -2182,22 +1899,34 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    /// Collects `MethodInfoEntry` tuples for all primary instance methods of `class`,
-    /// including auto-generated slot methods for Value subclasses.
     fn meta_instance_method_entries(
         class: &ClassDefinition,
+        module: &Module,
         auto: Option<&crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods>,
+        include_standalone: bool,
     ) -> Vec<MethodInfoEntry> {
+        let sealed = class.is_sealed;
         let mut entries: Vec<MethodInfoEntry> = class
             .methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(Self::meta_method_entry)
+            .map(|m| Self::meta_method_entry(m, sealed))
             .collect();
+        // BT-1005: Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
+        // but included in BuilderState.meta so init/1 can register their return types.
+        if include_standalone {
+            for standalone in module.method_definitions.iter().filter(|m| {
+                m.class_name.name == class.name.name
+                    && !m.is_class_method
+                    && m.method.kind == MethodKind::Primary
+            }) {
+                entries.push(Self::meta_method_entry(&standalone.method, sealed));
+            }
+        }
         if let Some(auto) = auto {
             use crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods;
             for field in &auto.getters {
-                entries.push((field.clone(), 0, None, vec![]));
+                entries.push((field.clone(), 0, None, vec![], sealed));
             }
             for field in &auto.setters {
                 entries.push((
@@ -2205,6 +1934,7 @@ impl CoreErlangGenerator {
                     1,
                     None,
                     vec![None],
+                    sealed,
                 ));
             }
         }
@@ -2215,25 +1945,39 @@ impl CoreErlangGenerator {
     /// including the auto-generated keyword constructor for Value subclasses.
     fn meta_class_method_entries(
         class: &ClassDefinition,
+        module: &Module,
         auto: Option<&crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods>,
+        include_standalone: bool,
     ) -> Vec<MethodInfoEntry> {
+        let sealed = class.is_sealed;
         let mut entries: Vec<MethodInfoEntry> = class
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
-            .map(Self::meta_method_entry)
+            .map(|m| Self::meta_method_entry(m, sealed))
             .collect();
+        // BT-1005: Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
+        // but included in BuilderState.meta so init/1 can register their return types.
+        if include_standalone {
+            for standalone in module.method_definitions.iter().filter(|m| {
+                m.class_name.name == class.name.name
+                    && m.is_class_method
+                    && m.method.kind == MethodKind::Primary
+            }) {
+                entries.push(Self::meta_method_entry(&standalone.method, sealed));
+            }
+        }
         if let Some(auto) = auto {
             if let Some(kw_sel) = &auto.keyword_constructor {
                 let arity = class.state.len();
-                entries.push((kw_sel.clone(), arity, None, vec![None; arity]));
+                entries.push((kw_sel.clone(), arity, None, vec![None; arity], sealed));
             }
         }
         entries
     }
 
     /// Converts a `MethodDefinition` into a `MethodInfoEntry`.
-    fn meta_method_entry(m: &MethodDefinition) -> MethodInfoEntry {
+    fn meta_method_entry(m: &MethodDefinition, class_is_sealed: bool) -> MethodInfoEntry {
         let return_type = m.return_type.as_ref().map(|rt| rt.type_name().to_string());
         let param_types: Vec<Option<String>> = m
             .parameters
@@ -2249,6 +1993,7 @@ impl CoreErlangGenerator {
             m.selector.arity(),
             return_type,
             param_types,
+            m.is_sealed || class_is_sealed,
         )
     }
 
@@ -2262,7 +2007,7 @@ impl CoreErlangGenerator {
         }
         let mut parts: Vec<Document<'static>> = Vec::new();
         parts.push(Document::Str("~{"));
-        for (i, (sel, arity, return_type, param_types)) in methods.iter().enumerate() {
+        for (i, (sel, arity, return_type, param_types, is_sealed)) in methods.iter().enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
@@ -2287,6 +2032,7 @@ impl CoreErlangGenerator {
                 Some(name) => docvec!["'", Document::String(name.clone()), "'"],
                 None => Document::Str("'none'"),
             };
+            let is_sealed_doc = if *is_sealed { "'true'" } else { "'false'" };
             parts.push(docvec![
                 "'",
                 Document::String(sel.clone()),
@@ -2296,6 +2042,8 @@ impl CoreErlangGenerator {
                 param_types_doc,
                 ", 'return_type' => ",
                 return_type_doc,
+                ", 'is_sealed' => ",
+                Document::String(is_sealed_doc.to_string()),
                 "}~",
             ]);
         }
