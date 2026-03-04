@@ -549,29 +549,6 @@ async function captureSessionId(
   }
 }
 
-/**
- * Find the position of a named symbol in a flat/nested document symbol list.
- */
-// See also: WorkspaceTreeDataProvider._findSymbolPosition (parallel implementation).
-function findSymbolPosition(
-  symbols: vscode.DocumentSymbol[] | vscode.SymbolInformation[],
-  name: string,
-  kinds: vscode.SymbolKind[]
-): vscode.Position | undefined {
-  for (const sym of symbols) {
-    // Class symbols are named "ClassName (class)" per ADR 0013 — strip the suffix.
-    const symName =
-      sym.kind === vscode.SymbolKind.Class ? sym.name.replace(/ \(class\)$/, "") : sym.name;
-    if (kinds.includes(sym.kind) && symName === name) {
-      return "range" in sym ? sym.selectionRange.start : sym.location.range.start;
-    }
-    if ("children" in sym && sym.children.length > 0) {
-      const found = findSymbolPosition(sym.children, name, kinds);
-      if (found) return found;
-    }
-  }
-  return undefined;
-}
 
 function replCommand(): string {
   const config = vscode.workspace.getConfiguration("beamtalk");
@@ -818,31 +795,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
       const className = node!.info.name;
 
-      // Try LSP document symbols first — class symbols have name_span pointing at the name.
+      // Find the class declaration position via regex.
+      // Note: executeDocumentSymbolProvider is not used here because openTextDocument
+      // does not trigger textDocument/didOpen to the LSP — symbols are only available
+      // for files already open in an editor. The regex is the reliable primary approach.
       let position: vscode.Position | undefined;
-      try {
-        const docSymbols = await vscode.commands.executeCommand<
-          vscode.DocumentSymbol[] | vscode.SymbolInformation[]
-        >("vscode.executeDocumentSymbolProvider", uri);
-        position = findSymbolPosition(docSymbols ?? [], className, [vscode.SymbolKind.Class]);
-      } catch {
-        // LSP unavailable — fall through.
-      }
-
-      if (!position) {
-        // Fallback: regex for `class ClassName` / `actor ClassName`, skipping comment lines.
-        const text = document.getText();
-        const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        // Beamtalk class declarations use `SuperClass subclass: ClassName` syntax.
-        const pattern = new RegExp(`\\bsubclass:\\s+(${escaped})(?=\\s|$)`, "g");
-        let classMatch: RegExpExecArray | null;
-        while ((classMatch = pattern.exec(text)) !== null) {
-          const lineStart = text.lastIndexOf("\n", classMatch.index) + 1;
-          const linePrefix = text.slice(lineStart, classMatch.index).trimStart();
-          if (!linePrefix.startsWith("//")) {
-            position = document.positionAt(classMatch.index + classMatch[0].indexOf(className));
-            break;
-          }
+      const text = document.getText();
+      const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // Beamtalk class declarations use `SuperClass subclass: ClassName` syntax.
+      const pattern = new RegExp(`\\bsubclass:\\s+(${escaped})(?=\\s|$)`, "g");
+      let classMatch: RegExpExecArray | null;
+      while ((classMatch = pattern.exec(text)) !== null) {
+        const lineStart = text.lastIndexOf("\n", classMatch.index) + 1;
+        const linePrefix = text.slice(lineStart, classMatch.index).trimStart();
+        if (!linePrefix.startsWith("//")) {
+          position = document.positionAt(classMatch.index + classMatch[0].indexOf(className));
+          break;
         }
       }
 
@@ -902,48 +870,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
 
-      // Use document symbols from the LSP to find the method's exact position.
+      // Find the method declaration position via regex.
+      // Note: executeDocumentSymbolProvider is not used here because openTextDocument
+      // does not trigger textDocument/didOpen to the LSP — symbols are only available
+      // for files already open in an editor. The regex is the reliable primary approach.
+      // LSP go-to-definition is used *after* showTextDocument below for precise navigation.
+      const text = document.getText();
+      const escaped = method.selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // `method <selector>` matches both instance (`method foo`) and class-side
+      // (`class method foo`) declarations since both contain `method <selector>`.
+      const pattern = new RegExp(`\\bmethod\\s+(${escaped})(?=\\s|$)`, "g");
       let position: vscode.Position | undefined;
-      try {
-        const docSymbols = await vscode.commands.executeCommand<
-          vscode.DocumentSymbol[] | vscode.SymbolInformation[]
-        >("vscode.executeDocumentSymbolProvider", uri);
-        position = findSymbolPosition(
-          docSymbols ?? [],
-          method.selector,
-          [vscode.SymbolKind.Method, vscode.SymbolKind.Function]
-        );
-      } catch {
-        // LSP unavailable — fall through to text search.
+      let methodMatch: RegExpExecArray | null;
+      while ((methodMatch = pattern.exec(text)) !== null) {
+        // Skip matches on comment lines (Beamtalk uses // comments).
+        const lineStart = text.lastIndexOf("\n", methodMatch.index) + 1;
+        const linePrefix = text.slice(lineStart, methodMatch.index).trimStart();
+        if (!linePrefix.startsWith("//")) {
+          position = document.positionAt(
+            methodMatch.index + methodMatch[0].indexOf(method.selector)
+          );
+          break;
+        }
       }
       if (!position) {
-        // Fallback: regex search for `method <selector>` (matches both instance and
-        // class-side methods — `class method foo` contains `method foo`).
-        const text = document.getText();
-        const escaped = method.selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const pattern = new RegExp(`\\bmethod\\s+(${escaped})(?=\\s|$)`, "g");
-        let methodMatch: RegExpExecArray | null;
-        while ((methodMatch = pattern.exec(text)) !== null) {
-          // Skip matches on comment lines (Beamtalk uses // comments).
-          const lineStart = text.lastIndexOf("\n", methodMatch.index) + 1;
-          const linePrefix = text.slice(lineStart, methodMatch.index).trimStart();
-          if (!linePrefix.startsWith("//")) {
-            position = document.positionAt(
-              methodMatch.index + methodMatch[0].indexOf(method.selector)
-            );
-            break;
-          }
+        const idx = text.indexOf(method.selector);
+        if (idx === -1) {
+          await vscode.window.showInformationMessage(
+            `Method '${method.selector}' not found in source for ${classInfo.name}`
+          );
+          return;
         }
-        if (!position) {
-          const idx = text.indexOf(method.selector);
-          if (idx === -1) {
-            await vscode.window.showInformationMessage(
-              `Method '${method.selector}' not found in source for ${classInfo.name}`
-            );
-            return;
-          }
-          position = document.positionAt(idx);
-        }
+        position = document.positionAt(idx);
       }
 
       // Try LSP go-to-definition for a precise location. If LSP is unavailable or
