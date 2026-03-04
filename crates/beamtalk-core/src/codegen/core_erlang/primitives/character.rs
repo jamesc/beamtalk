@@ -9,7 +9,7 @@
 //! Simple operations use direct BIFs; predicates delegate to `beamtalk_character`.
 
 use super::super::document::Document;
-use super::generate_comparison_bif;
+use super::{generate_comparison_bif, param};
 use crate::docvec;
 
 /// Character primitive implementations (BT-339).
@@ -17,7 +17,7 @@ pub(crate) fn generate_character_bif(
     selector: &str,
     params: &[String],
 ) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         // Comparison — direct integer comparison (ADR 0002: Erlang operators)
         "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),

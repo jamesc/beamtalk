@@ -17,6 +17,7 @@
 //! overrides handled by `list.rs`, `misc.rs`, and `dictionary.rs`.
 
 use super::super::document::Document;
+use super::param;
 use crate::docvec;
 
 /// Collection primitive implementations.
@@ -26,8 +27,8 @@ pub(crate) fn generate_collection_bif(
 ) -> Option<Document<'static>> {
     match selector {
         "inject:into:" => {
-            let p0 = params.first().map_or("_Initial", String::as_str);
-            let p1 = params.get(1).map_or("_Block", String::as_str);
+            let p0 = param(params, 0, "_Initial");
+            let p1 = param(params, 1, "_Block");
             Some(docvec![
                 "call 'beamtalk_collection_ops':'inject_into'(Self, ",
                 p0.to_string(),

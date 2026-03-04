@@ -6,7 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use super::super::document::Document;
-use super::generate_comparison_bif;
+use super::{generate_comparison_bif, param};
 use crate::docvec;
 
 /// String primitive implementations.
@@ -37,7 +37,7 @@ pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<D
 }
 
 fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         "++" => Some(docvec![
             "call 'erlang':'iolist_to_binary'([Self, ",
@@ -74,7 +74,7 @@ fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Do
 }
 
 fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         "includes:" => Some(docvec![
             "call 'beamtalk_string_ops':'includes'(Self, ",
@@ -114,7 +114,7 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
         "lines" => Some(Document::Str("call 'beamtalk_string_ops':'lines'(Self)")),
         "words" => Some(Document::Str("call 'beamtalk_string_ops':'words'(Self)")),
         "replaceAll:with:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'binary':'replace'(Self, ",
                 p0.to_string(),
@@ -124,7 +124,7 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
             ])
         }
         "replaceFirst:with:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'binary':'replace'(Self, ",
                 p0.to_string(),
@@ -154,7 +154,7 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
             ", 'trailing'))",
         ]),
         "padLeft:with:" | "padRight:with:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             let dir = if selector == "padLeft:with:" {
                 "'leading'"
             } else {
@@ -175,7 +175,7 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
 }
 
 fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         "isBlank" => Some(Document::Str("call 'beamtalk_string_ops':'is_blank'(Self)")),
         "isDigit" => Some(Document::Str("call 'beamtalk_string_ops':'is_digit'(Self)")),
@@ -217,7 +217,7 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
 /// These delegate to `beamtalk_regex` helper functions that accept both
 /// String patterns and compiled Regex objects.
 fn generate_string_regex_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         "matchesRegex:" => Some(docvec![
             "call 'beamtalk_regex':'matches_regex'(Self, ",
@@ -225,7 +225,7 @@ fn generate_string_regex_bif(selector: &str, params: &[String]) -> Option<Docume
             ")"
         ]),
         "matchesRegex:options:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_regex':'matches_regex_options'(Self, ",
                 p0.to_string(),
@@ -245,7 +245,7 @@ fn generate_string_regex_bif(selector: &str, params: &[String]) -> Option<Docume
             ")"
         ]),
         "replaceRegex:with:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_regex':'replace_regex'(Self, ",
                 p0.to_string(),
@@ -255,7 +255,7 @@ fn generate_string_regex_bif(selector: &str, params: &[String]) -> Option<Docume
             ])
         }
         "replaceAllRegex:with:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_regex':'replace_all_regex'(Self, ",
                 p0.to_string(),

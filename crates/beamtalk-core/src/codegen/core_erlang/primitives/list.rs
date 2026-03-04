@@ -9,7 +9,7 @@
 //! Complex operations delegate to `beamtalk_list_ops` helper module.
 
 use super::super::document::Document;
-use super::core_erlang_binary_string;
+use super::{core_erlang_binary_string, param};
 use crate::docvec;
 
 /// List primitive implementations (BT-419).
@@ -69,7 +69,7 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
             ])
         }
         "at:" => {
-            let p0 = params.first().map_or("_N", String::as_str);
+            let p0 = param(params, 0, "_N");
             Some(docvec![
                 "call 'beamtalk_list_ops':'at'(Self, ",
                 p0.to_string(),
@@ -77,12 +77,12 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
             ])
         }
         "includes:" => {
-            let p0 = params.first().map_or("_Item", String::as_str);
+            let p0 = param(params, 0, "_Item");
             Some(docvec!["call 'lists':'member'(", p0.to_string(), ", Self)"])
         }
         "sort" => Some(Document::Str("call 'lists':'sort'(Self)")),
         "sort:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
+            let p0 = param(params, 0, "_Block");
             Some(docvec![
                 "call 'beamtalk_list_ops':'sort_with'(Self, ",
                 p0.to_string(),
@@ -96,7 +96,7 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
 }
 
 fn generate_list_iteration_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Block", String::as_str);
+    let p0 = param(params, 0, "_Block");
     match selector {
         "detect:" => Some(docvec![
             "call 'beamtalk_list_ops':'detect'(Self, ",
@@ -104,7 +104,7 @@ fn generate_list_iteration_bif(selector: &str, params: &[String]) -> Option<Docu
             ")"
         ]),
         "detect:ifNone:" => {
-            let p1 = params.get(1).map_or("_Default", String::as_str);
+            let p1 = param(params, 1, "_Default");
             Some(docvec![
                 "call 'beamtalk_list_ops':'detect_if_none'(Self, ",
                 p0.to_string(),
@@ -126,7 +126,7 @@ fn generate_list_iteration_bif(selector: &str, params: &[String]) -> Option<Docu
             ")"
         ]),
         "inject:into:" => {
-            let p1 = params.get(1).map_or("_Block", String::as_str);
+            let p1 = param(params, 1, "_Block");
             Some(docvec![
                 "call 'beamtalk_collection_ops':'inject_into'(Self, ",
                 p0.to_string(),
@@ -165,7 +165,7 @@ fn generate_list_iteration_bif(selector: &str, params: &[String]) -> Option<Docu
 fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         "zip:" => {
-            let p0 = params.first().map_or("_Other", String::as_str);
+            let p0 = param(params, 0, "_Other");
             Some(docvec![
                 "call 'beamtalk_list_ops':'zip'(Self, ",
                 p0.to_string(),
@@ -173,7 +173,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
             ])
         }
         "groupBy:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
+            let p0 = param(params, 0, "_Block");
             Some(docvec![
                 "call 'beamtalk_list_ops':'group_by'(Self, ",
                 p0.to_string(),
@@ -181,7 +181,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
             ])
         }
         "partition:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
+            let p0 = param(params, 0, "_Block");
             Some(docvec![
                 "call 'beamtalk_list_ops':'partition'(Self, ",
                 p0.to_string(),
@@ -189,7 +189,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
             ])
         }
         "takeWhile:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
+            let p0 = param(params, 0, "_Block");
             Some(docvec![
                 "call 'lists':'takewhile'(",
                 p0.to_string(),
@@ -197,7 +197,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
             ])
         }
         "dropWhile:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
+            let p0 = param(params, 0, "_Block");
             Some(docvec![
                 "call 'lists':'dropwhile'(",
                 p0.to_string(),
@@ -205,7 +205,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
             ])
         }
         "intersperse:" => {
-            let p0 = params.first().map_or("_Sep", String::as_str);
+            let p0 = param(params, 0, "_Sep");
             Some(docvec![
                 "call 'beamtalk_list_ops':'intersperse'(Self, ",
                 p0.to_string(),
@@ -213,11 +213,11 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
             ])
         }
         "addFirst:" => {
-            let p0 = params.first().map_or("_Item", String::as_str);
+            let p0 = param(params, 0, "_Item");
             Some(docvec!["[", p0.to_string(), "|Self]"])
         }
         "add:" => {
-            let p0 = params.first().map_or("_Item", String::as_str);
+            let p0 = param(params, 0, "_Item");
             Some(docvec![
                 "call 'erlang':'++'(Self, [",
                 p0.to_string(),
@@ -225,12 +225,12 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
             ])
         }
         "++" => {
-            let p0 = params.first().map_or("_Other", String::as_str);
+            let p0 = param(params, 0, "_Other");
             Some(docvec!["call 'erlang':'++'(Self, ", p0.to_string(), ")"])
         }
         "from:to:" => {
-            let p0 = params.first().map_or("_Start", String::as_str);
-            let p1 = params.get(1).map_or("_End", String::as_str);
+            let p0 = param(params, 0, "_Start");
+            let p1 = param(params, 1, "_End");
             Some(docvec![
                 "call 'beamtalk_list_ops':'from_to'(Self, ",
                 p0.to_string(),
@@ -246,7 +246,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
         "atRandom" => Some(Document::Str("call 'beamtalk_random':'atRandom'(Self)")),
         "join" => Some(Document::Str("call 'erlang':'iolist_to_binary'(Self)")),
         "join:" => {
-            let p0 = params.first().map_or("_Sep", String::as_str);
+            let p0 = param(params, 0, "_Sep");
             Some(docvec![
                 "call 'erlang':'iolist_to_binary'(call 'lists':'join'(",
                 p0.to_string(),
@@ -255,7 +255,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
         }
         // Class-side factory: List class withAll: list is identity (list is already a List)
         "withAll:" => {
-            let p0 = params.first().map_or("_List", String::as_str);
+            let p0 = param(params, 0, "_List");
             Some(Document::String(p0.to_string()))
         }
         _ => None,

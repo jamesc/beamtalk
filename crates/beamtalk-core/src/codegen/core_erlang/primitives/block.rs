@@ -6,6 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use super::super::document::Document;
+use super::param;
 use crate::docvec;
 
 /// Block primitive implementations.
@@ -19,7 +20,7 @@ pub(crate) fn generate_block_bif(selector: &str, params: &[String]) -> Option<Do
             ))
         }
         "valueWithArguments:" => {
-            let p0 = params.first().map_or("_Args", String::as_str);
+            let p0 = param(params, 0, "_Args");
             Some(docvec!["call 'erlang':'apply'(Self, ", p0.to_string(), ")"])
         }
         // on:do: and ensure: are structural intrinsics handled at the call site

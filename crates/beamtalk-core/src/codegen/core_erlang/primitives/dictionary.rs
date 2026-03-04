@@ -8,6 +8,7 @@
 //! Dictionaries are Erlang maps — immutable key-value collections.
 
 use super::super::document::Document;
+use super::param;
 use crate::docvec;
 
 /// Dictionary primitive implementations (BT-418).
@@ -20,12 +21,12 @@ pub(crate) fn generate_dictionary_bif(
         "keys" => Some(Document::Str("call 'maps':'keys'(Self)")),
         "values" => Some(Document::Str("call 'maps':'values'(Self)")),
         "at:" => {
-            let p0 = params.first().map_or("_Key", String::as_str);
+            let p0 = param(params, 0, "_Key");
             Some(docvec!["call 'maps':'get'(", p0.to_string(), ", Self)"])
         }
         "at:ifAbsent:" => {
-            let p0 = params.first().map_or("_Key", String::as_str);
-            let p1 = params.get(1).map_or("_Block", String::as_str);
+            let p0 = param(params, 0, "_Key");
+            let p1 = param(params, 1, "_Block");
             Some(docvec![
                 "call 'beamtalk_map_ops':'at_if_absent'(Self, ",
                 p0.to_string(),
@@ -35,8 +36,8 @@ pub(crate) fn generate_dictionary_bif(
             ])
         }
         "at:put:" => {
-            let p0 = params.first().map_or("_Key", String::as_str);
-            let p1 = params.get(1).map_or("_Value", String::as_str);
+            let p0 = param(params, 0, "_Key");
+            let p1 = param(params, 1, "_Value");
             Some(docvec![
                 "call 'maps':'put'(",
                 p0.to_string(),
@@ -46,19 +47,19 @@ pub(crate) fn generate_dictionary_bif(
             ])
         }
         "includesKey:" => {
-            let p0 = params.first().map_or("_Key", String::as_str);
+            let p0 = param(params, 0, "_Key");
             Some(docvec!["call 'maps':'is_key'(", p0.to_string(), ", Self)"])
         }
         "removeKey:" => {
-            let p0 = params.first().map_or("_Key", String::as_str);
+            let p0 = param(params, 0, "_Key");
             Some(docvec!["call 'maps':'remove'(", p0.to_string(), ", Self)"])
         }
         "merge:" => {
-            let p0 = params.first().map_or("_Other", String::as_str);
+            let p0 = param(params, 0, "_Other");
             Some(docvec!["call 'maps':'merge'(Self, ", p0.to_string(), ")"])
         }
         "doWithKey:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
+            let p0 = param(params, 0, "_Block");
             Some(docvec![
                 "call 'beamtalk_map_ops':'do_with_key'(Self, ",
                 p0.to_string(),
@@ -66,7 +67,7 @@ pub(crate) fn generate_dictionary_bif(
             ])
         }
         "do:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
+            let p0 = param(params, 0, "_Block");
             Some(docvec![
                 "call 'beamtalk_map_ops':'do'(Self, ",
                 p0.to_string(),
@@ -74,7 +75,7 @@ pub(crate) fn generate_dictionary_bif(
             ])
         }
         "includes:" => {
-            let p0 = params.first().map_or("_Element", String::as_str);
+            let p0 = param(params, 0, "_Element");
             Some(docvec![
                 "call 'beamtalk_map_ops':'includes'(Self, ",
                 p0.to_string(),
