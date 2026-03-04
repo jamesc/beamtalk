@@ -540,6 +540,63 @@ ensure_wrapped_3_undef_empty_stacktrace_test() ->
     ?assertEqual(<<"Undefined function">>, Inner#beamtalk_error.message).
 
 %%% ===================================================================
+%%% class_to_kind/1 tests — pure, no class system needed
+%%% ===================================================================
+
+class_to_kind_instantiation_error_test() ->
+    ?assertEqual(
+        instantiation_error, beamtalk_exception_handler:class_to_kind('InstantiationError')
+    ).
+
+class_to_kind_type_error_test() ->
+    ?assertEqual(type_error, beamtalk_exception_handler:class_to_kind('TypeError')).
+
+class_to_kind_unknown_falls_back_to_signal_test() ->
+    ?assertEqual(signal, beamtalk_exception_handler:class_to_kind('SomeUserClass')).
+
+class_to_kind_error_falls_back_to_signal_test() ->
+    ?assertEqual(signal, beamtalk_exception_handler:class_to_kind('Error')).
+
+class_to_kind_runtime_error_falls_back_to_signal_test() ->
+    ?assertEqual(signal, beamtalk_exception_handler:class_to_kind('RuntimeError')).
+
+%%% ===================================================================
+%%% ensure_wrapped/3 — future_rejected unwrapping (BT-869)
+%%% ===================================================================
+
+ensure_wrapped_3_throw_future_rejected_beamtalk_error_test() ->
+    %% future_rejected with a raw beamtalk_error should be unwrapped and wrapped
+    Inner = beamtalk_error:new(type_error, 'Future'),
+    Reason = {future_rejected, Inner},
+    Result = beamtalk_exception_handler:ensure_wrapped(throw, Reason, []),
+    ?assertMatch(#{'$beamtalk_class' := 'TypeError', error := _}, Result),
+    #{error := WrappedInner} = Result,
+    ?assertEqual(type_error, WrappedInner#beamtalk_error.kind).
+
+ensure_wrapped_3_throw_future_rejected_already_wrapped_test() ->
+    %% future_rejected with an already-wrapped map should pass through
+    Inner = beamtalk_error:new(does_not_understand, 'Integer'),
+    AlreadyWrapped = beamtalk_exception_handler:wrap(Inner),
+    Reason = {future_rejected, AlreadyWrapped},
+    Result = beamtalk_exception_handler:ensure_wrapped(throw, Reason, []),
+    ?assertMatch(#{'$beamtalk_class' := 'RuntimeError', error := _}, Result).
+
+ensure_wrapped_3_throw_future_rejected_error_tuple_test() ->
+    %% future_rejected with {error, WrappedMap} should also be unwrapped
+    Inner = beamtalk_error:new(runtime_error, 'Actor'),
+    AlreadyWrapped = beamtalk_exception_handler:wrap(Inner),
+    Reason = {future_rejected, {error, AlreadyWrapped}},
+    Result = beamtalk_exception_handler:ensure_wrapped(throw, Reason, []),
+    ?assertMatch(#{'$beamtalk_class' := 'RuntimeError', error := _}, Result).
+
+ensure_wrapped_3_throw_non_future_wraps_as_throw_error_test() ->
+    %% Non-future_rejected throw becomes ThrowError
+    Result = beamtalk_exception_handler:ensure_wrapped(throw, some_reason, []),
+    ?assertMatch(#{'$beamtalk_class' := 'ThrowError', error := _}, Result),
+    #{error := Inner} = Result,
+    ?assertEqual(erlang_throw, Inner#beamtalk_error.kind).
+
+%%% ===================================================================
 %%% wrap_raw/1 — badarity wrapping
 %%% ===================================================================
 
