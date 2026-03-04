@@ -11,7 +11,7 @@
 //! `StackFrame`, `JSON`, `Future`, `FileHandle`.
 
 use super::super::document::Document;
-use super::{binary_bif, ops_dispatch};
+use super::{binary_bif, ops_dispatch, param};
 use crate::docvec;
 
 /// File primitive implementations (BT-336, BT-513).
@@ -19,7 +19,7 @@ use crate::docvec;
 /// File class methods delegate directly to `beamtalk_file` runtime module.
 /// These are class-level methods (no Self parameter needed).
 pub(crate) fn generate_file_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         "exists:" => Some(docvec![
             "call 'beamtalk_file':'exists:'(",
@@ -32,7 +32,7 @@ pub(crate) fn generate_file_bif(selector: &str, params: &[String]) -> Option<Doc
             ")"
         ]),
         "writeAll:contents:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_file':'writeAll:contents:'(",
                 p0.to_string(),
@@ -47,7 +47,7 @@ pub(crate) fn generate_file_bif(selector: &str, params: &[String]) -> Option<Doc
             ")"
         ]),
         "open:do:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_file':'open:do:'(",
                 p0.to_string(),
@@ -92,7 +92,7 @@ pub(crate) fn generate_exception_bif(
             "call 'beamtalk_exception_handler':'dispatch'('signal', [], Self)",
         )),
         "signal:" => {
-            let p0 = params.first().map_or("_Msg", String::as_str);
+            let p0 = param(params, 0, "_Msg");
             Some(docvec![
                 "call 'beamtalk_exception_handler':'dispatch'('signal:', [",
                 p0.to_string(),
@@ -191,7 +191,7 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
         }
         "asString" => Some(Document::Str("call 'beamtalk_tuple_ops':'as_string'(Self)")),
         "do:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
+            let p0 = param(params, 0, "_Block");
             Some(docvec![
                 "call 'beamtalk_tuple_ops':'do'(Self, ",
                 p0.to_string(),
@@ -200,7 +200,7 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
         }
         "atRandom" => Some(Document::Str("call 'beamtalk_random':'atRandom'(Self)")),
         "withAll:" => {
-            let p0 = params.first().map_or("_List", String::as_str);
+            let p0 = param(params, 0, "_List");
             Some(docvec![
                 "call 'erlang':'list_to_tuple'(",
                 p0.to_string(),
@@ -228,7 +228,7 @@ pub(crate) fn generate_object_bif(
 pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         "fromList:" | "withAll:" => {
-            let p0 = params.first().map_or("_List", String::as_str);
+            let p0 = param(params, 0, "_List");
             Some(docvec![
                 "call 'beamtalk_set_ops':'from_list'(",
                 p0.to_string(),
@@ -238,7 +238,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
         "size" => Some(Document::Str("call 'beamtalk_set_ops':'size'(Self)")),
         "isEmpty" => Some(Document::Str("call 'beamtalk_set_ops':'is_empty'(Self)")),
         "includes:" => {
-            let p0 = params.first().map_or("_Element", String::as_str);
+            let p0 = param(params, 0, "_Element");
             Some(docvec![
                 "call 'beamtalk_set_ops':'includes'(Self, ",
                 p0.to_string(),
@@ -246,7 +246,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             ])
         }
         "add:" => {
-            let p0 = params.first().map_or("_Element", String::as_str);
+            let p0 = param(params, 0, "_Element");
             Some(docvec![
                 "call 'beamtalk_set_ops':'add'(Self, ",
                 p0.to_string(),
@@ -254,7 +254,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             ])
         }
         "remove:" => {
-            let p0 = params.first().map_or("_Element", String::as_str);
+            let p0 = param(params, 0, "_Element");
             Some(docvec![
                 "call 'beamtalk_set_ops':'remove'(Self, ",
                 p0.to_string(),
@@ -262,7 +262,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             ])
         }
         "union:" => {
-            let p0 = params.first().map_or("_Other", String::as_str);
+            let p0 = param(params, 0, "_Other");
             Some(docvec![
                 "call 'beamtalk_set_ops':'union'(Self, ",
                 p0.to_string(),
@@ -270,7 +270,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             ])
         }
         "intersection:" => {
-            let p0 = params.first().map_or("_Other", String::as_str);
+            let p0 = param(params, 0, "_Other");
             Some(docvec![
                 "call 'beamtalk_set_ops':'intersection'(Self, ",
                 p0.to_string(),
@@ -278,7 +278,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             ])
         }
         "difference:" => {
-            let p0 = params.first().map_or("_Other", String::as_str);
+            let p0 = param(params, 0, "_Other");
             Some(docvec![
                 "call 'beamtalk_set_ops':'difference'(Self, ",
                 p0.to_string(),
@@ -286,7 +286,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             ])
         }
         "isSubsetOf:" => {
-            let p0 = params.first().map_or("_Other", String::as_str);
+            let p0 = param(params, 0, "_Other");
             Some(docvec![
                 "call 'beamtalk_set_ops':'is_subset_of'(Self, ",
                 p0.to_string(),
@@ -295,7 +295,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
         }
         "asList" => Some(Document::Str("call 'beamtalk_set_ops':'as_list'(Self)")),
         "do:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
+            let p0 = param(params, 0, "_Block");
             Some(docvec![
                 "call 'beamtalk_set_ops':'do'(Self, ",
                 p0.to_string(),
@@ -339,8 +339,8 @@ pub(crate) fn generate_test_case_bif(
 ) -> Option<Document<'static>> {
     match selector {
         "should:raise:" => {
-            let p0 = params.first().map_or("_Block", String::as_str);
-            let p1 = params.get(1).map_or("_ErrorKind", String::as_str);
+            let p0 = param(params, 0, "_Block");
+            let p1 = param(params, 1, "_ErrorKind");
             Some(docvec![
                 "call 'beamtalk_test_case':'should_raise'(",
                 p0.to_string(),
@@ -350,7 +350,7 @@ pub(crate) fn generate_test_case_bif(
             ])
         }
         "fail:" => {
-            let p0 = params.first().map_or("_Message", String::as_str);
+            let p0 = param(params, 0, "_Message");
             Some(docvec![
                 "call 'beamtalk_test_case':'fail'(",
                 p0.to_string(),
@@ -370,7 +370,7 @@ pub(crate) fn generate_test_case_bif(
                  call 'beamtalk_test_case':'run_all'(_RunClassName)",
         )),
         "run:" => {
-            let p0 = params.first().map_or("_TestName", String::as_str);
+            let p0 = param(params, 0, "_TestName");
             Some(docvec![
                 "let <_RunTag2> = call 'erlang':'element'(2, ClassSelf) in \
                  let <_RunTagStr2> = call 'erlang':'atom_to_list'(_RunTag2) in \
@@ -402,7 +402,7 @@ pub(crate) fn generate_test_runner_bif(
         "runAll" => Some(Document::Str("call 'beamtalk_test_runner':'run_all'()")),
         // Class-side: run all tests in a single class
         "run:" => {
-            let p0 = params.first().map_or("_TestClass", String::as_str);
+            let p0 = param(params, 0, "_TestClass");
             Some(docvec![
                 "call 'beamtalk_test_runner':'run_class'(",
                 p0.to_string(),
@@ -411,8 +411,8 @@ pub(crate) fn generate_test_runner_bif(
         }
         // Class-side: run a single test method in a class
         "run:method:" => {
-            let p0 = params.first().map_or("_TestClass", String::as_str);
-            let p1 = params.get(1).map_or("_TestName", String::as_str);
+            let p0 = param(params, 0, "_TestClass");
+            let p1 = param(params, 1, "_TestName");
             Some(docvec![
                 "call 'beamtalk_test_runner':'run_method'(",
                 p0.to_string(),
@@ -517,7 +517,7 @@ pub(crate) fn generate_reference_bif(
 /// Class-side constructors delegate to `beamtalk_stream` module.
 /// Instance methods delegate to `beamtalk_stream` module with Self as first arg.
 pub(crate) fn generate_stream_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         // Class-side constructors
         "from:" => Some(docvec![
@@ -526,7 +526,7 @@ pub(crate) fn generate_stream_bif(selector: &str, params: &[String]) -> Option<D
             ")"
         ]),
         "from:by:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_stream':'from_by'(",
                 p0.to_string(),
@@ -569,7 +569,7 @@ pub(crate) fn generate_stream_bif(selector: &str, params: &[String]) -> Option<D
             ")"
         ]),
         "inject:into:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_stream':'inject_into'(Self, ",
                 p0.to_string(),
@@ -604,8 +604,8 @@ pub(crate) fn generate_stream_bif(selector: &str, params: &[String]) -> Option<D
 /// System class methods delegate directly to `beamtalk_system` runtime module.
 /// These are class-level methods (no Self parameter needed).
 pub(crate) fn generate_system_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
-    let p1 = params.get(1).map_or("_Arg1", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
+    let p1 = param(params, 1, "_Arg1");
     match selector {
         "getEnv:" => Some(docvec![
             "call 'beamtalk_system':'getEnv:'(",
@@ -635,7 +635,7 @@ pub(crate) fn generate_system_bif(selector: &str, params: &[String]) -> Option<D
 /// Instance methods use explicit state via `rand:uniform_s`.
 /// Instance state is a tagged map with `$beamtalk_class => 'Random'`.
 pub(crate) fn generate_random_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         // Class-side (process dictionary seed)
         "next" => Some(Document::Str("call 'beamtalk_random':'next'()")),
@@ -667,7 +667,7 @@ pub(crate) fn generate_random_bif(selector: &str, params: &[String]) -> Option<D
 /// JSON class methods delegate directly to `beamtalk_json` runtime module.
 /// These are class-level methods (no Self parameter needed).
 pub(crate) fn generate_json_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         "parse:" => Some(docvec![
             "call 'beamtalk_json':'parse:'(",
@@ -693,7 +693,7 @@ pub(crate) fn generate_json_bif(selector: &str, params: &[String]) -> Option<Doc
 /// Regex class methods delegate to `beamtalk_regex` runtime module.
 /// Instance methods (source, printString) operate on Self.
 pub(crate) fn generate_regex_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         "from:" => Some(docvec![
             "call 'beamtalk_regex':'from:'(",
@@ -701,7 +701,7 @@ pub(crate) fn generate_regex_bif(selector: &str, params: &[String]) -> Option<Do
             ")"
         ]),
         "from:options:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_regex':'from:options:'(",
                 p0.to_string(),
@@ -726,7 +726,7 @@ pub(crate) fn generate_datetime_bif(
     selector: &str,
     params: &[String],
 ) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         // Class methods
         "now"
@@ -749,8 +749,8 @@ fn generate_datetime_class_bif(
         "now" => Some(Document::Str("call 'beamtalk_datetime':'now'()")),
         "monotonicNow" => Some(Document::Str("call 'beamtalk_datetime':'monotonicNow'()")),
         "year:month:day:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
-            let p2 = params.get(2).map_or("_Arg2", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
+            let p2 = param(params, 2, "_Arg2");
             Some(docvec![
                 "call 'beamtalk_datetime':'year:month:day:'(",
                 p0.to_string(),
@@ -762,11 +762,11 @@ fn generate_datetime_class_bif(
             ])
         }
         "year:month:day:hour:minute:second:" => {
-            let p1 = params.get(1).map_or("_Arg1", String::as_str);
-            let p2 = params.get(2).map_or("_Arg2", String::as_str);
-            let p3 = params.get(3).map_or("_Arg3", String::as_str);
-            let p4 = params.get(4).map_or("_Arg4", String::as_str);
-            let p5 = params.get(5).map_or("_Arg5", String::as_str);
+            let p1 = param(params, 1, "_Arg1");
+            let p2 = param(params, 2, "_Arg2");
+            let p3 = param(params, 3, "_Arg3");
+            let p4 = param(params, 4, "_Arg4");
+            let p5 = param(params, 5, "_Arg5");
             Some(docvec![
                 "call 'beamtalk_datetime':'year:month:day:hour:minute:second:'(",
                 p0.to_string(),
@@ -873,7 +873,7 @@ fn generate_datetime_instance_bif(selector: &str, p0: &str) -> Option<Document<'
 /// (intercepted by `dispatch_codegen` before reaching here), so these BIFs
 /// serve dynamic-dispatch use cases (e.g., `perform:`).
 pub(crate) fn generate_future_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = params.first().map_or("_Arg0", String::as_str);
+    let p0 = param(params, 0, "_Arg0");
     match selector {
         "await" => Some(Document::Str("call 'beamtalk_future':'await'(Self)")),
         "awaitForever" => Some(Document::Str(

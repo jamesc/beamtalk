@@ -120,6 +120,16 @@ pub(crate) fn binary_bif(erlang_op: &'static str, params: &[String]) -> Option<D
     ])
 }
 
+/// Extracts the parameter at `index` from `params`, returning `default` if the
+/// index is out of bounds.
+///
+/// The conventional default names follow the `_ArgN` pattern (e.g., `_Arg0`,
+/// `_Arg1`), though callers may use descriptive names like `_Block` or `_Key`
+/// to clarify the role of a generated Core Erlang variable.
+pub(crate) fn param<'a>(params: &'a [String], index: usize, default: &'static str) -> &'a str {
+    params.get(index).map_or(default, String::as_str)
+}
+
 /// Returns power implementation: `call 'math':'pow'(Self, Param0)`
 pub(crate) fn power_bif(params: &[String]) -> Option<Document<'static>> {
     let p0 = params.first()?;
