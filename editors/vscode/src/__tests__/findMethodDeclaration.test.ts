@@ -74,6 +74,9 @@ Actor subclass: SchemeEnv
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function lineOf(text: string, offset: number): number {
+  if (offset < 0) {
+    throw new Error("Expected non-negative offset from declaration lookup");
+  }
   return text.slice(0, offset).split("\n").length - 1;
 }
 
@@ -384,5 +387,67 @@ describe("extractMethodDocComment", () => {
   it("works with keyword selectors (env.bt lookup:)", () => {
     const doc = extractMethodDocComment(ENV_BT, "lookup:", "instance");
     expect(doc).toBe("Look up `name` in this frame, then walk parent frames until found.");
+  });
+});
+
+// ─── Typed method/state var tests ────────────────────────────────────────────
+
+const TYPED_BT = `\
+Object subclass: TypedAccount
+  state: balance: Integer = 0
+  state: owner: String = ""
+
+  /// Returns current balance.
+  balance -> Integer => self.balance
+
+  deposit: amount: Integer -> Integer =>
+    self.balance := self.balance + amount
+    self.balance
+`;
+
+describe("findMethodDeclaration — typed declarations", () => {
+  it("finds a typed unary method (balance -> Integer =>)", () => {
+    const offset = findMethodDeclaration(TYPED_BT, "balance", "instance");
+    expect(offset).not.toBe(-1);
+    const line = lineOf(TYPED_BT, offset);
+    expect(TYPED_BT.split("\n")[line]).toMatch(/balance\s*->/);
+  });
+
+  it("finds a typed keyword method (deposit:)", () => {
+    const offset = findMethodDeclaration(TYPED_BT, "deposit:", "instance");
+    expect(offset).not.toBe(-1);
+    const line = lineOf(TYPED_BT, offset);
+    expect(TYPED_BT.split("\n")[line]).toMatch(/deposit:/);
+  });
+
+  it("extracts doc comment for typed unary method", () => {
+    const doc = extractMethodDocComment(TYPED_BT, "balance", "instance");
+    expect(doc).toBe("Returns current balance.");
+  });
+});
+
+describe("findStateVarDeclaration — typed state vars", () => {
+  it("finds typed state var 'balance: Integer'", () => {
+    const offset = findStateVarDeclaration(TYPED_BT, "balance");
+    expect(offset).not.toBe(-1);
+    expect(TYPED_BT.slice(offset, offset + 7)).toBe("balance");
+  });
+
+  it("finds typed state var 'owner: String'", () => {
+    const offset = findStateVarDeclaration(TYPED_BT, "owner");
+    expect(offset).not.toBe(-1);
+    expect(TYPED_BT.slice(offset, offset + 5)).toBe("owner");
+  });
+});
+
+describe("extractStateVarInfo — typed state vars", () => {
+  it("extracts default value for typed state var", () => {
+    const info = extractStateVarInfo(TYPED_BT, "balance");
+    expect(info?.defaultValue).toBe("0");
+  });
+
+  it("extracts empty string default for typed string state var", () => {
+    const info = extractStateVarInfo(TYPED_BT, "owner");
+    expect(info?.defaultValue).toBe('""');
   });
 });

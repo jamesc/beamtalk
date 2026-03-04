@@ -235,9 +235,11 @@ export class WorkspaceClient {
       methods?: Array<{ name: string; selector: string; side: "instance" | "class" }>;
       state_vars?: string[];
     };
+    const methods = Array.isArray(resp.methods) ? resp.methods : [];
+    const stateVarsRaw = Array.isArray(resp.state_vars) ? resp.state_vars : [];
     return {
-      methods: resp.methods ?? [],
-      stateVars: (resp.state_vars ?? []).map((name) => ({ name })),
+      methods,
+      stateVars: stateVarsRaw.map((name) => ({ name })),
     };
   }
 

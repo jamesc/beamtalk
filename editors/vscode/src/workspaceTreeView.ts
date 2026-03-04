@@ -454,7 +454,6 @@ export class WorkspaceTreeDataProvider
       );
       if (!hovers || hovers.length === 0) return undefined;
       const md = new vscode.MarkdownString();
-      md.isTrusted = true;
       for (const hover of hovers) {
         const contents = Array.isArray(hover.contents) ? hover.contents : [hover.contents];
         for (const c of contents) {
@@ -537,7 +536,6 @@ export class WorkspaceTreeDataProvider
       );
       if (!comment) return undefined;
       const md = new vscode.MarkdownString(comment);
-      md.isTrusted = true;
       return md;
     } catch {
       return undefined;

@@ -398,7 +398,7 @@ function disconnectWorkspace(reason: "port-removed"): void {
   workspaceTreeProvider?.setClient(null);
   transcriptViewProvider?.setClient(null);
 
-  replRunning = false;
+  setReplRunning(false);
   outputChannel?.info(`Disconnected from workspace ${id}: ${reason}`);
 
   if (reason === "port-removed") {
@@ -917,7 +917,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "beamtalk.navigateToStateVar",
-      async (node: StateVarItemNode) => {
+      async (node?: StateVarItemNode) => {
+        if (!node || node.kind !== "state-item") {
+          await vscode.window.showInformationMessage(
+            "Select a state variable in Workspace Explorer first."
+          );
+          return;
+        }
         const { classInfo, stateVar } = node;
         const sourceFile = classInfo.source_file;
         if (!sourceFile || sourceFile === "unknown") {

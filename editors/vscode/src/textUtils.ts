@@ -4,24 +4,31 @@
 /**
  * Build a regex matching a Beamtalk method head (selector + optional params + `=>`).
  *
- * Unary selectors (`run`) match `run =>`.
+ * Unary selectors (`run`) match `run =>` and optionally `run -> Type =>`.
  * Keyword selectors (`lookup:depth:`) match `lookup: <ident> depth: <ident> =>`
  * by inserting `\s+\w+` after each keyword part to account for parameter names.
+ * Typed params (`lookup: name: String`) and typed returns (`-> Integer`) are also handled.
  *
  * The returned regex captures the full head (including param names) in group 1.
  */
 function methodHeadPattern(selector: string): RegExp {
   if (!selector.includes(":")) {
     const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`^(${esc})\\s*=>`);
+    // Allow optional return-type annotation: `selector -> Type =>`
+    return new RegExp(`^(${esc}(?:\\s*->\\s*\\w+)?)\\s*=>`);
   }
   const parts = selector.split(":").filter((p) => p.length > 0);
-  const pat = parts.map((p) => `${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\\s+\\w+`).join("\\s+");
-  return new RegExp(`^(${pat})\\s*=>`);
+  // Each keyword part takes a parameter name with optional type: `name` or `name: Type`
+  const pat = parts
+    .map((p) => `${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\\s+\\w+(?:\\s*:\\s*\\w+)?`)
+    .join("\\s+");
+  // Allow optional return-type annotation after parameters: `... -> Type =>`
+  return new RegExp(`^(${pat}(?:\\s*->\\s*\\w+)?)\\s*=>`);
 }
 
 /**
  * Extract display info from a `state: varName = default  // comment` declaration.
+ * Also handles typed state vars: `state: varName: Type = default  // comment`.
  *
  * Returns `{ defaultValue, comment }` where either may be undefined if not present.
  * Returns undefined if the declaration is not found.
@@ -31,8 +38,8 @@ export function extractStateVarInfo(
   name: string
 ): { defaultValue?: string; comment?: string } | undefined {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // Match `state: name = <rest>` — capture everything after `=`
-  const re = new RegExp(`^state:\\s+${esc}\\s*=\\s*(.+)$`);
+  // Match `state: name = <rest>` or `state: name: Type = <rest>`
+  const re = new RegExp(`^state:\\s+${esc}(?:\\s*:\\s*[^=]+)?\\s*=\\s*(.+)$`);
   for (const line of text.split("\n")) {
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//")) continue;
@@ -53,12 +60,14 @@ export function extractStateVarInfo(
 
 /**
  * Find a `state: varName = ...` declaration in Beamtalk source text.
+ * Also handles typed state vars: `state: varName: Type = ...`.
  *
  * Returns the character offset of `varName`, or -1 if not found.
  */
 export function findStateVarDeclaration(text: string, name: string): number {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`^(state:\\s+)${esc}\\s*=`);
+  // Allow optional type annotation: `state: name: Type =` or `state: name =`
+  const re = new RegExp(`^(state:\\s+)${esc}(?:\\s*:\\s*[^=]+)?\\s*=`);
   const lines = text.split("\n");
   let offset = 0;
   for (const line of lines) {
