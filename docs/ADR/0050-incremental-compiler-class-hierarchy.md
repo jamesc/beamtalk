@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-03-04)
+Accepted (2026-03-04)
 
 ## Context
 
@@ -348,6 +348,22 @@ The `__beamtalk_meta/0` format change is managed across two phases:
 **Format versioning**: Crash recovery scans all loaded modules, which may include classes compiled before this ADR (old `__beamtalk_meta/0` format, missing `method_info`, `field_types`, flags). Recovery must treat absent keys as their zero values (`method_info => #{}`, `is_sealed => false`, etc.) rather than crashing. Consider adding a `meta_version => 2` key in Phase 1 so recovery can distinguish old-format modules and skip or degrade gracefully.
 
 **Phase 4 (breaking, after consumers migrated)**: Old tuple-list format removed. By this point all consumers read from the new map keys. This is an internal change — `__beamtalk_meta/0` is not part of the public BEAM interop API (ADR 0028).
+
+## Implementation Tracking
+
+**Epic:** BT-1073 — Incremental Compiler ClassHierarchy via BEAM Metadata Streaming (ADR 0050)
+**Issues:** BT-1074 (Phase 1), BT-1075 (Phase 2), BT-1076 (Phase 3), BT-1077 (Phase 4), BT-1078 (Phase 5)
+**Status:** Planned
+
+| Phase | Issue | Title | Size |
+|-------|-------|-------|------|
+| 1 | BT-1074 | Extend `__beamtalk_meta/0` codegen with full ClassInfo fields | M |
+| 2 | BT-1075 | Migrate `__beamtalk_meta/0` consumers to new map keys | S |
+| 3 | BT-1076 | Add class cache and registration hook to `beamtalk_compiler_server` | M |
+| 4 | BT-1077 | Add `ClassHierarchy::add_from_beam_meta` and wire into port requests | M |
+| 5 | BT-1078 | BuilderState simplification: remove static metadata duplication | M |
+
+**Start here:** BT-1074 (Phase 1, no dependencies)
 
 ## References
 
