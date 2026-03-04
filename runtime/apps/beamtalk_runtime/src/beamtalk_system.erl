@@ -3,7 +3,7 @@
 
 %%% @doc System class implementation — OS environment, platform, and process info.
 %%%
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** Object System Context
 %%%
 %%% System provides class-side methods for accessing environment variables,
 %%% detecting the operating system and architecture, and querying process info.

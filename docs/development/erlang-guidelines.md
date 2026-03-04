@@ -42,6 +42,18 @@ When generating Core Erlang or Erlang source:
 - Document public API functions
 - Include DDD Context annotation using **triple `%`** (module-level style): `%%% **DDD Context:** ContextName` — never `%%`
 
+**Valid DDD Context labels** (use exactly one of these 7):
+
+| Context | Used for |
+|---|---|
+| `Actor System Context` | Actor lifecycle, supervision, message delivery between processes |
+| `Concurrency Context` | Futures, promises, async synchronization primitives |
+| `Object System Context` | Classes, methods, dispatch, metaclasses, instances, standard library ops |
+| `Hot Reload Context` | Hot code reload, state migration |
+| `Workspace Context` | Workspace state, session management, configuration |
+| `REPL Session Context` | REPL evaluation, protocol, commands, transcript, I/O capture |
+| `Compilation (Anti-Corruption Layer)` | Compiler infrastructure bridging Rust compiler to BEAM |
+
 ---
 
 ## Core Erlang Generation

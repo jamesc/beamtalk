@@ -3,7 +3,7 @@
 
 %%% @doc ClassBuilder runtime backing for ADR 0038 (ClassBuilder Protocol).
 %%%
-%% **DDD Context:** Object System
+%%% **DDD Context:** Object System Context
 %%%
 %%% This module implements the `register/1` function that is the Erlang backing
 %%% for the `@intrinsic classBuilderRegister` intrinsic. It accepts a builder

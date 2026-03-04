@@ -3,7 +3,7 @@
 
 %%% @doc Erlang class-side dispatch (BT-676, BT-871).
 %%%
-%%% **DDD Context:** Runtime — BEAM Interop
+%%% **DDD Context:** Object System Context
 %%%
 %%% Dispatches messages to the `Erlang` class object — a tagged map used as
 %%% the entry point for Erlang module interop. Unary selectors become

@@ -3,7 +3,7 @@
 
 %%% @doc TestCase primitive implementations for BUnit test framework.
 %%%
-%%% **DDD Context:** Runtime (Testing subdomain)
+%%% **DDD Context:** Object System Context
 %%%
 %%% This module provides the runtime support for TestCase assertion methods.
 %%% All assertions create structured #beamtalk_error{} records with kind

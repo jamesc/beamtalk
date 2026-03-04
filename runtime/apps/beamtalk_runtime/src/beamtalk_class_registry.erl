@@ -3,7 +3,7 @@
 
 %%% @doc Class registry and hierarchy management for Beamtalk.
 %%%
-%%% **DDD Context:** Runtime — Class System
+%%% **DDD Context:** Object System Context
 %%%
 %%% Provides stateless lookup and hierarchy functions for the class system.
 %%% These functions don't require gen_server state and are used across many

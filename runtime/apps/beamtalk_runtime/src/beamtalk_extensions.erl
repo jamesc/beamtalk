@@ -3,7 +3,7 @@
 
 %%% @doc Extension method registry for Beamtalk primitives.
 %%%
-%%% **DDD Context:** Object System
+%%% **DDD Context:** Object System Context
 %%%
 %%% This module provides a Pharo-style extension registry that allows libraries
 %%% to add methods to existing classes (especially primitives like Integer, String).

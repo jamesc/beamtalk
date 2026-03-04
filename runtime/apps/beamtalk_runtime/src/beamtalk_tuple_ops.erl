@@ -3,7 +3,7 @@
 
 %%% @doc Tuple runtime helper functions.
 %%%
-%%% **DDD Context:** Runtime Context — Domain Service
+%%% **DDD Context:** Object System Context
 %%%
 %%% This module provides runtime support for Tuple methods that require
 %%% complex pattern matching or error handling logic. The Tuple class

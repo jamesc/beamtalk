@@ -3,7 +3,7 @@
 
 %%% @doc Workspace metadata tracking
 %%%
-%%% **DDD Context:** Workspace
+%%% **DDD Context:** Workspace Context
 %%%
 %%% Stores metadata about the workspace including:
 %%% - Workspace ID

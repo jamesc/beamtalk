@@ -3,7 +3,7 @@
 
 %%% @doc TestRunner and TestResult primitive implementations (BT-762).
 %%%
-%%% **DDD Context:** Runtime (Testing subdomain)
+%%% **DDD Context:** Object System Context
 %%%
 %%% TestRunner provides programmatic test execution returning structured
 %%% TestResult objects. TestResult wraps the structured maps from

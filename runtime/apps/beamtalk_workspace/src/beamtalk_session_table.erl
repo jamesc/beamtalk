@@ -11,7 +11,7 @@
 %%%     internals.
 %%%   * The common "resolve session ID → live PID" pattern lives in one place.
 %%%
-%%% **DDD Context:** REPL / Runtime
+%%% **DDD Context:** REPL Session Context
 
 -module(beamtalk_session_table).
 

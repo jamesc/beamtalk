@@ -3,7 +3,7 @@
 
 %%% @doc TranscriptStream actor — shared workspace log with pub/sub dispatch.
 %%%
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% TranscriptStream is the actor backing the `Transcript` binding in a
 %%% workspace.  It maintains a ring buffer of recent output and pushes text

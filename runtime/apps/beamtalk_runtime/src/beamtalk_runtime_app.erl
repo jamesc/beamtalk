@@ -3,7 +3,7 @@
 
 %%% @doc Application callback module for the Beamtalk runtime.
 %%%
-%%% **DDD Context:** Runtime
+%%% **DDD Context:** Object System Context
 -module(beamtalk_runtime_app).
 -behaviour(application).
 

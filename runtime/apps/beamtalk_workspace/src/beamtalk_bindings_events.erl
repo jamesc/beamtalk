@@ -3,7 +3,7 @@
 
 %%% @doc Bindings-changed event pub/sub for workspace WebSocket push.
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Tracks WebSocket handler subscribers and broadcasts
 %%% `{bindings_changed, SessionId}` messages whenever a REPL session

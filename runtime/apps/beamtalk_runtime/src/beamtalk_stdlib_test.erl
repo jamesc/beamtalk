@@ -3,7 +3,7 @@
 
 %%% @doc Stdlib expression test runner for compiled `// =>` assertion tests.
 %%%
-%%% **DDD Context:** Runtime (Testing subdomain)
+%%% **DDD Context:** Object System Context
 %%%
 %%% Provides the runtime support for stdlib expression tests (ADR 0014 Phase 1).
 %%% The Rust test compiler generates thin EUnit wrappers that call into this

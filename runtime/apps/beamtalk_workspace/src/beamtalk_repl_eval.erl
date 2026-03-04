@@ -3,7 +3,7 @@
 
 %%% @doc Expression evaluation orchestration for the Beamtalk REPL
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Orchestrates compilation, module loading, execution, and result processing
 %%% for REPL expressions. Delegates compilation to beamtalk_repl_compiler and

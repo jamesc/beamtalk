@@ -3,7 +3,7 @@
 
 %%% @doc Bootstrap the runtime environment.
 %%%
-%%% **DDD Context:** Runtime
+%%% **DDD Context:** Object System Context
 %%%
 %%% BT-446: Bootstrap no longer creates class processes for ProtoObject,
 %%% Object, and Actor. Those are now registered by their compiled stdlib

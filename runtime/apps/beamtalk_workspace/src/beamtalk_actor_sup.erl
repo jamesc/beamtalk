@@ -3,7 +3,7 @@
 
 %%% @doc Actor supervisor for workspace
 %%%
-%%% **DDD Context:** Workspace
+%%% **DDD Context:** Actor System Context
 %%%
 %%% Supervises all user-spawned actors in a workspace.
 %%% Actors are shared across all REPL sessions in the same workspace.

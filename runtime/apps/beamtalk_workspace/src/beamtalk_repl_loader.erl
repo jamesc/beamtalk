@@ -3,7 +3,7 @@
 
 %%% @doc Module loading and class activation for the Beamtalk REPL
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Handles loading compiled Beamtalk modules into the BEAM runtime,
 %%% registering classes, triggering hot reload, and managing file paths.

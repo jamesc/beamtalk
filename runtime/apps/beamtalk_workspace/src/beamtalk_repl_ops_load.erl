@@ -3,7 +3,7 @@
 
 %%% @doc Op handlers for load-file, load-source, reload, unload, and modules operations.
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Extracted from beamtalk_repl_server (BT-705).
 

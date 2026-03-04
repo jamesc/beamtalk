@@ -27,7 +27,7 @@
 %%% | `asString`       | []   | Same as printString                |
 %%% | `respondsTo:`    | [S]  | Check if responds to selector S    |
 %%%
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** Object System Context
 -module(beamtalk_compiled_method_ops).
 -export([dispatch/3, has_method/1]).
 

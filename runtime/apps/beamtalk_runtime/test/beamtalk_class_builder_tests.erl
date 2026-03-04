@@ -1,6 +1,6 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
-%% **DDD Context:** Object System
+%%% **DDD Context:** Object System Context
 
 %%% @doc EUnit tests for beamtalk_class_builder:register/1 (ADR 0038 Phase 1, BT-835).
 %%%

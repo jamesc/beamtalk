@@ -3,7 +3,7 @@
 
 %%% @doc Error utilities for the Beamtalk REPL.
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Provides helpers for wrapping raw error terms into structured
 %%% #beamtalk_error{} records, safe atom conversion, and name formatting.

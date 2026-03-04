@@ -3,7 +3,7 @@
 
 %%% @doc Beamtalk compilation pipeline for the REPL
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Handles Beamtalk source → Core Erlang → BEAM bytecode compilation,
 %%% including expression compilation, file compilation, and codegen display.

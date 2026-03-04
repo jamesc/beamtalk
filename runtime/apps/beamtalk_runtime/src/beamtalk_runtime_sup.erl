@@ -3,7 +3,7 @@
 
 %%% @doc Top-level supervisor for the Beamtalk runtime.
 %%%
-%%% **DDD Context:** Runtime
+%%% **DDD Context:** Object System Context
 -module(beamtalk_runtime_sup).
 -behaviour(supervisor).
 

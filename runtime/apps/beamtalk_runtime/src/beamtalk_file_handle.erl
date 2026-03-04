@@ -3,7 +3,7 @@
 
 %%% @doc FileHandle instance-side dispatch (BT-513, BT-871).
 %%%
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** Object System Context
 %%%
 %%% Implements the compiled stdlib dispatch interface (`dispatch/3`,
 %%% `has_method/1`) for `FileHandle` tagged-map instances, enabling

@@ -3,7 +3,7 @@
 
 %%% @doc File class implementation - file system I/O operations.
 %%%
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** Object System Context
 %%%
 %%% File provides basic file I/O operations wrapping Erlang's file module.
 %%% All operations are class methods. Error handling uses structured

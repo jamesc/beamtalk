@@ -3,7 +3,7 @@
 
 %%% @doc String helper operations for compiled stdlib.
 %%%
-%%% **DDD Context:** Runtime Context — Domain Service
+%%% **DDD Context:** Object System Context
 %%%
 %%% This module provides implementations for String primitive methods
 %%% that require more than simple Erlang BIF calls. Called by compiled

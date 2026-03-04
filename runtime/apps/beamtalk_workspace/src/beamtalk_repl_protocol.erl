@@ -3,7 +3,7 @@
 
 %%% @doc REPL message protocol encoder/decoder
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Implements the nREPL-inspired message protocol for REPL communication.
 %%% Supports both the new protocol format (op/id/session) and the legacy

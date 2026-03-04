@@ -3,7 +3,7 @@
 
 %%% @doc Application callback module for Beamtalk workspace management.
 %%%
-%%% **DDD Context:** Workspace
+%%% **DDD Context:** Workspace Context
 %%%
 %%% This application provides the interactive development environment including:
 %%% - REPL evaluation and protocol

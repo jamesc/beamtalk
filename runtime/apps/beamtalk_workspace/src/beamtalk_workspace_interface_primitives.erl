@@ -3,7 +3,7 @@
 
 %%% @doc Primitive implementations for the WorkspaceInterface singleton actor.
 %%%
-%%% **DDD Context:** Workspace
+%%% **DDD Context:** Workspace Context
 %%%
 %%% Implements the `@primitive` methods for the WorkspaceInterface class. The
 %%% compiled Beamtalk actor (`bt@stdlib@workspace_interface`) delegates all

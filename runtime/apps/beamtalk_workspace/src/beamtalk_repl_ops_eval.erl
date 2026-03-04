@@ -3,7 +3,7 @@
 
 %%% @doc Op handlers for eval, clear, and bindings operations.
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Extracted from beamtalk_repl_server (BT-705).
 

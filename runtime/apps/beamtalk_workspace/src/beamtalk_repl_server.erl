@@ -3,7 +3,7 @@
 
 %%% @doc WebSocket server for Beamtalk REPL (ADR 0020).
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Starts a cowboy HTTP/WebSocket listener for the REPL protocol.
 %%% Client connections are handled by beamtalk_ws_handler.

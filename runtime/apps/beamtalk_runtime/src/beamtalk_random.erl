@@ -3,7 +3,7 @@
 
 %%% @doc Random class implementation — random number generation via Erlang `rand`.
 %%%
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** Object System Context
 %%%
 %%% Random provides both class-side convenience methods (using the process
 %%% dictionary seed) and instance-side methods (using explicit state for

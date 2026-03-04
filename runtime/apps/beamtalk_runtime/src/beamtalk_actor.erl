@@ -3,7 +3,7 @@
 
 %%% @doc Beamtalk Actor Runtime (gen_server wrapper)
 %%%
-%%% **DDD Context:** Actor System
+%%% **DDD Context:** Actor System Context
 %%%
 %%% Every Beamtalk actor is a BEAM process running a gen_server.
 %%% This module provides the actor behavior template and message dispatch.

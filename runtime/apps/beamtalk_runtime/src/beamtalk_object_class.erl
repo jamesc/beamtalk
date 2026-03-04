@@ -3,7 +3,7 @@
 
 %%% @doc Per-class gen_server for Beamtalk class objects.
 %%%
-%%% **DDD Context:** Object System
+%%% **DDD Context:** Object System Context
 %%%
 %% Each class in Beamtalk is a first-class object backed by a gen_server
 %% process. Follows Smalltalk philosophy where classes are messageable objects.

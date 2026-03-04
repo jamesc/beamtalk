@@ -3,7 +3,7 @@
 
 %%% @doc Idle monitor for automatic workspace cleanup
 %%%
-%%% **DDD Context:** Workspace
+%%% **DDD Context:** Workspace Context
 %%%
 %%% Monitors workspace activity and initiates graceful shutdown if the
 %%% workspace has been idle for too long. This prevents abandoned BEAM

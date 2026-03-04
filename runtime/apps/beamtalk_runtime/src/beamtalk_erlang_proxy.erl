@@ -30,7 +30,7 @@
 %%% **Escape hatch:** `call:args:` bypasses selector→function mapping
 %%% for reserved selectors (class, ==, /=, self, etc.).
 %%%
-%%% **DDD Context:** Runtime — BEAM Interop
+%%% **DDD Context:** Object System Context
 %%%
 %%% See: ADR 0028 §1 (Module Proxy Pattern)
 

@@ -3,7 +3,7 @@
 
 %%% @doc Class-loaded event pub/sub for workspace WebSocket push (BT-1020).
 %%%
-%%% **DDD Context:** REPL
+%%% **DDD Context:** REPL Session Context
 %%%
 %%% Tracks WebSocket handler subscribers and broadcasts `{class_loaded, ClassName}`
 %%% messages when classes are loaded, reloaded, or eval-defined.
