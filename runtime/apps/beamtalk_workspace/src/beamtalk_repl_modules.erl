@@ -119,13 +119,29 @@ format_module_info(
         name => atom_to_binary(Name, utf8),
         source_file =>
             case Source of
-                undefined -> "unknown";
-                Path -> Path
+                undefined ->
+                    resolve_source_path(Name);
+                Path ->
+                    Path
             end,
         actor_count => ActorCount,
         load_time => LoadTime,
         time_ago => TimeAgo
     }.
+
+%% @private Resolve source path for a loaded module when workspace_meta has none.
+%% Reads the beamtalk_source module attribute embedded by the compiler (BT-845/BT-860).
+-spec resolve_source_path(atom()) -> string().
+resolve_source_path(ModName) ->
+    try
+        Attrs = erlang:get_module_info(ModName, attributes),
+        case proplists:get_value(beamtalk_source, Attrs) of
+            [Path] when is_list(Path), Path =/= "" -> Path;
+            _ -> "unknown"
+        end
+    catch
+        _:_ -> "unknown"
+    end.
 
 %% @doc Format elapsed time as a human-readable string (e.g., "5m ago").
 -spec format_time_ago(integer()) -> string().

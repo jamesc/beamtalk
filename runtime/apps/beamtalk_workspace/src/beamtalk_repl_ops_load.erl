@@ -168,13 +168,14 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
                                 ClassName = maps:get(
                                     ModName, ModToClass, atom_to_binary(ModName, utf8)
                                 ),
+                                ResolvedPath =
+                                    case SourcePath of
+                                        undefined -> resolve_source_path(ModName);
+                                        _ -> SourcePath
+                                    end,
                                 Info = #{
                                     name => ClassName,
-                                    source_file =>
-                                        case SourcePath of
-                                            undefined -> "unknown";
-                                            _ -> SourcePath
-                                        end,
+                                    source_file => ResolvedPath,
                                     actor_count => 0,
                                     load_time => 0,
                                     time_ago => "startup"
@@ -334,6 +335,21 @@ resolve_class_to_module(ClassName, [Pid | Rest]) ->
     catch
         _:_ ->
             resolve_class_to_module(ClassName, Rest)
+    end.
+
+%% @private
+%% @doc Resolve a source path for a module when workspace_meta has none.
+%% Reads the beamtalk_source module attribute embedded by the compiler (BT-845/BT-860).
+-spec resolve_source_path(atom()) -> string().
+resolve_source_path(ModName) ->
+    try
+        Attrs = erlang:get_module_info(ModName, attributes),
+        case proplists:get_value(beamtalk_source, Attrs) of
+            [Path] when is_list(Path), Path =/= "" -> Path;
+            _ -> "unknown"
+        end
+    catch
+        _:_ -> "unknown"
     end.
 
 %% @private
