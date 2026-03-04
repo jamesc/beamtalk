@@ -84,22 +84,24 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
         let _BuilderState0 = ~{
             'className' => 'Parent',
             'superclassRef' => 'Object',
-            'fieldSpecs' => ~{}~,
-            'methodSpecs' => ~{'frozen' => ~{'arity' => 0, 'is_sealed' => 'true'}~}~,
-            'modifiers' => [],
             'moduleName' => 'sealed_method_override',
-            'classMethods' => ~{
-                'new' => ~{'arity' => 0, 'injected' => 'true'}~,
-                'new:' => ~{'arity' => 1, 'injected' => 'true'}~
-            }~,
             'methodSource' => ~{'frozen' => #{#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<52>(8,1,'integer',['unsigned'|['big']]),#<50>(8,1,'integer',['unsigned'|['big']])}#}~,
             'methodSignatures' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#}~,
             'classMethodSignatures' => ~{}~,
-            'methodReturnTypes' => ~{'frozen' => 'Integer'}~,
-            'classMethodReturnTypes' => ~{}~,
             'classState' => ~{}~,
             'classDoc' => 'none',
-            'methodDocs' => ~{}~
+            'methodDocs' => ~{}~,
+            'meta' => ~{'class' => 'Parent',
+      'superclass' => 'Object',
+      'fields' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'field_types' => ~{}~,
+      'method_info' => ~{'frozen' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer'}~}~,
+      'class_method_info' => ~{}~
+    }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
             <{'ok', _Pid0}> when 'true' -> 'ok'
@@ -113,22 +115,24 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
                 let _BuilderState1 = ~{
                     'className' => 'AllowedChild',
                     'superclassRef' => 'Object',
-                    'fieldSpecs' => ~{}~,
-                    'methodSpecs' => ~{'frozen' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
-                    'modifiers' => [],
                     'moduleName' => 'sealed_method_override',
-                    'classMethods' => ~{
-                        'new' => ~{'arity' => 0, 'injected' => 'true'}~,
-                        'new:' => ~{'arity' => 1, 'injected' => 'true'}~
-                    }~,
                     'methodSource' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<57>(8,1,'integer',['unsigned'|['big']]),#<57>(8,1,'integer',['unsigned'|['big']])}#}~,
                     'methodSignatures' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#}~,
                     'classMethodSignatures' => ~{}~,
-                    'methodReturnTypes' => ~{'frozen' => 'Integer'}~,
-                    'classMethodReturnTypes' => ~{}~,
                     'classState' => ~{}~,
                     'classDoc' => 'none',
-                    'methodDocs' => ~{}~
+                    'methodDocs' => ~{}~,
+                    'meta' => ~{'class' => 'AllowedChild',
+      'superclass' => 'Object',
+      'fields' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'field_types' => ~{}~,
+      'method_info' => ~{'frozen' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer'}~}~,
+      'class_method_info' => ~{}~
+    }~
                 }~
                 in let _Reg1 = case call 'beamtalk_class_builder':'register'(_BuilderState1) of
                     <{'ok', _Pid1}> when 'true' -> 'ok'
@@ -142,22 +146,24 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
                         let _BuilderState2 = ~{
                             'className' => 'Child',
                             'superclassRef' => 'Parent',
-                            'fieldSpecs' => ~{}~,
-                            'methodSpecs' => ~{'frozen' => ~{'arity' => 0, 'is_sealed' => 'false'}~}~,
-                            'modifiers' => [],
                             'moduleName' => 'sealed_method_override',
-                            'classMethods' => ~{
-                                'new' => ~{'arity' => 0, 'injected' => 'true'}~,
-                                'new:' => ~{'arity' => 1, 'injected' => 'true'}~
-                            }~,
                             'methodSource' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<57>(8,1,'integer',['unsigned'|['big']]),#<57>(8,1,'integer',['unsigned'|['big']])}#}~,
                             'methodSignatures' => ~{'frozen' => #{#<102>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<122>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#}~,
                             'classMethodSignatures' => ~{}~,
-                            'methodReturnTypes' => ~{'frozen' => 'Integer'}~,
-                            'classMethodReturnTypes' => ~{}~,
                             'classState' => ~{}~,
                             'classDoc' => 'none',
-                            'methodDocs' => ~{}~
+                            'methodDocs' => ~{}~,
+                            'meta' => ~{'class' => 'Child',
+      'superclass' => 'Parent',
+      'fields' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'field_types' => ~{}~,
+      'method_info' => ~{'frozen' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer'}~}~,
+      'class_method_info' => ~{}~
+    }~
                         }~
                         in let _Reg2 = case call 'beamtalk_class_builder':'register'(_BuilderState2) of
                             <{'ok', _Pid2}> when 'true' -> 'ok'
@@ -176,8 +182,6 @@ module 'sealed_method_override' ['new'/0, 'new'/1, 'frozen'/1, 'dispatch'/3, 'di
     ~{'class' => 'Parent',
       'superclass' => 'Object',
       'fields' => [],
-      'methods' => [{'frozen', 0}],
-      'class_methods' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',

@@ -273,9 +273,26 @@ init({ClassName, ClassInfo}) ->
 
     Superclass = maps:get(superclass, ClassInfo, none),
     Module = maps:get(module, ClassInfo, ClassName),
-    IsAbstract = maps:get(is_abstract, ClassInfo, false),
-    InstanceMethods = maps:get(instance_methods, ClassInfo, #{}),
-    ClassMethods = maps:get(class_methods, ClassInfo, #{}),
+
+    %% ADR 0050 Phase 5: Use meta from ClassInfo when available (set by the compiler
+    %% in BuilderState.meta). During on_load, erlang:function_exported/3 returns false,
+    %% making Module:'__beamtalk_meta'() unavailable via read_meta. The meta map literal
+    %% in BuilderState provides the same data without requiring a function call.
+    %% Falls back to read_meta for hot reload (apply_class_info) and dynamic classes.
+    Meta =
+        case maps:get(meta, ClassInfo, undefined) of
+            undefined -> read_meta(Module);
+            M when is_map(M) -> M
+        end,
+    IsAbstract = maps:get(is_abstract, Meta, maps:get(is_abstract, ClassInfo, false)),
+    {InstanceMethods, MethodReturnTypes} = meta_to_methods(
+        maps:get(method_info, Meta, undefined),
+        maps:get(instance_methods, ClassInfo, #{})
+    ),
+    {ClassMethods, ClassMethodReturnTypes} = meta_to_methods(
+        maps:get(class_method_info, Meta, undefined),
+        maps:get(class_methods, ClassInfo, #{})
+    ),
 
     beamtalk_class_hierarchy_table:insert(ClassName, Superclass),
 
@@ -288,17 +305,8 @@ init({ClassName, ClassInfo}) ->
     %% ADR 0050 Phase 3: Notify compiler server of this class registration.
     %% Cast is fire-and-forget — silently dropped if the compiler server is not running.
     case erlang:function_exported(Module, '__beamtalk_meta', 0) of
-        true ->
-            try Module:'__beamtalk_meta'() of
-                Meta when is_map(Meta) ->
-                    beamtalk_compiler_server:register_class(ClassName, Meta);
-                _ ->
-                    ok
-            catch
-                _:_ -> ok
-            end;
-        false ->
-            ok
+        true -> beamtalk_compiler_server:register_class(ClassName, Meta);
+        false -> ok
     end,
 
     %% BT-877: is_constructible may be set by the compiler via ClassBuilder.
@@ -308,18 +316,25 @@ init({ClassName, ClassInfo}) ->
         name = ClassName,
         module = Module,
         superclass = Superclass,
-        is_sealed = maps:get(is_sealed, ClassInfo, false),
+        is_sealed = maps:get(is_sealed, Meta, maps:get(is_sealed, ClassInfo, false)),
         is_abstract = IsAbstract,
         is_constructible = maps:get(is_constructible, ClassInfo, undefined),
         instance_methods = InstanceMethods,
         class_methods = ClassMethods,
-        fields = maps:get(fields, ClassInfo, []),
+        fields = maps:get(fields, Meta, maps:get(fields, ClassInfo, [])),
         class_state = maps:get(class_state, ClassInfo, #{}),
         method_source = maps:get(method_source, ClassInfo, #{}),
         method_signatures = maps:get(method_signatures, ClassInfo, #{}),
         class_method_signatures = maps:get(class_method_signatures, ClassInfo, #{}),
-        method_return_types = maps:get(method_return_types, ClassInfo, #{}),
-        class_method_return_types = maps:get(class_method_return_types, ClassInfo, #{}),
+        %% Merge: ClassInfo explicit values (from old format) are lower priority than meta.
+        method_return_types = maps:merge(
+            maps:get(method_return_types, ClassInfo, #{}),
+            MethodReturnTypes
+        ),
+        class_method_return_types = maps:merge(
+            maps:get(class_method_return_types, ClassInfo, #{}),
+            ClassMethodReturnTypes
+        ),
         doc = maps:get(doc, ClassInfo, none),
         method_docs = maps:get(method_docs, ClassInfo, #{})
     },
@@ -696,6 +711,54 @@ has_class_new_in_chain(ClassName, Module, Depth) ->
             end
     end.
 
+%% @private Read __beamtalk_meta/0 from a compiled module.
+%%
+%% Returns the meta map or #{} if the function is not exported or fails.
+%% ADR 0050 Phase 5: Used by init/1 and apply_class_info/2 to read static metadata.
+-spec read_meta(atom()) -> map().
+read_meta(Module) ->
+    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
+        true ->
+            try Module:'__beamtalk_meta'() of
+                M when is_map(M) -> M;
+                _ -> #{}
+            catch
+                _:_ -> #{}
+            end;
+        false ->
+            #{}
+    end.
+
+%% @private Convert a method_info map from __beamtalk_meta/0 to the internal format.
+%%
+%% Returns {MethodMap, ReturnTypes} where:
+%%   MethodMap: selector => #{arity => N}
+%%   ReturnTypes: selector => atom (only for non-none return types)
+%%
+%% Falls back to FallbackMethods when MetaMethodInfo is undefined (dynamic classes
+%% without __beamtalk_meta/0 pass method closures via ClassInfo instead).
+-spec meta_to_methods(map() | undefined, map()) -> {map(), map()}.
+meta_to_methods(undefined, FallbackMethods) ->
+    %% No meta available: return fallback methods with empty return types.
+    %% Callers that need to preserve explicit return_types must merge them separately.
+    {FallbackMethods, #{}};
+meta_to_methods(MetaMethodInfo, _FallbackMethods) when is_map(MetaMethodInfo) ->
+    Methods = maps:map(
+        fun
+            (_Sel, #{arity := Arity}) -> #{arity => Arity};
+            (_Sel, Info) when is_map(Info) -> Info
+        end,
+        MetaMethodInfo
+    ),
+    ReturnTypes = maps:filtermap(
+        fun
+            (_Sel, #{return_type := RT}) when RT =/= none -> {true, RT};
+            (_, _) -> false
+        end,
+        MetaMethodInfo
+    ),
+    {Methods, ReturnTypes}.
+
 %% @private Notify the compiler server of a hot-patch.
 %%
 %% ADR 0050 Phase 3: `__beamtalk_meta/0` is stale after hot-patching (it reflects
@@ -767,21 +830,52 @@ notify_hot_patch(#class_state{
 
 %% @private Apply ClassInfo map to existing State, returning updated State.
 %% ADR 0032 Phase 1: No flattened tables to rebuild.
-%% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
+%% ADR 0050 Phase 5: Static metadata read from __beamtalk_meta/0 on the new module.
 -spec apply_class_info(#class_state{}, map()) -> #class_state{}.
 apply_class_info(State, ClassInfo) ->
     %% BT-893: Keep process dictionary in sync with state for self-instantiation.
     NewModule = maps:get(module, ClassInfo, State#class_state.module),
     put(beamtalk_class_module, NewModule),
-    NewIsAbstract = maps:get(is_abstract, ClassInfo, State#class_state.is_abstract),
+
+    %% ADR 0050 Phase 5: Prefer meta from ClassInfo when available (same reason as init/1:
+    %% erlang:function_exported/3 returns false during on_load, so read_meta/1 returns #{}).
+    %% Falls back to read_meta for explicit hot-reload calls made outside on_load.
+    Meta =
+        case maps:get(meta, ClassInfo, undefined) of
+            undefined -> read_meta(NewModule);
+            M when is_map(M) -> M
+        end,
+    NewIsAbstract = maps:get(
+        is_abstract,
+        Meta,
+        maps:get(is_abstract, ClassInfo, State#class_state.is_abstract)
+    ),
     put(beamtalk_class_is_abstract, NewIsAbstract),
+
+    {NewInstanceMethods, NewMethodReturnTypes} = meta_to_methods(
+        maps:get(method_info, Meta, undefined),
+        maps:get(instance_methods, ClassInfo, State#class_state.instance_methods)
+    ),
+    {NewClassMethods, NewClassMethodReturnTypes} = meta_to_methods(
+        maps:get(class_method_info, Meta, undefined),
+        maps:get(class_methods, ClassInfo, State#class_state.class_methods)
+    ),
+
     State#class_state{
         module = NewModule,
-        instance_methods = maps:get(
-            instance_methods, ClassInfo, State#class_state.instance_methods
+        instance_methods = NewInstanceMethods,
+        class_methods = NewClassMethods,
+        fields = maps:get(
+            fields,
+            Meta,
+            maps:get(fields, ClassInfo, State#class_state.fields)
         ),
-        class_methods = maps:get(class_methods, ClassInfo, State#class_state.class_methods),
-        fields = maps:get(fields, ClassInfo, State#class_state.fields),
+        is_abstract = NewIsAbstract,
+        is_sealed = maps:get(
+            is_sealed,
+            Meta,
+            maps:get(is_sealed, ClassInfo, State#class_state.is_sealed)
+        ),
         method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
         method_signatures = maps:get(
             method_signatures, ClassInfo, State#class_state.method_signatures
@@ -789,11 +883,15 @@ apply_class_info(State, ClassInfo) ->
         class_method_signatures = maps:get(
             class_method_signatures, ClassInfo, State#class_state.class_method_signatures
         ),
-        method_return_types = maps:get(
-            method_return_types, ClassInfo, State#class_state.method_return_types
+        method_return_types = maps:merge(
+            maps:get(method_return_types, ClassInfo, State#class_state.method_return_types),
+            NewMethodReturnTypes
         ),
-        class_method_return_types = maps:get(
-            class_method_return_types, ClassInfo, State#class_state.class_method_return_types
+        class_method_return_types = maps:merge(
+            maps:get(
+                class_method_return_types, ClassInfo, State#class_state.class_method_return_types
+            ),
+            NewClassMethodReturnTypes
         ),
         is_constructible = maps:get(is_constructible, ClassInfo, undefined),
         doc = maps:get(doc, ClassInfo, State#class_state.doc),
