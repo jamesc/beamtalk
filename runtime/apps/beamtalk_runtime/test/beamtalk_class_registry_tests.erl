@@ -276,6 +276,44 @@ all_classes_test() ->
     ?assert(is_list(Result)).
 
 %%% ============================================================================
+%%% live_class_entries tests (BT-1090)
+%%% ============================================================================
+
+live_class_entries_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pg_started(),
+            ClassInfo = #{superclass => none, methods => #{}, class_methods => #{}},
+            {ok, Pid} = beamtalk_object_class:start_link('LiveEntriesTestClass1090', ClassInfo),
+            Pid
+        end,
+        fun(Pid) ->
+            catch gen_server:stop(Pid)
+        end,
+        [
+            {"returns a list", fun() ->
+                Result = beamtalk_class_registry:live_class_entries(),
+                ?assert(is_list(Result))
+            end},
+            {"entries are {Name, Module, Pid} tuples", fun() ->
+                Result = beamtalk_class_registry:live_class_entries(),
+                lists:foreach(
+                    fun({Name, Mod, Pid}) ->
+                        ?assert(is_atom(Name)),
+                        ?assert(is_atom(Mod)),
+                        ?assert(is_pid(Pid))
+                    end,
+                    Result
+                )
+            end},
+            {"includes the started class", fun() ->
+                Result = beamtalk_class_registry:live_class_entries(),
+                Names = [Name || {Name, _Mod, _Pid} <- Result],
+                ?assert(lists:member('LiveEntriesTestClass1090', Names))
+            end}
+        ]}.
+
+%%% ============================================================================
 %%% get_method_return_type / get_class_method_return_type tests (BT-1002)
 %%% ============================================================================
 
