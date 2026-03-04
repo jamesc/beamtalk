@@ -87,8 +87,8 @@ dispatch_test_() ->
                 fun test_module_without_dispatch/0},
             {"error in dispatch/4 is wrapped as beamtalk_error",
                 fun test_dispatch_throws_wrapped/0},
-            {"actor instance displayString error is wrapped",
-                fun test_actor_instance_dispatch_throws/0},
+            {"actor instance displayString bypasses throwing module",
+                fun test_actor_instance_bypass_throwing_module/0},
             {"super on non-existent class returns error", fun test_super_nonexistent_class/0},
             {"lookup returns class_not_found when parent class is gone",
                 fun test_stale_parent_class/0},
@@ -702,17 +702,18 @@ test_depth_limit_exceeded() ->
         lists:seq(1, NumClasses)
     ),
 
-    %% Lookup a method that doesn't exist in any class — should hit depth limit
-    LeafClass = hd(ClassNames),
-    State = #{'$beamtalk_class' => LeafClass},
-    Self = make_ref(),
-    Result = beamtalk_dispatch:lookup(noSuchMethod, [], Self, State, LeafClass),
+    try
+        %% Lookup a method that doesn't exist in any class — should hit depth limit
+        LeafClass = hd(ClassNames),
+        State = #{'$beamtalk_class' => LeafClass},
+        Self = make_ref(),
+        Result = beamtalk_dispatch:lookup(noSuchMethod, [], Self, State, LeafClass),
 
-    %% Depth exceeded → does_not_understand (depth guard fires before "not found at root")
-    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
-
-    %% Clean up
-    lists:foreach(fun gen_server:stop/1, Pids).
+        %% Depth exceeded → does_not_understand (depth guard fires before "not found at root")
+        ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result)
+    after
+        lists:foreach(fun gen_server:stop/1, Pids)
+    end.
 
 %% Test that when a class's module exists but does not export dispatch/4,
 %% the lookup falls through to the superclass chain (continue_to_superclass path).
@@ -727,9 +728,9 @@ test_module_without_dispatch() ->
     {module, Mod} = code:load_binary(Mod, "bt_test_no_dispatch_stub.beam", Bin),
 
     %% Register a class with this stub module.
-    %% The class has no local methods, so invoke_method is called,
-    %% finds dispatch/4 is not exported, and falls to continue_to_superclass.
-    %% The class has no superclass, so DNU is returned.
+    %% The class has stubMethod in instance_methods (has_method returns true),
+    %% so invoke_method is called. The stub module lacks dispatch/4 →
+    %% continue_to_superclass → no superclass → DNU.
     {ok, Pid} = beamtalk_object_class:start_link('NoDispatchStubClass', #{
         module => bt_test_no_dispatch_stub,
         superclass => none,
@@ -739,17 +740,16 @@ test_module_without_dispatch() ->
         instance_variables => []
     }),
 
-    State = #{'$beamtalk_class' => 'NoDispatchStubClass'},
-    Self = make_ref(),
-
-    %% stubMethod is tracked in instance_methods (has_method returns true),
-    %% so invoke_method is called. The stub module lacks dispatch/4 →
-    %% continue_to_superclass → no superclass → DNU.
-    Result = beamtalk_dispatch:lookup(stubMethod, [], Self, State, 'NoDispatchStubClass'),
-    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result),
-
-    gen_server:stop(Pid),
-    code:delete(bt_test_no_dispatch_stub).
+    try
+        State = #{'$beamtalk_class' => 'NoDispatchStubClass'},
+        Self = make_ref(),
+        Result = beamtalk_dispatch:lookup(stubMethod, [], Self, State, 'NoDispatchStubClass'),
+        ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result)
+    after
+        gen_server:stop(Pid),
+        code:purge(bt_test_no_dispatch_stub),
+        code:delete(bt_test_no_dispatch_stub)
+    end.
 
 %% Test that an Erlang exception thrown inside dispatch/4 is caught and
 %% wrapped as a structured #beamtalk_error{} (not an unhandled crash).
@@ -780,22 +780,27 @@ test_dispatch_throws_wrapped() ->
         instance_variables => []
     }),
 
-    State = #{'$beamtalk_class' => 'ThrowingDispatchClass'},
-    Self = make_ref(),
+    try
+        State = #{'$beamtalk_class' => 'ThrowingDispatchClass'},
+        Self = make_ref(),
 
-    %% dispatch/4 throws → caught → wrapped as #beamtalk_error{}
-    Result = beamtalk_dispatch:lookup(throwMethod, [], Self, State, 'ThrowingDispatchClass'),
-    ?assertMatch({error, #beamtalk_error{}}, Result),
+        %% dispatch/4 throws → caught → wrapped as #beamtalk_error{}
+        Result = beamtalk_dispatch:lookup(throwMethod, [], Self, State, 'ThrowingDispatchClass'),
+        ?assertMatch({error, #beamtalk_error{}}, Result)
+    after
+        gen_server:stop(Pid),
+        code:purge(bt_test_dispatch_throws_stub),
+        code:delete(bt_test_dispatch_throws_stub)
+    end.
 
-    gen_server:stop(Pid),
-    code:delete(bt_test_dispatch_throws_stub).
-
-%% Test that an error inside beamtalk_object_ops:dispatch (actor + displayString path)
-%% is caught and returned as a structured error.
-test_actor_instance_dispatch_throws() ->
+%% Test that the actor instance bypass correctly intercepts displayString before
+%% reaching the module's dispatch/4. The stub module throws, but the actor bypass
+%% routes to beamtalk_object_ops instead, so the result is {reply, _, _}.
+test_actor_instance_bypass_throwing_module() ->
     ok = ensure_counter_loaded(),
 
-    %% Compile a stub dispatch module that errors for displayString
+    %% Compile a stub dispatch module whose dispatch/4 always throws.
+    %% The actor bypass should prevent this from ever being called.
     Forms = [
         {attribute, 1, module, bt_test_actor_dispatch_throws_stub},
         {attribute, 2, export, [{dispatch, 4}]},
@@ -822,21 +827,23 @@ test_actor_instance_dispatch_throws() ->
         instance_variables => []
     }),
 
-    %% Actor instance triggers the beamtalk_object_ops path, not the stub module path.
-    %% beamtalk_object_ops:dispatch(displayString,...) should succeed normally.
-    ActorSelf = #beamtalk_object{
-        class = 'ActorDispatchThrowsClass',
-        class_mod = bt_test_actor_dispatch_throws_stub,
-        pid = self()
-    },
-    State = #{'$beamtalk_class' => 'ActorDispatchThrowsClass'},
+    try
+        %% Actor instance triggers the beamtalk_object_ops path, not the stub module.
+        ActorSelf = #beamtalk_object{
+            class = 'ActorDispatchThrowsClass',
+            class_mod = bt_test_actor_dispatch_throws_stub,
+            pid = self()
+        },
+        State = #{'$beamtalk_class' => 'ActorDispatchThrowsClass'},
 
-    %% displayString is intercepted before calling the module's dispatch/4,
-    %% so beamtalk_object_ops handles it safely and returns {reply, _, _}
-    Result = beamtalk_dispatch:lookup(
-        'displayString', [], ActorSelf, State, 'ActorDispatchThrowsClass'
-    ),
-    ?assertMatch({reply, _, _}, Result),
-
-    gen_server:stop(Pid),
-    code:delete(bt_test_actor_dispatch_throws_stub).
+        %% displayString is intercepted before calling the module's dispatch/4,
+        %% so beamtalk_object_ops handles it safely and returns {reply, _, _}
+        Result = beamtalk_dispatch:lookup(
+            'displayString', [], ActorSelf, State, 'ActorDispatchThrowsClass'
+        ),
+        ?assertMatch({reply, _, _}, Result)
+    after
+        gen_server:stop(Pid),
+        code:purge(bt_test_actor_dispatch_throws_stub),
+        code:delete(bt_test_actor_dispatch_throws_stub)
+    end.
