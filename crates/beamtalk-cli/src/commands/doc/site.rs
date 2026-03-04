@@ -90,12 +90,13 @@ pub(super) fn generate_prose_docs(
 }
 
 /// Render the docs index page listing all prose documentation pages.
-fn render_docs_index(
-    prose_pages: &[(&str, &str, &str)],
-    docs_output: &Utf8Path,
-) -> Result<()> {
+fn render_docs_index(prose_pages: &[(&str, &str, &str)], docs_output: &Utf8Path) -> Result<()> {
     let mut html = String::new();
-    html.push_str(&page_header("Documentation — Beamtalk", "../style.css", "../"));
+    html.push_str(&page_header(
+        "Documentation — Beamtalk",
+        "../style.css",
+        "../",
+    ));
     html.push_str("<div class=\"page-wrapper\">\n");
     html.push_str(SIDEBAR_TOGGLE);
     html.push_str(&prose_nav("index.html", prose_pages));
@@ -107,7 +108,12 @@ fn render_docs_index(
     html.push_str("<h1>Documentation</h1>\n");
     html.push_str("<ul>\n");
     for &(_, file, title) in prose_pages {
-        let _ = writeln!(html, "<li><a href=\"{file}\">{title}</a></li>", file = file, title = html_escape(title));
+        let _ = writeln!(
+            html,
+            "<li><a href=\"{file}\">{title}</a></li>",
+            file = file,
+            title = html_escape(title)
+        );
     }
     html.push_str("</ul>\n");
     html.push_str("</main>\n");
