@@ -637,14 +637,6 @@ pub(super) fn write_site_landing_page(
     html.push_str("<div class=\"landing-section-label\">Explore the docs</div>\n");
     html.push_str("<div class=\"landing-cards\">\n");
 
-    // ADR card
-    html.push_str("<a href=\"adr/\" class=\"landing-card\">\n");
-    html.push_str("<h2>Architecture Decisions</h2>\n");
-    html.push_str(
-        "<p>Key design decisions — context, alternatives considered, and consequences.</p>\n",
-    );
-    html.push_str("</a>\n");
-
     // Prose docs cards
     for &(_, file, title) in prose_pages {
         let (_, desc) = landing_card_meta(file);
