@@ -115,9 +115,12 @@ body {
   font-weight: 500;
   color: var(--fg-muted);
   text-decoration: none;
-  padding: 0.35rem 0.7rem;
+  padding: 0.55rem 0.7rem;
   border-radius: 6px;
   transition: background 0.12s, color 0.12s;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
 }
 .nav-links a:hover {
   background: var(--accent-bg);
@@ -176,7 +179,7 @@ body {
 
 .sidebar-section-label {
   padding: 0.75rem 1.25rem 0.3rem;
-  font-size: 0.69rem;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -187,11 +190,13 @@ body {
 .sidebar-nav li { margin: 0; }
 .sidebar-nav a {
   display: block;
-  padding: 0.3rem 1.25rem;
+  padding: 0.55rem 1.25rem;
   font-size: 0.875rem;
   color: var(--fg-muted);
   text-decoration: none;
   transition: background 0.1s, color 0.1s;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .sidebar-nav a:hover {
   background: var(--accent-bg);
@@ -207,8 +212,11 @@ body {
 .main-content {
   margin-left: var(--sidebar-w);
   flex: 1;
+  min-width: 0;
   max-width: 860px;
   padding: 2.5rem 3rem;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .sidebar-toggle {
@@ -220,11 +228,13 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 0.4rem 0.6rem;
+  padding: 0.6rem 0.8rem;
   font-size: 1.2rem;
   cursor: pointer;
   box-shadow: var(--shadow);
   color: var(--fg);
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .sidebar-overlay {
@@ -265,24 +275,36 @@ body {
 
 @media (max-width: 480px) {
   /* Very small screens: tighter padding */
-  .main-content { padding: 1.5rem 1rem; padding-top: 3.5rem; }
+  .main-content { padding: 1.25rem 0.875rem; padding-top: 3.5rem; }
   .landing-content { padding: 1.5rem 1rem 1.5rem; }
 
-  /* Full-width CTAs */
-  .landing-cta { flex-direction: column; }
-  .btn-primary, .btn-secondary { width: 100%; text-align: center; }
+  /* Tighter nav padding */
+  .top-nav { padding: 0 1rem; }
 
-  /* Landing logo on smallest screens */
+  /* Full-width CTAs with adequate tap targets */
+  .landing-cta { flex-direction: column; }
+  .btn-primary, .btn-secondary { width: 100%; text-align: center; padding: 0.75rem 1.25rem; min-height: 44px; }
+
+  /* Landing hero: tighter gap and smaller logo */
+  .landing-hero { gap: 1.5rem; }
   .landing-logo img { height: 36px; }
 
   /* Reduce method card padding */
   .method { padding: 1rem; }
 
+  /* Code blocks: smaller font on tiny screens */
+  pre { font-size: 0.78rem; padding: 0.75rem 1rem; }
+
+  /* Code window tighter layout */
+  .code-window-bar { padding: 0.5rem 0.75rem; }
+  .code-window-body { padding: 0.75rem 1rem; }
+  .code-window-body pre { font-size: 0.75rem; }
 }
 
 /* --- Typography --- */
 a { color: inherit; text-decoration: none; }
 a:hover { color: inherit; }
+img { max-width: 100%; height: auto; }
 
 /* Underline links in running prose text, tables, and lists */
 .main-content p a,
@@ -336,6 +358,7 @@ pre {
   padding: 1.25rem 1.5rem;
   border-radius: var(--radius);
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   margin-bottom: 1.25rem;
   line-height: 1.6;
 }
@@ -343,7 +366,7 @@ pre code { background: none; color: inherit; padding: 0; font-size: 0.875rem; }
 
 /* --- Tables --- */
 table { border-collapse: collapse; width: 100%; margin-bottom: 1.25rem; font-size: 0.9rem; }
-th, td { border: 1px solid var(--border); padding: 0.5rem 0.875rem; text-align: left; }
+th, td { border: 1px solid var(--border); padding: 0.5rem 0.875rem; text-align: left; overflow-wrap: break-word; word-break: break-word; }
 th {
   background: var(--accent-bg);
   font-weight: 600;
@@ -424,6 +447,9 @@ tbody tr:hover { background: var(--sidebar-bg); }
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--accent);
+  overflow-wrap: break-word;
+  word-break: break-all;
+  min-width: 0;
 }
 .source-link { font-size: 0.75rem; color: var(--fg-muted); margin-left: auto; }
 .method-doc { margin-top: 0.6rem; }
@@ -436,7 +462,7 @@ tbody tr:hover { background: var(--sidebar-bg); }
 .toc .label {
   display: inline-block;
   font-family: 'Inter', sans-serif;
-  font-size: 0.67rem;
+  font-size: 0.75rem;
   font-weight: 700;
   color: var(--fg-muted);
   background: var(--inline-code-bg);
@@ -452,7 +478,7 @@ tbody tr:hover { background: var(--sidebar-bg); }
 .class-list {
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
   gap: 0.75rem;
 }
 .class-list li {
@@ -624,7 +650,7 @@ footer {
 .code-window-title {
   margin-left: 0.5rem;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: #A1A1AA;
 }
 .code-window-body { padding: 1.25rem 1.5rem; }
@@ -636,7 +662,7 @@ footer {
 .code-window-body pre code { background: none; color: var(--code-fg); padding: 0; }
 
 .landing-section-label {
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -645,7 +671,7 @@ footer {
 }
 .landing-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 1rem;
   margin-bottom: 2rem;
 }
@@ -686,7 +712,7 @@ footer {
 .landing-links a:hover { text-decoration: underline; }
 
 /* --- Prose pages --- */
-.prose-content { max-width: 760px; }
+.prose-content { max-width: 760px; min-width: 0; overflow-wrap: break-word; word-break: break-word; }
 ";
 
 /// Write CSS stylesheet.

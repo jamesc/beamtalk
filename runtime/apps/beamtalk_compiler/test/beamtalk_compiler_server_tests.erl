@@ -3,7 +3,7 @@
 
 %% @doc Tests for beamtalk_compiler_server internal functions.
 %%
-%% Tests response handlers, compile_core_erlang, flush_port_messages,
+%% Tests response handlers, compile_core_erlang,
 %% and gen_server edge cases (unknown call, cast, info).
 %% Integration tests (compile_expression, compile, diagnostics, version)
 %% are covered in beamtalk_compiler_tests.erl.
@@ -106,34 +106,6 @@ handle_version_response_unexpected_test() ->
     Response = #{status => error, message => <<"fail">>},
     Result = beamtalk_compiler_server:handle_version_response(Response),
     ?assertEqual({error, unexpected_response}, Result).
-
-%%% ---------------------------------------------------------------
-%%% flush_port_messages/1 — drains stale port messages
-%%% ---------------------------------------------------------------
-
-flush_port_messages_empty_test() ->
-    %% No messages in mailbox — should return ok immediately
-    FakePort = make_ref(),
-    ok = beamtalk_compiler_server:flush_port_messages(FakePort).
-
-flush_port_messages_drains_data_test() ->
-    %% Simulate stale data messages
-    FakePort = make_ref(),
-    self() ! {FakePort, {data, <<"stale1">>}},
-    self() ! {FakePort, {data, <<"stale2">>}},
-    ok = beamtalk_compiler_server:flush_port_messages(FakePort),
-    %% Mailbox should be empty now
-    receive
-        {FakePort, _} -> ?assert(false)
-    after 0 ->
-        ok
-    end.
-
-flush_port_messages_stops_at_exit_test() ->
-    FakePort = make_ref(),
-    self() ! {FakePort, {data, <<"stale">>}},
-    self() ! {FakePort, {exit_status, 0}},
-    ok = beamtalk_compiler_server:flush_port_messages(FakePort).
 
 %%% ---------------------------------------------------------------
 %%% gen_server edge cases (via running server)

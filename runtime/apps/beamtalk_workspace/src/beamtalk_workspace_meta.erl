@@ -165,20 +165,7 @@ register_module(Module) ->
 -spec register_module(atom(), string() | binary() | undefined) -> ok.
 register_module(Module, SourcePath) when is_atom(Module) ->
     %% Normalise binary to string so persist_metadata_to_disk/1 always sees a list.
-    NormalizedPath =
-        case SourcePath of
-            undefined ->
-                undefined;
-            B when is_binary(B) ->
-                case unicode:characters_to_list(B) of
-                    L when is_list(L) -> L;
-                    _ -> undefined
-                end;
-            S when is_list(S) ->
-                S;
-            _ ->
-                undefined
-        end,
+    NormalizedPath = normalize_source_path(SourcePath),
     try
         gen_server:cast(?MODULE, {register_module, Module, NormalizedPath})
     catch
@@ -311,17 +298,7 @@ handle_cast({register_actor, Pid}, State) ->
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast({unregister_actor, Pid}, State) ->
-    Actors = State#state.supervised_actors,
-    MonRefs = State#state.monitor_refs,
-    %% Demonitor if we have a ref for this PID
-    case maps:find(Pid, MonRefs) of
-        {ok, Ref} -> demonitor(Ref, [flush]);
-        error -> ok
-    end,
-    State2 = State#state{
-        supervised_actors = lists:delete(Pid, Actors),
-        monitor_refs = maps:remove(Pid, MonRefs)
-    },
+    State2 = remove_actor(Pid, State),
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast({register_module, Module, NewSource}, State) ->
@@ -344,12 +321,7 @@ handle_info(persist_to_disk, State) ->
     {noreply, State#state{persist_timer = undefined}};
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     %% Actor exited, remove from tracked list and monitor refs
-    Actors = State#state.supervised_actors,
-    MonRefs = State#state.monitor_refs,
-    State2 = State#state{
-        supervised_actors = lists:delete(Pid, Actors),
-        monitor_refs = maps:remove(Pid, MonRefs)
-    },
+    State2 = remove_actor(Pid, State),
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_info(_Info, State) ->
@@ -426,17 +398,11 @@ load_metadata_from_disk(State) ->
                                     undefined ->
                                         false;
                                     Atom ->
+                                        RawSource = maps:get(<<"source">>, Entry, null),
                                         Source =
-                                            case maps:get(<<"source">>, Entry, null) of
-                                                null ->
-                                                    undefined;
-                                                S when is_binary(S) ->
-                                                    case unicode:characters_to_list(S) of
-                                                        L when is_list(L) -> L;
-                                                        _ -> undefined
-                                                    end;
-                                                _ ->
-                                                    undefined
+                                            case RawSource of
+                                                null -> undefined;
+                                                _ -> normalize_source_path(RawSource)
                                             end,
                                         {true, {Atom, Source}}
                                 end;
@@ -541,6 +507,37 @@ persist_metadata_to_disk(State) ->
             ),
             {error, Reason}
     end.
+
+%% @private
+%% Remove an actor PID from the supervised list and cancel its monitor.
+%% Used by both explicit unregister and DOWN message handling.
+-spec remove_actor(pid(), #state{}) -> #state{}.
+remove_actor(Pid, State) ->
+    MonRefs = State#state.monitor_refs,
+    case maps:find(Pid, MonRefs) of
+        {ok, Ref} -> demonitor(Ref, [flush]);
+        error -> ok
+    end,
+    State#state{
+        supervised_actors = lists:delete(Pid, State#state.supervised_actors),
+        monitor_refs = maps:remove(Pid, MonRefs)
+    }.
+
+%% @private
+%% Normalise a source path value to a string (list).
+%% Accepts binary, list, or undefined. Returns undefined on any conversion failure.
+-spec normalize_source_path(term()) -> string() | undefined.
+normalize_source_path(undefined) ->
+    undefined;
+normalize_source_path(B) when is_binary(B) ->
+    case unicode:characters_to_list(B) of
+        L when is_list(L) -> L;
+        _ -> undefined
+    end;
+normalize_source_path(S) when is_list(S) ->
+    S;
+normalize_source_path(_) ->
+    undefined.
 
 %% @private
 safe_existing_atom(Binary) ->

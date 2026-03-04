@@ -195,7 +195,7 @@ enum Command {
         action: commands::workspace::cli::WorkspaceCommand,
     },
 
-    /// Run compiled stdlib tests (ADR 0014 Phase 1)
+    /// Run compiled bootstrap tests
     TestStdlib {
         /// File or directory containing .btscript test files
         #[arg(default_value = "bootstrap-test")]
@@ -214,14 +214,14 @@ enum Command {
         show_output: bool,
     },
 
-    /// Run `BUnit` tests — discover and run `TestCase` subclasses (ADR 0014 Phase 2)
+    /// Run `BUnit` tests — discover and run `TestCase` subclasses
     Test {
         /// Test file or directory containing .bt test files
         #[arg(default_value = "test")]
         path: String,
     },
 
-    /// Generate HTML API documentation from source files (ADR 0008)
+    /// Generate HTML API documentation from source files
     Doc {
         /// Source file or directory containing .bt files
         #[arg(default_value = "stdlib/src")]
@@ -240,7 +240,7 @@ enum Command {
         docs_path: String,
     },
 
-    /// Manage TLS certificates for Erlang distribution security (ADR 0020)
+    /// Manage TLS certificates for Erlang distribution security
     Tls {
         #[command(subcommand)]
         action: commands::tls::TlsCommand,
