@@ -637,15 +637,6 @@ pub(super) fn write_site_landing_page(
     html.push_str("<div class=\"landing-section-label\">Explore the docs</div>\n");
     html.push_str("<div class=\"landing-cards\">\n");
 
-    // API Reference card
-    html.push_str("<a href=\"apidocs/\" class=\"landing-card\">\n");
-    html.push_str("<h2>API Reference</h2>\n");
-    html.push_str(
-        "<p>Standard library classes — Actor, Block, Integer, String, \
-         Collections, and more.</p>\n",
-    );
-    html.push_str("</a>\n");
-
     // ADR card
     html.push_str("<a href=\"adr/\" class=\"landing-card\">\n");
     html.push_str("<h2>Architecture Decisions</h2>\n");
