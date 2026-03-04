@@ -224,7 +224,7 @@ The existing `add_external_superclasses` (which creates stubs) remains for backw
 |--------|--------------------|
 | **Newcomer** | "Completions and errors just work for my classes, no configuration" |
 | **Smalltalk purist** | "Erlang owns the class registry; it's correct for Erlang to own the compiler's view of it too. State belongs in processes." |
-| **BEAM veteran** | "gen_server state is observable, supervised, and hot-upgradeable. Crash recovery by scanning loaded modules is exactly what Dialyzer does. This is idiomatic OTP." |
+| **BEAM veteran** | "gen_server state is observable, supervised, and hot-upgradeable. The `class_state` record is the live source of truth — hot-patching mutates it in place, and the compiler server gets a consistent snapshot. Crash recovery by scanning loaded modules is exactly what Dialyzer does. This is idiomatic OTP." |
 | **Operator** | "`sys:get_state(SessionPid)` shows the full class cache. No opaque Rust state, no disk files to manage." |
 | **Language designer** | "Clean boundary: Erlang manages session state, Rust compiles. Each does what it does best. The port stays testable in isolation." |
 
@@ -238,7 +238,7 @@ The existing `add_external_superclasses` (which creates stubs) remains for backw
 | **Operator** | "Fewer processes, simpler supervision tree" |
 | **Language designer** | "TypeChecker accesses ClassHierarchy directly without ETF round-trips" |
 
-**Tension**: The strongest argument for Option B is eliminating per-request serialization overhead. The counter: a REPL session has tens of user-defined classes at most; their metadata maps are small (kilobytes of ETF). The port already serializes source code (potentially larger) and the existing index maps. The marginal overhead is negligible against the 10–500ms compilation time (ADR 0022). Operational transparency and OTP idiomatics tip decisively to Option A.
+**Tension**: The strongest argument for Option B is eliminating per-request serialization overhead. For small sessions (tens of classes), the overhead is negligible against 10–500ms compilation time. But the ADR acknowledges this is an open question: at 50–100 loaded classes with full metadata, ETF payloads could approach ~1MB per request. If measurement shows this is a real problem, Option B's "state lives where it's consumed" argument becomes compelling — the class hierarchy would live in Rust memory with zero per-request serialization cost. Operational transparency and OTP idiomatics favour Option A, but the decision should be revisited if payload measurement (Phase 2) reveals scaling issues. This is not a one-way door.
 
 **Richer metadata does not require a stateful compiler**: whether `ClassInfo` contains only superclass names or also includes return types and param types, all of it is injected per-request by the gen_server. The gen_server IS the stateful component. The compiler remains a pure function: inputs → Core Erlang.
 
