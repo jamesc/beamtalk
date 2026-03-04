@@ -707,8 +707,8 @@ mod tests {
         assert!(prose.contains("Language Features"));
         assert!(prose.contains("../style.css"));
         assert!(prose.contains("../apidocs/"));
-        // Prose nav includes ADR link
-        assert!(prose.contains("../adr/"));
+        // Prose nav includes Home link
+        assert!(prose.contains("../\">Home</a>"));
 
         // ADR index (no ADR dir in test, so directory is absent but run_site succeeds)
         // The adr/ dir is only created when docs/ADR/ exists in the source
