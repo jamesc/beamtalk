@@ -550,19 +550,27 @@ async function captureSessionId(
 }
 
 /**
- * Find the index of a method declaration (`method <selector>`) in source text.
- * Returns the index of the selector within the declaration, or -1 if not found.
+ * Find the position of a named symbol in a flat/nested document symbol list.
  */
-function findMethodDeclaration(text: string, selector: string): number {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // Use (?=\s|$) instead of \b — keyword selectors end with ":" (e.g. "from:to:")
-  // which is a non-word char, so \b fails to match there.
-  const pattern = new RegExp(`\\bmethod\\s+(${escaped})(?=\\s|$)`);
-  const match = pattern.exec(text);
-  if (match && match.index !== undefined) {
-    return match.index + match[0].indexOf(selector);
+// See also: WorkspaceTreeDataProvider._findSymbolPosition (parallel implementation).
+function findSymbolPosition(
+  symbols: vscode.DocumentSymbol[] | vscode.SymbolInformation[],
+  name: string,
+  kinds: vscode.SymbolKind[]
+): vscode.Position | undefined {
+  for (const sym of symbols) {
+    // Class symbols are named "ClassName (class)" per ADR 0013 — strip the suffix.
+    const symName =
+      sym.kind === vscode.SymbolKind.Class ? sym.name.replace(/ \(class\)$/, "") : sym.name;
+    if (kinds.includes(sym.kind) && symName === name) {
+      return "range" in sym ? sym.selectionRange.start : sym.location.range.start;
+    }
+    if ("children" in sym && sym.children.length > 0) {
+      const found = findSymbolPosition(sym.children, name, kinds);
+      if (found) return found;
+    }
   }
-  return -1;
+  return undefined;
 }
 
 function replCommand(): string {
@@ -858,19 +866,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
 
-      // Find the method declaration in the source file.
-      // Prefer `method <selector>` to avoid false positives on call sites or comments.
-      const text = document.getText();
-      const methodDeclIndex = findMethodDeclaration(text, method.selector);
-      const selectorIndex =
-        methodDeclIndex !== -1 ? methodDeclIndex : text.indexOf(method.selector);
-      if (selectorIndex === -1) {
-        await vscode.window.showInformationMessage(
-          `Method '${method.selector}' not found in source for ${classInfo.name}`
+      // Use document symbols from the LSP to find the method's exact position.
+      let position: vscode.Position | undefined;
+      try {
+        const docSymbols = await vscode.commands.executeCommand<
+          vscode.DocumentSymbol[] | vscode.SymbolInformation[]
+        >("vscode.executeDocumentSymbolProvider", uri);
+        position = findSymbolPosition(
+          docSymbols ?? [],
+          method.selector,
+          [vscode.SymbolKind.Method, vscode.SymbolKind.Function]
         );
-        return;
+      } catch {
+        // LSP unavailable — fall through to text search.
       }
-      const position = document.positionAt(selectorIndex);
+      if (!position) {
+        // Fallback: plain text search for the selector.
+        const idx = document.getText().indexOf(method.selector);
+        if (idx === -1) {
+          await vscode.window.showInformationMessage(
+            `Method '${method.selector}' not found in source for ${classInfo.name}`
+          );
+          return;
+        }
+        position = document.positionAt(idx);
+      }
 
       // Try LSP go-to-definition for a precise location. If LSP is unavailable or
       // returns no results, fall back to the text-search position — don't fail.

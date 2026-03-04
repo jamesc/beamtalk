@@ -3064,12 +3064,12 @@ fn test_class_registration_generation() {
         "Should include classMethods map. Got:\n{code}"
     );
     assert!(
-        code.contains("'spawn' => ~{'arity' => 0}~"),
-        "Should include spawn class method. Got:\n{code}"
+        code.contains("'spawn' => ~{'arity' => 0, 'injected' => 'true'}~"),
+        "Should include spawn class method with injected flag. Got:\n{code}"
     );
     assert!(
-        code.contains("'spawnWith:' => ~{'arity' => 1}~"),
-        "Should include spawnWith: class method. Got:\n{code}"
+        code.contains("'spawnWith:' => ~{'arity' => 1, 'injected' => 'true'}~"),
+        "Should include spawnWith: class method with injected flag. Got:\n{code}"
     );
 
     // Check modifiers list

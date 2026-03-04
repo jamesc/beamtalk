@@ -110,6 +110,25 @@ build-vscode: build-lsp
     Push-Location editors\vscode; try { npm install --quiet; if ($LASTEXITCODE -ne 0) { throw "npm install failed" }; npm run compile; if ($LASTEXITCODE -ne 0) { throw "npm run compile failed" } } finally { Pop-Location }
     @echo "✅ VS Code extension built for local install from editors/vscode"
 
+# Build and deploy VS Code extension to the locally-installed extension directory.
+# Finds the first matching beamtalk.beamtalk-* dir under ~/.vscode-server*/extensions/.
+# Copies JS output and LSP binary so the extension host picks up changes on next reload.
+[linux]
+dev-deploy-vscode: build-vscode
+    #!/usr/bin/env bash
+    set -euo pipefail
+    EXT_DIR=$(ls -d ~/.vscode-server*/extensions/beamtalk.beamtalk-* 2>/dev/null | head -1)
+    if [ -z "${EXT_DIR}" ]; then
+        echo "❌ No installed beamtalk extension found under ~/.vscode-server*/extensions/"
+        echo "   Install the extension first, then re-run."
+        exit 1
+    fi
+    echo "📦 Deploying to ${EXT_DIR}"
+    cp editors/vscode/out/*.js "${EXT_DIR}/out/"
+    cp target/debug/beamtalk-lsp "${EXT_DIR}/bin/beamtalk-lsp"
+    echo "✅ Deployed JS + LSP to ${EXT_DIR}"
+    echo "   Reload the VS Code extension host (Ctrl+Shift+P → 'Restart Extension Host') to pick up changes."
+
 # Build Erlang runtime
 [working-directory: 'runtime']
 build-erlang:

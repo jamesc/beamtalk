@@ -390,7 +390,7 @@ export class WorkspaceTreeDataProvider
         (await this._lspHoverTooltip(
           element.classInfo.source_file,
           element.method.selector,
-          "method"
+          element.method.side === "class" ? "class-method" : "method"
         )) ?? this._methodTooltipFallback(element.method);
       return item;
     }
@@ -400,17 +400,21 @@ export class WorkspaceTreeDataProvider
   private async _lspHoverTooltip(
     sourceFile: string | undefined,
     symbol: string,
-    kind: "class" | "method"
+    kind: "class" | "method" | "class-method"
   ): Promise<vscode.MarkdownString | undefined> {
     if (!sourceFile || sourceFile === "unknown") return undefined;
     try {
       const uri = vscode.Uri.file(sourceFile);
-      const doc = await vscode.workspace.openTextDocument(uri);
-      const text = doc.getText();
-      const idx =
-        kind === "class" ? findClassDeclaration(text, symbol) : findMethodDeclaration(text, symbol);
-      if (idx === -1) return undefined;
-      const pos = doc.positionAt(idx);
+      await vscode.workspace.openTextDocument(uri);
+
+      // Use the LSP document symbol provider to find the exact position — no regex.
+      const docSymbols = await vscode.commands.executeCommand<
+        vscode.DocumentSymbol[] | vscode.SymbolInformation[]
+      >("vscode.executeDocumentSymbolProvider", uri);
+
+      const pos = this._findSymbolPosition(docSymbols ?? [], symbol, kind);
+      if (!pos) return undefined;
+
       const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
         "vscode.executeHoverProvider",
         uri,
@@ -430,6 +434,39 @@ export class WorkspaceTreeDataProvider
     } catch {
       return undefined;
     }
+  }
+
+  /** Find the position of a class or method symbol from document symbols. */
+  private _findSymbolPosition(
+    symbols: vscode.DocumentSymbol[] | vscode.SymbolInformation[],
+    name: string,
+    kind: "class" | "method" | "class-method"
+  ): vscode.Position | undefined {
+    const targetKind =
+      kind === "class"
+        ? [vscode.SymbolKind.Class]
+        : [vscode.SymbolKind.Method, vscode.SymbolKind.Function];
+
+    for (const sym of symbols) {
+      // Class symbols are named "ClassName (class)" per ADR 0013 — strip the suffix for matching.
+      const symBaseName =
+        sym.kind === vscode.SymbolKind.Class ? sym.name.replace(/ \(class\)$/, "") : sym.name;
+      if (targetKind.includes(sym.kind) && symBaseName === name) {
+        if ("range" in sym) {
+          // DocumentSymbol
+          return sym.selectionRange.start;
+        } else {
+          // SymbolInformation
+          return sym.location.range.start;
+        }
+      }
+      // Recurse into children (DocumentSymbol only)
+      if ("children" in sym && sym.children.length > 0) {
+        const found = this._findSymbolPosition(sym.children, name, kind);
+        if (found) return found;
+      }
+    }
+    return undefined;
   }
 
   private _classTooltipFallback(info: ClassInfo): vscode.MarkdownString {
@@ -734,20 +771,3 @@ export class WorkspaceTreeDataProvider
   }
 }
 
-// ─── Module-level helpers for symbol position finding ────────────────────────
-
-function findClassDeclaration(text: string, className: string): number {
-  const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`\\b(?:class|actor)\\s+${escaped}(?=\\s|$)`, "m");
-  const match = pattern.exec(text);
-  if (!match) return -1;
-  return match.index + match[0].indexOf(className);
-}
-
-function findMethodDeclaration(text: string, selector: string): number {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`\\bmethod\\s+(${escaped})(?=\\s|$)`);
-  const match = pattern.exec(text);
-  if (!match || match.index === undefined) return -1;
-  return match.index + match[0].indexOf(selector);
-}

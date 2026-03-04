@@ -871,8 +871,15 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
                 undefined ->
                     [];
                 Pid ->
-                    InstanceSelectors = lists:sort(beamtalk_object_class:methods(Pid)),
-                    ClassSelectors = lists:sort(beamtalk_object_class:local_class_methods(Pid)),
+                    InstanceSelectors = lists:sort(
+                        beamtalk_object_class:local_instance_methods(Pid)
+                    ),
+                    ClassMethodsMap = beamtalk_object_class:local_class_methods_map(Pid),
+                    ClassSelectors = lists:sort([
+                        S
+                     || {S, Info} <- maps:to_list(ClassMethodsMap),
+                        not maps:get(injected, Info, false)
+                    ]),
                     InstanceEntries = [
                         #{
                             <<"name">> => atom_to_binary(S, utf8),
