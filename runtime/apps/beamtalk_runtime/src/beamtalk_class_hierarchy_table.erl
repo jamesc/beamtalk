@@ -33,7 +33,8 @@
     delete/1,
     lookup/1,
     foldl/2,
-    match_subclasses/1
+    match_subclasses/1,
+    all_builtins/0
 ]).
 
 -type class_name() :: atom().
@@ -118,6 +119,74 @@ foldl(Fun, Acc0) ->
                     Acc0
             end
     end.
+
+%% @doc Return all stdlib builtin class names known to the Rust compiler.
+%%
+%% These classes are already in `ClassHierarchy::with_builtins()` on the Rust
+%% side with richer data than `__beamtalk_meta/0` provides.  Crash recovery
+%% skips them so the Rust compiler's richer definitions take precedence.
+%%
+%% Keep this list in sync with `generated_builtins.rs::is_generated_builtin_class`
+%% and the `Future` runtime-only class.
+-spec all_builtins() -> [atom()].
+all_builtins() ->
+    [
+        'Actor',
+        'Array',
+        'BEAMError',
+        'BeamtalkInterface',
+        'Behaviour',
+        'Block',
+        'Boolean',
+        'Character',
+        'Class',
+        'ClassBuilder',
+        'Collection',
+        'CompiledMethod',
+        'DateTime',
+        'Dictionary',
+        'Erlang',
+        'ErlangModule',
+        'Error',
+        'Exception',
+        'ExitError',
+        'False',
+        'File',
+        'FileHandle',
+        'Float',
+        'Future',
+        'InstantiationError',
+        'Integer',
+        'JSON',
+        'List',
+        'Metaclass',
+        'Number',
+        'Object',
+        'Pid',
+        'Port',
+        'ProtoObject',
+        'Random',
+        'Reference',
+        'Regex',
+        'RuntimeError',
+        'Set',
+        'StackFrame',
+        'Stream',
+        'String',
+        'Symbol',
+        'System',
+        'TestCase',
+        'TestResult',
+        'TestRunner',
+        'ThrowError',
+        'TranscriptStream',
+        'True',
+        'Tuple',
+        'TypeError',
+        'UndefinedObject',
+        'Value',
+        'WorkspaceInterface'
+    ].
 
 %% @doc Return all class names whose direct superclass is `ClassName`.
 %%

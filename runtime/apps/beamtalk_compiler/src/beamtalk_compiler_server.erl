@@ -25,7 +25,9 @@
     compile/2,
     diagnostics/1,
     version/0,
-    compile_core_erlang/1
+    compile_core_erlang/1,
+    register_class/2,
+    clear_classes/0
 ]).
 
 %% gen_server callbacks
@@ -35,12 +37,17 @@
 -export([
     handle_compile_response/1,
     handle_diagnostics_response/1,
-    handle_version_response/1
+    handle_version_response/1,
+    get_classes/0
 ]).
 -endif.
 
 -record(state, {
-    port :: port() | undefined
+    port :: port() | undefined,
+    %% ADR 0050 Phase 3: Accumulated class metadata cache.
+    %% Maps class name atom → __beamtalk_meta/0 map.
+    %% Populated via register_class/2 casts and crash recovery on init.
+    classes = #{} :: #{atom() => map()}
 }).
 
 %%% Public API
@@ -99,6 +106,30 @@ diagnostics(Source) ->
 version() ->
     gen_server:call(?MODULE, version, 5000).
 
+-ifdef(TEST).
+%% @doc Return the current class cache map (test use only).
+-spec get_classes() -> #{atom() => map()}.
+get_classes() ->
+    gen_server:call(?MODULE, get_classes, 5000).
+-endif.
+
+%% @doc Register a class with its metadata in the compiler server cache.
+%%
+%% ADR 0050 Phase 3: Fire-and-forget cast. Silently dropped if the server is
+%% not running (e.g. non-REPL compilation or test runs without the server).
+-spec register_class(atom(), map()) -> ok.
+register_class(ClassName, MetaMap) ->
+    catch gen_server:cast(?MODULE, {register_class, ClassName, MetaMap}),
+    ok.
+
+%% @doc Clear all cached class metadata.
+%%
+%% ADR 0050 Phase 3: Used for test isolation — call before tests that need a
+%% clean class cache. Synchronous so the next compile sees an empty cache.
+-spec clear_classes() -> ok.
+clear_classes() ->
+    gen_server:call(?MODULE, clear_classes, 5000).
+
 %% @doc Compile Core Erlang source to BEAM bytecode in memory.
 %% Uses core_scan → core_parse → compile:forms (no temp files).
 -spec compile_core_erlang(binary()) -> {ok, atom(), binary()} | {error, term()}.
@@ -128,7 +159,11 @@ compile_core_erlang(CoreErlangBin) ->
 init(_Args) ->
     process_flag(trap_exit, true),
     Port = open_port(),
-    {ok, #state{port = Port}}.
+    %% ADR 0050 Phase 3: Recover class cache synchronously on start/restart.
+    %% Compile requests arriving before recovery completes are queued by the
+    %% gen_server mailbox — they will not see an empty cache.
+    Classes = recover_from_beam_modules(),
+    {ok, #state{port = Port, classes = Classes}}.
 
 handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From, State) ->
     Result = beamtalk_compiler_port:compile_expression(
@@ -144,9 +179,17 @@ handle_call({diagnostics, Source}, _From, State) ->
 handle_call(version, _From, State) ->
     Result = do_version(State#state.port),
     {reply, Result, State};
+handle_call(clear_classes, _From, State) ->
+    {reply, ok, State#state{classes = #{}}};
+handle_call(get_classes, _From, State) ->
+    {reply, State#state.classes, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
+handle_cast({register_class, ClassName, MetaMap}, State) ->
+    %% ADR 0050 Phase 3: Accumulate class metadata; overwrite on redefinition.
+    NewClasses = maps:put(ClassName, MetaMap, State#state.classes),
+    {noreply, State#state{classes = NewClasses}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -166,6 +209,46 @@ terminate(_Reason, _State) ->
     ok.
 
 %%% Internal functions
+
+%% @private Scan all currently loaded BEAM modules and recover user-class metadata.
+%%
+%% ADR 0050 Phase 3 (crash recovery): On compiler server restart the port process
+%% is gone but every Beamtalk class BEAM module is still loaded in the VM.  We
+%% call `__beamtalk_meta/0` on each loaded module and collect the metadata, skipping:
+%%   * Modules that do not export `__beamtalk_meta/0` (non-Beamtalk modules).
+%%   * Classes in `all_builtins/0` — the Rust compiler already has richer data.
+%%   * Old-format modules (no `meta_version` key) are included with their partial
+%%     data; absent keys are treated as zero-values by the Rust deserializer.
+%%
+%% Runs synchronously in `init/1` so compile requests queue during recovery.
+-spec recover_from_beam_modules() -> #{atom() => map()}.
+recover_from_beam_modules() ->
+    BuiltinSet = sets:from_list(beamtalk_class_hierarchy_table:all_builtins(), [{version, 2}]),
+    AllModules = code:all_loaded(),
+    lists:foldl(
+        fun({Module, _Path}, Acc) ->
+            case erlang:function_exported(Module, '__beamtalk_meta', 0) of
+                false ->
+                    Acc;
+                true ->
+                    case (catch Module:'__beamtalk_meta'()) of
+                        Meta when is_map(Meta) ->
+                            ClassName = maps:get(class, Meta, undefined),
+                            case
+                                is_atom(ClassName) andalso
+                                    not sets:is_element(ClassName, BuiltinSet)
+                            of
+                                true -> maps:put(ClassName, Meta, Acc);
+                                false -> Acc
+                            end;
+                        _ ->
+                            Acc
+                    end
+            end
+        end,
+        #{},
+        AllModules
+    ).
 
 open_port() ->
     try

@@ -108,6 +108,70 @@ handle_version_response_unexpected_test() ->
     ?assertEqual({error, unexpected_response}, Result).
 
 %%% ---------------------------------------------------------------
+%%% ADR 0050 Phase 3: Class cache (register_class, clear_classes)
+%%% ---------------------------------------------------------------
+
+class_cache_test_() ->
+    {setup, fun start_compiler/0, fun stop_compiler/1, [
+        {"register → class visible in state", fun register_class_visible/0},
+        {"register twice → overwrites", fun register_class_overwrites/0},
+        {"clear_classes → cache emptied", fun clear_classes_empties/0},
+        {"crash recovery → no builtins in cache", fun crash_recovery_populates/0},
+        {"register_class when server down → no crash", fun register_when_down/0}
+    ]}.
+
+register_class_visible() ->
+    beamtalk_compiler_server:clear_classes(),
+    Meta = #{class => 'TestFoo', superclass => 'Object', fields => []},
+    beamtalk_compiler_server:register_class('TestFoo', Meta),
+    %% gen_server mailbox ordering: the synchronous get_classes/0 call is
+    %% guaranteed to be processed after the preceding cast.
+    Classes = beamtalk_compiler_server:get_classes(),
+    ?assertMatch(#{class := 'TestFoo'}, maps:get('TestFoo', Classes)).
+
+register_class_overwrites() ->
+    beamtalk_compiler_server:clear_classes(),
+    Meta1 = #{class => 'TestBar', superclass => 'Object', fields => []},
+    Meta2 = #{class => 'TestBar', superclass => 'Actor', fields => [x]},
+    beamtalk_compiler_server:register_class('TestBar', Meta1),
+    beamtalk_compiler_server:register_class('TestBar', Meta2),
+    Classes = beamtalk_compiler_server:get_classes(),
+    ?assertMatch(#{superclass := 'Actor', fields := [x]}, maps:get('TestBar', Classes)).
+
+clear_classes_empties() ->
+    Meta = #{class => 'TestBaz', superclass => 'Object', fields => []},
+    beamtalk_compiler_server:register_class('TestBaz', Meta),
+    ok = beamtalk_compiler_server:clear_classes(),
+    Classes = beamtalk_compiler_server:get_classes(),
+    ?assertEqual(#{}, Classes).
+
+crash_recovery_populates() ->
+    %% Restart the server and check that recovery excludes builtins.
+    %% Note: if no non-builtin Beamtalk classes are loaded, recovery correctly
+    %% returns #{} — the assertion checks the invariant "no builtins in cache".
+    application:stop(beamtalk_compiler),
+    application:start(beamtalk_compiler),
+    timer:sleep(200),
+    Classes = beamtalk_compiler_server:get_classes(),
+    BuiltinSet = sets:from_list(beamtalk_class_hierarchy_table:all_builtins()),
+    ?assert(
+        maps:fold(
+            fun(ClassName, _Meta, Acc) ->
+                Acc andalso not sets:is_element(ClassName, BuiltinSet)
+            end,
+            true,
+            Classes
+        )
+    ).
+
+register_when_down() ->
+    %% Calling register_class/2 when the server is not running must not crash.
+    application:stop(beamtalk_compiler),
+    ?assertEqual(ok, beamtalk_compiler_server:register_class('TestDown', #{class => 'TestDown'})),
+    application:start(beamtalk_compiler),
+    timer:sleep(100).
+
+%%% ---------------------------------------------------------------
 %%% gen_server edge cases (via running server)
 %%% ---------------------------------------------------------------
 
