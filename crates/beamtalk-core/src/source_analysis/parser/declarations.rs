@@ -868,19 +868,20 @@ impl Parser {
                     || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:")
                 {
                     // Trailing period at end of method — not needed (BT-948)
-                    let mut diag =
-                        Diagnostic::lint("unnecessary trailing `.` at end of method", period_span);
-                    diag.hint = Some("Remove the trailing `.`".into());
-                    self.diagnostics.push(diag);
+                    self.diagnostics.push(
+                        Diagnostic::lint("unnecessary trailing `.` at end of method", period_span)
+                            .with_hint("Remove the trailing `.`"),
+                    );
                     break;
                 } else if !self.is_at_end() && self.current_token().has_leading_newline() {
                     // Period immediately before a newline — newline already separates statements
-                    let mut diag = Diagnostic::lint(
-                        "unnecessary `.` — the following newline already separates statements",
-                        period_span,
+                    self.diagnostics.push(
+                        Diagnostic::lint(
+                            "unnecessary `.` — the following newline already separates statements",
+                            period_span,
+                        )
+                        .with_hint("Remove the `.` and rely on the newline"),
                     );
-                    diag.hint = Some("Remove the `.` and rely on the newline".into());
-                    self.diagnostics.push(diag);
                 }
                 // Otherwise continue parsing more expressions
             } else if self.match_token(&TokenKind::Bang) {

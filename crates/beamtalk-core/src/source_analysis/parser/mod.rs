@@ -419,6 +419,13 @@ impl Diagnostic {
         }
     }
 
+    /// Attaches an optional hint for how to fix the issue.
+    #[must_use]
+    pub fn with_hint(mut self, hint: impl Into<EcoString>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+
     /// Attaches a semantic category for `@expect` suppression.
     #[must_use]
     pub fn with_category(mut self, category: DiagnosticCategory) -> Self {

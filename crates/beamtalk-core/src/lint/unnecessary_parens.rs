@@ -111,10 +111,10 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     match expr {
         Expression::Parenthesized { expression, span } => {
             if is_always_unnecessary(expression) {
-                let mut diag = Diagnostic::lint("unnecessary parentheses".to_string(), *span);
-                diag.hint =
-                    Some("Remove the parentheses — they do not affect precedence here".into());
-                diagnostics.push(diag);
+                diagnostics.push(
+                    Diagnostic::lint("unnecessary parentheses".to_string(), *span)
+                        .with_hint("Remove the parentheses — they do not affect precedence here"),
+                );
             }
             check_expr(expression, diagnostics);
         }

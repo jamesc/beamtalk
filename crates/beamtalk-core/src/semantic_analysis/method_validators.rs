@@ -172,13 +172,10 @@ impl MethodValidator for ReflectionMethodValidator {
                      = note: {selector_name} {}",
                     method_description(&selector_name),
                 );
-                vec![Diagnostic {
-                    severity: crate::source_analysis::Severity::Error,
-                    message: message.into(),
-                    span: id.span,
-                    hint: Some(format!("Use #{} instead of {}", id.name, id.name).into()),
-                    category: None,
-                }]
+                vec![
+                    Diagnostic::error(message, id.span)
+                        .with_hint(format!("Use #{} instead of {}", id.name, id.name)),
+                ]
             }
 
             // Class reference (e.g., `classNamed: Counter` instead of `classNamed: #Counter`)
@@ -189,13 +186,10 @@ impl MethodValidator for ReflectionMethodValidator {
                      = note: {selector_name} {}",
                     method_description(&selector_name),
                 );
-                vec![Diagnostic {
-                    severity: crate::source_analysis::Severity::Error,
-                    message: message.into(),
-                    span: *span,
-                    hint: Some(format!("Use #{} instead of {}", name.name, name.name).into()),
-                    category: None,
-                }]
+                vec![
+                    Diagnostic::error(message, *span)
+                        .with_hint(format!("Use #{} instead of {}", name.name, name.name)),
+                ]
             }
 
             // Other expression types (numbers, strings, blocks, etc.)
@@ -206,13 +200,10 @@ impl MethodValidator for ReflectionMethodValidator {
                      = note: {selector_name} {}",
                     method_description(&selector_name),
                 );
-                vec![Diagnostic {
-                    severity: crate::source_analysis::Severity::Error,
-                    message: message.into(),
-                    span: other.span(),
-                    hint: Some("Use a symbol literal like #methodName".into()),
-                    category: None,
-                }]
+                vec![
+                    Diagnostic::error(message, other.span())
+                        .with_hint("Use a symbol literal like #methodName"),
+                ]
             }
         }
     }
@@ -281,13 +272,13 @@ pub(crate) fn validate_primitive_instantiation(
         _ => "Primitive values are created with literals",
     };
 
-    Some(Diagnostic {
-        severity: crate::source_analysis::Severity::Error,
-        message: format!("Cannot instantiate primitive class `{class_name}`").into(),
-        span,
-        hint: Some(hint.into()),
-        category: None,
-    })
+    Some(
+        Diagnostic::error(
+            format!("Cannot instantiate primitive class `{class_name}`"),
+            span,
+        )
+        .with_hint(hint),
+    )
 }
 
 /// Check if the receiver of `fieldAt:put:` is an immutable literal.
@@ -316,13 +307,11 @@ pub(crate) fn validate_immutable_mutation(
         _ => return None,
     };
 
-    Some(Diagnostic {
-        severity: crate::source_analysis::Severity::Warning,
-        message: format!("Cannot mutate immutable value ({type_name})").into(),
-        span,
-        hint: Some("Primitive values like integers, strings, and booleans are immutable".into()),
-        category: Some(DiagnosticCategory::Type),
-    })
+    Some(
+        Diagnostic::warning(format!("Cannot mutate immutable value ({type_name})"), span)
+            .with_hint("Primitive values like integers, strings, and booleans are immutable")
+            .with_category(DiagnosticCategory::Type),
+    )
 }
 
 // ── Block arity validator ───────────────────────────────────────────────
@@ -384,13 +373,7 @@ impl MethodValidator for BlockArityValidator {
         );
         let hint = block_arity_hint(&selector_name, expected);
 
-        vec![Diagnostic {
-            severity: crate::source_analysis::Severity::Error,
-            message: message.into(),
-            span: block.span,
-            hint: Some(hint.into()),
-            category: None,
-        }]
+        vec![Diagnostic::error(message, block.span).with_hint(hint)]
     }
 }
 
@@ -455,16 +438,13 @@ impl MethodValidator for IntegerArgumentValidator {
                 Expression::Literal(Literal::Integer(_), _) => {}
                 Expression::Literal(lit, lit_span) => {
                     let type_name = literal_type_name(lit);
-                    diags.push(Diagnostic {
-                        severity: crate::source_analysis::Severity::Warning,
-                        message: format!(
-                            "{selector_name} expects an integer argument, got {type_name}"
+                    diags.push(
+                        Diagnostic::warning(
+                            format!("{selector_name} expects an integer argument, got {type_name}"),
+                            *lit_span,
                         )
-                        .into(),
-                        span: *lit_span,
-                        hint: Some(integer_arg_hint(&selector_name).into()),
-                        category: None,
-                    });
+                        .with_hint(integer_arg_hint(&selector_name)),
+                    );
                 }
                 _ => {}
             }
@@ -524,14 +504,13 @@ impl MethodValidator for StringArgumentValidator {
             Expression::Literal(lit, lit_span) => {
                 let type_name = literal_type_name(lit);
                 let selector_name = selector.name();
-                vec![Diagnostic {
-                    severity: crate::source_analysis::Severity::Error,
-                    message: format!("{selector_name} expects a string argument, got {type_name}")
-                        .into(),
-                    span: *lit_span,
-                    hint: Some(string_arg_hint(&selector_name).into()),
-                    category: None,
-                }]
+                vec![
+                    Diagnostic::error(
+                        format!("{selector_name} expects a string argument, got {type_name}"),
+                        *lit_span,
+                    )
+                    .with_hint(string_arg_hint(&selector_name)),
+                ]
             }
 
             // Non-literal — skip (runtime handles)
@@ -592,16 +571,13 @@ impl MethodValidator for TypeAwareIntegerArgValidator {
             Expression::Literal(lit, lit_span) => {
                 let type_name = literal_type_name(lit);
                 let selector_name = selector.name();
-                vec![Diagnostic {
-                    severity: crate::source_analysis::Severity::Error,
-                    message: format!(
-                        "{selector_name} expects an integer argument, got {type_name}"
+                vec![
+                    Diagnostic::error(
+                        format!("{selector_name} expects an integer argument, got {type_name}"),
+                        *lit_span,
                     )
-                    .into(),
-                    span: *lit_span,
-                    hint: Some("Use a 1-based integer index: list at: 1".into()),
-                    category: None,
-                }]
+                    .with_hint("Use a 1-based integer index: list at: 1"),
+                ]
             }
             _ => vec![],
         }
@@ -647,14 +623,13 @@ impl MethodValidator for TypeAwareStringArgValidator {
             Expression::Literal(lit, lit_span) => {
                 let type_name = literal_type_name(lit);
                 let selector_name = selector.name();
-                vec![Diagnostic {
-                    severity: crate::source_analysis::Severity::Error,
-                    message: format!("{selector_name} expects a string argument, got {type_name}")
-                        .into(),
-                    span: *lit_span,
-                    hint: Some(string_arg_hint(&selector_name).into()),
-                    category: None,
-                }]
+                vec![
+                    Diagnostic::error(
+                        format!("{selector_name} expects a string argument, got {type_name}"),
+                        *lit_span,
+                    )
+                    .with_hint(string_arg_hint(&selector_name)),
+                ]
             }
             _ => vec![],
         }
