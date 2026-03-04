@@ -1,7 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_interface module
+%%% @doc EUnit tests for beamtalk_interface module (Phase 1 gen_server — DEPRECATED).
+%%%
+%%% @deprecated beamtalk_interface (Phase 1 gen_server) is planned for removal per BT-1093.
+%%% New tests should target beamtalk_interface_primitives_tests instead.
 %%%
 %%% Tests the BeamtalkInterface actor functionality:
 %%% - Basic lifecycle (start_link, init)
