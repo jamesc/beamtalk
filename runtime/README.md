@@ -104,30 +104,6 @@ rebar3 shell
 
 The Beamtalk runtime supports standard OTP application configuration for production deployments and development.
 
-### REPL Port Configuration
-
-The REPL backend TCP port can be configured via:
-
-**Priority order** (highest to lowest):
-1. CLI flag: `beamtalk repl --port 9001`
-2. Environment variable: `BEAMTALK_REPL_PORT`
-3. Application config: `application:get_env(beamtalk_runtime, repl_port, 0)`
-4. Default: `0` (ephemeral)
-
-**Example sys.config for OTP releases:**
-```erlang
-[
-    {beamtalk_runtime, [
-        {repl_port, 9001}
-    ]}
-].
-```
-
-**Example environment variable (devcontainer):**
-```bash
-export BEAMTALK_REPL_PORT=9190
-```
-
 ### Node Name Configuration
 
 For Erlang distribution, node names can be configured:

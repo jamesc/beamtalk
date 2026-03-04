@@ -452,13 +452,6 @@ gh auth status
 gh auth login
 ```
 
-#### Port conflicts
-
-If you need a fixed REPL port, set an env var before launching REPL:
-```bash
-BEAMTALK_REPL_PORT=9999
-```
-
 ---
 
 ## Project Status
