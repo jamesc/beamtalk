@@ -605,20 +605,22 @@ pub(crate) fn generate_stream_bif(selector: &str, params: &[String]) -> Option<D
 /// These are class-level methods (no Self parameter needed).
 pub(crate) fn generate_system_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     let p0 = param(params, 0, "_Arg0");
-    let p1 = param(params, 1, "_Arg1");
     match selector {
         "getEnv:" => Some(docvec![
             "call 'beamtalk_system':'getEnv:'(",
             p0.to_string(),
             ")"
         ]),
-        "getEnv:default:" => Some(docvec![
-            "call 'beamtalk_system':'getEnv:default:'(",
-            p0.to_string(),
-            ", ",
-            p1.to_string(),
-            ")"
-        ]),
+        "getEnv:default:" => {
+            let p1 = param(params, 1, "_Arg1");
+            Some(docvec![
+                "call 'beamtalk_system':'getEnv:default:'(",
+                p0.to_string(),
+                ", ",
+                p1.to_string(),
+                ")"
+            ])
+        }
         "osPlatform" => Some(docvec!["call 'beamtalk_system':'osPlatform'()"]),
         "osFamily" => Some(docvec!["call 'beamtalk_system':'osFamily'()"]),
         "architecture" => Some(docvec!["call 'beamtalk_system':'architecture'()"]),
