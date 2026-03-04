@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 76
 expression: core_erlang
 ---
 module 'method_lookup' ['new'/0, 'new'/1, 'lookupLiteral'/1, 'lookupVariable:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
@@ -122,6 +121,14 @@ call 'beamtalk_method_resolver':'resolve'(_cls1, 'getValue')
       'superclass' => 'Object',
       'fields' => [],
       'methods' => [{'lookupLiteral', 0}, {'lookupVariable:', 1}],
-      'class_methods' => []}~
+      'class_methods' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'field_types' => ~{}~,
+      'method_info' => ~{'lookupLiteral' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'lookupVariable:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~}~,
+      'class_method_info' => ~{}~
+    }~
 
 end

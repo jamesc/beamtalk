@@ -12,10 +12,15 @@ use super::super::document::{Document, INDENT, line, nest};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
     Block, ClassDefinition, ClassKind, Expression, Literal, MessageSelector, MethodDefinition,
-    MethodKind, Module, TypeAnnotation,
+    MethodKind, Module, StateDeclaration, TypeAnnotation,
 };
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
+
+/// Tuple representing a method entry for `method_info` / `class_method_info` meta maps.
+///
+/// Fields: (`erlang_selector`, `arity`, `return_type`, `param_types`)
+type MethodInfoEntry = (String, usize, Option<String>, Vec<Option<String>>);
 
 impl CoreErlangGenerator {
     /// Generates dispatch case clauses for all methods in a class definition.
@@ -2037,6 +2042,20 @@ impl CoreErlangGenerator {
         let methods_doc = Self::meta_method_tuple_list(&methods);
         let class_methods_doc = Self::meta_method_tuple_list(&class_methods);
 
+        // Boolean flags
+        let is_sealed_doc = Self::meta_bool(class.is_sealed);
+        let is_abstract_doc = Self::meta_bool(class.is_abstract);
+        let is_value_doc = Self::meta_bool(class.class_kind == ClassKind::Value);
+        let is_typed_doc = Self::meta_bool(class.is_typed);
+
+        // field_types: map of field name → declared type atom or 'none'
+        let field_types_doc = Self::meta_field_types_map(&class.state);
+
+        let method_info_doc =
+            Self::meta_method_info_map(&Self::meta_instance_method_entries(class));
+        let class_method_info_doc =
+            Self::meta_method_info_map(&Self::meta_class_method_entries(class));
+
         Ok(docvec![
             "'__beamtalk_meta'/0 = fun () ->\n",
             "    ~{'class' => '",
@@ -2049,7 +2068,21 @@ impl CoreErlangGenerator {
             methods_doc,
             ",\n      'class_methods' => ",
             class_methods_doc,
-            "}~\n",
+            ",\n      'is_sealed' => ",
+            is_sealed_doc,
+            ",\n      'is_abstract' => ",
+            is_abstract_doc,
+            ",\n      'is_value' => ",
+            is_value_doc,
+            ",\n      'is_typed' => ",
+            is_typed_doc,
+            ",\n      'field_types' => ",
+            field_types_doc,
+            ",\n      'method_info' => ",
+            method_info_doc,
+            ",\n      'class_method_info' => ",
+            class_method_info_doc,
+            "\n    }~\n",
             "\n",
         ])
     }
@@ -2097,6 +2130,163 @@ impl CoreErlangGenerator {
             ]);
         }
         parts.push(Document::Str("]"));
+        Document::Vec(parts)
+    }
+
+    /// Produces the Core Erlang atom for a boolean value.
+    fn meta_bool(b: bool) -> Document<'static> {
+        if b {
+            Document::Str("'true'")
+        } else {
+            Document::Str("'false'")
+        }
+    }
+
+    /// Builds a Core Erlang map of field name → declared type atom or `'none'`.
+    ///
+    /// Example: `[StateDecl{name: "value", type: Integer}]` → `~{'value' => 'Integer'}~`
+    /// Empty slice → `~{}~`
+    fn meta_field_types_map(state: &[StateDeclaration]) -> Document<'static> {
+        if state.is_empty() {
+            return Document::Str("~{}~");
+        }
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        parts.push(Document::Str("~{"));
+        for (i, s) in state.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            let type_doc = match &s.type_annotation {
+                Some(ta) => docvec!["'", Document::String(ta.type_name().to_string()), "'"],
+                None => Document::Str("'none'"),
+            };
+            parts.push(docvec![
+                "'",
+                Document::String(s.name.name.to_string()),
+                "' => ",
+                type_doc,
+            ]);
+        }
+        parts.push(Document::Str("}~"));
+        Document::Vec(parts)
+    }
+
+    /// Collects `MethodInfoEntry` tuples for all primary instance methods of `class`,
+    /// including auto-generated slot methods for Value subclasses.
+    fn meta_instance_method_entries(class: &ClassDefinition) -> Vec<MethodInfoEntry> {
+        let mut entries: Vec<MethodInfoEntry> = class
+            .methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary)
+            .map(Self::meta_method_entry)
+            .collect();
+        if let Some(auto) =
+            crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class)
+        {
+            use crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods;
+            for field in &auto.getters {
+                entries.push((field.clone(), 0, None, vec![]));
+            }
+            for field in &auto.setters {
+                entries.push((
+                    AutoSlotMethods::with_star_selector(field),
+                    1,
+                    None,
+                    vec![None],
+                ));
+            }
+        }
+        entries
+    }
+
+    /// Collects `MethodInfoEntry` tuples for all primary class methods of `class`,
+    /// including the auto-generated keyword constructor for Value subclasses.
+    fn meta_class_method_entries(class: &ClassDefinition) -> Vec<MethodInfoEntry> {
+        let mut entries: Vec<MethodInfoEntry> = class
+            .class_methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary)
+            .map(Self::meta_method_entry)
+            .collect();
+        if let Some(auto) =
+            crate::codegen::core_erlang::value_type_codegen::compute_auto_slot_methods(class)
+        {
+            if let Some(kw_sel) = &auto.keyword_constructor {
+                let arity = class.state.len();
+                entries.push((kw_sel.clone(), arity, None, vec![None; arity]));
+            }
+        }
+        entries
+    }
+
+    /// Converts a `MethodDefinition` into a `MethodInfoEntry`.
+    fn meta_method_entry(m: &MethodDefinition) -> MethodInfoEntry {
+        let return_type = m.return_type.as_ref().map(|rt| rt.type_name().to_string());
+        let param_types: Vec<Option<String>> = m
+            .parameters
+            .iter()
+            .map(|p| {
+                p.type_annotation
+                    .as_ref()
+                    .map(|ta| ta.type_name().to_string())
+            })
+            .collect();
+        (
+            m.selector.to_erlang_atom(),
+            m.selector.arity(),
+            return_type,
+            param_types,
+        )
+    }
+
+    /// Builds a Core Erlang map of selector → method info map.
+    ///
+    /// Each entry: `'selector' => ~{'arity' => N, 'param_types' => [...], 'return_type' => 'T'}~`
+    /// Empty slice → `~{}~`
+    fn meta_method_info_map(methods: &[MethodInfoEntry]) -> Document<'static> {
+        if methods.is_empty() {
+            return Document::Str("~{}~");
+        }
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        parts.push(Document::Str("~{"));
+        for (i, (sel, arity, return_type, param_types)) in methods.iter().enumerate() {
+            if i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            let param_types_doc = if param_types.is_empty() {
+                Document::Str("[]")
+            } else {
+                let mut pts: Vec<Document<'static>> = Vec::new();
+                pts.push(Document::Str("["));
+                for (j, pt) in param_types.iter().enumerate() {
+                    if j > 0 {
+                        pts.push(Document::Str(", "));
+                    }
+                    pts.push(match pt {
+                        Some(name) => docvec!["'", Document::String(name.clone()), "'"],
+                        None => Document::Str("'none'"),
+                    });
+                }
+                pts.push(Document::Str("]"));
+                Document::Vec(pts)
+            };
+            let return_type_doc = match return_type {
+                Some(name) => docvec!["'", Document::String(name.clone()), "'"],
+                None => Document::Str("'none'"),
+            };
+            parts.push(docvec![
+                "'",
+                Document::String(sel.clone()),
+                "' => ~{'arity' => ",
+                Document::String(arity.to_string()),
+                ", 'param_types' => ",
+                param_types_doc,
+                ", 'return_type' => ",
+                return_type_doc,
+                "}~",
+            ]);
+        }
+        parts.push(Document::Str("}~"));
         Document::Vec(parts)
     }
 }

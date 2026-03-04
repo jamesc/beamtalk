@@ -168,6 +168,14 @@ call 'bt@stdlib@dictionary':'dispatch'('keysAndValuesDo:', [_block9], Self)
       'superclass' => 'Object',
       'fields' => [],
       'methods' => [{'size', 0}, {'keys', 0}, {'values', 0}, {'at:', 1}, {'at:ifAbsent:', 2}, {'at:put:', 2}, {'includesKey:', 1}, {'removeKey:', 1}, {'merge:', 1}, {'keysAndValuesDo:', 1}],
-      'class_methods' => []}~
+      'class_methods' => [],
+      'is_sealed' => 'true',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'field_types' => ~{}~,
+      'method_info' => ~{'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'keys' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'values' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'at:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'at:ifAbsent:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none'}~, 'at:put:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none'}~, 'includesKey:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'removeKey:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'merge:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'keysAndValuesDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~}~,
+      'class_method_info' => ~{}~
+    }~
 
 end

@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 76
 expression: core_erlang
 ---
 module 'stdlib_class_tuple' ['new'/0, 'new'/1, 'size'/1, 'at:'/2, 'isOk'/1, 'isError'/1, 'unwrap'/1, 'unwrapOr:'/2, 'unwrapOrElse:'/2, 'asString'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
@@ -156,6 +155,14 @@ call 'beamtalk_tuple_ops':'as_string'(Self)
       'superclass' => 'Object',
       'fields' => [],
       'methods' => [{'size', 0}, {'at:', 1}, {'isOk', 0}, {'isError', 0}, {'unwrap', 0}, {'unwrapOr:', 1}, {'unwrapOrElse:', 1}, {'asString', 0}],
-      'class_methods' => []}~
+      'class_methods' => [],
+      'is_sealed' => 'true',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'field_types' => ~{}~,
+      'method_info' => ~{'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'at:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'isOk' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'isError' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'unwrap' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~, 'unwrapOr:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'unwrapOrElse:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none'}~, 'asString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none'}~}~,
+      'class_method_info' => ~{}~
+    }~
 
 end
