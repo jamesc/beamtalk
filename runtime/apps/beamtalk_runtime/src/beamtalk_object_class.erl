@@ -273,6 +273,22 @@ init({ClassName, ClassInfo}) ->
     put(beamtalk_class_module, Module),
     put(beamtalk_class_is_abstract, IsAbstract),
 
+    %% ADR 0050 Phase 3: Notify compiler server of this class registration.
+    %% Cast is fire-and-forget — silently dropped if the compiler server is not running.
+    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
+        true ->
+            try Module:'__beamtalk_meta'() of
+                Meta when is_map(Meta) ->
+                    beamtalk_compiler_server:register_class(ClassName, Meta);
+                _ ->
+                    ok
+            catch
+                _:_ -> ok
+            end;
+        false ->
+            ok
+    end,
+
     %% BT-877: is_constructible may be set by the compiler via ClassBuilder.
     %% If not set (undefined), it will be computed lazily on first new call.
     %% ADR 0032 Phase 1: No flattened method tables — dispatch walks the chain directly.
@@ -455,6 +471,11 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
         method_signatures = maps:remove(Selector, State#class_state.method_signatures),
         method_return_types = maps:remove(Selector, State#class_state.method_return_types)
     },
+    %% ADR 0050 Phase 3: Notify compiler server of hot-patch.
+    %% __beamtalk_meta/0 is stale after hot-patching, so synthesize metadata
+    %% from the live class_state record instead.  Return types are cleared for
+    %% hot-patched methods — the compiler treats them as dynamic.
+    notify_hot_patch(NewState),
     {reply, ok, NewState};
 %% BT-572: Update class metadata after redefinition (hot reload).
 %% BT-737/BT-738: Validation (shadowing + collision) delegated to beamtalk_class_registry.
@@ -466,6 +487,22 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             {reply, {error, Error}, State};
         ok ->
             NewState = apply_class_info(State, ClassInfo),
+            %% ADR 0050 Phase 3: Notify compiler server of class redefinition.
+            %% The new module is already loaded, so __beamtalk_meta/0 is fresh.
+            NewModule = NewState#class_state.module,
+            case erlang:function_exported(NewModule, '__beamtalk_meta', 0) of
+                true ->
+                    try NewModule:'__beamtalk_meta'() of
+                        Meta when is_map(Meta) ->
+                            beamtalk_compiler_server:register_class(ClassName, Meta);
+                        _ ->
+                            ok
+                    catch
+                        _:_ -> ok
+                    end;
+                false ->
+                    ok
+            end,
             {reply, {ok, NewState#class_state.fields}, NewState}
     end;
 handle_call(instance_variables, _From, #class_state{fields = IVars} = State) ->
@@ -645,6 +682,75 @@ has_class_new_in_chain(ClassName, Module, Depth) ->
                             end
                     end
             end
+    end.
+
+%% @private Notify the compiler server of a hot-patch.
+%%
+%% ADR 0050 Phase 3: `__beamtalk_meta/0` is stale after hot-patching (it reflects
+%% compile-time metadata only).  This function synthesizes a minimal metadata map
+%% from the current live `class_state` and casts it to the compiler server.
+%% The compiler server replaces the class entry wholesale.
+%% Fire-and-forget — silently dropped if the server is not running.
+-spec notify_hot_patch(#class_state{}) -> ok.
+notify_hot_patch(#class_state{
+    name = ClassName,
+    module = Module,
+    superclass = Superclass,
+    is_sealed = IsSealed,
+    is_abstract = IsAbstract,
+    instance_methods = InstanceMethods,
+    class_methods = ClassMethods,
+    fields = Fields,
+    method_return_types = MethodReturnTypes,
+    class_method_return_types = ClassMethodReturnTypes
+}) ->
+    %% Build selector→arity maps from the live instance_methods and class_methods.
+    %% param_types uses atom `none` (not empty list) per ADR 0050 format.
+    MethodInfo = maps:map(
+        fun(Sel, #{arity := Arity}) ->
+            %% Return types are cleared for hot-patched selectors — the compiler
+            %% will treat them as dynamic (none).
+            #{
+                arity => Arity,
+                return_type => maps:get(Sel, MethodReturnTypes, none),
+                param_types => none
+            }
+        end,
+        InstanceMethods
+    ),
+    ClassMethodInfo = maps:map(
+        fun(Sel, #{arity := Arity}) ->
+            #{
+                arity => Arity,
+                return_type => maps:get(Sel, ClassMethodReturnTypes, none),
+                param_types => none
+            }
+        end,
+        ClassMethods
+    ),
+    %% Normalize superclass: class_state uses `none` for root classes, but
+    %% __beamtalk_meta/0 uses `nil`.  Keep the cache consistent with the meta format.
+    SuperclassOut =
+        case Superclass of
+            none -> nil;
+            S -> S
+        end,
+    Meta = #{
+        class => ClassName,
+        superclass => SuperclassOut,
+        module => Module,
+        meta_version => 2,
+        is_sealed => IsSealed,
+        is_abstract => IsAbstract,
+        fields => Fields,
+        method_info => MethodInfo,
+        class_method_info => ClassMethodInfo
+    },
+    %% Guard: the compiler app may not be present in all deployments.
+    %% beamtalk_runtime does not formally depend on beamtalk_compiler.
+    case erlang:function_exported(beamtalk_compiler_server, register_class, 2) of
+        true -> beamtalk_compiler_server:register_class(ClassName, Meta);
+        false -> ok
     end.
 
 %% @private Apply ClassInfo map to existing State, returning updated State.
