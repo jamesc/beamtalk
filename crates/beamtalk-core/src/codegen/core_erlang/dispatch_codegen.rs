@@ -1957,3 +1957,108 @@ impl CoreErlangGenerator {
 // is_bt_stdlib_class, is_erlang_stdlib_module) were removed in BT-411.
 // Class dispatch now goes through runtime class_send/3 instead of
 // compile-time module name resolution.
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{Expression, Identifier, KeywordPart, Literal, MessageSelector};
+    use crate::codegen::core_erlang::CoreErlangGenerator;
+    use crate::source_analysis::Span;
+
+    fn s() -> Span {
+        Span::new(0, 0)
+    }
+
+    #[test]
+    fn test_generate_message_send_unary_uses_dispatch() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let receiver = Expression::Identifier(Identifier::new("counter", s()));
+        let selector = MessageSelector::Unary("increment".into());
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &[])
+            .unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("beamtalk_message_dispatch':'send'("),
+            "unary send should use unified dispatch. Got: {output}"
+        );
+        assert!(output.contains("'increment'"), "should include selector atom. Got: {output}");
+    }
+
+    #[test]
+    fn test_generate_cast_send_non_actor_routes_via_cast() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let receiver = Expression::Identifier(Identifier::new("other", s()));
+        let selector = MessageSelector::Unary("doIt".into());
+        let doc = generator
+            .generate_cast_send(&receiver, &selector, &[])
+            .unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("beamtalk_message_dispatch':'cast'("),
+            "non-actor cast send should route through cast/3. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_super_send_uses_beamtalk_dispatch() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let selector = MessageSelector::Unary("initialize".into());
+        let doc = generator.generate_super_send(&selector, &[]).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("beamtalk_dispatch':'super'("),
+            "super send should use beamtalk_dispatch:super. Got: {output}"
+        );
+        assert!(output.contains("'initialize'"), "should include selector. Got: {output}");
+    }
+
+    #[test]
+    fn test_generate_actor_spawn_non_repl() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let doc = generator.generate_actor_spawn("Counter", None).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'spawn'()"),
+            "spawn should call spawn/0. Got: {output}"
+        );
+        assert!(output.contains("counter"), "spawn should reference module. Got: {output}");
+    }
+
+    #[test]
+    fn test_generate_message_send_keyword_includes_selector() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let receiver = Expression::Identifier(Identifier::new("obj", s()));
+        let selector = MessageSelector::Keyword(vec![
+            KeywordPart::new("at:", s()),
+            KeywordPart::new("put:", s()),
+        ]);
+        let arguments = vec![
+            Expression::Literal(Literal::Integer(1), s()),
+            Expression::Literal(Literal::Integer(2), s()),
+        ];
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("'at:put:'"),
+            "keyword send should combine selector parts. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_generate_message_send_binary_op_addition() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let receiver = Expression::Literal(Literal::Integer(3), s());
+        let selector = MessageSelector::Binary("+".into());
+        let arguments = vec![Expression::Literal(Literal::Integer(4), s())];
+        let doc = generator
+            .generate_message_send(&receiver, &selector, &arguments)
+            .unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains("erlang':'+'("),
+            "binary + should compile to erlang arithmetic. Got: {output}"
+        );
+    }
+}
