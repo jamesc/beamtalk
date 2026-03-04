@@ -208,23 +208,22 @@ fn parse_method_infos_from_map(
                         Some(ecow::EcoString::from(s.as_str()))
                     }
                 });
-            let param_types: Vec<Option<ecow::EcoString>> =
-                match map_get(info_map, "param_types") {
-                    Some(Term::List(list)) => list
-                        .elements
-                        .iter()
-                        .map(|t| {
-                            term_to_atom(t).and_then(|s| {
-                                if s == "none" {
-                                    None
-                                } else {
-                                    Some(ecow::EcoString::from(s.as_str()))
-                                }
-                            })
+            let param_types: Vec<Option<ecow::EcoString>> = match map_get(info_map, "param_types") {
+                Some(Term::List(list)) => list
+                    .elements
+                    .iter()
+                    .map(|t| {
+                        term_to_atom(t).and_then(|s| {
+                            if s == "none" {
+                                None
+                            } else {
+                                Some(ecow::EcoString::from(s.as_str()))
+                            }
                         })
-                        .collect(),
-                    _ => vec![],
-                };
+                    })
+                    .collect(),
+                _ => vec![],
+            };
             Some(MethodInfo {
                 selector: ecow::EcoString::from(selector.as_str()),
                 arity,
@@ -1155,8 +1154,8 @@ mod tests {
         );
     }
 
-    /// ADR 0050 Phase 4: roundtrip — construct ETF class_hierarchy map, deserialize,
-    /// verify ClassInfo fields match.
+    /// ADR 0050 Phase 4: roundtrip — construct ETF `class_hierarchy` map, deserialize,
+    /// verify `ClassInfo` fields match.
     #[test]
     fn parse_class_hierarchy_from_term_roundtrip() {
         use eetf::{FixInteger, List};
@@ -1192,8 +1191,7 @@ mod tests {
             (atom("class_variables"), Term::from(List::from(vec![]))),
         ]);
 
-        let class_hierarchy_term =
-            Term::from(Map::from([(atom("counter"), Term::from(meta_map))]));
+        let class_hierarchy_term = Term::from(Map::from([(atom("counter"), Term::from(meta_map))]));
 
         let classes = parse_class_hierarchy_from_term(&class_hierarchy_term);
         assert_eq!(classes.len(), 1, "Should parse one class");
@@ -1208,7 +1206,7 @@ mod tests {
         assert_eq!(info.state.len(), 1);
         assert_eq!(info.state[0].as_str(), "count");
         assert_eq!(
-            info.state_types.get("count").map(|s| s.as_str()),
+            info.state_types.get("count").map(ecow::EcoString::as_str),
             Some("Integer")
         );
         assert_eq!(info.methods.len(), 1);
@@ -1220,7 +1218,7 @@ mod tests {
         assert_eq!(info.class_methods[0].arity, 0);
     }
 
-    /// ADR 0050 Phase 4: class_hierarchy in compile_expression request is accepted
+    /// ADR 0050 Phase 4: `class_hierarchy` in `compile_expression` request is accepted
     /// and does not cause errors (backward-compatible optional key).
     #[test]
     fn compile_expression_accepts_class_hierarchy_key() {
@@ -1256,7 +1254,7 @@ mod tests {
             (atom("source"), binary("1 + 1.")),
             (atom("module"), binary("bt@test_repl")),
             (atom("known_vars"), Term::from(List::from(vec![]))),
-            (atom("class_hierarchy"), Term::from(class_hierarchy_term)),
+            (atom("class_hierarchy"), class_hierarchy_term),
         ]);
 
         let response = handle_compile_expression(&request);
@@ -1290,7 +1288,10 @@ mod tests {
         ]);
         let term = Term::from(Map::from([(atom("Integer"), Term::from(meta_map))]));
         let classes = parse_class_hierarchy_from_term(&term);
-        assert!(classes.is_empty(), "Integer is a builtin — should be skipped");
+        assert!(
+            classes.is_empty(),
+            "Integer is a builtin — should be skipped"
+        );
     }
 }
 

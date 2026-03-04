@@ -348,7 +348,9 @@ fn analyse_full_with_pre_classes(
     result.diagnostics.extend(hierarchy_diags);
 
     // ADR 0050 Phase 4: inject REPL-session class metadata before TypeChecking
-    result.class_hierarchy.add_from_beam_meta(pre_loaded_classes);
+    result
+        .class_hierarchy
+        .add_from_beam_meta(pre_loaded_classes);
 
     // Phase 1: Name Resolution
     let mut name_resolver = NameResolver::new();
