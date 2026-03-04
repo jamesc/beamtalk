@@ -177,6 +177,33 @@ open_port() ->
             error(Err)
     end.
 
+%% Send a request via the port and receive the response.
+%%
+%% Returns:
+%%   {ok, Response}         — decoded ETF response from the port
+%%   {exit_status, Status}  — port exited before responding
+%%   timeout                — port did not respond within Timeout ms
+%%   port_not_available     — port is closed (badarg from port_command)
+-spec send_port_request(port(), map(), timeout()) ->
+    {ok, term()} | {exit_status, non_neg_integer()} | timeout | port_not_available.
+send_port_request(Port, Request, Timeout) ->
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    {ok, binary_to_term(ResponseBin)};
+                {Port, {exit_status, Status}} ->
+                    {exit_status, Status}
+            after Timeout ->
+                flush_port_messages(Port),
+                timeout
+            end
+    catch
+        error:badarg ->
+            port_not_available
+    end.
+
 %% Send a compile (file) request via the port.
 do_compile(Port, Source, Options) ->
     StdlibMode = maps:get(stdlib_mode, Options, false),
@@ -215,68 +242,44 @@ do_compile(Port, Source, Options) ->
             0 -> Request3;
             _ -> Request3#{class_module_index => ClassModuleIndex}
         end,
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    Response = binary_to_term(ResponseBin),
-                    handle_compile_response(Response);
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during compile", #{status => Status}),
-                    {error, [<<"Compiler port exited unexpectedly">>]}
-            after 30000 ->
-                flush_port_messages(Port),
-                {error, [<<"Compiler port timed out">>]}
-            end
-    catch
-        error:badarg ->
+    case send_port_request(Port, Request, 30000) of
+        {ok, Response} ->
+            handle_compile_response(Response);
+        {exit_status, Status} ->
+            ?LOG_ERROR("Compiler port exited during compile", #{status => Status}),
+            {error, [<<"Compiler port exited unexpectedly">>]};
+        timeout ->
+            {error, [<<"Compiler port timed out">>]};
+        port_not_available ->
             {error, [<<"Compiler port is not available">>]}
     end.
 
 %% Send a diagnostics request via the port.
 do_diagnostics(Port, Source) ->
-    Request = #{
-        command => diagnostics,
-        source => Source
-    },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    Response = binary_to_term(ResponseBin),
-                    handle_diagnostics_response(Response);
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during diagnostics", #{status => Status}),
-                    {error, [<<"Compiler port exited unexpectedly">>]}
-            after 30000 ->
-                flush_port_messages(Port),
-                {error, [<<"Compiler port timed out">>]}
-            end
-    catch
-        error:badarg ->
+    Request = #{command => diagnostics, source => Source},
+    case send_port_request(Port, Request, 30000) of
+        {ok, Response} ->
+            handle_diagnostics_response(Response);
+        {exit_status, Status} ->
+            ?LOG_ERROR("Compiler port exited during diagnostics", #{status => Status}),
+            {error, [<<"Compiler port exited unexpectedly">>]};
+        timeout ->
+            {error, [<<"Compiler port timed out">>]};
+        port_not_available ->
             {error, [<<"Compiler port is not available">>]}
     end.
 
 %% Send a version request via the port.
 do_version(Port) ->
     Request = #{command => version},
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    Response = binary_to_term(ResponseBin),
-                    handle_version_response(Response);
-                {Port, {exit_status, _}} ->
-                    {error, port_exited}
-            after 5000 ->
-                flush_port_messages(Port),
-                {error, timeout}
-            end
-    catch
-        error:badarg ->
+    case send_port_request(Port, Request, 5000) of
+        {ok, Response} ->
+            handle_version_response(Response);
+        {exit_status, _} ->
+            {error, port_exited};
+        timeout ->
+            {error, timeout};
+        port_not_available ->
             {error, port_not_available}
     end.
 

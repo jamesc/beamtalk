@@ -109,6 +109,7 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
                     {error, [<<"Compiler port exited unexpectedly">>]}
             after 30000 ->
                 ?LOG_ERROR("Compiler port timeout", #{port => Port}),
+                flush_port_messages(Port),
                 {error, [<<"Compiler port timed out">>]}
             end
     catch
@@ -123,6 +124,17 @@ close(Port) ->
     port_close(Port).
 
 %%% Internal functions
+
+%% @private Drain any stale messages from a port after a timeout.
+%% Prevents late responses from being consumed by the next request's receive.
+-spec flush_port_messages(port()) -> ok.
+flush_port_messages(Port) ->
+    receive
+        {Port, {data, _}} -> flush_port_messages(Port);
+        {Port, {exit_status, _}} -> ok
+    after 0 ->
+        ok
+    end.
 
 %% @private Handle ETF response from the compiler port.
 %% BT-571: Extended to handle class_definition and method_definition responses
@@ -186,27 +198,15 @@ handle_response(Other) ->
 %% Falls back to the original Core Erlang text on any failure.
 -spec maybe_pretty_core(binary()) -> binary().
 maybe_pretty_core(CoreErlang) when is_binary(CoreErlang) ->
-    CoreStr = binary_to_list(CoreErlang),
-    case catch core_scan:string(CoreStr) of
-        {ok, Tokens, _} ->
-            case catch core_parse:parse(Tokens) of
-                {ok, CoreModule} ->
-                    case catch core_pp:format(CoreModule) of
-                        {'EXIT', _} ->
-                            CoreErlang;
-                        Formatted ->
-                            %% Halve indentation from 4-space to 2-space and return binary.
-                            try halve_indent(iolist_to_binary(Formatted)) of
-                                Bin -> Bin
-                            catch
-                                _:_ -> CoreErlang
-                            end
-                    end;
-                _ ->
-                    CoreErlang
-            end;
-        _ ->
-            CoreErlang
+    try
+        CoreStr = binary_to_list(CoreErlang),
+        {ok, Tokens, _} = core_scan:string(CoreStr),
+        {ok, CoreModule} = core_parse:parse(Tokens),
+        Formatted = core_pp:format(CoreModule),
+        %% Halve indentation from 4-space to 2-space and return binary.
+        halve_indent(iolist_to_binary(Formatted))
+    catch
+        _:_ -> CoreErlang
     end;
 maybe_pretty_core(Other) when not is_binary(Other) -> erlang:error(badarg).
 
