@@ -26,8 +26,7 @@
     diagnostics/1,
     version/0,
     compile_core_erlang/1,
-    register_class/2,
-    clear_classes/0
+    register_class/2
 ]).
 
 %% gen_server callbacks
@@ -38,7 +37,8 @@
     handle_compile_response/1,
     handle_diagnostics_response/1,
     handle_version_response/1,
-    get_classes/0
+    get_classes/0,
+    clear_classes/0
 ]).
 -endif.
 
@@ -111,6 +111,14 @@ version() ->
 -spec get_classes() -> #{atom() => map()}.
 get_classes() ->
     gen_server:call(?MODULE, get_classes, 5000).
+
+%% @doc Clear all cached class metadata (test use only).
+%%
+%% ADR 0050 Phase 3: Used for test isolation — call before tests that need a
+%% clean class cache. Synchronous so the next compile sees an empty cache.
+-spec clear_classes() -> ok.
+clear_classes() ->
+    gen_server:call(?MODULE, clear_classes, 5000).
 -endif.
 
 %% @doc Register a class with its metadata in the compiler server cache.
@@ -121,14 +129,6 @@ get_classes() ->
 register_class(ClassName, MetaMap) ->
     catch gen_server:cast(?MODULE, {register_class, ClassName, MetaMap}),
     ok.
-
-%% @doc Clear all cached class metadata.
-%%
-%% ADR 0050 Phase 3: Used for test isolation — call before tests that need a
-%% clean class cache. Synchronous so the next compile sees an empty cache.
--spec clear_classes() -> ok.
-clear_classes() ->
-    gen_server:call(?MODULE, clear_classes, 5000).
 
 %% @doc Compile Core Erlang source to BEAM bytecode in memory.
 %% Uses core_scan → core_parse → compile:forms (no temp files).
@@ -223,7 +223,14 @@ terminate(_Reason, _State) ->
 %% Runs synchronously in `init/1` so compile requests queue during recovery.
 -spec recover_from_beam_modules() -> #{atom() => map()}.
 recover_from_beam_modules() ->
-    BuiltinSet = sets:from_list(beamtalk_class_hierarchy_table:all_builtins(), [{version, 2}]),
+    %% Guard: beamtalk_class_hierarchy_table may not be loaded if the runtime
+    %% app is absent from the release (e.g. compiler-only deployment).
+    Builtins =
+        case erlang:function_exported(beamtalk_class_hierarchy_table, all_builtins, 0) of
+            true -> beamtalk_class_hierarchy_table:all_builtins();
+            false -> []
+        end,
+    BuiltinSet = sets:from_list(Builtins),
     AllModules = code:all_loaded(),
     lists:foldl(
         fun({Module, _Path}, Acc) ->
@@ -235,7 +242,8 @@ recover_from_beam_modules() ->
                         Meta when is_map(Meta) ->
                             ClassName = maps:get(class, Meta, undefined),
                             case
-                                is_atom(ClassName) andalso
+                                ClassName =/= undefined andalso
+                                    is_atom(ClassName) andalso
                                     not sets:is_element(ClassName, BuiltinSet)
                             of
                                 true -> maps:put(ClassName, Meta, Acc);

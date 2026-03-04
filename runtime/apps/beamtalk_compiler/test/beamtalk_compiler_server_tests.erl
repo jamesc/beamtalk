@@ -151,7 +151,8 @@ crash_recovery_populates() ->
     %% returns #{} — the assertion checks the invariant "no builtins in cache".
     application:stop(beamtalk_compiler),
     application:start(beamtalk_compiler),
-    timer:sleep(200),
+    %% application:start/1 is synchronous — init/1 (including recovery) has
+    %% completed before start/1 returns, so no sleep is needed.
     Classes = beamtalk_compiler_server:get_classes(),
     BuiltinSet = sets:from_list(beamtalk_class_hierarchy_table:all_builtins()),
     ?assert(
@@ -168,8 +169,7 @@ register_when_down() ->
     %% Calling register_class/2 when the server is not running must not crash.
     application:stop(beamtalk_compiler),
     ?assertEqual(ok, beamtalk_compiler_server:register_class('TestDown', #{class => 'TestDown'})),
-    application:start(beamtalk_compiler),
-    timer:sleep(100).
+    application:start(beamtalk_compiler).
 
 %%% ---------------------------------------------------------------
 %%% gen_server edge cases (via running server)

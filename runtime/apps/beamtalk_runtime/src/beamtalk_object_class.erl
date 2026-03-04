@@ -705,6 +705,7 @@ notify_hot_patch(#class_state{
     class_method_return_types = ClassMethodReturnTypes
 }) ->
     %% Build selector→arity maps from the live instance_methods and class_methods.
+    %% param_types uses atom `none` (not empty list) per ADR 0050 format.
     MethodInfo = maps:map(
         fun(Sel, #{arity := Arity}) ->
             %% Return types are cleared for hot-patched selectors — the compiler
@@ -712,7 +713,7 @@ notify_hot_patch(#class_state{
             #{
                 arity => Arity,
                 return_type => maps:get(Sel, MethodReturnTypes, none),
-                param_types => []
+                param_types => none
             }
         end,
         InstanceMethods
@@ -722,7 +723,7 @@ notify_hot_patch(#class_state{
             #{
                 arity => Arity,
                 return_type => maps:get(Sel, ClassMethodReturnTypes, none),
-                param_types => []
+                param_types => none
             }
         end,
         ClassMethods
@@ -745,7 +746,12 @@ notify_hot_patch(#class_state{
         method_info => MethodInfo,
         class_method_info => ClassMethodInfo
     },
-    beamtalk_compiler_server:register_class(ClassName, Meta).
+    %% Guard: the compiler app may not be present in all deployments.
+    %% beamtalk_runtime does not formally depend on beamtalk_compiler.
+    case erlang:function_exported(beamtalk_compiler_server, register_class, 2) of
+        true -> beamtalk_compiler_server:register_class(ClassName, Meta);
+        false -> ok
+    end.
 
 %% @private Apply ClassInfo map to existing State, returning updated State.
 %% ADR 0032 Phase 1: No flattened tables to rebuild.
