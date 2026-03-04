@@ -28,6 +28,7 @@
     whereis_class/1,
     all_classes/0,
     live_class_entries/0,
+    user_classes/0,
     registry_name/1,
     ensure_pg_started/0,
     ensure_hierarchy_table/0,
@@ -92,6 +93,41 @@ live_class_entries() ->
     catch
         exit:{noproc, _} ->
             ?LOG_WARNING("pg not started when fetching class entries", #{module => ?MODULE}),
+            []
+    end.
+
+%% @doc Return all loaded user classes (those with a source file recorded).
+%%
+%% Excludes stdlib and ClassBuilder-created classes (they have no source file).
+%% Returns a list of {beamtalk_object, ClassTag, ModuleName, Pid} tuples for
+%% all user-defined classes that are still alive. Dead processes are silently
+%% filtered out. Returns [] if the pg process group is not running.
+-type user_class_entry() :: {beamtalk_object, atom(), module(), pid()}.
+-spec user_classes() -> [user_class_entry()].
+user_classes() ->
+    try
+        ClassPids = all_classes(),
+        lists:filtermap(
+            fun(Pid) ->
+                try
+                    ClassName = beamtalk_object_class:class_name(Pid),
+                    ModuleName = beamtalk_object_class:module_name(Pid),
+                    case beamtalk_reflection:source_file_from_module(ModuleName) of
+                        nil ->
+                            false;
+                        _SourceFile ->
+                            ClassTag = class_object_tag(ClassName),
+                            {true, {beamtalk_object, ClassTag, ModuleName, Pid}}
+                    end
+                catch
+                    exit:{noproc, _} -> false;
+                    exit:{timeout, _} -> false
+                end
+            end,
+            ClassPids
+        )
+    catch
+        exit:{noproc, _} ->
             []
     end.
 

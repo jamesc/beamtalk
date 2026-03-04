@@ -236,31 +236,7 @@ handle_actor_at(_) ->
 %% @private Return all loaded user classes (those with a source file recorded).
 -spec handle_classes() -> [tuple()].
 handle_classes() ->
-    try
-        ClassPids = beamtalk_class_registry:all_classes(),
-        lists:filtermap(
-            fun(Pid) ->
-                try
-                    ClassName = beamtalk_object_class:class_name(Pid),
-                    ModuleName = beamtalk_object_class:module_name(Pid),
-                    case beamtalk_reflection:source_file_from_module(ModuleName) of
-                        nil ->
-                            false;
-                        _SourceFile ->
-                            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-                            {true, {beamtalk_object, ClassTag, ModuleName, Pid}}
-                    end
-                catch
-                    exit:{noproc, _} -> false;
-                    exit:{timeout, _} -> false
-                end
-            end,
-            ClassPids
-        )
-    catch
-        exit:{noproc, _} ->
-            []
-    end.
+    beamtalk_class_registry:user_classes().
 
 %% @private Load a .bt file, compiling and registering the class.
 -spec handle_load(term()) -> nil | {error, #beamtalk_error{}}.
