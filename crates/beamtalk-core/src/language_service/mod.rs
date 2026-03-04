@@ -55,8 +55,8 @@ mod value_objects;
 // Re-export value objects at the module level
 pub use project_index::ProjectIndex;
 pub use value_objects::{
-    ByteOffset, Completion, CompletionKind, Diagnostic, DocumentSymbol, DocumentSymbolKind,
-    HoverInfo, Location, ParameterInfo, Position, SignatureHelp, SignatureInfo,
+    ByteOffset, CodeAction, Completion, CompletionKind, Diagnostic, DocumentSymbol,
+    DocumentSymbolKind, HoverInfo, Location, ParameterInfo, Position, SignatureHelp, SignatureInfo,
 };
 
 use crate::ast::{Expression, Identifier, Module, TypeAnnotation};
@@ -112,6 +112,13 @@ pub trait LanguageService {
     ///
     /// Should respond in <50ms for typical file sizes.
     fn document_symbols(&self, file: &Utf8PathBuf) -> Vec<DocumentSymbol>;
+
+    /// Returns code actions available at the given byte range in a file.
+    ///
+    /// Returns "Add annotation: -> `ClassName`" quick-fixes for unannotated
+    /// methods whose return type can be inferred by the `TypeChecker` (BT-1067).
+    /// Should respond in <50ms for typical file sizes.
+    fn code_actions(&self, file: &Utf8PathBuf, start: u32, end: u32) -> Vec<CodeAction>;
 }
 
 /// A simple in-memory language service implementation.
@@ -710,6 +717,108 @@ impl LanguageService for SimpleLanguageService {
 
         crate::queries::document_symbols_provider::compute_document_symbols(&file_data.module)
     }
+
+    fn code_actions(&self, file: &Utf8PathBuf, start: u32, end: u32) -> Vec<CodeAction> {
+        let Some(file_data) = self.get_file(file) else {
+            return Vec::new();
+        };
+
+        let inferred = crate::semantic_analysis::type_checker::infer_method_return_types(
+            &file_data.module,
+            self.project_index.hierarchy(),
+        );
+
+        if inferred.is_empty() {
+            return Vec::new();
+        }
+
+        let source = &file_data.source;
+        let mut actions = Vec::new();
+
+        for class in &file_data.module.classes {
+            for (method, is_class_method) in class
+                .methods
+                .iter()
+                .map(|m| (m, false))
+                .chain(class.class_methods.iter().map(|m| (m, true)))
+            {
+                if method.return_type.is_some() {
+                    continue;
+                }
+                // Only offer for methods whose span overlaps the requested range
+                if method.span.end() < start || method.span.start() > end {
+                    continue;
+                }
+                let key = (
+                    class.name.name.clone(),
+                    method.selector.name(),
+                    is_class_method,
+                );
+                if let Some(class_name) = inferred.get(&key) {
+                    if let Some(offset) = find_body_open_offset(source, method.span) {
+                        actions.push(CodeAction::new(
+                            format!("Add annotation: -> {class_name}"),
+                            format!("-> {class_name} "),
+                            offset,
+                        ));
+                    }
+                }
+            }
+        }
+
+        for standalone in &file_data.module.method_definitions {
+            let method = &standalone.method;
+            if method.return_type.is_some() {
+                continue;
+            }
+            if method.span.end() < start || method.span.start() > end {
+                continue;
+            }
+            let key = (
+                standalone.class_name.name.clone(),
+                method.selector.name(),
+                standalone.is_class_method,
+            );
+            if let Some(class_name) = inferred.get(&key) {
+                if let Some(offset) = find_body_open_offset(source, method.span) {
+                    actions.push(CodeAction::new(
+                        format!("Add annotation: -> {class_name}"),
+                        format!("-> {class_name} "),
+                        offset,
+                    ));
+                }
+            }
+        }
+
+        actions
+    }
+}
+
+/// Finds the byte offset of the `=>` body opener of a method definition.
+///
+/// Scans forward from `method_span.start()` in `source` looking for the first
+/// `=>` token.  Inserting text at this offset places a return-type annotation
+/// just before the body opener, e.g. turning `count => 42` into
+/// `count -> Integer => 42`.
+///
+/// Returns `None` when the span is out of bounds or no `=>` is found.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "source files over 4GB are not supported"
+)]
+fn find_body_open_offset(source: &str, method_span: Span) -> Option<u32> {
+    let start = method_span.start() as usize;
+    let end = method_span.end() as usize;
+    let src = source.get(start..end.min(source.len()))?;
+    let bytes = src.as_bytes();
+    let mut i = 0;
+    while i < bytes.len().saturating_sub(1) {
+        if bytes[i] == b'=' && bytes[i + 1] == b'>' {
+            return Some((start + i) as u32);
+        }
+        i += 1;
+    }
+    None
 }
 
 impl Default for SimpleLanguageService {
@@ -1087,6 +1196,165 @@ mod tests {
         let def = service.goto_definition(&file_hierarchy, Position::new(3, 16));
         assert!(def.is_some());
         assert_eq!(def.unwrap().file, file_hierarchy);
+    }
+
+    // ── code_actions tests (BT-1067) ────────────────────────────────────────
+
+    /// Helper: byte length of a source string as `u32` (test-only).
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "test strings are trivially small"
+    )]
+    fn len32(s: &str) -> u32 {
+        s.len() as u32
+    }
+
+    #[test]
+    fn code_actions_returns_annotation_suggestion_for_unary_method() {
+        // `count => 42` — inferred Integer; action inserts `-> Integer ` before `=>`
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+        let source = "Object subclass: Counter\n  count => 42";
+        service.update_file(file.clone(), source.to_string());
+
+        // Request code actions spanning the whole file
+        let actions = service.code_actions(&file, 0, len32(source));
+        assert_eq!(actions.len(), 1, "expected exactly one code action");
+
+        let action = &actions[0];
+        assert!(
+            action.title.contains("Integer"),
+            "title should mention inferred type: {title}",
+            title = action.title
+        );
+        assert_eq!(action.new_text, "-> Integer ", "wrong inserted text");
+
+        // Verify insertion point is at the `=>` of the method
+        let before_body = &source[..action.insert_at as usize];
+        assert!(
+            before_body.ends_with("count "),
+            "insertion should be before `=>`, got prefix: {before_body:?}"
+        );
+    }
+
+    #[test]
+    fn code_actions_returns_annotation_suggestion_for_early_return_method() {
+        // `count => ^ 42` — inferred Integer via early return; same insertion logic
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+        let source = "Object subclass: Counter\n  count => ^ 42";
+        service.update_file(file.clone(), source.to_string());
+
+        let actions = service.code_actions(&file, 0, len32(source));
+        assert_eq!(actions.len(), 1, "expected exactly one code action");
+
+        let action = &actions[0];
+        assert!(action.title.contains("Integer"));
+        assert_eq!(action.new_text, "-> Integer ");
+    }
+
+    #[test]
+    fn code_actions_skips_already_annotated_methods() {
+        // Explicit annotation — no code action expected
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+        let source = "Object subclass: Counter\n  count -> Integer => 42";
+        service.update_file(file.clone(), source.to_string());
+
+        let actions = service.code_actions(&file, 0, len32(source));
+        assert!(
+            actions.is_empty(),
+            "annotated method should produce no action"
+        );
+    }
+
+    #[test]
+    fn code_actions_skips_methods_outside_requested_range() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+        let source = "Object subclass: Counter\n  count => 42";
+        service.update_file(file.clone(), source.to_string());
+
+        // Request code actions for a range that doesn't overlap the method
+        let actions = service.code_actions(&file, 0, 5);
+        assert!(
+            actions.is_empty(),
+            "method outside range should produce no action"
+        );
+    }
+
+    #[test]
+    fn code_actions_empty_for_unknown_file() {
+        let service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("nonexistent.bt");
+        let actions = service.code_actions(&file, 0, 100);
+        assert!(
+            actions.is_empty(),
+            "unknown file should return empty actions"
+        );
+    }
+
+    #[test]
+    fn code_actions_returns_annotation_for_keyword_method() {
+        // `greet: name => "hello"` — keyword method with known String return
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+        let source = "Object subclass: Calc\n  greet: name => \"hello\"";
+        service.update_file(file.clone(), source.to_string());
+
+        let actions = service.code_actions(&file, 0, len32(source));
+        assert_eq!(
+            actions.len(),
+            1,
+            "expected one code action for keyword method"
+        );
+        assert!(actions[0].title.contains("String"));
+        assert_eq!(actions[0].new_text, "-> String ");
+    }
+
+    #[test]
+    fn code_actions_returns_annotation_for_class_method() {
+        // `class answer => 42` — class-side method inferred Integer
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+        let source = "Object subclass: Calc\n  class answer => 42";
+        service.update_file(file.clone(), source.to_string());
+
+        let actions = service.code_actions(&file, 0, len32(source));
+        assert_eq!(
+            actions.len(),
+            1,
+            "expected one code action for class method"
+        );
+        assert!(actions[0].title.contains("Integer"));
+    }
+
+    #[test]
+    fn find_body_open_offset_finds_fat_arrow() {
+        use crate::source_analysis::Span;
+        // `count => 42` — the `=>` is at byte 6 within "count => 42"
+        let source = "count => 42";
+        let span = Span::new(0, len32(source));
+        let offset = find_body_open_offset(source, span).expect("should find `=>`");
+        assert_eq!(offset, 6, "should point to `=>`");
+    }
+
+    #[test]
+    fn find_body_open_offset_with_keyword_selector() {
+        use crate::source_analysis::Span;
+        // keyword method: `add: x => x + 1`
+        let source = "add: x => x + 1";
+        let span = Span::new(0, len32(source));
+        let offset = find_body_open_offset(source, span).expect("should find `=>`");
+        assert_eq!(offset, 7, "should point to `=>`");
+    }
+
+    #[test]
+    fn find_body_open_offset_returns_none_without_fat_arrow() {
+        use crate::source_analysis::Span;
+        let source = "no body opener here";
+        let span = Span::new(0, len32(source));
+        assert!(find_body_open_offset(source, span).is_none());
     }
 
     #[test]
