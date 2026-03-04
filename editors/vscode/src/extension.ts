@@ -807,12 +807,48 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
       const uri = vscode.Uri.file(sourceFile);
+      let document: vscode.TextDocument;
       try {
-        await vscode.window.showTextDocument(uri);
+        document = await vscode.workspace.openTextDocument(uri);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         await vscode.window.showErrorMessage(`Could not open source: ${sourceFile}: ${msg}`);
+        return;
       }
+
+      const className = node!.info.name;
+
+      // Try LSP document symbols first — class symbols have name_span pointing at the name.
+      let position: vscode.Position | undefined;
+      try {
+        const docSymbols = await vscode.commands.executeCommand<
+          vscode.DocumentSymbol[] | vscode.SymbolInformation[]
+        >("vscode.executeDocumentSymbolProvider", uri);
+        position = findSymbolPosition(docSymbols ?? [], className, [vscode.SymbolKind.Class]);
+      } catch {
+        // LSP unavailable — fall through.
+      }
+
+      if (!position) {
+        // Fallback: regex for `class ClassName` / `actor ClassName`, skipping comment lines.
+        const text = document.getText();
+        const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        // Beamtalk class declarations use `SuperClass subclass: ClassName` syntax.
+        const pattern = new RegExp(`\\bsubclass:\\s+(${escaped})(?=\\s|$)`, "g");
+        let classMatch: RegExpExecArray | null;
+        while ((classMatch = pattern.exec(text)) !== null) {
+          const lineStart = text.lastIndexOf("\n", classMatch.index) + 1;
+          const linePrefix = text.slice(lineStart, classMatch.index).trimStart();
+          if (!linePrefix.startsWith("//")) {
+            position = document.positionAt(classMatch.index + classMatch[0].indexOf(className));
+            break;
+          }
+        }
+      }
+
+      await vscode.window.showTextDocument(document, {
+        selection: position ? new vscode.Range(position, position) : undefined,
+      });
     })
   );
 
@@ -881,15 +917,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // LSP unavailable — fall through to text search.
       }
       if (!position) {
-        // Fallback: plain text search for the selector.
-        const idx = document.getText().indexOf(method.selector);
-        if (idx === -1) {
-          await vscode.window.showInformationMessage(
-            `Method '${method.selector}' not found in source for ${classInfo.name}`
-          );
-          return;
+        // Fallback: regex search for `method <selector>` (matches both instance and
+        // class-side methods — `class method foo` contains `method foo`).
+        const text = document.getText();
+        const escaped = method.selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const pattern = new RegExp(`\\bmethod\\s+(${escaped})(?=\\s|$)`, "g");
+        let methodMatch: RegExpExecArray | null;
+        while ((methodMatch = pattern.exec(text)) !== null) {
+          // Skip matches on comment lines (Beamtalk uses // comments).
+          const lineStart = text.lastIndexOf("\n", methodMatch.index) + 1;
+          const linePrefix = text.slice(lineStart, methodMatch.index).trimStart();
+          if (!linePrefix.startsWith("//")) {
+            position = document.positionAt(
+              methodMatch.index + methodMatch[0].indexOf(method.selector)
+            );
+            break;
+          }
         }
-        position = document.positionAt(idx);
+        if (!position) {
+          const idx = text.indexOf(method.selector);
+          if (idx === -1) {
+            await vscode.window.showInformationMessage(
+              `Method '${method.selector}' not found in source for ${classInfo.name}`
+            );
+            return;
+          }
+          position = document.positionAt(idx);
+        }
       }
 
       // Try LSP go-to-definition for a precise location. If LSP is unavailable or
