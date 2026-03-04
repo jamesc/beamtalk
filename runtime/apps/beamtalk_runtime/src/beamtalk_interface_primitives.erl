@@ -39,7 +39,7 @@
 %% Called by the compiled `bt@stdlib@beamtalk_interface:dispatch/3`.
 -spec dispatch(atom(), list(), term()) -> term().
 dispatch(allClasses, [], _Self) ->
-    [Name || {Name, _Mod, _Pid} <- live_class_entries()];
+    [Name || {Name, _Mod, _Pid} <- beamtalk_class_registry:live_class_entries()];
 dispatch('classNamed:', [ClassName], _Self) ->
     handle_class_named(ClassName);
 dispatch(globals, [], _Self) ->
@@ -106,7 +106,7 @@ handle_globals() ->
             maps:put(Name, ClassObj, Acc)
         end,
         #{},
-        live_class_entries()
+        beamtalk_class_registry:live_class_entries()
     ).
 
 %% @private Format class documentation for help:.
@@ -500,28 +500,3 @@ make_method_not_found_error(ClassName, Selector) ->
         Err2,
         iolist_to_binary([<<"Use Beamtalk help: ">>, NameBin, <<" to see available methods.">>])
     ).
-
-%% @private Fetch all live class entries from the registry.
--type class_entry() :: {atom(), module(), pid()}.
--spec live_class_entries() -> [class_entry()].
-live_class_entries() ->
-    try
-        ClassPids = beamtalk_class_registry:all_classes(),
-        lists:filtermap(
-            fun(Pid) ->
-                try
-                    Name = beamtalk_object_class:class_name(Pid),
-                    Mod = beamtalk_object_class:module_name(Pid),
-                    {true, {Name, Mod, Pid}}
-                catch
-                    exit:{noproc, _} -> false;
-                    exit:{timeout, _} -> false
-                end
-            end,
-            ClassPids
-        )
-    catch
-        exit:{noproc, _} ->
-            ?LOG_WARNING("pg not started when fetching class entries", #{module => ?MODULE}),
-            []
-    end.

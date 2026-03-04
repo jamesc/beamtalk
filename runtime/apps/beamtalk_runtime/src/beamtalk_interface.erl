@@ -335,11 +335,11 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @doc Get all registered class names.
 %%
-%% Delegates to live_class_entries/0 to get live class pid entries,
+%% Delegates to beamtalk_class_registry:live_class_entries/0 to get live class pid entries,
 %% then extracts just the class names.
 -spec handle_all_classes() -> [atom()].
 handle_all_classes() ->
-    [Name || {Name, _Mod, _Pid} <- live_class_entries()].
+    [Name || {Name, _Mod, _Pid} <- beamtalk_class_registry:live_class_entries()].
 
 %% @doc Look up a class by name.
 %%
@@ -388,7 +388,7 @@ handle_globals() ->
             maps:put(Name, ClassObj, Acc)
         end,
         #{},
-        live_class_entries()
+        beamtalk_class_registry:live_class_entries()
     ).
 
 %% @doc Format class documentation for help:.
@@ -796,32 +796,3 @@ make_method_not_found_error(ClassName, Selector) ->
         Err2,
         iolist_to_binary([<<"Use Beamtalk help: ">>, NameBin, <<" to see available methods.">>])
     ).
-
-%% @private Fetch all live class entries from the registry.
-%%
-%% Returns a list of {Name, ModuleName, Pid} tuples for all registered class
-%% processes that are still alive. Dead processes (noproc, timeout) are silently
-%% filtered out. Returns [] if the pg process group is not running.
--type class_entry() :: {atom(), module(), pid()}.
--spec live_class_entries() -> [class_entry()].
-live_class_entries() ->
-    try
-        ClassPids = beamtalk_class_registry:all_classes(),
-        lists:filtermap(
-            fun(Pid) ->
-                try
-                    Name = beamtalk_object_class:class_name(Pid),
-                    Mod = beamtalk_object_class:module_name(Pid),
-                    {true, {Name, Mod, Pid}}
-                catch
-                    exit:{noproc, _} -> false;
-                    exit:{timeout, _} -> false
-                end
-            end,
-            ClassPids
-        )
-    catch
-        exit:{noproc, _} ->
-            ?LOG_WARNING("pg not started when fetching class entries", #{module => ?MODULE}),
-            []
-    end.

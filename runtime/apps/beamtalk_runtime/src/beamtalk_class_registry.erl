@@ -27,6 +27,7 @@
 -export([
     whereis_class/1,
     all_classes/0,
+    live_class_entries/0,
     registry_name/1,
     ensure_pg_started/0,
     ensure_hierarchy_table/0,
@@ -64,6 +65,35 @@ whereis_class(ClassName) ->
 -spec all_classes() -> [pid()].
 all_classes() ->
     pg:get_members(beamtalk_classes).
+
+%% @doc Fetch all live class entries from the registry.
+%%
+%% Returns a list of {Name, ModuleName, Pid} tuples for all registered class
+%% processes that are still alive. Dead processes (noproc, timeout) are silently
+%% filtered out. Returns [] if the pg process group is not running.
+-type class_entry() :: {atom(), module(), pid()}.
+-spec live_class_entries() -> [class_entry()].
+live_class_entries() ->
+    try
+        ClassPids = all_classes(),
+        lists:filtermap(
+            fun(Pid) ->
+                try
+                    Name = beamtalk_object_class:class_name(Pid),
+                    Mod = beamtalk_object_class:module_name(Pid),
+                    {true, {Name, Mod, Pid}}
+                catch
+                    exit:{noproc, _} -> false;
+                    exit:{timeout, _} -> false
+                end
+            end,
+            ClassPids
+        )
+    catch
+        exit:{noproc, _} ->
+            ?LOG_WARNING("pg not started when fetching class entries", #{module => ?MODULE}),
+            []
+    end.
 
 %% @doc Compute the Erlang registry name for a class.
 -spec registry_name(class_name()) -> atom().
