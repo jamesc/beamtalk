@@ -95,7 +95,16 @@ Module:'__beamtalk_meta'() ->
 
 **Simplification**: Static metadata (return types, flags, field types, param types) is removed from the `BuilderState` passed through `register_class/0`. `beamtalk_object_class:init/1` reads from `Module:__beamtalk_meta()` instead, and `register_class/0` carries only what `__beamtalk_meta/0` cannot: method closures (the actual compiled functions). This eliminates the duplication between the two paths.
 
-**Hot-patching caveat**: `__beamtalk_meta/0` is a compiled function — it is NOT updated when methods are hot-patched via `put_method/3`. The class gen_server retains a **live metadata view** that diverges from `__beamtalk_meta/0` after hot-patching. When a hot-patched class notifies the compiler server, it sends the gen_server's live metadata (which has the hot-patched method with its return type cleared), not the stale `__beamtalk_meta/0`. Crash recovery reads `__beamtalk_meta/0` and therefore loses hot-patch deltas — this is acceptable because hot-patched methods already lose their return-type annotations (they are cleared in `put_method/3`), and the class will be re-registered by its gen_server on next use.
+**Hot-patching and the two kinds of state**: Two distinct data structures must not be confused:
+
+- **`BuilderState`** — the one-time init-time map passed through `register_class/0` from codegen to the gen_server at class definition time. This is what Phases 1 and 4 simplify.
+- **`class_state` record** — the gen_server's own live process state, persisting for the lifetime of the class process and mutated by hot-patching. This always exists independently of BuilderState.
+
+`__beamtalk_meta/0` is a compiled function — it is NOT updated when methods are hot-patched via `put_method/3`. However, the gen_server's `class_state` record IS updated: `put_method/3` replaces the method closure in `instance_methods` and clears `method_return_types[selector]`. The `class_state` is therefore always the live, correct view of the class.
+
+When a hot-patched class notifies the compiler server, it synthesizes a metadata map directly from its current `class_state` record — not from the stale `__beamtalk_meta/0`. Phase 4 (removing static metadata from BuilderState) does not affect this: `class_state` is the gen_server's own process state, not BuilderState. There is no contradiction.
+
+Crash recovery reads `__beamtalk_meta/0` and therefore loses hot-patch deltas. This is acceptable — hot-patched methods already have their return types cleared, so the compiler treats them as dynamic.
 
 ### 2. Extend `beamtalk_compiler_server` with Class Cache
 
@@ -142,7 +151,7 @@ beamtalk_compiler_server:register_class(ClassName, Meta),
 
 The call is a cast (fire-and-forget). If the compiler server is not running (e.g. non-REPL compilation), the cast is silently dropped.
 
-Hot-patching via `put_method/3` also notifies the compiler server. Since `__beamtalk_meta/0` is stale after hot-patching, the notification sends the gen_server's live metadata view instead — built from the current `class_state` record. The compiler server replaces the class entry wholesale — no partial updates.
+Hot-patching via `put_method/3` also notifies the compiler server. Since `__beamtalk_meta/0` is stale after hot-patching, the notification synthesizes a metadata map from the gen_server's current `class_state` record (which already reflects the patch). The compiler server replaces the class entry wholesale — no partial updates, same protocol as initial registration.
 
 ### 4. Crash Recovery
 
@@ -290,6 +299,7 @@ Notify compiler server from `beamtalk_workspace` after each compilation, rather 
 
 - Port protocol gains a new optional `class_hierarchy` key alongside existing optional indices (backward compatible)
 - Compiler server API gains a `register_class/2` cast — existing compile API unchanged
+- One workspace per BEAM node is an architectural constraint — the singleton compiler server is correct by design, not just current limitation
 - When v0.2 adds namespaces (ADR 0031), the session key may need to change from bare class name to qualified name
 
 ## Implementation
