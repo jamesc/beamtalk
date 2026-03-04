@@ -20,7 +20,7 @@ The stdlib has ~100% return-type annotation coverage — all ~500 annotated meth
 
 ### Current Architecture
 
-```
+```text
 REPL request                   Compiler Port (Rust)
     │                               │
     ├─ source code ────────────────►│ ClassHierarchy::with_builtins()
@@ -30,7 +30,7 @@ REPL request                   Compiler Port (Rust)
                                     └─ compile → Core Erlang
 ```
 
-### What __beamtalk_meta/0 Currently Returns
+### What `__beamtalk_meta/0` Currently Returns
 
 ```erlang
 %% BT-942: zero-process reflection — exists today
@@ -59,11 +59,16 @@ BT-989 adds `method_return_types` and `class_method_return_types` to `class_stat
 
 ```erlang
 %% Extended __beamtalk_meta/0 — the canonical class metadata payload
+%% Phase 1 format: new keys added alongside backward-compat tuple lists
 Module:'__beamtalk_meta'() ->
     #{
         %% Identity
         class             => 'Counter',
         superclass        => 'Actor',
+
+        %% Format version — Phase 1 adds this so crash recovery can distinguish
+        %% old-format modules (no meta_version key) from new-format modules
+        meta_version      => 2,
 
         %% Class flags
         is_sealed         => false,
@@ -75,14 +80,18 @@ Module:'__beamtalk_meta'() ->
         fields            => [count],
         field_types       => #{count => 'Integer'},
 
-        %% Instance methods: selector => #{arity, param_types, return_type}
-        methods => #{
+        %% Backward-compatible tuple-list (kept through Phase 4 for existing consumers)
+        methods           => [{increment, 1}, {value, 0}],
+        class_methods     => [{new, 0}],
+
+        %% New: instance method metadata — selector => #{arity, param_types, return_type}
+        method_info => #{
             increment => #{arity => 1, param_types => ['Integer'], return_type => 'Integer'},
             value     => #{arity => 0, param_types => [], return_type => 'Integer'}
         },
 
-        %% Class-side methods
-        class_methods => #{
+        %% New: class-side method metadata
+        class_method_info => #{
             new => #{arity => 0, param_types => [], return_type => 'Counter'}
         },
 
@@ -91,7 +100,7 @@ Module:'__beamtalk_meta'() ->
     }
 ```
 
-`param_types` and `return_type` are `none` (atom) when unannotated, a class-name atom when annotated. This matches the Rust `Option<EcoString>` in `MethodInfo`.
+`param_types` and `return_type` in `method_info`/`class_method_info` use the atom `none` when unannotated, and a class-name atom (e.g. `'Integer'`) when annotated. Using an explicit `none` atom (rather than omitting the key) keeps the map structure uniform and avoids absent-key edge cases in consumers. This is distinct from `superclass => none` (which signals a root class with no superclass) — both use `none` but in different semantic contexts. On the Rust side, `none` deserializes to `Option::None` in `MethodInfo`.
 
 **Simplification**: Static metadata (return types, flags, field types, param types) is removed from the `BuilderState` passed through `register_class/0`. `beamtalk_object_class:init/1` reads from `Module:__beamtalk_meta()` instead, and `register_class/0` carries only what `__beamtalk_meta/0` cannot: method closures (the actual compiled functions). This eliminates the duplication between the two paths.
 
@@ -306,8 +315,8 @@ Notify compiler server from `beamtalk_workspace` after each compilation, rather 
 
 ### Phase 1: Extend `__beamtalk_meta/0` (backward-compatible)
 
-- Extend codegen to emit new keys (`is_sealed`, `is_abstract`, `is_value`, `is_typed`, `field_types`, per-method `param_types` and `return_type`) in `__beamtalk_meta/0` while keeping existing keys (`methods` list of tuples, `class_methods` list of tuples) for backward compatibility during transition
-- Add new `method_info` and `class_method_info` map keys alongside existing tuple lists
+- Extend codegen to emit new keys in `__beamtalk_meta/0`: `meta_version => 2`, `is_sealed`, `is_abstract`, `is_value`, `is_typed`, `field_types`, `method_info` (map of selector → `#{arity, param_types, return_type}`), `class_method_info` (map)
+- Keep existing `methods` (tuple list) and `class_methods` (tuple list) keys alongside new map keys for backward compatibility during transition
 - Update all consumers of `__beamtalk_meta/0` (`beamtalk_behaviour_intrinsics.erl`, reflection tests)
 - Update ~21 snapshot tests in `test-package-compiler/tests/snapshots/`
 - Files: `crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs`, `runtime/apps/beamtalk_runtime/src/beamtalk_behaviour_intrinsics.erl`
@@ -331,7 +340,7 @@ Notify compiler server from `beamtalk_workspace` after each compilation, rather 
 
 - Once Phase 1 consumers are migrated, remove redundant static metadata keys from `BuilderState` / `register_class/0`
 - `beamtalk_object_class:init/1` reads metadata from `Module:__beamtalk_meta()` instead of from BuilderState
-- Remove deprecated tuple-list `methods` / `class_methods` keys from `__beamtalk_meta/0`
+- Remove deprecated tuple-list `methods` / `class_methods` keys from `__beamtalk_meta/0`; `method_info` / `class_method_info` maps are now the sole method metadata keys
 - Files: `crates/beamtalk-core/src/codegen/`, `runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl`
 
 ### Phase 5: ADR 0045 Option C
@@ -343,11 +352,11 @@ Notify compiler server from `beamtalk_workspace` after each compilation, rather 
 
 The `__beamtalk_meta/0` format change is managed across two phases:
 
-**Phase 1 (additive, backward-compatible)**: New keys are added alongside existing keys. The current `methods => [{atom(), integer()}]` tuple-list format is preserved. New `method_info => #{atom() => #{...}}` map is added in parallel. All existing consumers (`beamtalk_behaviour_intrinsics.erl`, reflection tests, snapshot tests) continue working unchanged and are migrated to the new keys.
+**Phase 1 (additive, backward-compatible)**: New keys are added alongside existing keys. The current `methods => [{atom(), integer()}]` tuple-list format is preserved. New `method_info => #{atom() => #{...}}` and `class_method_info` maps are added in parallel. Phase 1 must also emit `meta_version => 2` in `__beamtalk_meta/0`. All existing consumers (`beamtalk_behaviour_intrinsics.erl`, reflection tests, snapshot tests) continue working unchanged and are migrated to the new keys.
 
-**Format versioning**: Crash recovery scans all loaded modules, which may include classes compiled before this ADR (old `__beamtalk_meta/0` format, missing `method_info`, `field_types`, flags). Recovery must treat absent keys as their zero values (`method_info => #{}`, `is_sealed => false`, etc.) rather than crashing. Consider adding a `meta_version => 2` key in Phase 1 so recovery can distinguish old-format modules and skip or degrade gracefully.
+**Format versioning**: Crash recovery scans all loaded modules, which may include classes compiled before this ADR (old `__beamtalk_meta/0` format, missing `method_info`, `field_types`, flags). Phase 1 must emit `meta_version => 2` in `__beamtalk_meta/0`. Recovery uses this key to detect new-format modules — old-format modules (no `meta_version` key) must have absent keys treated as zero values (`method_info => #{}`, `is_sealed => false`, etc.) rather than crashing, or recovery may skip them entirely if full metadata is required.
 
-**Phase 4 (breaking, after consumers migrated)**: Old tuple-list format removed. By this point all consumers read from the new map keys. This is an internal change — `__beamtalk_meta/0` is not part of the public BEAM interop API (ADR 0028).
+**Phase 5 (breaking, after consumers migrated)**: Old tuple-list `methods`/`class_methods` format removed; only `method_info`/`class_method_info` maps remain. By this point all consumers read from the new map keys. This is an internal change — `__beamtalk_meta/0` is not part of the public BEAM interop API (ADR 0028).
 
 ## Implementation Tracking
 
