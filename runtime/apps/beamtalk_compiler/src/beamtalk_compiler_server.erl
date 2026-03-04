@@ -35,8 +35,7 @@
 -export([
     handle_compile_response/1,
     handle_diagnostics_response/1,
-    handle_version_response/1,
-    flush_port_messages/1
+    handle_version_response/1
 ]).
 -endif.
 
@@ -297,16 +296,6 @@ do_version(Port) ->
             {error, port_not_available};
         decode_error ->
             {error, decode_error}
-    end.
-
-%% @private Drain any stale messages from a port after a timeout.
-%% Prevents late responses from being consumed by the next request's receive.
-flush_port_messages(Port) ->
-    receive
-        {Port, {data, _}} -> flush_port_messages(Port);
-        {Port, {exit_status, _}} -> ok
-    after 0 ->
-        ok
     end.
 
 %% Handle response from compile command.
