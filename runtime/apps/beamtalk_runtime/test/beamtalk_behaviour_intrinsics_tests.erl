@@ -159,7 +159,8 @@ class_field_names_empty_test_() ->
                 {ClassObj, Pid} = register_class('BT1088BiNoFields', #{}, #{}),
                 try
                     Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
-                    ?assert(is_list(Fields))
+                    ?assert(is_list(Fields)),
+                    ?assertEqual([], Fields)
                 after
                     catch gen_server:stop(Pid, normal, 5000)
                 end
@@ -283,7 +284,11 @@ class_set_method_doc_test_() ->
                     RetObj = beamtalk_behaviour_intrinsics:classSetMethodDoc(
                         ClassObj, 'myMethod', Doc
                     ),
-                    ?assertEqual(ClassObj, RetObj)
+                    ?assertEqual(ClassObj, RetObj),
+                    ?assertEqual(
+                        Doc,
+                        beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'myMethod')
+                    )
                 after
                     catch gen_server:stop(Pid, normal, 5000)
                 end
@@ -319,7 +324,8 @@ class_subclasses_empty_test_() ->
                 {ClassObj, Pid} = register_class('BT1088BiLeafClass', #{}, #{}),
                 try
                     Subclasses = beamtalk_behaviour_intrinsics:classSubclasses(ClassObj),
-                    ?assert(is_list(Subclasses))
+                    ?assert(is_list(Subclasses)),
+                    ?assertEqual([], Subclasses)
                 after
                     catch gen_server:stop(Pid, normal, 5000)
                 end
