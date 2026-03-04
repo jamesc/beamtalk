@@ -579,7 +579,10 @@ ensure_wrapped_3_throw_future_rejected_already_wrapped_test() ->
     AlreadyWrapped = beamtalk_exception_handler:wrap(Inner),
     Reason = {future_rejected, AlreadyWrapped},
     Result = beamtalk_exception_handler:ensure_wrapped(throw, Reason, []),
-    ?assertMatch(#{'$beamtalk_class' := 'RuntimeError', error := _}, Result).
+    ?assertMatch(#{'$beamtalk_class' := 'RuntimeError', error := _}, Result),
+    #{error := UnwrappedInner} = Result,
+    ?assertEqual(does_not_understand, UnwrappedInner#beamtalk_error.kind),
+    ?assertEqual('Integer', UnwrappedInner#beamtalk_error.class).
 
 ensure_wrapped_3_throw_future_rejected_error_tuple_test() ->
     %% future_rejected with {error, WrappedMap} should also be unwrapped
@@ -587,7 +590,10 @@ ensure_wrapped_3_throw_future_rejected_error_tuple_test() ->
     AlreadyWrapped = beamtalk_exception_handler:wrap(Inner),
     Reason = {future_rejected, {error, AlreadyWrapped}},
     Result = beamtalk_exception_handler:ensure_wrapped(throw, Reason, []),
-    ?assertMatch(#{'$beamtalk_class' := 'RuntimeError', error := _}, Result).
+    ?assertMatch(#{'$beamtalk_class' := 'RuntimeError', error := _}, Result),
+    #{error := UnwrappedInner} = Result,
+    ?assertEqual(runtime_error, UnwrappedInner#beamtalk_error.kind),
+    ?assertEqual('Actor', UnwrappedInner#beamtalk_error.class).
 
 ensure_wrapped_3_throw_non_future_wraps_as_throw_error_test() ->
     %% Non-future_rejected throw becomes ThrowError
