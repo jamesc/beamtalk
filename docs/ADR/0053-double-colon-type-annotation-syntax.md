@@ -35,10 +35,11 @@ Additionally, adding a type annotation *changes the parameter name* — `binding
 
 ### State Declarations
 
-The same ambiguity exists in state declarations, though it's less acute because there's only one keyword (`state:`):
+State declarations have the same `:` overloading, though the ambiguity is less acute because there's only one keyword (`state:`), making the pattern regular. The change to `::` here is primarily for **consistency** with parameter annotations rather than readability:
 
 ```beamtalk
-state: balance: Integer = 0    // balance: looks like a keyword
+state: balance: Integer = 0    // balance: looks like a keyword (mild ambiguity)
+state: balance :: Integer = 0  // consistent with parameter :: syntax
 ```
 
 ### What's Not Changing
@@ -140,10 +141,9 @@ The selector `detect:ifNone:` is now immediately distinguishable from the parame
 deposit: amount :: => ...
 Error: Expected type name after '::', found '=>'
 
-// Using single : (old syntax)
-deposit: amount: Integer => ...
-Warning: Single ':' type annotation syntax is deprecated, use '::' instead
-         deposit: amount :: Integer => ...
+// Accidentally using :: without a type name
+state: balance :: = 0
+Error: Expected type name after '::', found '='
 ```
 
 ## Prior Art
@@ -158,10 +158,10 @@ Uses `:` for type annotations: `def deposit(amount: Int): Int`. This works becau
 All use `:` for type annotations in parameter lists. All have parenthesised parameters, so `:` is unambiguous. The lesson: `:` works when parameter boundaries are explicit. Keyword message syntax lacks explicit boundaries, requiring a more distinct delimiter.
 
 ### Newspeak
-Uses `::` for module-level type declarations. This is the closest Smalltalk-family precedent for double-colon in a typing context.
+Uses angle brackets for type annotations: `message: param <Type> = ...`. This is Newspeak's way of annotating parameters within keyword message signatures. As a Smalltalk-family language, it faced the same `:` ambiguity problem and chose a different solution (wrapping the type rather than using a delimiter).
 
 ### Erlang
-Uses `::` in type specs: `-spec deposit(integer()) :: integer()`. Beamtalk's `::` aligns with Erlang's use of the same symbol for type annotation, which aids BEAM ecosystem familiarity.
+Uses `::` for type declarations and record field types: `-type amount() :: integer()` and `-record(account, {balance :: integer()})`. Function specs use `->` for return types: `-spec deposit(integer()) -> integer()`. Beamtalk's `::` aligns with Erlang's use of the same symbol for type annotation in declarations, which aids BEAM ecosystem familiarity.
 
 ### Pascal / Go
 Use no delimiter for parameter types — type follows name with a space: `procedure deposit(amount Integer)` / `func deposit(amount int)`. This was considered but rejected as it makes the type annotation invisible (no syntactic marker).
@@ -175,7 +175,10 @@ The newcomer knows `:` for types from their home language. `::` is slightly unfa
 There is no type annotation in Smalltalk-80, so no Smalltalk convention is being broken. `::` is new syntax for a new feature. The key benefit for Smalltalkers is that keyword message selectors remain visually pure — colons only appear as part of message names, never as type delimiters.
 
 ### Erlang/BEAM Developer
-`::` is already the type annotation operator in Erlang's type spec syntax (`-spec foo(integer()) :: integer()`). Using the same symbol in Beamtalk creates natural familiarity and reinforces the BEAM ecosystem connection.
+`::` is already the type annotation operator in Erlang's type declarations (`-type amount() :: integer()`) and record field types (`-record(account, {balance :: integer()})`). Using the same symbol in Beamtalk creates natural familiarity and reinforces the BEAM ecosystem connection.
+
+### Production Operator
+Zero impact. Type annotations are compile-time only (erased before codegen per ADR 0025). The generated BEAM bytecode is identical regardless of annotation syntax. No observable, hot-reload, or performance implications.
 
 ### Tooling Developer (LSP)
 `::` is a distinct two-character token, making it trivially lexable. The parser never needs to disambiguate "is this `:` a keyword separator or a type delimiter?" — all colons are keyword separators, all double-colons are type annotations. This simplifies parser recovery for incomplete code (critical for LSP).
@@ -186,10 +189,12 @@ There is no type annotation in Smalltalk-80, so no Smalltalk convention is being
 
 - **Newcomer**: "`:` is universal — Python, TypeScript, Rust, Kotlin all use it. `::` is unfamiliar and adds cognitive overhead for the most common typing annotation."
 - **Smalltalk purist**: "Minimalism matters. `:` is one character, `::` is two. More syntax is more friction."
-- **BEAM veteran**: "Erlang actually uses `::` AND `:` in specs — the argument that `::` is 'the Erlang way' oversimplifies."
+- **BEAM veteran**: "Erlang uses `::` for type declarations but `->` for spec return types — the argument that `::` is 'the Erlang way' oversimplifies."
 - **Language designer**: "Consistency with state declarations (`state: balance: Integer = 0`) is a real benefit. Changing both parameter AND state syntax to `::` is a larger disruption than the ambiguity warrants."
 
-**Response**: The ambiguity is not hypothetical — it manifests in every multi-keyword method with typed parameters, which is the common case. The consistency argument is preserved since state declarations also move to `::`. The familiarity argument is valid but mitigated: `::` is immediately readable in context, and the syntax it replaces (`: Type` after a keyword parameter) is itself unfamiliar to developers from `:` languages because those languages use parenthesised parameters.
+- **Pragmatist**: "The ambiguity only matters in multi-keyword methods with typed parameters. Today that's <10 methods in the stdlib. Is a syntax change across ~190 annotations justified for <10 hard cases? Fix the readability problem where it exists — maybe with documentation or editor highlighting — rather than changing the entire type annotation system."
+
+**Response**: The proportionality concern is fair today, but Beamtalk's stdlib will grow and multi-keyword methods are the Smalltalk norm (not the exception). Fixing this now, while the migration surface is small and there are no external users, is the cheapest time to make the change. Waiting until the problem is larger means a harder migration. The consistency argument is preserved since state declarations also move to `::`. The familiarity argument is valid but mitigated: `::` is immediately readable in context, and the syntax it replaces (`: Type` after a keyword parameter) is itself unfamiliar to developers from `:` languages because those languages use parenthesised parameters.
 
 ### For No Delimiter (Space-Separated Types)
 
@@ -241,48 +246,68 @@ Use brackets to wrap the type.
 
 **Rejected because:** Angle brackets are reserved for protocol types (`<Printable>`) per ADR 0025 Phase 3. Parentheses clash with expression grouping. Both add more visual noise than `::`.
 
+### Alternative D: Keyword-Style Type Annotation (`as`)
+
+```beamtalk
+detect: block as Block ifNone: noneBlock as Block -> Object => ...
+state: balance as Integer = 0
+```
+
+Use `as` keyword to introduce the type. Reads naturally in English ("block as Block").
+
+**Rejected because:** `as` is already used in the workspace registration API (`bind: value as: #name`) and could conflict with future cast operations. It also adds a keyword-like element to a declaration context, blurring the line between syntax and messages. `::` is purely punctuation, keeping the declaration/expression distinction clean.
+
 ## Consequences
 
 ### Positive
 - Keyword selectors and type annotations are visually distinct — a reader can immediately identify selector keywords (single `:`) vs type annotations (double `::`)
 - Parameter names are stable — `bindingName` remains `bindingName` whether annotated or not
-- Aligns with Erlang's `::` type spec syntax, reinforcing BEAM ecosystem familiarity
+- Aligns with Erlang's `::` type declaration syntax (`-type`, `-record` field types), reinforcing BEAM ecosystem familiarity
 - Simplifies parser implementation — no ambiguity between keyword colon and type colon
 - LSP benefits from unambiguous tokenisation for error recovery in incomplete code
 - `::` is a distinct two-character token, making it trivially recognisable in syntax highlighting
 
 ### Negative
 - Departures from the `:` convention used by most mainstream typed languages (TypeScript, Rust, Kotlin, Swift) — though these languages all use parenthesised parameters where `:` is unambiguous
-- Requires updating ~35 parameter annotations, ~13 state annotations across stdlib, plus ~87 test files and documentation
+- Requires updating ~190 parameter annotations across stdlib, plus ~25 state annotations in test fixtures/examples, and documentation
 - Supersedes the parameter type syntax specified in ADR 0025 Phase 2
 
 ### Neutral
-- `::` for namespaces (`Banking::Counter`) is a v0.2+ future consideration (ADR 0031). The syntactic contexts are distinct — `::` in a method signature is always a type annotation, `::` between two identifiers in expression position is a namespace qualifier. The parser can disambiguate by context. If this becomes a concern, the namespace ADR can choose a different separator.
+- `::` for namespaces (`Banking::Counter`) is a v0.2+ future consideration (ADR 0031). The syntactic contexts are distinct: `::` in a method signature follows a parameter name and precedes a type, while `::` in expression position sits between two identifiers forming a qualified name. In the combined case (`amount :: Banking::Counter`), the parser reads the first `::` as a type annotation delimiter and `Banking::Counter` as a qualified type name — a well-defined parse. However, if v0.2 namespace design finds this problematic, the namespace separator can use a different token since it is not yet committed.
 - Return type syntax (`-> Type`) is unchanged
+- `asType:` (ADR 0025 Phase 2b) is a keyword message, not a type annotation — `asType:` is the selector, `Handler` is the argument. No change needed; `::` applies to declaration-site type annotations, not expression-site type casts.
 
 ## Implementation
 
-### Phase 1: Lexer and Parser Changes
-- Add `TokenKind::DoubleColon` to the lexer
-- Update `parse_type_annotation()` in `declarations.rs` to expect `::` instead of `:` for parameter types
-- Update state declaration parsing to expect `::` for state types
+This is a single-PR change. Type annotations were introduced recently (ADR 0025 Phase 2) and have no external users, so no deprecation period is needed.
+
+### Lexer
+- Add `TokenKind::DoubleColon` token kind
+- Recognise `::` as a distinct token (not two consecutive colons)
+
+### Parser (`declarations.rs`)
+The current parser has two code paths for typed parameters:
+1. **Keyword-tokenised**: `amount:` is lexed as `Keyword("amount:")`, parser strips the trailing colon and calls `parse_type_annotation()`. This path relies on lookahead (lines 739-758) to distinguish `paramName: Type` from an additional keyword selector part.
+2. **Space-before-colon**: `amount :` is lexed as `Identifier("amount")` + `Colon`, and `parse_optional_param_type()` consumes the colon.
+
+With `::`, both paths simplify: `amount` is always an `Identifier`, and `::` is always `DoubleColon`. The complex Keyword-token lookahead in path 1 is eliminated. Changes:
+- `parse_optional_param_type()` checks for `DoubleColon` instead of `Colon`
+- State declaration parsing (`state:` and `classState:`) checks for `DoubleColon` after the field name
+- Remove the Keyword-stripping path for typed parameters (no longer needed)
 - Update error messages to reference `::` syntax
 
-### Phase 2: Migrate Stdlib and Tests
-- Update all `.bt` files in `stdlib/src/` with new `::` syntax (~35 parameter annotations, ~13 state annotations)
-- Update test `.bt` files
-- Update example files in `examples/` and `test-package-compiler/cases/`
+### Formatter
+- Update formatting rules to normalise `::` with spaces on both sides
 
-### Phase 3: Documentation
-- Update `docs/beamtalk-language-features.md` (type annotations section)
-- Update ADR 0025 to note superseded parameter type syntax
-- Update CLAUDE.md examples if affected
-
-### Phase 4: Deprecation Period (Optional)
-- Accept both `:` and `::` for one release cycle with a deprecation warning
-- Remove single-colon support in the following release
+### Migration
+- Update all `.bt` files in `stdlib/src/` (~190 parameter annotations)
+- Update test fixtures and examples (~25 state annotations in `test-package-compiler/`, `examples/`, `stdlib/test/fixtures/`)
+- Update `docs/beamtalk-language-features.md`, ADR 0025 (note superseded syntax), CLAUDE.md examples
+- Regenerate `generated_builtins.rs` if it encodes annotation syntax
 
 **Affected components:** Lexer, parser, formatter, documentation, stdlib `.bt` files, test `.bt` files, example files. No codegen changes (type annotations are erased before codegen). No runtime changes.
+
+**Verification:** `just test` and `just test-stdlib` must pass after all changes.
 
 ## Migration Path
 
@@ -298,7 +323,7 @@ deposit: amount :: Integer -> Integer => ...
 state: balance :: Integer = 0
 ```
 
-A deprecation period (Phase 4) can ease the transition by accepting both forms with a warning. Given that type annotations were introduced recently (ADR 0025 Phase 2), the migration surface is small.
+Type annotations were introduced recently (ADR 0025 Phase 2) and the language has no external users, so the change can be made atomically in a single PR with no deprecation period.
 
 ## References
 - Related ADRs:
@@ -309,5 +334,5 @@ A deprecation period (Phase 4) can ease the transition by accepting both forms w
 - Documentation: `docs/beamtalk-language-features.md` (type annotations section)
 - Prior art:
   - [Haskell type signatures](https://wiki.haskell.org/Type_signature) — `::` for "has type"
-  - [Erlang type specs](https://www.erlang.org/doc/reference_manual/typespec) — `::` in `-spec` and `-type`
-  - [Newspeak language spec](https://newspeaklanguage.org/) — `::` for module-level type declarations
+  - [Erlang type specs](https://www.erlang.org/doc/reference_manual/typespec) — `::` in `-type` declarations and record field types
+  - [Newspeak language spec](https://newspeaklanguage.org/) — angle-bracket type annotations (alternative solution to the same `:` ambiguity)
