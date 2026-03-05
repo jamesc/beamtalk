@@ -321,6 +321,42 @@ pub struct ParameterInfo {
     pub documentation: Option<EcoString>,
 }
 
+/// A suggested code action (e.g. "Add annotation: -> Integer").
+///
+/// **DDD Context:** Language Service — Value Object
+///
+/// Used to surface inferred return-type annotations as VS Code quick-fixes
+/// (BT-1067, ADR 0045 Phase 1b). Each action describes a single text
+/// insertion: `new_text` inserted at byte offset `insert_at` in the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeAction {
+    /// Human-readable title shown in the VS Code lightbulb menu.
+    /// Example: `"Add annotation: -> Integer"`
+    pub title: EcoString,
+    /// The text to insert at `insert_at`.
+    /// Example: `"-> Integer "`
+    pub new_text: EcoString,
+    /// The byte offset (in the source file) at which `new_text` is inserted.
+    /// This is a zero-length insertion point — existing text is not replaced.
+    pub insert_at: u32,
+}
+
+impl CodeAction {
+    /// Creates a new code action.
+    #[must_use]
+    pub fn new(
+        title: impl Into<EcoString>,
+        new_text: impl Into<EcoString>,
+        insert_at: u32,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            new_text: new_text.into(),
+            insert_at,
+        }
+    }
+}
+
 /// The kind of a document symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DocumentSymbolKind {

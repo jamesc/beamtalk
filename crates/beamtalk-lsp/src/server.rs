@@ -26,16 +26,18 @@ use beamtalk_core::unparse::format_source;
 use camino::Utf8PathBuf;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
-    DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, Documentation,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, MarkupContent,
-    MarkupKind, OneOf, ParameterInformation, ParameterLabel, Range, ReferenceParams,
-    ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    SignatureInformation, SymbolKind, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions,
+    CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams,
+    CodeActionProviderCapability, CodeActionResponse, CompletionItem, CompletionItemKind,
+    CompletionOptions, CompletionParams, CompletionResponse, DiagnosticSeverity,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
+    DocumentSymbolParams, DocumentSymbolResponse, Documentation, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, InitializedParams, MarkupContent, MarkupKind, OneOf,
+    ParameterInformation, ParameterLabel, Range, ReferenceParams, ServerCapabilities,
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolKind,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
 };
 use tower_lsp::{Client, LanguageServer};
 use tracing::debug;
@@ -361,6 +363,7 @@ impl LanguageServer for Backend {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -755,6 +758,72 @@ impl LanguageServer for Backend {
         params: DocumentRangeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
         Ok(self.format_document(&params.text_document.uri))
+    }
+
+    /// Returns code actions available at the requested range.
+    ///
+    /// Currently surfaces "Add annotation: -> `ClassName`" quick-fixes for
+    /// unannotated methods whose return type the `TypeChecker` can infer
+    /// (BT-1067, ADR 0045 Phase 1b).
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "source files over 4GB are not supported"
+    )]
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = &params.text_document.uri;
+        let Some(path) = self.resolve_path_for_uri(uri) else {
+            return Ok(None);
+        };
+        // Stdlib files are read-only; no code actions.
+        if uri.scheme() == "beamtalk-stdlib" {
+            return Ok(None);
+        }
+
+        let (source, actions) = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let Some(source) = svc.file_source(&path) else {
+                return Ok(None);
+            };
+            let range = &params.range;
+            let start_offset = position_to_offset(range.start, &source) as u32;
+            let end_offset = position_to_offset(range.end, &source) as u32;
+            let actions = svc.code_actions(&path, start_offset, end_offset);
+            (source, actions)
+        };
+
+        if actions.is_empty() {
+            return Ok(Some(vec![]));
+        }
+
+        let lsp_actions: CodeActionResponse = actions
+            .into_iter()
+            .map(|action| {
+                let insert_pos = offset_to_position(action.insert_at as usize, &source);
+                let edit_range = Range {
+                    start: insert_pos,
+                    end: insert_pos,
+                };
+                let text_edit = TextEdit {
+                    range: edit_range,
+                    new_text: action.new_text.to_string(),
+                };
+                let mut changes = HashMap::new();
+                changes.insert(uri.clone(), vec![text_edit]);
+                let lsp_action = CodeAction {
+                    title: action.title.to_string(),
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(changes),
+                        ..Default::default()
+                    }),
+                    is_preferred: Some(false),
+                    ..Default::default()
+                };
+                CodeActionOrCommand::CodeAction(lsp_action)
+            })
+            .collect();
+
+        Ok(Some(lsp_actions))
     }
 }
 
@@ -1158,6 +1227,43 @@ fn offset_to_position(offset: usize, source: &str) -> tower_lsp::lsp_types::Posi
         }
     }
     tower_lsp::lsp_types::Position::new(line, col)
+}
+
+/// Converts an LSP `Position` (line, UTF-16 column) to a byte offset in `source`.
+///
+/// Returns `source.len()` when the position is beyond the end of the file.
+fn position_to_offset(pos: tower_lsp::lsp_types::Position, source: &str) -> usize {
+    let mut line = 0u32;
+    let mut line_start = 0usize;
+    for (i, ch) in source.char_indices() {
+        if line == pos.line {
+            // Walk UTF-16 columns within this line
+            let mut col_utf16 = 0u32;
+            let mut byte_offset = line_start;
+            for (j, c) in source[line_start..].char_indices() {
+                if col_utf16 >= pos.character {
+                    return line_start + j;
+                }
+                if c == '\n' {
+                    break;
+                }
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "char::len_utf16() is always 1 or 2"
+                )]
+                {
+                    col_utf16 += c.len_utf16() as u32;
+                }
+                byte_offset = line_start + j + c.len_utf8();
+            }
+            return byte_offset;
+        }
+        if ch == '\n' {
+            line += 1;
+            line_start = i + 1;
+        }
+    }
+    source.len()
 }
 
 /// Converts a beamtalk `Diagnostic` to an LSP `Diagnostic`.
@@ -1767,5 +1873,41 @@ mod tests {
         let uri = Url::parse("file:///C:/project/main.bt").expect("valid URI");
         let result = backend.resolve_path_for_uri(&uri);
         assert_eq!(result, Some(Utf8PathBuf::from("C:/project/main.bt")));
+    }
+
+    // ── position_to_offset tests (BT-1067) ─────────────────────────────
+
+    #[test]
+    fn position_to_offset_first_line() {
+        let source = "hello world";
+        let pos = tower_lsp::lsp_types::Position::new(0, 6);
+        assert_eq!(position_to_offset(pos, source), 6);
+    }
+
+    #[test]
+    fn position_to_offset_second_line() {
+        let source = "hello\nworld";
+        let pos = tower_lsp::lsp_types::Position::new(1, 3);
+        assert_eq!(position_to_offset(pos, source), 9); // 'l' in "world"
+    }
+
+    #[test]
+    fn position_to_offset_beyond_eof() {
+        let source = "hi";
+        let pos = tower_lsp::lsp_types::Position::new(5, 0);
+        assert_eq!(position_to_offset(pos, source), source.len());
+    }
+
+    #[test]
+    fn position_to_offset_roundtrip_with_offset_to_position() {
+        let source = "Object subclass: Counter\n  count => 42";
+        for byte_offset in [0, 5, 24, 25, 30, 38] {
+            let pos = offset_to_position(byte_offset, source);
+            let back = position_to_offset(pos, source);
+            assert_eq!(
+                back, byte_offset,
+                "roundtrip failed for offset {byte_offset}"
+            );
+        }
     }
 }
