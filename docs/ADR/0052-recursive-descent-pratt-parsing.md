@@ -20,7 +20,7 @@ ADR 0039 established that Beamtalk departs from Smalltalk's pure left-to-right b
 
 The initial implementation handled binary precedence with three dedicated methods:
 
-- `parse_comparison()`: `<`, `>`, `<=`, `>=`, `==`, `!=`
+- `parse_comparison()`: `<`, `>`, `<=`, `>=`, `==`, `/=` (Erlang-style operators — ADR 0002)
 - `parse_additive()`: `+`, `-`
 - `parse_multiplicative()`: `*`, `/`, `%`
 
