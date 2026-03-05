@@ -3,6 +3,8 @@
 
 %%% @doc EUnit tests for beamtalk_http module (BT-1114).
 %%%
+%%% **DDD Context:** Object System Context
+%%%
 %%% Tests cover pure, non-network functions:
 %%% - URL parsing (parse_url/1)
 %%% - Method normalisation (normalise_method/1)
