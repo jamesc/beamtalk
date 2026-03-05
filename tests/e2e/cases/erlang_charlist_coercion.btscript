@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for automatic binary→charlist coercion at the Erlang FFI boundary
+// (BT-1127, ADR 0028 §3).
+//
+// Beamtalk strings are binaries (<<"hello">>). Many Erlang functions expect
+// charlists ([104,101,108,108,111]). The proxy and direct-call path both
+// auto-convert binary arguments to charlists on badarg, and convert charlist
+// results back to binaries.
+//
+// Note: os:cmd returns a string with a trailing newline. The `_` wildcard
+// suffix in the assertion matches the trailing newline character.
+
+// ===========================================================================
+// os:cmd — binary arg auto-coerced to charlist, result returned as String
+// ===========================================================================
+
+// Basic command execution with binary string arg
+Erlang os cmd: "echo hello"
+// => hello_
+
+// Multi-word command
+Erlang os cmd: "echo foo bar"
+// => foo bar_

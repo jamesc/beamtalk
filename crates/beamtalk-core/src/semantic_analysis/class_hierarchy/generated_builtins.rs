@@ -41,6 +41,8 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "File"
             | "FileHandle"
             | "Float"
+            | "HTTPClient"
+            | "HTTPResponse"
             | "InstantiationError"
             | "Integer"
             | "JSON"
@@ -737,6 +739,58 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "e".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
                 MethodInfo { selector: "infinity".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![] },
             ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "HTTPClient".into(),
+        ClassInfo {
+            name: "HTTPClient".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec!["baseUrl".into(), "headers".into(), "timeout".into()],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "get:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("String".into())] },
+                MethodInfo { selector: "post:body:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("String".into()), Some("String".into())] },
+                MethodInfo { selector: "put:body:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("String".into()), Some("String".into())] },
+                MethodInfo { selector: "delete:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("String".into())] },
+                MethodInfo { selector: "request:path:options:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![None, Some("String".into()), Some("Dictionary".into())] },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "get:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("String".into())] },
+                MethodInfo { selector: "post:body:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("String".into()), Some("String".into())] },
+                MethodInfo { selector: "put:body:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("String".into()), Some("String".into())] },
+                MethodInfo { selector: "delete:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![Some("String".into())] },
+                MethodInfo { selector: "request:url:options:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "HTTPClient".into(), is_sealed: false, return_type: Some("HTTPResponse".into()), param_types: vec![None, Some("String".into()), Some("Dictionary".into())] },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "HTTPResponse".into(),
+        ClassInfo {
+            name: "HTTPResponse".into(),
+            superclass: Some("Value".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "status".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: true, return_type: Some("Integer".into()), param_types: vec![] },
+                MethodInfo { selector: "headers".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: true, return_type: Some("List".into()), param_types: vec![] },
+                MethodInfo { selector: "body".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
+                MethodInfo { selector: "ok".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: true, return_type: Some("Boolean".into()), param_types: vec![] },
+                MethodInfo { selector: "bodyAsJson".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: true, return_type: Some("Object".into()), param_types: vec![] },
+            ],
+            class_methods: vec![],
             class_variables: vec![],
         },
     );

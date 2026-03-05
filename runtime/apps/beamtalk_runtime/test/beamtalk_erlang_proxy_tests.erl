@@ -629,6 +629,103 @@ dispatch_call_args_non_tuple_args_test() ->
     end.
 
 %%% ===================================================================
+%%% BT-1127: direct_call/3 — charlist coercion
+%%% ===================================================================
+
+direct_call_basic_test() ->
+    %% Direct call to lists:reverse works normally
+    ?assertEqual([3, 2, 1], beamtalk_erlang_proxy:direct_call(lists, reverse, [[1, 2, 3]])).
+
+direct_call_os_cmd_coerces_binary_test() ->
+    %% os:cmd/1 expects a charlist — binary arg should be auto-coerced.
+    %% Strip trailing CR/LF to handle Windows (CRLF) and Unix (LF) variants.
+    Result = beamtalk_erlang_proxy:direct_call(os, cmd, [<<"echo hello">>]),
+    ?assert(is_binary(Result)),
+    ?assertEqual(<<"hello">>, string:trim(Result, trailing, "\r\n")).
+
+direct_call_exit_propagates_test() ->
+    %% exit should propagate naturally, NOT be wrapped
+    try
+        beamtalk_erlang_proxy:direct_call(erlang, exit, [killed]),
+        ?assert(false)
+    catch
+        exit:killed -> ok
+    end.
+
+direct_call_throw_propagates_test() ->
+    %% throw should propagate naturally, NOT be wrapped
+    try
+        beamtalk_erlang_proxy:direct_call(erlang, throw, [oops]),
+        ?assert(false)
+    catch
+        throw:oops -> ok
+    end.
+
+direct_call_missing_function_raises_test() ->
+    try
+        beamtalk_erlang_proxy:direct_call(lists, nonexistent_xyz, [1]),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind)
+    end.
+
+direct_call_wrong_arity_raises_test() ->
+    try
+        beamtalk_erlang_proxy:direct_call(lists, reverse, []),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(arity_mismatch, Inner#beamtalk_error.kind)
+    end.
+
+direct_call_unloaded_module_raises_test() ->
+    try
+        beamtalk_erlang_proxy:direct_call(completely_bogus_module_xyz, foo, []),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind)
+    end.
+
+direct_call_badarg_no_binary_raises_test() ->
+    %% badarg with no binary args should raise (no coercion possible)
+    try
+        beamtalk_erlang_proxy:direct_call(erlang, abs, [not_a_number]),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(type_error, Inner#beamtalk_error.kind),
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual(badarg, maps:get(erlang_error, Details))
+    end.
+
+direct_call_coercion_retry_still_fails_test() ->
+    %% binary_to_existing_atom with non-existent atom: badarg after coercion
+    %% should still raise structured error
+    try
+        beamtalk_erlang_proxy:direct_call(
+            erlang, binary_to_existing_atom, [<<"zzzz_nonexistent_atom_xyz">>]
+        ),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(type_error, Inner#beamtalk_error.kind)
+    end.
+
+%%% ===================================================================
+%%% BT-1127: dispatch/3 charlist coercion via validate_and_apply
+%%% ===================================================================
+
+dispatch_os_cmd_coerces_binary_test() ->
+    %% Verify coercion also works through dispatch path.
+    %% Strip trailing CR/LF to handle Windows (CRLF) and Unix (LF) variants.
+    Proxy = beamtalk_erlang_proxy:new(os),
+    Result = beamtalk_erlang_proxy:dispatch('cmd:', [<<"echo hello">>], Proxy),
+    ?assert(is_binary(Result)),
+    ?assertEqual(<<"hello">>, string:trim(Result, trailing, "\r\n")).
+
+%%% ===================================================================
 %%% BT-679: Beamtalk error passthrough
 %%% ===================================================================
 

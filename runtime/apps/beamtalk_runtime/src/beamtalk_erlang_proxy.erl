@@ -36,7 +36,7 @@
 
 -module(beamtalk_erlang_proxy).
 
--export([dispatch/3, has_method/1, new/1]).
+-export([direct_call/3, dispatch/3, has_method/1, new/1]).
 
 -include("beamtalk.hrl").
 
@@ -137,6 +137,69 @@ dispatch(Selector, Args, Self) ->
 -spec has_method(atom()) -> boolean().
 has_method(_Selector) -> true.
 
+%% @doc Entry point for direct Erlang calls (BT-1127).
+%%
+%% The codegen emits `call 'beamtalk_erlang_proxy':'direct_call'(M, F, [args])`
+%% for all `Erlang M fn: arg` expressions, routing through the proxy instead
+%% of calling `call 'M':'F'(args)` directly. This enables:
+%% - Export validation and actionable error messages (BT-679)
+%% - Automatic binary→charlist coercion on badarg (BT-1127)
+%% - Charlist→binary result coercion for consistent string types
+%%
+%% Unlike `validate_and_apply/4`, this does NOT wrap exit/throw exceptions —
+%% those propagate naturally so `Erlang erlang exit: 1` behaves as expected.
+-spec direct_call(atom(), atom(), list()) -> term().
+direct_call(Module, FunName, Args) ->
+    Arity = length(Args),
+    case get_exports(Module) of
+        {error, not_loaded} ->
+            raise_module_not_loaded(Module, FunName);
+        {ok, Exports} ->
+            case lists:member({FunName, Arity}, Exports) of
+                true ->
+                    apply_with_coercion(Module, FunName, Args, FunName);
+                false ->
+                    raise_function_or_arity_error(
+                        Module, FunName, Arity, FunName, Exports
+                    )
+            end
+    end.
+
+%% @doc Call Module:FunName(Args), retrying with charlist-coerced args on badarg.
+%%
+%% Only catches badarg (for coercion retry). All other exceptions (exit, throw,
+%% and other errors) propagate naturally — this preserves the semantics of
+%% direct calls like `Erlang erlang exit: 1`.
+-spec apply_with_coercion(atom(), atom(), list(), atom()) -> term().
+apply_with_coercion(Module, FunName, Args, OrigSelector) ->
+    try
+        erlang:apply(Module, FunName, Args)
+    catch
+        error:#{error := #beamtalk_error{}} = Wrapped:_ ->
+            error(Wrapped);
+        error:undef:_Stack ->
+            %% TOCTOU: function unloaded between export check and apply
+            raise_undef_error(Module, FunName, length(Args), OrigSelector);
+        error:badarg:Stack ->
+            CoercedArgs = coerce_binaries_to_charlists(Args),
+            case CoercedArgs =/= Args of
+                true ->
+                    try
+                        Result = erlang:apply(Module, FunName, CoercedArgs),
+                        coerce_charlist_result(Result)
+                    catch
+                        error:badarg:Stack2 ->
+                            raise_badarg_error(Module, FunName, OrigSelector, Stack2);
+                        error:#{error := #beamtalk_error{}} = Wrapped:_ ->
+                            error(Wrapped);
+                        error:undef:_Stack2 ->
+                            raise_undef_error(Module, FunName, length(CoercedArgs), OrigSelector)
+                    end;
+                false ->
+                    raise_badarg_error(Module, FunName, OrigSelector, Stack)
+            end
+    end.
+
 %%% ============================================================================
 %%% Internal helpers
 %%% ============================================================================
@@ -232,21 +295,33 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
                                 )
                             );
                         error:badarg:Stack ->
-                            Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
-                            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
-                            Error2 = beamtalk_error:with_hint(
-                                Error1,
-                                erlang_error_hint(Module, FunName, badarg)
-                            ),
-                            beamtalk_error:raise(
-                                beamtalk_error:with_details(
-                                    Error2,
-                                    #{
-                                        erlang_error => badarg,
-                                        erlang_stacktrace => Stack
-                                    }
-                                )
-                            );
+                            %% BT-1127: Auto-coerce binary args to charlists and retry.
+                            %% Many Erlang functions (os:cmd/1, file:read_file/1, etc.)
+                            %% expect charlists but Beamtalk strings are binaries.
+                            CoercedArgs = coerce_binaries_to_charlists(Args),
+                            case CoercedArgs =/= Args of
+                                true ->
+                                    try
+                                        Result = erlang:apply(Module, FunName, CoercedArgs),
+                                        coerce_charlist_result(Result)
+                                    catch
+                                        error:badarg:Stack2 ->
+                                            raise_badarg_error(
+                                                Module, FunName, OrigSelector, Stack2
+                                            );
+                                        error:#{error := #beamtalk_error{}} = Wrapped:_Stack2 ->
+                                            error(Wrapped);
+                                        error:undef:_Stack2 ->
+                                            raise_undef_error(
+                                                Module,
+                                                FunName,
+                                                length(CoercedArgs),
+                                                OrigSelector
+                                            )
+                                    end;
+                                false ->
+                                    raise_badarg_error(Module, FunName, OrigSelector, Stack)
+                            end;
                         error:function_clause:Stack ->
                             Error0 = beamtalk_error:new(arity_mismatch, 'ErlangModule'),
                             Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
@@ -341,52 +416,133 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
                             )
                     end;
                 false ->
-                    %% Function/arity not found — check if function exists with different arity
-                    MatchingArities = [A || {F, A} <- Exports, F =:= FunName],
-                    case MatchingArities of
-                        [] ->
-                            %% Function doesn't exist at all
-                            Error0 = beamtalk_error:new(does_not_understand, 'ErlangModule'),
-                            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
-                            Error2 = beamtalk_error:with_hint(
-                                Error1,
-                                <<"This Erlang function does not exist. Check spelling and arity.">>
-                            ),
-                            Error3 = beamtalk_error:with_details(Error2, #{
-                                module => Module,
-                                function => FunName,
-                                arity => Arity
-                            }),
-                            beamtalk_error:raise(Error3);
-                        _ ->
-                            %% Function exists but with different arity
-                            AritiesStr = lists:join(
-                                <<", ">>,
-                                [integer_to_binary(A) || A <- lists:sort(MatchingArities)]
-                            ),
-                            Hint = iolist_to_binary([
-                                atom_to_binary(Module, utf8),
-                                <<":">>,
-                                atom_to_binary(FunName, utf8),
-                                <<"/">>,
-                                iolist_to_binary(AritiesStr),
-                                <<" exists but was called with ">>,
-                                integer_to_binary(Arity),
-                                <<" arguments">>
-                            ]),
-                            Error0 = beamtalk_error:new(arity_mismatch, 'ErlangModule'),
-                            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
-                            Error2 = beamtalk_error:with_hint(Error1, Hint),
-                            Error3 = beamtalk_error:with_details(Error2, #{
-                                module => Module,
-                                function => FunName,
-                                expected_arities => lists:sort(MatchingArities),
-                                actual_arity => Arity
-                            }),
-                            beamtalk_error:raise(Error3)
-                    end
+                    raise_function_or_arity_error(
+                        Module, FunName, Arity, OrigSelector, Exports
+                    )
             end
     end.
+
+%% @doc Raise an error for missing function or wrong arity (BT-679).
+%%
+%% Shared by `direct_call/3` and `validate_and_apply/4`.
+-spec raise_function_or_arity_error(atom(), atom(), non_neg_integer(), atom(), [
+    {atom(), non_neg_integer()}
+]) -> no_return().
+raise_function_or_arity_error(Module, FunName, Arity, OrigSelector, Exports) ->
+    MatchingArities = [A || {F, A} <- Exports, F =:= FunName],
+    case MatchingArities of
+        [] ->
+            Error0 = beamtalk_error:new(does_not_understand, 'ErlangModule'),
+            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
+            Error2 = beamtalk_error:with_hint(
+                Error1,
+                <<"This Erlang function does not exist. Check spelling and arity.">>
+            ),
+            beamtalk_error:raise(
+                beamtalk_error:with_details(Error2, #{
+                    module => Module,
+                    function => FunName,
+                    arity => Arity
+                })
+            );
+        _ ->
+            AritiesStr = lists:join(
+                <<", ">>,
+                [integer_to_binary(A) || A <- lists:sort(MatchingArities)]
+            ),
+            Hint = iolist_to_binary([
+                atom_to_binary(Module, utf8),
+                <<":">>,
+                atom_to_binary(FunName, utf8),
+                <<"/">>,
+                iolist_to_binary(AritiesStr),
+                <<" exists but was called with ">>,
+                integer_to_binary(Arity),
+                <<" arguments">>
+            ]),
+            Error0 = beamtalk_error:new(arity_mismatch, 'ErlangModule'),
+            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
+            Error2 = beamtalk_error:with_hint(Error1, Hint),
+            beamtalk_error:raise(
+                beamtalk_error:with_details(Error2, #{
+                    module => Module,
+                    function => FunName,
+                    expected_arities => lists:sort(MatchingArities),
+                    actual_arity => Arity
+                })
+            )
+    end.
+
+%% @doc Raise a structured undef error (TOCTOU: function unloaded between check and apply).
+%%
+%% Pass the actual arity so the error message is accurate (not "0 arguments").
+-spec raise_undef_error(atom(), atom(), non_neg_integer(), atom()) -> no_return().
+raise_undef_error(Module, FunName, Arity, OrigSelector) ->
+    case get_exports(Module) of
+        {error, not_loaded} ->
+            raise_module_not_loaded(Module, OrigSelector);
+        {ok, Exports} ->
+            raise_function_or_arity_error(
+                Module, FunName, Arity, OrigSelector, Exports
+            )
+    end.
+
+%% @doc Raise a structured badarg error.
+-spec raise_badarg_error(atom(), atom(), atom(), list()) -> no_return().
+raise_badarg_error(Module, FunName, OrigSelector, Stack) ->
+    Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
+    Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        erlang_error_hint(Module, FunName, badarg)
+    ),
+    beamtalk_error:raise(
+        beamtalk_error:with_details(
+            Error2,
+            #{
+                erlang_error => badarg,
+                erlang_stacktrace => Stack
+            }
+        )
+    ).
+
+%% @doc Coerce all binary values in a list to charlists (BT-1127).
+%%
+%% Beamtalk strings are UTF-8 binaries. Many Erlang functions (os:cmd/1,
+%% file:read_file/1, io:format/1) expect charlists. This converts each
+%% binary in the arg list to a charlist using unicode:characters_to_list/2.
+%% Non-binary args are passed through unchanged.
+-spec coerce_binaries_to_charlists(list()) -> list().
+coerce_binaries_to_charlists(Args) ->
+    lists:map(fun coerce_arg/1, Args).
+
+-spec coerce_arg(term()) -> term().
+coerce_arg(Arg) when is_binary(Arg) ->
+    case unicode:characters_to_list(Arg, utf8) of
+        Charlist when is_list(Charlist) -> Charlist;
+        _ -> Arg
+    end;
+coerce_arg(Arg) ->
+    Arg.
+
+%% @doc Convert a charlist result to a binary (BT-1127).
+%%
+%% When we auto-coerce binary args to charlists, Erlang functions may return
+%% charlists as output (e.g., os:cmd/1 returns a charlist). Convert those
+%% back to binaries for consistent Beamtalk string representation.
+-spec coerce_charlist_result(term()) -> term().
+coerce_charlist_result(Result) when is_list(Result) ->
+    case io_lib:char_list(Result) of
+        true ->
+            case unicode:characters_to_binary(Result, utf8) of
+                Bin when is_binary(Bin) -> Bin;
+                _ -> Result
+            end;
+        false ->
+            Result
+    end;
+coerce_charlist_result(Result) ->
+    Result.
 
 %% @doc Raise error for unloaded module.
 -spec raise_module_not_loaded(atom(), atom()) -> no_return().
