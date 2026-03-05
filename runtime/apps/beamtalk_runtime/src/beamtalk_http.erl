@@ -231,7 +231,11 @@ do_request(Method, Url, BtHeaders, Body, Timeout) ->
                         gun:close(ConnPid)
                     end;
                 {error, Reason} ->
-                    http_error('do_request', #{url => Url, reason => Reason}, <<"Could not open connection">>)
+                    http_error(
+                        'do_request',
+                        #{url => Url, reason => Reason},
+                        <<"Could not open connection">>
+                    )
             end
     end.
 
