@@ -1,0 +1,117 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Yaml class (BT-1122)
+
+TestCase subclass: YamlTest
+
+  testParsingScalarValues =>
+    // Parse a YAML integer
+    self assert: (Yaml parse: "42") equals: 42
+    // Parse a YAML float
+    self assert: (Yaml parse: "3.14") equals: 3.14
+    // Parse YAML true
+    self assert: (Yaml parse: "true")
+    // Parse YAML false
+    self deny: (Yaml parse: "false")
+    // Parse YAML null to nil
+    self assert: (Yaml parse: "null") equals: nil
+    // Parse YAML ~ (alternate null syntax)
+    self assert: (Yaml parse: "~") equals: nil
+
+  testParsingFlowSequences =>
+    // Parse a YAML flow-style sequence of integers
+    self assert: (Yaml parse: "[1, 2, 3]") equals: #(1, 2, 3)
+    // Parse an empty sequence
+    self assert: (Yaml parse: "[]") equals: #()
+    // Parse a nested sequence
+    self assert: (Yaml parse: "[[1, 2], [3, 4]]") equals: #(#(1, 2), #(3, 4))
+    // Parse a sequence of booleans
+    self assert: (Yaml parse: "[true, false]") size equals: 2
+
+  testParsingMappingsViaRoundTrip =>
+    // Parse a mapping by round-tripping through generate:
+    self assert: ((Yaml parse: (Yaml generate: #{
+      "name" => "Ada"
+    })) at: "name") equals: "Ada"
+    // Mapping with integer value
+    self assert: ((Yaml parse: (Yaml generate: #{
+      "age" => 36
+    })) at: "age") equals: 36
+    // Mapping with boolean value
+    self assert: ((Yaml parse: (Yaml generate: #{
+      "active" => true
+    })) at: "active")
+    // Mapping with nil value
+    self assert: ((Yaml parse: (Yaml generate: #{
+      "value" => nil
+    })) at: "value") equals: nil
+    // Mapping result has correct size
+    self assert: (Yaml parse: (Yaml generate: #{"x" => 1})) size equals: 1
+
+  testParsingNestedStructures =>
+    // Map containing a sequence (via round-trip)
+    self assert: ((Yaml parse: (Yaml generate: #{
+      "items" => #(1, 2, 3)
+    })) at: "items") equals: #(1, 2, 3)
+    // Sequence containing a map (via round-trip)
+    self assert: (((Yaml parse: (Yaml generate: #(#{
+      "x" => 1
+    }, #{"x" => 2}))) at: 1) at: "x") equals: 1
+
+  testParseAllSingleDocument =>
+    // parseAll: with a single document returns a list of size 1
+    self assert: (Yaml parseAll: "42") size equals: 1
+    // The single document has the correct value
+    self assert: ((Yaml parseAll: "42") at: 1) equals: 42
+    // parseAll: with a sequence returns a list containing the sequence
+    self assert: ((Yaml parseAll: "[1, 2, 3]") at: 1) equals: #(1, 2, 3)
+
+  testGeneratingScalarValues =>
+    // Generate YAML from an Integer
+    self assert: (Yaml generate: 42) equals: "42"
+    // Generate YAML from true
+    self assert: (Yaml generate: true) equals: "true"
+    // Generate YAML from false
+    self assert: (Yaml generate: false) equals: "false"
+    // Generate YAML from nil (becomes null)
+    self assert: (Yaml generate: nil) equals: "null"
+
+  testGeneratingSequences =>
+    // Generate YAML from an empty List
+    self assert: (Yaml generate: #()) equals: "[]"
+    // Generate YAML from a List of integers
+    self assert: (Yaml generate: #(1, 2, 3)) equals: "[1, 2, 3]"
+    // Generated sequence is parseable
+    self assert: (Yaml parse: (Yaml generate: #(1, 2, 3))) equals: #(1, 2, 3)
+
+  testRoundTripGenerateThenParse =>
+    // Round-trip an integer
+    self assert: (Yaml parse: (Yaml generate: 42)) equals: 42
+    // Round-trip a boolean
+    self assert: (Yaml parse: (Yaml generate: true))
+    // Round-trip null
+    self assert: (Yaml parse: (Yaml generate: nil)) equals: nil
+    // Round-trip a list
+    self assert: (Yaml parse: (Yaml generate: #(1, 2, 3))) equals: #(1, 2, 3)
+    // Round-trip a Dictionary with a string value
+    self assert: ((Yaml parse: (Yaml generate: #{
+      "name" => "Ada"
+    })) at: "name") equals: "Ada"
+    // Round-trip nested structures
+    self assert: (((Yaml parse: (Yaml generate: #{
+      "user" => #{"age" => 36}
+    })) at: "user") at: "age") equals: 36
+    // Round-trip empty dict
+    self assert: (Yaml parse: (Yaml generate: #{})) size equals: 0
+
+  testErrorHandling =>
+    // Parse invalid YAML produces a parse_error
+    self should: [Yaml parse: "key: [unclosed"] raise: #parse_error
+    // Parse with non-string argument produces type_error
+    @expect type
+    self should: [Yaml parse: 42] raise: #type_error
+
+  testClassIdentity =>
+    // class on class returns a real metaclass object
+    self assert: (Yaml class) isMeta equals: true

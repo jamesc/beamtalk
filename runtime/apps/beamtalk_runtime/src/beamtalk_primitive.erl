@@ -401,6 +401,7 @@ module_for_value(X) when is_map(X) ->
         'TestCase' -> 'bt@stdlib@test_case';
         'Regex' -> 'bt@stdlib@regex';
         'DateTime' -> 'bt@stdlib@date_time';
+        'Timer' -> 'bt@stdlib@timer';
         'TestResult' -> 'bt@stdlib@test_result';
         'StackFrame' -> beamtalk_stack_frame;
         'ErlangModule' -> beamtalk_erlang_proxy;

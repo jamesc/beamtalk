@@ -1582,3 +1582,54 @@ handle_cast_fire_and_forget_unknown_selector_logs_and_continues_test() ->
     %% Actor still alive and state unchanged
     ?assertEqual(7, gen_server:call(Counter, {getValue, []})),
     gen_server:stop(Counter).
+
+%%% Regression tests for kill semantics (race-condition fix)
+%%% These guard against the bug where exit(Pid, kill) + immediate ok
+%%% meant is_process_alive could still return true on the next call.
+
+async_send_kill_live_actor_resolves_ok_and_actor_is_dead_test() ->
+    %% Use start/1 (not start_link) so kill does not propagate to the test process.
+    {ok, Counter} = test_counter:start(0),
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, kill, [], Future),
+    Result = beamtalk_future:await(Future),
+    %% kill must return ok only once the process is confirmed dead
+    ?assertEqual(ok, Result),
+    ?assertNot(is_process_alive(Counter)).
+
+async_send_kill_dead_actor_resolves_ok_test() ->
+    {ok, Counter} = test_counter:start(0),
+    gen_server:stop(Counter),
+    timer:sleep(10),
+    Future = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, kill, [], Future),
+    Result = beamtalk_future:await(Future),
+    %% Killing an already-dead process is idempotent
+    ?assertEqual(ok, Result).
+
+sync_send_kill_live_actor_returns_ok_and_actor_is_dead_test() ->
+    {ok, Counter} = test_counter:start(0),
+    Result = beamtalk_actor:sync_send(Counter, kill, []),
+    %% kill must return ok only once the process is confirmed dead
+    ?assertEqual(ok, Result),
+    ?assertNot(is_process_alive(Counter)).
+
+sync_send_kill_dead_actor_returns_ok_test() ->
+    {ok, Counter} = test_counter:start(0),
+    gen_server:stop(Counter),
+    timer:sleep(10),
+    Result = beamtalk_actor:sync_send(Counter, kill, []),
+    %% Killing an already-dead process is idempotent
+    ?assertEqual(ok, Result).
+
+async_send_kill_isAlive_false_immediately_after_test() ->
+    %% This is the exact sequence that was flaky before the fix.
+    %% kill must guarantee is_process_alive is false by the time it resolves.
+    {ok, Counter} = test_counter:start(0),
+    KillFuture = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, kill, [], KillFuture),
+    ok = beamtalk_future:await(KillFuture),
+    %% No sleep — process must be dead synchronously after kill resolves
+    AliveFuture = beamtalk_future:new(),
+    beamtalk_actor:async_send(Counter, isAlive, [], AliveFuture),
+    ?assertEqual(false, beamtalk_future:await(AliveFuture)).
