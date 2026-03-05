@@ -11,7 +11,7 @@
 ///
 /// | YAML          | Beamtalk     |
 /// |---------------|--------------|
-/// | mapping       | Dictionary   |
+/// | mapping       | Dictionary (keys typed per scalar) |
 /// | sequence      | List         |
 /// | string        | String       |
 /// | integer       | Integer      |
@@ -32,7 +32,8 @@ sealed Object subclass: Yaml
 
   /// Parse a YAML string into a Beamtalk value (class method).
   ///
-  /// YAML mappings become Dictionaries with String keys, sequences become
+  /// YAML mappings become Dictionaries whose key types follow the YAML scalar
+  /// type (string keys → Strings, integer keys → Integers), sequences become
   /// Lists, strings become Strings, integers become Integers, floats become
   /// Floats, booleans stay as true/false, null/~ becomes nil.
   ///

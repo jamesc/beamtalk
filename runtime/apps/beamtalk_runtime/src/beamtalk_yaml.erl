@@ -13,7 +13,7 @@
 %%%
 %%% | YAML          | Beamtalk     |
 %%% |---------------|--------------|
-%%% | mapping       | Dictionary   |
+%%% | mapping       | Dictionary (keys typed per scalar) |
 %%% | sequence      | List         |
 %%% | string        | String       |
 %%% | integer       | Integer      |
@@ -44,9 +44,10 @@
 
 %% @doc Parse a YAML string into a Beamtalk value (first document).
 %%
-%% YAML mappings become Dictionaries (maps with String keys), sequences become
-%% Lists, strings become Strings, integers become Integers, floats become Floats,
-%% true/false become booleans, null/~ become nil.
+%% YAML mappings become Dictionaries (maps whose key types follow the YAML
+%% scalar type — string keys become Strings, integer keys become Integers),
+%% sequences become Lists, strings become Strings, integers become Integers,
+%% floats become Floats, true/false become booleans, null/~ become nil.
 -spec 'parse:'(binary()) -> term().
 'parse:'(YamlStr) when is_binary(YamlStr) ->
     Docs = parse_yaml_string(YamlStr, 'parse:'),
@@ -141,7 +142,7 @@ has_method(_) -> false.
 %% lazily here.
 -spec parse_yaml_string(binary(), atom()) -> [term()].
 parse_yaml_string(YamlStr, Selector) ->
-    ok = ensure_yamerl_started(),
+    ok = ensure_yamerl_started(Selector),
     try
         Docs = yamerl_constr:string(YamlStr, [{detailed_constr, true}]),
         [unwrap_doc(D) || D <- Docs]
@@ -168,18 +169,21 @@ parse_yaml_string(YamlStr, Selector) ->
 %% yamerl requires its application to be started before use. The beamtalk
 %% test runner does not use application:ensure_all_started, so yamerl must
 %% be started lazily. This call is idempotent.
--spec ensure_yamerl_started() -> ok.
-ensure_yamerl_started() ->
+%%
+%% Takes the calling selector so error messages attribute failures correctly.
+-spec ensure_yamerl_started(atom()) -> ok.
+ensure_yamerl_started(Selector) ->
     case application:ensure_all_started(yamerl) of
         {ok, _Started} ->
             ok;
         {error, Reason} ->
             Error0 = beamtalk_error:new(parse_error, 'Yaml'),
-            Error1 = beamtalk_error:with_hint(
-                Error0, <<"Failed to start yamerl YAML library">>
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error2 = beamtalk_error:with_hint(
+                Error1, <<"Failed to start yamerl YAML library">>
             ),
-            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
-            beamtalk_error:raise(Error2)
+            Error3 = beamtalk_error:with_details(Error2, #{reason => Reason}),
+            beamtalk_error:raise(Error3)
     end.
 
 %% @private
@@ -195,8 +199,10 @@ unwrap_doc(Node) -> Node.
 %% This converter handles all standard YAML types.
 -spec convert_node(term()) -> term().
 convert_node({yamerl_str, _, _, _, Charlist}) ->
-    %% Strings are returned as charlists in yamerl detailed mode
-    list_to_binary(Charlist);
+    %% Strings are returned as charlists in yamerl detailed mode.
+    %% Use unicode:characters_to_binary/1 (not list_to_binary/1) to safely
+    %% handle codepoints > 255, which list_to_binary/1 would crash on.
+    unicode:characters_to_binary(Charlist);
 convert_node({yamerl_int, _, _, _, Value}) ->
     Value;
 convert_node({yamerl_float, _, _, _, Value}) ->
@@ -215,8 +221,11 @@ convert_node({yamerl_map, _, _, _, Pairs}) ->
      || {K, V} <- Pairs
     ]);
 convert_node(Other) ->
-    %% Fallback for unrecognized node types (e.g., aliases, anchors)
-    ?LOG_WARNING("beamtalk_yaml: unrecognized yamerl node", #{node => Other}),
+    %% Fallback for unrecognized node types (e.g., aliases, anchors).
+    %% Log only the node type tag to avoid exposing potentially sensitive values
+    %% from YAML files (e.g. API keys, passwords) in log output.
+    NodeType = element(1, Other),
+    ?LOG_WARNING("beamtalk_yaml: unrecognized yamerl node", #{node_type => NodeType}),
     nil.
 
 %%% ============================================================================
