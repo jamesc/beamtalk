@@ -186,6 +186,7 @@ has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
     Headers = maps:get(headers, Options, []),
     Body = maps:get(body, Options, <<>>),
     Timeout = maps:get(timeout, Options, ?DEFAULT_TIMEOUT),
+    validate_request_options(Headers, Body, Timeout),
     do_request(MethodBin, Url, Headers, Body, Timeout);
 'request:url:options:'(_, Url, _) when not is_binary(Url) ->
     type_error('request:url:options:', <<"Url must be a String">>);
@@ -204,7 +205,7 @@ do_request(Method, Url, BtHeaders, Body, Timeout) ->
             http_error('do_request', #{url => Url}, <<"Invalid URL">>);
         {ok, #{host := Host, port := Port, path := Path, transport := Transport}} ->
             GunHeaders = to_gun_headers(BtHeaders),
-            GunOpts = #{transport => Transport},
+            GunOpts = build_gun_opts(Transport, Host),
             case gun:open(Host, Port, GunOpts) of
                 {ok, ConnPid} ->
                     MRef = monitor(process, ConnPid),
@@ -239,7 +240,15 @@ do_request(Method, Url, BtHeaders, Body, Timeout) ->
             end
     end.
 
-%% @private Await response and body from gun.
+%% @private Await response headers from gun, skipping 1xx informational responses.
+%%
+%% Gun 2.x may emit `{inform, ...}` for 1xx Informational responses (e.g. 100
+%% Continue, 103 Early Hints) before the final response. We skip these and
+%% recurse so the caller always sees the final `{response, ...}` event.
+%%
+%% Other unexpected event types (push, upgrade, ws, data, trailers) are logged
+%% and skipped — they should not appear in a normal request/response flow but
+%% must be handled to avoid case_clause crashes.
 -spec collect_response(pid(), reference(), reference(), timeout()) -> map().
 collect_response(ConnPid, StreamRef, MRef, Timeout) ->
     case gun:await(ConnPid, StreamRef, Timeout, MRef) of
@@ -265,6 +274,26 @@ collect_response(ConnPid, StreamRef, MRef, Timeout) ->
                         <<"Failed to read response body">>
                     )
             end;
+        {inform, _Status, _Headers} ->
+            %% 1xx Informational (e.g. 100 Continue, 103 Early Hints) — skip and wait
+            collect_response(ConnPid, StreamRef, MRef, Timeout);
+        {push, _PushedStreamRef, _Method, _URI, _Headers} ->
+            %% HTTP/2 server push — not used, skip
+            ?LOG_DEBUG("beamtalk_http: ignoring HTTP/2 server push", #{}),
+            collect_response(ConnPid, StreamRef, MRef, Timeout);
+        {upgrade, _Protocols, _Headers} ->
+            %% Protocol upgrade (e.g. WebSocket) — unexpected in plain HTTP flow
+            http_error('do_request', #{}, <<"Unexpected protocol upgrade">>);
+        {ws, _Frame} ->
+            %% WebSocket frame — unexpected in plain HTTP flow
+            http_error('do_request', #{}, <<"Unexpected WebSocket frame">>);
+        {data, _IsFin, _Data} ->
+            %% Data frame before response headers — unexpected, skip
+            ?LOG_DEBUG("beamtalk_http: ignoring unexpected data frame", #{}),
+            collect_response(ConnPid, StreamRef, MRef, Timeout);
+        {trailers, _Trailers} ->
+            %% Trailers before response headers — unexpected, skip
+            collect_response(ConnPid, StreamRef, MRef, Timeout);
         {error, timeout} ->
             http_error('do_request', #{}, <<"Request timed out">>);
         {error, Reason} ->
@@ -318,6 +347,29 @@ parse_url(Url) ->
             {error, invalid_url}
     end.
 
+%% @private Build gun connection options, including TLS peer verification for HTTPS.
+%%
+%% For TLS connections, enables full certificate and hostname verification:
+%% - `verify_peer` — reject connections with invalid or untrusted certificates
+%% - `cacerts` — use the system CA bundle (OTP 25.1+)
+%% - `server_name_indication` — send SNI so virtual hosts present the right cert
+%% - `customize_hostname_check` — enforce RFC 6125 hostname matching for HTTPS
+-spec build_gun_opts(tcp | tls, string()) -> map().
+build_gun_opts(tcp, _Host) ->
+    #{transport => tcp};
+build_gun_opts(tls, Host) ->
+    #{
+        transport => tls,
+        tls_opts => [
+            {verify, verify_peer},
+            {cacerts, public_key:cacerts_get()},
+            {server_name_indication, Host},
+            {customize_hostname_check, [
+                {match_fun, public_key:pkix_verify_hostname_match_fun(https)}
+            ]}
+        ]
+    }.
+
 %% @private Convert Beamtalk headers list to gun headers format.
 %%
 %% Beamtalk headers: list of `[Name, Value]` pairs (binaries).
@@ -342,16 +394,33 @@ to_gun_headers([_ | Rest]) ->
 from_gun_headers(Headers) ->
     [[Name, Value] || {Name, Value} <- Headers].
 
+%% @private Validate request options, raising type_error on bad values.
+-spec validate_request_options(list(), binary(), timeout()) -> ok.
+validate_request_options(Headers, _Body, _Timeout) when not is_list(Headers) ->
+    type_error('request:url:options:', <<"Options.headers must be a List">>);
+validate_request_options(_Headers, Body, _Timeout) when not is_binary(Body) ->
+    type_error('request:url:options:', <<"Options.body must be a String">>);
+validate_request_options(_Headers, _Body, Timeout) when
+    not is_integer(Timeout) orelse Timeout < 0
+->
+    type_error(
+        'request:url:options:',
+        <<"Options.timeout must be a non-negative Integer">>
+    );
+validate_request_options(_Headers, _Body, _Timeout) ->
+    ok.
+
 %% @private Normalise a method value to an uppercase binary.
 %%
-%% Accepts binary `<<"get">>`, atom `get` or `'GET'`, or already-uppercase binary.
+%% Accepts binary `<<"get">>` or atom `get`/`'GET'`.
+%% Raises type_error for any other value.
 -spec normalise_method(term()) -> binary().
 normalise_method(Method) when is_binary(Method) ->
     string:uppercase(Method);
 normalise_method(Method) when is_atom(Method) ->
     string:uppercase(atom_to_binary(Method, utf8));
 normalise_method(_) ->
-    <<"GET">>.
+    type_error('request:url:options:', <<"Method must be a Symbol or String">>).
 
 %% @private Raise a typed HTTP error.
 -spec http_error(atom(), map(), binary()) -> no_return().
