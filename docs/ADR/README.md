@@ -47,7 +47,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0018](0018-document-tree-codegen.md) | Document Tree Code Generation (Wadler-Lindig Pretty Printer) | Implemented | 2026-02-15 |
 | [0019](0019-singleton-class-variables.md) | Singleton Access via Class Variables | Implemented | 2026-02-15 |
 | [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Implemented | 2026-02-17 |
-| [0021](0021-streams-and-io-design.md) | Stream — Universal Data Interface | Implemented | 2026-02-15 |
+| [0021](0021-streams-and-io-design.md) | Stream — Lazy Pipeline for Value-Side Data | Implemented (Revised) | 2026-02-15 |
 | [0022](0022-embedded-compiler-via-otp-port.md) | Embedded Compiler via OTP Port (with NIF option) | Implemented | 2026-02-15 |
 | [0023](0023-string-interpolation-and-binaries.md) | String Interpolation Syntax and Compilation | Implemented | 2026-02-17 |
 | [0024](0024-static-first-live-augmented-ide-tooling.md) | Static-First, Live-Augmented IDE Tooling | Implemented (Phase 1) | 2026-02-17 |
@@ -77,6 +77,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0048](0048-class-side-method-syntax.md) | Class-Side Method Syntax Redesign | Proposed | 2026-03-02 |
 | [0049](0049-remove-method-level-sealed.md) | Remove Method-Level `sealed` — Infer Protection from `@primitive`/`@intrinsic` | Proposed | 2026-03-02 |
 | [0050](0050-incremental-compiler-class-hierarchy.md) | Incremental Compiler ClassHierarchy via BEAM Metadata Streaming | Proposed | 2026-03-04 |
+| [0051](0051-subprocess-execution.md) | Subprocess Execution — System Commands and Interactive Subprocess Actor | Proposed | 2026-03-05 |
 
 ## Creating New ADRs
 
