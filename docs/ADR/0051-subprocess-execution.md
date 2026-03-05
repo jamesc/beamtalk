@@ -319,6 +319,8 @@ build onExit: [:code |
 
 All three classes are backed by hand-written Erlang modules rather than generated codegen. This follows the same pattern as `beamtalk_compiler_port.erl` — specialized port management that needs direct `handle_info` control.
 
+**OTP behaviour choice:** `gen_server`, not `gen_statem`. The subprocess has a simple linear state machine (`starting → running → draining → closed`) with 4 states — easy to encode as a `phase` key in the gen_server state map. `gen_statem` would be cleaner but SubprocessBase needs to interoperate with Beamtalk's Actor infrastructure (which is gen_server-based). When Beamtalk adds full OTP behaviour support including `gen_statem` wrappers, SubprocessBase can be migrated.
+
 - `beamtalk_subprocess_base.erl` — shared `init/1` (opens port), `writeLine`, `exitCode`, `close`, `terminate/2` cleanup
 - `beamtalk_subprocess.erl` — extends base with buffering, deferred reply, timeout management
 - `beamtalk_subprocess_listener.erl` — extends base with callback dispatch, no buffering
