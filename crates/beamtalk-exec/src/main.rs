@@ -187,8 +187,13 @@ fn exit_event(child_id: u32, code: i32) -> Term {
 /// The `Child` handle is given to a reaper thread at spawn time; only
 /// `stdin` and the process-group ID remain here for lifecycle management.
 struct ChildEntry {
-    /// Stdin pipe — `None` after `close_stdin` or if not captured.
+    /// Stdin pipe — `None` while temporarily taken by `write_stdin` or after
+    /// `close_stdin`.  Use `stdin_closed` to distinguish the two cases.
     stdin: Option<ChildStdin>,
+    /// Set to `true` by `close_stdin` so that a concurrent `write_stdin`
+    /// (which takes stdin, releases the lock, does I/O, then restores) does
+    /// not reopen the pipe after it has been intentionally closed.
+    stdin_closed: bool,
     /// Process group ID (Unix only). After `setsid()`, pgid == child PID.
     #[cfg(unix)]
     pgid: libc::pid_t,
@@ -256,12 +261,17 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
             .lock()
             .map_err(|e| format!("children lock poisoned: {e}"))?;
         if map.contains_key(&child_id) {
+            // Release lock before blocking on kill/wait.
+            drop(map);
+            let _ = child.kill();
+            let _ = child.wait();
             return Err(format!("child_id {child_id} already in use"));
         }
         map.insert(
             child_id,
             ChildEntry {
                 stdin: child_stdin,
+                stdin_closed: false,
                 #[cfg(unix)]
                 pgid,
             },
@@ -449,11 +459,16 @@ fn handle_write_stdin(request: &Map, children: &ChildMap) -> Result<(), String> 
         .and_then(|()| stdin.flush())
         .map_err(|e| format!("write_stdin error: {e}"));
 
-    // Restore stdin into the entry regardless of I/O result so that the
-    // caller receives a proper error and can retry or close_stdin.
+    // Restore stdin unless close_stdin was called while we held it — in that
+    // case stdin_closed is true and we must not reopen the pipe.
     if let Ok(mut map) = children.lock() {
         if let Some(entry) = map.get_mut(&child_id) {
-            entry.stdin = Some(stdin);
+            if entry.stdin_closed {
+                // close_stdin ran concurrently; drop stdin here to close pipe.
+                drop(stdin);
+            } else {
+                entry.stdin = Some(stdin);
+            }
         }
     }
 
@@ -471,6 +486,9 @@ fn handle_close_stdin(request: &Map, children: &ChildMap) -> Result<(), String> 
     let entry = map
         .get_mut(&child_id)
         .ok_or_else(|| format!("child {child_id} not found"))?;
+    // Mark closed first so a concurrent write_stdin restore does not reopen
+    // the pipe (see handle_write_stdin restore logic).
+    entry.stdin_closed = true;
     // Dropping closes the OS pipe, sending EOF to the child.
     entry.stdin = None;
     Ok(())
