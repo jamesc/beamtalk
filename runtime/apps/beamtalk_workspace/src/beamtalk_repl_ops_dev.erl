@@ -18,9 +18,12 @@
     get_context_completions/2,
     parse_receiver_and_prefix/1,
     tokenise_send_chain/1,
+    tokenise_binary_chain/1,
     resolve_chain_type/2,
     walk_chain/2,
     walk_chain_class/2,
+    walk_mixed_chain/2,
+    walk_mixed_chain_class/2,
     make_class_not_found_error/1,
     base_protocol_response/1,
     list_class_methods_for_ws/1
@@ -518,14 +521,171 @@ is_valid_unary_selector(_) ->
     false.
 
 %% @private
+%% @doc Returns true if the first character of a token is a binary selector character.
+%%
+%% Binary selector characters: + - * / < > = ~ % & ? , \
+%% These are the same characters recognised by the Beamtalk lexer.
+-spec is_binary_selector_token(binary()) -> boolean().
+is_binary_selector_token(<<H, _/binary>>) ->
+    lists:member(H, "+-*/<>=~%&?,\\");
+is_binary_selector_token(<<>>) ->
+    false.
+
+%% @private
+%% @doc Returns true if the token contains characters that make it un-parseable
+%% as part of a simple chain (parentheses or the `>>` method-reference operator).
+-spec has_invalid_chain_chars(binary()) -> boolean().
+has_invalid_chain_chars(T) ->
+    binary:match(T, <<"(">>) =/= nomatch orelse
+        binary:match(T, <<")">>) =/= nomatch orelse
+        binary:match(T, <<">>">>) =/= nomatch.
+
+%% @private
+%% @doc Parse a whitespace-separated expression into a receiver token and a list
+%% of mixed unary/binary hops (BT-1071).
+%%
+%% Extends `tokenise_send_chain/1` to handle binary message sends mid-chain:
+%% each binary operator token consumes the following token as its argument.
+%% Binary hops are tagged `{binary, Selector}` and unary hops `{unary, Selector}`.
+%%
+%% Returns `error` for:
+%% - Empty or single-token expressions (no chain to walk)
+%% - Tokens containing parentheses or `>>` (complex sub-expressions)
+%% - Binary operators with no following argument token
+%% - Keyword sends (tokens containing `:`)
+%%
+%% Examples:
+%%   <<"counter value + 1">>  → {ok, <<"counter">>, [{unary, value}, {binary, '+'}]}
+%%   <<"\"foo\" , \"bar\"">>  → {ok, <<"\"foo\"">>, [{binary, ','}]}
+%%   <<"myList size + offset">>→ {ok, <<"myList">>, [{unary, size}, {binary, '+'}]}
+%%   <<"x + 1 * 2">>          → {ok, <<"x">>, [{binary, '+'}, {binary, '*'}]}
+-type chain_hop() :: {unary, atom()} | {binary, atom()}.
+-spec tokenise_binary_chain(binary()) -> {ok, binary(), [chain_hop()]} | error.
+tokenise_binary_chain(<<>>) ->
+    error;
+tokenise_binary_chain(Expr) when is_binary(Expr) ->
+    Parts = [list_to_binary(T) || T <- string:tokens(binary_to_list(Expr), " \t")],
+    case Parts of
+        [] ->
+            error;
+        [_] ->
+            %% Single token — no sends to walk
+            error;
+        [ReceiverToken | HopTokens] ->
+            case has_invalid_chain_chars(ReceiverToken) of
+                true ->
+                    error;
+                false ->
+                    case parse_binary_hops(HopTokens) of
+                        error -> error;
+                        {ok, []} -> error;
+                        {ok, Hops} -> {ok, ReceiverToken, Hops}
+                    end
+            end
+    end.
+
+%% @private
+-spec parse_binary_hops([binary()]) -> {ok, [chain_hop()]} | error.
+parse_binary_hops([]) ->
+    {ok, []};
+parse_binary_hops([Token | Rest]) ->
+    case has_invalid_chain_chars(Token) of
+        true ->
+            error;
+        false ->
+            case is_binary_selector_token(Token) of
+                true ->
+                    %% Binary op: consume the following token as the argument
+                    case Rest of
+                        [] ->
+                            %% Binary operator with no argument — malformed
+                            error;
+                        [ArgToken | Rest2] ->
+                            case
+                                has_invalid_chain_chars(ArgToken) orelse
+                                    binary:match(ArgToken, <<":">>) =/= nomatch
+                            of
+                                true ->
+                                    error;
+                                false ->
+                                    try
+                                        Sel = binary_to_existing_atom(Token, utf8),
+                                        case parse_binary_hops(Rest2) of
+                                            {ok, MoreHops} -> {ok, [{binary, Sel} | MoreHops]};
+                                            error -> error
+                                        end
+                                    catch
+                                        error:badarg -> error
+                                    end
+                            end
+                    end;
+                false ->
+                    %% Must be a valid unary selector (no colon, starts with letter/_)
+                    case is_valid_unary_selector(Token) of
+                        true ->
+                            try
+                                Sel = binary_to_existing_atom(Token, utf8),
+                                case parse_binary_hops(Rest) of
+                                    {ok, MoreHops} -> {ok, [{unary, Sel} | MoreHops]};
+                                    error -> error
+                                end
+                            catch
+                                error:badarg -> error
+                            end;
+                        false ->
+                            %% Keyword send or other unrecognised token
+                            error
+                    end
+            end
+    end.
+
+%% @private
+%% @doc Walk an instance-side send chain containing mixed unary and binary hops (BT-1071).
+%%
+%% For each `{unary, Sel}` hop: looks up `get_method_return_type(ClassName, Sel)`.
+%% For each `{binary, Sel}` hop: looks up `get_method_return_type(ClassName, Sel)`.
+%% Returns `undefined` (graceful fallback) when any hop lacks a return-type annotation.
+-spec walk_mixed_chain(atom(), [chain_hop()]) -> {ok, atom()} | undefined.
+walk_mixed_chain(ClassName, Hops) ->
+    walk_mixed_chain(ClassName, Hops, 0).
+
+-spec walk_mixed_chain(atom(), [chain_hop()], non_neg_integer()) -> {ok, atom()} | undefined.
+walk_mixed_chain(ClassName, [], _Depth) ->
+    {ok, ClassName};
+walk_mixed_chain(_ClassName, _Hops, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    undefined;
+walk_mixed_chain(ClassName, [{_Kind, Sel} | Rest], Depth) ->
+    case beamtalk_class_registry:get_method_return_type(ClassName, Sel) of
+        {ok, NextClass} -> walk_mixed_chain(NextClass, Rest, Depth + 1);
+        {error, not_found} -> undefined
+    end.
+
+%% @private
+%% @doc Walk a chain starting from the class side with mixed unary/binary hops (BT-1071).
+%%
+%% The first hop uses `get_class_method_return_type`; subsequent hops transition to
+%% instance-side via `walk_mixed_chain/3`.
+-spec walk_mixed_chain_class(atom(), [chain_hop()]) -> {ok, atom()} | undefined.
+walk_mixed_chain_class(ClassName, []) ->
+    {ok, ClassName};
+walk_mixed_chain_class(ClassName, [{unary, class} | Rest]) ->
+    %% `ClassName class` → metaclass; stay on the class side for completions.
+    walk_mixed_chain_class(ClassName, Rest);
+walk_mixed_chain_class(ClassName, [{_Kind, Sel} | Rest]) ->
+    case beamtalk_class_registry:get_class_method_return_type(ClassName, Sel) of
+        {ok, NextClass} -> walk_mixed_chain(NextClass, Rest, 1);
+        {error, not_found} -> undefined
+    end.
+
+%% @private
 %% @doc Resolve the type at the end of a send chain using static return-type metadata.
 %%
 %% Tokenises the expression, classifies the receiver, then walks the chain by
 %% looking up each send's return type in `method_return_types` on the class registry.
 %%
-%% When the tokenizer fails (e.g. parenthesised subexpressions, binary message
-%% chains, keyword sends mid-chain), falls back to compiler-based type resolution
-%% (BT-1068, ADR 0045 Option C).
+%% When the unary tokenizer fails, tries the binary/mixed tokenizer (BT-1071).
+%% When both tokenizers fail (e.g. parenthesised subexpressions, keyword sends
+%% mid-chain), falls back to compiler-based type resolution (BT-1068, ADR 0045 Option C).
 -spec resolve_chain_type(binary(), map()) -> {ok, atom()} | undefined.
 resolve_chain_type(Expr, Bindings) ->
     case tokenise_send_chain(Expr) of
@@ -536,8 +696,22 @@ resolve_chain_type(Expr, Bindings) ->
                 undefined -> undefined
             end;
         error ->
-            %% BT-1068: tokeniser can't parse the expression — try the compiler port.
-            resolve_type_via_compiler(Expr)
+            %% BT-1071: try binary/mixed chain tokenizer before the compiler port.
+            case tokenise_binary_chain(Expr) of
+                {ok, ReceiverToken, Hops} ->
+                    case classify_receiver(ReceiverToken, Bindings) of
+                        {instance, ClassName} ->
+                            walk_mixed_chain(ClassName, Hops);
+                        {class, ClassName} ->
+                            walk_mixed_chain_class(ClassName, Hops);
+                        undefined ->
+                            %% Receiver parsed but not classifiable — fall back to compiler.
+                            resolve_type_via_compiler(Expr)
+                    end;
+                error ->
+                    %% BT-1068: tokeniser can't parse the expression — try the compiler port.
+                    resolve_type_via_compiler(Expr)
+            end
     end.
 
 %% @private
