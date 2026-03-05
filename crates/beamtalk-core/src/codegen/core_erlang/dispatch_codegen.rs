@@ -520,10 +520,17 @@ impl CoreErlangGenerator {
                     }
                 }
 
+                // BT-1127: Route through beamtalk_erlang_proxy:direct_call/3 to
+                // enable binary→charlist coercion for functions like os:cmd/1.
+                // Args are wrapped in a list: call 'proxy':'direct_call'('M','F',[args])
                 let call_doc = docvec![
-                    Document::String(format!("call '{module_name}':'{function_name}'(")),
+                    "call 'beamtalk_erlang_proxy':'direct_call'('",
+                    Document::String(module_name.to_string()),
+                    "', '",
+                    Document::String(function_name.to_string()),
+                    "', [",
                     Document::Vec(arg_parts),
-                    ")"
+                    "])"
                 ];
 
                 let doc = if preamble_docs.is_empty() {

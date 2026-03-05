@@ -1057,7 +1057,8 @@ fn test_standalone_class_reference_validates_undefined_classes() {
 
 #[test]
 fn test_erlang_interop_direct_call_keyword_single_arg() {
-    // `Erlang lists reverse: xs` → `call 'lists':'reverse'(Xs)`
+    // `Erlang lists reverse: xs` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'reverse', [Xs])`
+    // BT-1127: Routes through proxy for binary→charlist coercion support
     let mut generator = CoreErlangGenerator::new("test");
 
     // Inner: Erlang lists (ClassReference("Erlang") + Unary("lists"))
@@ -1084,8 +1085,8 @@ fn test_erlang_interop_direct_call_keyword_single_arg() {
     let output = doc.to_pretty_string();
 
     assert!(
-        output.contains("call 'lists':'reverse'("),
-        "Should emit direct call. Got: {output}"
+        output.contains("call 'beamtalk_erlang_proxy':'direct_call'("),
+        "Should emit proxy-routed call. Got: {output}"
     );
     assert!(
         !output.contains("ErlangModule"),
@@ -1099,7 +1100,8 @@ fn test_erlang_interop_direct_call_keyword_single_arg() {
 
 #[test]
 fn test_erlang_interop_direct_call_keyword_multi_arg() {
-    // `Erlang lists seq: 1 with: 10` → `call 'lists':'seq'(1, 10)`
+    // `Erlang lists seq: 1 with: 10` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'seq', [1, 10])`
+    // BT-1127: Routes through proxy for binary→charlist coercion support
     let mut generator = CoreErlangGenerator::new("test");
 
     let inner_receiver = Expression::MessageSend {
@@ -1127,8 +1129,8 @@ fn test_erlang_interop_direct_call_keyword_multi_arg() {
     let output = doc.to_pretty_string();
 
     assert!(
-        output.contains("call 'lists':'seq'(1, 10)"),
-        "Should emit direct multi-arg call. Got: {output}"
+        output.contains("call 'beamtalk_erlang_proxy':'direct_call'("),
+        "Should emit proxy-routed multi-arg call. Got: {output}"
     );
     assert!(
         !output.contains("ErlangModule"),
@@ -1368,8 +1370,8 @@ fn test_bt855_erlang_interop_wrapper_pure_block_no_warning() {
 
     // Pure block — no wrapper, no extra let-binding for BtBlock
     assert!(
-        output.contains("call 'lists':'map'("),
-        "Should emit direct Erlang call. Got: {output}"
+        output.contains("call 'beamtalk_erlang_proxy':'direct_call'('lists', 'map',"),
+        "Should emit proxy-routed Erlang call. Got: {output}"
     );
     assert!(
         !output.contains("BtBlock"),
@@ -1450,8 +1452,8 @@ fn test_bt855_erlang_interop_wrapper_stateful_block_emits_warning() {
 
     // Should still call 'lists':'map'
     assert!(
-        output.contains("call 'lists':'map'("),
-        "Should emit direct Erlang call. Got: {output}"
+        output.contains("call 'beamtalk_erlang_proxy':'direct_call'('lists', 'map',"),
+        "Should emit proxy-routed Erlang call. Got: {output}"
     );
     // Should have a BtBlock binding for the Tier 2 block
     assert!(
