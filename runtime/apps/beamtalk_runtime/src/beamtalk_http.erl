@@ -324,11 +324,11 @@ collect_response(ConnPid, StreamRef, MRef, Deadline, Selector) ->
             http_error(Selector, #{reason => Reason}, <<"Request failed">>)
     end.
 
-%% @private Build a Beamtalk HTTP response map.
+%% @private Build a Beamtalk HTTPResponse tagged map.
 -spec make_response(non_neg_integer(), list(), binary()) -> map().
 make_response(Status, GunHeaders, Body) ->
     BtHeaders = from_gun_headers(GunHeaders),
-    #{status => Status, headers => BtHeaders, body => Body}.
+    #{'$beamtalk_class' => 'HTTPResponse', status => Status, headers => BtHeaders, body => Body}.
 
 %% @private Parse a URL binary into connection components.
 %%
