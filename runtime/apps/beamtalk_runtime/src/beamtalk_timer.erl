@@ -17,8 +17,13 @@
 %%% }
 %%% ```
 %%%
-%%% The spawned process waits for the delay, then executes the block.
-%%% Sending `cancel` to the process terminates it before execution.
+%%% ## Cancel Protocol
+%%%
+%%% `cancel/1` uses an acknowledgement-based protocol to avoid TOCTOU races.
+%%% The caller sends `{cancel, From, Ref}` and waits for `{Ref, canceled}`.
+%%% If the timer process has already exited (fired), a process monitor DOWN
+%%% message arrives instead and cancel/1 returns false. A 100 ms fallback
+%%% timeout guards against unexpected stalls.
 
 -module(beamtalk_timer).
 
@@ -42,7 +47,9 @@
 'after:do:'(Ms, Block) when is_integer(Ms), Ms >= 0, is_function(Block, 0) ->
     Pid = spawn(fun() ->
         receive
-            cancel -> ok
+            {cancel, From, Ref} ->
+                From ! {Ref, canceled},
+                ok
         after Ms ->
             catch Block()
         end
@@ -79,15 +86,25 @@
 %%% Instance Methods
 %%% ============================================================================
 
-%% @doc Cancel this timer. Returns true if the timer was active, false if already done.
+%% @doc Cancel this timer. Returns true if cancelled before firing, false if already done.
+%%
+%% Uses an ack-based protocol: sends {cancel, self(), Ref} and waits for
+%% {Ref, canceled}. If the timer process has already exited, the process
+%% monitor DOWN message arrives instead and we return false.
 -spec cancel(map()) -> boolean().
 cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
-    case erlang:is_process_alive(Pid) of
-        true ->
-            Pid ! cancel,
+    Ref = make_ref(),
+    Mon = erlang:monitor(process, Pid),
+    Pid ! {cancel, self(), Ref},
+    receive
+        {Ref, canceled} ->
+            erlang:demonitor(Mon, [flush]),
             true;
-        false ->
+        {'DOWN', Mon, process, Pid, _Reason} ->
             false
+    after 100 ->
+        erlang:demonitor(Mon, [flush]),
+        false
     end.
 
 %% @doc True if this timer is still scheduled to fire.
@@ -124,7 +141,9 @@ make_timer(Pid) ->
 -spec repeat_loop(integer(), function()) -> ok.
 repeat_loop(Ms, Block) ->
     receive
-        cancel -> ok
+        {cancel, From, Ref} ->
+            From ! {Ref, canceled},
+            ok
     after Ms ->
         catch Block(),
         repeat_loop(Ms, Block)
