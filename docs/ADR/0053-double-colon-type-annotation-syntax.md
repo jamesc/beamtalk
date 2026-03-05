@@ -1,7 +1,7 @@
 # ADR 0053: Double-Colon Type Annotation Syntax
 
 ## Status
-Proposed (2026-03-05)
+Accepted (2026-03-05)
 
 ## Context
 
