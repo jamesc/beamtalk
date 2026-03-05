@@ -23,7 +23,7 @@ counter increment
 value := counter getValue // => 2
 
 
-// Send message async
+// Send an async message
 counter increment!  // => ok
 // Cascades - multiple messages to same receiver
 Transcript show: "Hello"; cr; show: "World"
