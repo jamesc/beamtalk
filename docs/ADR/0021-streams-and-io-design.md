@@ -30,9 +30,9 @@ Streams cannot cross process boundaries because:
 |---------|--------------|-----------------|
 | File I/O (caller-owned handle) | Yes | `File lines: "data.csv"` |
 | Collection transforms | Yes | `#(1, 2, 3) stream select: [...]` |
-| Pure generators | Yes | `Stream from: 1 by: [:n | n * 2]` |
+| Pure generators | Yes | `Stream from: 1 by: [:n \| n * 2]` |
 | Actor → caller data flow (via message-send generator) | **Yes** | `agent lines` — Stream generator calls `readLine` via gen_server:call (ADR 0051) |
-| Subprocess output | **Yes** | `agent lines do: [:line | ...]` — no port handle crosses boundary |
+| Subprocess output | **Yes** | `agent lines do: [:line \| ...]` — no port handle crosses boundary |
 | Network sockets via actors | **Yes** (same pattern) | Actor exposes `lines` method returning message-send-backed Stream |
 | Direct port/handle across processes | **No** | Materialize to List first, or use message-send generator pattern |
 

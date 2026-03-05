@@ -313,11 +313,17 @@ buffer_and_maybe_reply(Channel, Data, State) ->
     case maps:get(WaitKey, State, undefined) of
         undefined ->
             {noreply, State#{BufKey => NewBuffer, PendKey => Remainder}};
-        From when not queue:is_empty(NewBuffer) ->
-            {{value, Line}, Rest} = queue:out(NewBuffer),
-            gen_server:reply(From, Line),
-            {noreply, State#{BufKey => Rest, PendKey => Remainder,
-                             WaitKey => undefined}}
+        From ->
+            case queue:is_empty(NewBuffer) of
+                false ->
+                    {{value, Line}, Rest} = queue:out(NewBuffer),
+                    gen_server:reply(From, Line),
+                    {noreply, State#{BufKey => Rest, PendKey => Remainder,
+                                     WaitKey => undefined}};
+                true ->
+                    {noreply, State#{BufKey => NewBuffer, PendKey => Remainder,
+                                     WaitKey => From}}
+            end
     end.
 
 %% readLine — blocks forever until a line or EOF
@@ -378,7 +384,7 @@ ADR 0043 notes that `gen_server:call` defaults to a 5000ms timeout. For the bloc
 
 #### Actor Lifecycle and Cleanup
 
-```
+```text
  Subprocess spawn         stop (graceful)        close (forced)
       │                       │                       │
       ▼                       ▼                       ▼
@@ -415,7 +421,14 @@ Both Tier 1 and Tier 2 share the same security model:
   select: [:line | line includesSubstring: "ERROR"]
 ```
 
-**Windows caveat:** On Windows, `os:find_executable/1` searches `PATHEXT` and may resolve to `.bat`/`.cmd` files, which implicitly invoke `cmd.exe` when passed to `spawn_executable`. This partially defeats the "no shell" guarantee. The implementation must detect `.bat`/`.cmd` resolution on Windows and either reject the command with a clear error or document the risk. This is a known limitation of `spawn_executable` on Windows, not specific to Beamtalk.
+**Windows caveat:** On Windows, `os:find_executable/1` searches `PATHEXT` and may resolve to `.bat`/`.cmd` files, which implicitly invoke `cmd.exe` when passed to `spawn_executable`. This partially defeats the "no shell" guarantee. **Decision:** The implementation MUST detect `.bat`/`.cmd` resolution on Windows and reject the command with a clear error:
+
+```beamtalk
+System run: "setup" args: #("install")
+// => Error: #command_error "Cannot execute setup.bat — .bat/.cmd files invoke cmd.exe, bypassing shell injection protection. Use the full path to a .exe instead."
+```
+
+This is the conservative choice: it's better to reject a valid-but-risky command than to silently reintroduce shell injection. Users who genuinely need to run batch files can use `System run: "cmd.exe" args: #("/c", "setup.bat")` — making the shell invocation explicit and auditable.
 
 ### Error Handling
 
@@ -442,7 +455,7 @@ agent writeLine: "hello".
 
 ### Stderr Handling
 
-The Rust helper binary (`beamtalk_exec`) manages separate stdout and stderr pipes to the subprocess. Both streams are forwarded to the BEAM over the ETF port protocol with tagged messages (`{stdout, Data}` / `{stderr, Data}`).
+The Rust helper binary (`beamtalk_exec`) manages separate stdout and stderr pipes to the subprocess. Both streams are forwarded to the BEAM over the ETF port protocol with tagged messages (`{stdout, ChildId, Data}` / `{stderr, ChildId, Data}`).
 
 **Tier 1:** `CommandResult` exposes both `output` (stdout) and `stderr` as separate strings:
 
