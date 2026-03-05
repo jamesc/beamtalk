@@ -38,11 +38,13 @@ Use three protocols, each fit-for-purpose at its boundary.
 
 The REPL protocol is inspired by [nREPL](https://nrepl.org/) and [Jupyter](https://jupyter.org/). It uses an operation-based message format:
 
+Request:
 ```json
-// Request
 {"op": "eval", "id": "msg-001", "code": "1 + 2"}
+```
 
-// Response
+Response:
+```json
 {"id": "msg-001", "value": 3, "status": ["done"]}
 ```
 
@@ -104,11 +106,12 @@ gen_server:cast(ActorPid, {increment, [], FuturePid})
 ```
 
 **Message format:**
-- Sync: `{Selector, Args}` — dispatched via `handle_call`
+- Sync: `{Selector, Args}` — dispatched via `handle_call`, blocks until result
 - Async: `{Selector, Args, FuturePid}` — dispatched via `handle_cast`, result delivered to future
+- Cast (fire-and-forget): `{cast, Selector, Args}` — dispatched via `handle_cast`, result discarded (used by the `!` bang operator)
 
 **Why BEAM process messages:**
-- Zero serialization — Erlang terms are passed by reference within the VM
+- No serialization overhead — Erlang terms stay in native format (small terms are copied between process heaps; large binaries are reference-counted and shared)
 - `gen_server` provides supervision, timeouts, back-pressure, and OTP tooling compatibility (`observer`, `sys:get_state`)
 - Location transparency — the same message protocol works for local and distributed (cross-node) actor communication
 - `doesNotUnderstand:args:` handler enables proxy and delegation patterns (Smalltalk DNU)
@@ -153,9 +156,11 @@ The REPL protocol's `describe` operation enables dynamic capability discovery. T
 
 ### For a Single Protocol (Rejected)
 
-- **Newcomer**: "One protocol to learn. If I understand the REPL protocol, I understand the whole system."
-- **Tooling developer**: "One client library, one parser, one test suite. Less code to maintain."
-- **Pragmatist**: "JSON-RPC everywhere is simple and well-understood. The performance difference is negligible for a development tool."
+- **Newcomer**: "One protocol to learn. If I understand the REPL protocol, I understand the whole system. Three protocols means three sets of error handling, three message formats to debug."
+- **Smalltalk purist**: "In Pharo, everything is message passing. One protocol would be truer to the Smalltalk ideal of uniform communication."
+- **BEAM veteran**: "JSON-RPC is a solved problem with excellent tooling. The 2ms ETF advantage is irrelevant when compilation takes 10-500ms."
+- **Operator**: "One protocol means one monitoring approach, one set of metrics, one failure mode to understand."
+- **Language designer**: "Protocol uniformity is an architectural virtue. Three protocols is three times the API surface to version, document, and maintain."
 
 **Response:** The simplicity argument is valid for external-facing protocols, but the compiler boundary requires ETF for crash isolation (Port process model) and the actor boundary requires native BEAM messaging for zero-overhead dispatch. Forcing JSON through these boundaries would add latency, lose type fidelity (atoms, binaries), and sacrifice OTP supervision guarantees. The complexity of three protocols is hidden behind clean APIs — users interact with `beamtalk_compiler:compile/2` and `gen_server:call/2`, not raw protocol frames.
 
@@ -163,6 +168,7 @@ The REPL protocol's `describe` operation enables dynamic capability discovery. T
 
 - **Security engineer**: "Unix sockets provide filesystem-based access control. No cookie handshake needed — just `chmod 600` the socket file."
 - **BEAM veteran**: "Unix sockets are simpler than WebSocket. No HTTP upgrade, no framing, no Cowboy dependency."
+- **Operator**: "Unix sockets eliminate an entire class of network attacks. Loopback TCP is visible to any local process; socket files are protected by filesystem permissions."
 
 **Response:** Unix sockets don't work on Windows (ADR 0027), can't be accessed from browsers (ADR 0017), and are incompatible with standard HTTP reverse proxies for remote access (ADR 0020). The cookie handshake provides equivalent authentication to filesystem permissions on shared machines.
 
@@ -170,6 +176,7 @@ The REPL protocol's `describe` operation enables dynamic capability discovery. T
 - Security purists prefer Unix sockets for filesystem ACLs, but cross-platform and browser requirements rule them out
 - Performance purists would prefer ETF everywhere, but browser clients can't speak ETF
 - Simplicity advocates would prefer one protocol, but the three boundaries have genuinely different constraints
+- Operators would prefer one protocol for monitoring uniformity, but the API abstraction layer makes the protocol diversity largely invisible
 
 ## Alternatives Considered
 
@@ -224,7 +231,7 @@ This ADR records existing decisions. All protocols are implemented:
 | Protocol | Implementation | ADR |
 |----------|---------------|-----|
 | Client ↔ Workspace (WebSocket + JSON) | `beamtalk_repl_server.erl`, `beamtalk_repl_protocol.erl`, `beamtalk_ws_handler.erl` | ADR 0020 (security), ADR 0017 (browser), ADR 0029 (streaming) |
-| Workspace ↔ Compiler (OTP Port + ETF) | `beamtalk_compiler.erl`, `beamtalk_compiler_backend.erl`, `beamtalk_compiler_port.erl` | ADR 0022 |
+| Workspace ↔ Compiler (OTP Port + ETF) | `beamtalk_compiler.erl`, `beamtalk_compiler_server.erl`, `beamtalk_compiler_port.erl` | ADR 0022 |
 | Actor ↔ Actor (BEAM gen_server) | `beamtalk_actor.erl`, `beamtalk_future.erl` | ADR 0005 (object model), ADR 0043 (sync-by-default) |
 
 No code changes are required.
