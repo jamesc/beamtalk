@@ -426,20 +426,37 @@ fn handle_write_stdin(request: &Map, children: &ChildMap) -> Result<(), String> 
         .and_then(term_to_bytes)
         .ok_or("missing or invalid data")?;
 
-    let mut map = children
-        .lock()
-        .map_err(|e| format!("children lock poisoned: {e}"))?;
-    let entry = map
-        .get_mut(&child_id)
-        .ok_or_else(|| format!("child {child_id} not found"))?;
-    let stdin = entry
-        .stdin
-        .as_mut()
-        .ok_or("stdin already closed for this child")?;
-    stdin
+    // Take stdin out of the entry so the children lock is released before
+    // blocking I/O — holding the lock during write_all/flush would prevent
+    // concurrent spawn/kill commands from making progress.
+    let mut stdin = {
+        let mut map = children
+            .lock()
+            .map_err(|e| format!("children lock poisoned: {e}"))?;
+        let entry = map
+            .get_mut(&child_id)
+            .ok_or_else(|| format!("child {child_id} not found"))?;
+        entry
+            .stdin
+            .take()
+            .ok_or("stdin already closed for this child")?
+    };
+    // Lock released — perform blocking I/O without holding it.
+
+    let result = stdin
         .write_all(&data)
-        .map_err(|e| format!("write_stdin error: {e}"))?;
-    stdin.flush().map_err(|e| format!("flush error: {e}"))
+        .and_then(|()| stdin.flush())
+        .map_err(|e| format!("write_stdin error: {e}"));
+
+    // Restore stdin into the entry regardless of I/O result so that the
+    // caller receives a proper error and can retry or close_stdin.
+    if let Ok(mut map) = children.lock() {
+        if let Some(entry) = map.get_mut(&child_id) {
+            entry.stdin = Some(stdin);
+        }
+    }
+
+    result
 }
 
 fn handle_close_stdin(request: &Map, children: &ChildMap) -> Result<(), String> {
@@ -584,6 +601,15 @@ fn main() {
 
         if let Err(e) = handle_command(&term, &writer, &children) {
             warn!("Command error: {e}");
+            // If a spawn command failed, emit a synthetic exit event so the
+            // BEAM caller does not wait forever for an exit that will never arrive.
+            if let Term::Map(map) = &term {
+                if matches!(map_get(map, "command"), Some(Term::Atom(a)) if a.name == "spawn") {
+                    if let Some(child_id) = map_get(map, "child_id").and_then(term_to_child_id) {
+                        send_event(&writer, &exit_event(child_id, -1));
+                    }
+                }
+            }
         }
     }
 

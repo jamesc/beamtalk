@@ -3,6 +3,8 @@
 
 %%% @doc EUnit tests for beamtalk_exec_port module.
 %%%
+%%% **DDD Context:** runtime
+%%%
 %%% Tests cover:
 %%% - find_exec_binary/0 (finds the dev build)
 %%% - find_project_root/0 (finds Cargo.toml)
