@@ -638,10 +638,12 @@ direct_call_basic_test() ->
 
 direct_call_os_cmd_coerces_binary_test() ->
     %% os:cmd/1 expects a charlist — binary arg should be auto-coerced.
-    %% Strip trailing CR/LF to handle Windows (CRLF) and Unix (LF) variants.
+    %% Use string:trim/2 (no Characters arg) to strip all trailing whitespace;
+    %% string:trim/3 with "\r\n" does not work in OTP 28 because CRLF is a
+    %% single grapheme cluster and [13,10] does not match it.
     Result = beamtalk_erlang_proxy:direct_call(os, cmd, [<<"echo hello">>]),
     ?assert(is_binary(Result)),
-    ?assertEqual(<<"hello">>, string:trim(Result, trailing, "\r\n")).
+    ?assertEqual(<<"hello">>, string:trim(Result, trailing)).
 
 direct_call_exit_propagates_test() ->
     %% exit should propagate naturally, NOT be wrapped
@@ -719,11 +721,11 @@ direct_call_coercion_retry_still_fails_test() ->
 
 dispatch_os_cmd_coerces_binary_test() ->
     %% Verify coercion also works through dispatch path.
-    %% Strip trailing CR/LF to handle Windows (CRLF) and Unix (LF) variants.
+    %% Use string:trim/2 (no Characters arg) — see direct_call_os_cmd_coerces_binary_test.
     Proxy = beamtalk_erlang_proxy:new(os),
     Result = beamtalk_erlang_proxy:dispatch('cmd:', [<<"echo hello">>], Proxy),
     ?assert(is_binary(Result)),
-    ?assertEqual(<<"hello">>, string:trim(Result, trailing, "\r\n")).
+    ?assertEqual(<<"hello">>, string:trim(Result, trailing)).
 
 %%% ===================================================================
 %%% BT-679: Beamtalk error passthrough
