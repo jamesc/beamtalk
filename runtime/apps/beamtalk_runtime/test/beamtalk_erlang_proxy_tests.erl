@@ -637,10 +637,11 @@ direct_call_basic_test() ->
     ?assertEqual([3, 2, 1], beamtalk_erlang_proxy:direct_call(lists, reverse, [[1, 2, 3]])).
 
 direct_call_os_cmd_coerces_binary_test() ->
-    %% os:cmd/1 expects a charlist — binary arg should be auto-coerced
+    %% os:cmd/1 expects a charlist — binary arg should be auto-coerced.
+    %% Strip trailing CR/LF to handle Windows (CRLF) and Unix (LF) variants.
     Result = beamtalk_erlang_proxy:direct_call(os, cmd, [<<"echo hello">>]),
     ?assert(is_binary(Result)),
-    ?assertEqual(<<"hello\n">>, Result).
+    ?assertEqual(<<"hello">>, string:trim(Result, trailing, "\r\n")).
 
 direct_call_exit_propagates_test() ->
     %% exit should propagate naturally, NOT be wrapped
@@ -717,11 +718,12 @@ direct_call_coercion_retry_still_fails_test() ->
 %%% ===================================================================
 
 dispatch_os_cmd_coerces_binary_test() ->
-    %% Verify coercion also works through dispatch path
+    %% Verify coercion also works through dispatch path.
+    %% Strip trailing CR/LF to handle Windows (CRLF) and Unix (LF) variants.
     Proxy = beamtalk_erlang_proxy:new(os),
     Result = beamtalk_erlang_proxy:dispatch('cmd:', [<<"echo hello">>], Proxy),
     ?assert(is_binary(Result)),
-    ?assertEqual(<<"hello\n">>, Result).
+    ?assertEqual(<<"hello">>, string:trim(Result, trailing, "\r\n")).
 
 %%% ===================================================================
 %%% BT-679: Beamtalk error passthrough
