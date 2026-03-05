@@ -406,6 +406,7 @@ module_for_value(X) when is_map(X) ->
         'ErlangModule' -> beamtalk_erlang_proxy;
         'FileHandle' -> beamtalk_file_handle;
         'Erlang' -> beamtalk_erlang_class;
+        'Http' -> beamtalk_http;
         undefined -> 'bt@stdlib@dictionary';
         _ -> undefined
     end;
