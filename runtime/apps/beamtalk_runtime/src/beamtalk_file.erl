@@ -663,8 +663,7 @@ handle_has_method(_) -> false.
 %% Returns the system temp directory as a String.
 -spec 'tempDirectory'() -> binary().
 'tempDirectory'() ->
-    TmpDir = filename:basedir(user_cache, "beamtalk_tmp"),
-    %% Fall back to os:getenv or a sensible default
+    %% Check standard environment variables, fall back to /tmp
     Dir =
         case os:getenv("TMPDIR") of
             false ->
@@ -680,7 +679,6 @@ handle_has_method(_) -> false.
             V ->
                 V
         end,
-    _ = TmpDir,
     list_to_binary(Dir).
 
 %%% ============================================================================

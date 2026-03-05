@@ -14,6 +14,12 @@ TestCase subclass: FileDirectoryTest
     File mkdirAll: "target/bt-test-tmp/fdt"
     self
 
+  // Remove the scratch area after the suite finishes.
+  tearDown =>
+    (File isDirectory: "target/bt-test-tmp/fdt") ifTrue: [
+      File deleteAll: "target/bt-test-tmp/fdt"
+    ]
+
   testIsDirectoryOnExistingDirectory =>
     self assert: (File isDirectory: "target/bt-test-tmp/fdt")
 
