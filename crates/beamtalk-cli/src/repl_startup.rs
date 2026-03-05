@@ -512,6 +512,10 @@ mod tests {
             PathBuf::from("/usr/local/lib/beamtalk/lib/ranch/ebin")
         );
         assert_eq!(
+            paths.gun_ebin,
+            PathBuf::from("/usr/local/lib/beamtalk/lib/gun/ebin")
+        );
+        assert_eq!(
             paths.stdlib_ebin,
             PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_stdlib/ebin")
         );
