@@ -223,6 +223,7 @@ mod tests {
             workspace_ebin: beam_dir.clone(),
             compiler_ebin: beam_dir.clone(),
             jsx_ebin: beam_dir.clone(),
+            yamerl_ebin: beam_dir.clone(),
             cowboy_ebin: beam_dir.clone(),
             cowlib_ebin: beam_dir.clone(),
             ranch_ebin: beam_dir.clone(),

@@ -72,6 +72,7 @@ pub fn generate_primitive_bif(
         "TestResult" => value_types::generate_test_result_bif(selector, params),
         "Stream" => system::generate_stream_bif(selector, params),
         "JSON" => reflection::generate_json_bif(selector, params),
+        "Yaml" => reflection::generate_yaml_bif(selector, params),
         "Random" => system::generate_random_bif(selector, params),
         "Regex" => reflection::generate_regex_bif(selector, params),
         "System" => system::generate_system_bif(selector, params),

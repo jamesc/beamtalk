@@ -1,0 +1,85 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Yaml — YAML parsing and generation.
+///
+/// Provides class methods for parsing YAML strings into Beamtalk values
+/// and generating YAML strings from Beamtalk values. Uses `yamerl` as the
+/// underlying YAML library (pure Erlang, no NIFs).
+///
+/// ## Type Mapping
+///
+/// | YAML          | Beamtalk     |
+/// |---------------|--------------|
+/// | mapping       | Dictionary   |
+/// | sequence      | List         |
+/// | string        | String       |
+/// | integer       | Integer      |
+/// | float         | Float        |
+/// | true/false    | Boolean      |
+/// | null/~        | nil          |
+///
+/// ## Examples
+/// ```beamtalk
+/// Yaml parse: "answer: 42"                  // => _
+/// Yaml parse: "- 1\n- 2\n- 3"              // => _
+/// Yaml generate: #{"name" => "Ada"}
+/// // => _
+/// Yaml parseFile: "/etc/myapp.yaml"
+/// // => _
+/// ```
+sealed Object subclass: Yaml
+
+  /// Parse a YAML string into a Beamtalk value (class method).
+  ///
+  /// YAML mappings become Dictionaries with String keys, sequences become
+  /// Lists, strings become Strings, integers become Integers, floats become
+  /// Floats, booleans stay as true/false, null/~ becomes nil.
+  ///
+  /// For multi-document YAML, only the first document is returned.
+  /// Use `parseAll:` to get all documents.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Yaml parse: "42"                        // => 42
+  /// Yaml parse: "- 1\n- 2\n- 3"            // => [1,2,3]
+  /// Yaml parse: "null"                      // => nil
+  /// ```
+  class sealed parse: yamlString: String => @primitive "parse:"
+
+  /// Parse a multi-document YAML string into a List of values (class method).
+  ///
+  /// Returns a List containing one Beamtalk value per YAML document
+  /// (documents are separated by ---).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Yaml parseAll: "42\n---\n43"            // => _
+  /// ```
+  class sealed parseAll: yamlString: String -> List => @primitive "parseAll:"
+
+  /// Generate a YAML string from a Beamtalk value (class method).
+  ///
+  /// Produces valid YAML 1.2 in flow style. Dictionaries become YAML
+  /// mappings, Lists become sequences, Strings become YAML strings,
+  /// Integer/Float become numbers, true/false become YAML booleans,
+  /// nil becomes null.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Yaml generate: #(1, 2, 3)              // => _
+  /// Yaml generate: nil                     // => _
+  /// Yaml generate: 42                      // => _
+  /// ```
+  class sealed generate: value: Object -> String => @primitive "generate:"
+
+  /// Parse a YAML file into a Beamtalk value (class method).
+  ///
+  /// Reads the file at the given path and parses it as YAML.
+  /// Returns the first document from the file.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Yaml parseFile: "/etc/myapp.yaml"      // => _
+  /// ```
+  class sealed parseFile: path: String -> Object => @primitive "parseFile:"
