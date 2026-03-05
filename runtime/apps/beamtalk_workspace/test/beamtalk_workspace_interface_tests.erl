@@ -1,7 +1,10 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Tests for WorkspaceInterface singleton.
+%%% @doc Tests for WorkspaceInterface singleton (Phase 1 gen_server — DEPRECATED).
+%%%
+%%% @deprecated beamtalk_workspace_interface (Phase 1 gen_server) is planned for removal
+%%% per BT-1093. New tests should target beamtalk_workspace_interface_primitives_tests instead.
 %%%
 %%% Tests the beamtalk_workspace_interface gen_server primitives
 %%% (actors, actorAt:, classes, load:).
