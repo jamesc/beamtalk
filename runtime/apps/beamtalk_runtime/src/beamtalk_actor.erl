@@ -296,8 +296,20 @@ async_send(ActorPid, stop, [], FuturePid) ->
     end,
     ok;
 async_send(ActorPid, kill, [], FuturePid) ->
-    %% kill is handled locally - forcefully kills the actor process
+    %% kill is handled locally - forcefully kills the actor process.
+    %% Monitor BEFORE sending the kill signal to close the TOCTOU window:
+    %% if we resolved the future immediately after exit/2 (which is async),
+    %% a caller doing `actor kill. actor isAlive` could still see true because
+    %% the BEAM scheduler had not yet processed the kill signal.
+    %% Waiting for the DOWN message guarantees the process is gone before ok
+    %% is delivered.  If the process is already dead, the DOWN arrives instantly.
+    Ref = erlang:monitor(process, ActorPid),
     exit(ActorPid, kill),
+    receive
+        {'DOWN', Ref, process, ActorPid, _Reason} -> ok
+    after 5000 ->
+        erlang:demonitor(Ref, [flush])
+    end,
     beamtalk_future:resolve(FuturePid, ok),
     ok;
 async_send(ActorPid, monitor, [], FuturePid) ->
@@ -368,9 +380,17 @@ sync_send(ActorPid, stop, []) ->
             actor_dead_error(stop)
     end;
 sync_send(ActorPid, kill, []) ->
-    %% kill is handled locally - forcefully kills the actor process
+    %% kill is handled locally - forcefully kills the actor process.
+    %% Same monitor-before-kill pattern as async_send/4: wait for the DOWN
+    %% message so that is_process_alive returns false immediately after kill.
+    Ref = erlang:monitor(process, ActorPid),
     exit(ActorPid, kill),
-    ok;
+    receive
+        {'DOWN', Ref, process, ActorPid, _Reason} -> ok
+    after 5000 ->
+        erlang:demonitor(Ref, [flush]),
+        ok
+    end;
 sync_send(ActorPid, monitor, []) ->
     erlang:monitor(process, ActorPid);
 sync_send(ActorPid, Selector, Args) ->
