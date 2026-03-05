@@ -124,6 +124,9 @@ pub enum TokenKind {
     /// Colon for block argument declaration (not keyword selectors): `:`
     Colon,
 
+    /// Double colon for type annotations: `::`
+    DoubleColon,
+
     /// Standalone hash character: `#`
     ///
     /// Note: complete symbol literals are represented by [`TokenKind::Symbol`],
@@ -240,6 +243,7 @@ impl TokenKind {
             | Self::Bang
             | Self::Pipe
             | Self::Colon
+            | Self::DoubleColon
             | Self::Hash
             | Self::FatArrow
             | Self::AtPrimitive
@@ -284,6 +288,7 @@ impl std::fmt::Display for TokenKind {
             Self::Bang => write!(f, "!"),
             Self::Pipe => write!(f, "|"),
             Self::Colon => write!(f, ":"),
+            Self::DoubleColon => write!(f, "::"),
             Self::Hash => write!(f, "#"),
             Self::FatArrow => write!(f, "=>"),
             Self::AtPrimitive => write!(f, "@primitive"),

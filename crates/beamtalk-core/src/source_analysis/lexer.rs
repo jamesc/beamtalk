@@ -377,8 +377,12 @@ impl<'src> Lexer<'src> {
         let start = self.current_position();
         self.advance_while(|c| c.is_ascii_alphanumeric() || c == '_');
 
-        // Check if followed by colon (keyword selector)
-        if self.peek_char() == Some(':') && self.peek_char_n(1) != Some('=') {
+        // Check if followed by colon (keyword selector).
+        // Guard against `:=` (assignment) and `::` (type annotation) — those are not keyword selectors.
+        if self.peek_char() == Some(':')
+            && self.peek_char_n(1) != Some('=')
+            && self.peek_char_n(1) != Some(':')
+        {
             self.advance(); // consume the colon
             let text = self.text_for(self.span_from(start));
             TokenKind::Keyword(EcoString::from(text))
@@ -849,10 +853,13 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Lexes colon or assignment operator.
+    /// Lexes colon, double-colon, or assignment operator.
     fn lex_colon_or_assign(&mut self) -> TokenKind {
         self.advance(); // :
-        if self.peek_char() == Some('=') {
+        if self.peek_char() == Some(':') {
+            self.advance(); // second :
+            TokenKind::DoubleColon
+        } else if self.peek_char() == Some('=') {
             self.advance(); // =
             TokenKind::Assign
         } else {
@@ -1576,6 +1583,50 @@ mod tests {
                 TokenKind::Pipe,
                 TokenKind::Colon,
                 TokenKind::Hash,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_double_colon() {
+        // `::` lexes as DoubleColon
+        assert_eq!(lex_kinds("::"), vec![TokenKind::DoubleColon]);
+    }
+
+    #[test]
+    fn lex_single_colon() {
+        // `:` lexes as Colon
+        assert_eq!(lex_kinds(":"), vec![TokenKind::Colon]);
+    }
+
+    #[test]
+    fn lex_colon_assign() {
+        // `:=` lexes as Assign
+        assert_eq!(lex_kinds(":="), vec![TokenKind::Assign]);
+    }
+
+    #[test]
+    fn lex_identifier_not_consumed_as_keyword_before_double_colon() {
+        // `amount::Integer` — non-canonical but accepted (ADR 0053).
+        // `::` must not be swallowed into a keyword: `amount` stays Identifier.
+        assert_eq!(
+            lex_kinds("amount::Integer"),
+            vec![
+                TokenKind::Identifier("amount".into()),
+                TokenKind::DoubleColon,
+                TokenKind::Identifier("Integer".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_double_colon_then_equals() {
+        // `::=` is NOT a valid token — lexes as DoubleColon + BinarySelector("=")
+        assert_eq!(
+            lex_kinds("::="),
+            vec![
+                TokenKind::DoubleColon,
+                TokenKind::BinarySelector("=".into()),
             ]
         );
     }
