@@ -697,9 +697,13 @@ resolve_chain_type(Expr, Bindings) ->
             case tokenise_binary_chain(Expr) of
                 {ok, ReceiverToken, Hops} ->
                     case classify_receiver(ReceiverToken, Bindings) of
-                        {instance, ClassName} -> walk_mixed_chain(ClassName, Hops);
-                        {class, ClassName} -> walk_mixed_chain_class(ClassName, Hops);
-                        undefined -> undefined
+                        {instance, ClassName} ->
+                            walk_mixed_chain(ClassName, Hops);
+                        {class, ClassName} ->
+                            walk_mixed_chain_class(ClassName, Hops);
+                        undefined ->
+                            %% Receiver parsed but not classifiable — fall back to compiler.
+                            resolve_type_via_compiler(Expr)
                     end;
                 error ->
                     %% BT-1068: tokeniser can't parse the expression — try the compiler port.

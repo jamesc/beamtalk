@@ -341,11 +341,9 @@ tokenise_binary_chain_with_plus_test() ->
     {ok, _, Hops} = Result,
     ?assertEqual([{unary, value}, {binary, '+'}], Hops).
 
-tokenise_binary_chain_string_concat_test() ->
-    %% `,` becomes a known atom after String is loaded (it's in method_return_types);
-    %% but at test time (no runtime), binary_to_existing_atom may fail.
-    %% Test that the structure is parsed correctly when atoms exist.
-    %% We use `+` which is always a known atom.
+tokenise_binary_chain_single_binary_op_test() ->
+    %% `+` is a known Erlang atom (used as BIF name erlang:'+'/2),
+    %% so we can safely test a simple binary operator chain here.
     Result = beamtalk_repl_ops_dev:tokenise_binary_chain(<<"42 + 1">>),
     ?assertMatch({ok, <<"42">>, [{binary, '+'}]}, Result).
 
