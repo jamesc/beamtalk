@@ -222,7 +222,7 @@ Actor
 #### SubprocessBase — Shared Port Lifecycle
 
 ```beamtalk
-Actor subclass: SubprocessBase
+abstract Actor subclass: SubprocessBase
   state: port = nil
   state: exitCode = nil
   state: portClosed = false
@@ -284,6 +284,11 @@ SubprocessBase subclass: Subprocess
 
 **Why `lines` works despite the cross-process constraint:** The Stream returned by `lines` has a generator closure that calls `gen_server:call(ActorPid, {readLine, []}, infinity)` — a message send, not a direct port read. The generator executes in the caller's process (correct for Streams), and each `next` step sends a sync message to the actor to get the next line. The actor reads from the port in its own process (correct for ports). No resource handle crosses the process boundary — only the actor's PID, which is safe to share. This is the same pattern as wrapping any actor method in a Stream generator.
 
+**`lines` caveats:**
+1. **Single-consumer:** The Stream's generator pulls from the actor's shared readLine buffer. If two consumers iterate the same `lines` Stream (e.g., `s := agent lines. s do: [...]. s do: [...]`), lines are distributed non-deterministically between iterations — the Stream protocol contract (`do:` iterates all elements) is silently violated. This is inherent to all stateful-generator Streams (file-backed Streams have the same property). Each call to `lines` should be consumed by exactly one terminal operation.
+2. **Caller blocking:** Each step of a `lines` iteration calls `gen_server:call` with `infinity` timeout. If the subprocess goes quiet for minutes, the caller's process is frozen for that duration. **If the caller is itself an actor**, its gen_server cannot process any other messages during the wait — supervised actors may be killed by their supervisor's health check. Use `readLine: timeout` for callers that must remain responsive, or spawn a dedicated process for the read loop.
+3. **Abandoned Stream buffer growth:** If a `lines` Stream is abandoned mid-iteration (assigned to a variable but never fully consumed), the actor's stdout buffer grows without bound as the subprocess continues producing output. Unlike Tier 1 abandoned Streams (cleaned up when the caller's process exits), the Tier 2 actor's lifetime is independent of the Stream consumer. Use `close.` to stop the subprocess when the Stream is no longer needed.
+
 #### SubprocessListener — Push Mode (Callbacks)
 
 For event-driven use cases (log tailing, build output, monitoring) where the subprocess drives the flow. Callbacks execute in the actor's process — no cross-process constraint.
@@ -335,6 +340,8 @@ build onExit: [:code |
 - Lines that arrive before `onLine:` is registered are dropped (no buffering in push mode).
 - If no callback is registered for a channel, lines on that channel are silently discarded.
 - `onExit:` fires once when the subprocess exits, after all buffered lines have been delivered to `onLine:`/`onStderrLine:`.
+
+**Callback blocking warning:** Callbacks run in the actor's `handle_info` — if a callback blocks (e.g., `[:line | System run: "notify-send" args: #(line)]`), **all line delivery halts** until the callback returns. Meanwhile the subprocess continues writing to stdout; the OS pipe buffer fills (typically 64KB on Linux); the subprocess blocks on `write()`. Both the actor and the subprocess are frozen. Callbacks must be fast and non-blocking. For slow processing, send a message to another actor from within the callback rather than doing the work inline.
 
 #### Runtime Implementation
 
