@@ -849,10 +849,13 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Lexes colon or assignment operator.
+    /// Lexes colon, double-colon, or assignment operator.
     fn lex_colon_or_assign(&mut self) -> TokenKind {
         self.advance(); // :
-        if self.peek_char() == Some('=') {
+        if self.peek_char() == Some(':') {
+            self.advance(); // second :
+            TokenKind::DoubleColon
+        } else if self.peek_char() == Some('=') {
             self.advance(); // =
             TokenKind::Assign
         } else {
@@ -1576,6 +1579,36 @@ mod tests {
                 TokenKind::Pipe,
                 TokenKind::Colon,
                 TokenKind::Hash,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_double_colon() {
+        // `::` lexes as DoubleColon
+        assert_eq!(lex_kinds("::"), vec![TokenKind::DoubleColon]);
+    }
+
+    #[test]
+    fn lex_single_colon() {
+        // `:` lexes as Colon
+        assert_eq!(lex_kinds(":"), vec![TokenKind::Colon]);
+    }
+
+    #[test]
+    fn lex_colon_assign() {
+        // `:=` lexes as Assign
+        assert_eq!(lex_kinds(":="), vec![TokenKind::Assign]);
+    }
+
+    #[test]
+    fn lex_double_colon_then_equals() {
+        // `::=` is NOT a valid token — lexes as DoubleColon + BinarySelector("=")
+        assert_eq!(
+            lex_kinds("::="),
+            vec![
+                TokenKind::DoubleColon,
+                TokenKind::BinarySelector("=".into()),
             ]
         );
     }
