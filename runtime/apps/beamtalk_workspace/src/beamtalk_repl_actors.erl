@@ -241,9 +241,21 @@ handle_call({kill, ActorPid}, _From, State) ->
     #state{actors = Actors} = State,
     case maps:is_key(ActorPid, Actors) of
         true ->
-            %% Kill the actor (gen_server will trap the exit and clean up)
+            %% Kill the actor and wait for it to die before replying.
+            %% The registry already monitors this actor (see register call), so a
+            %% DOWN message will arrive in our mailbox and be handled by handle_info.
+            %% We use a fresh one-shot monitor here only for the synchronous wait —
+            %% the existing monitor continues to trigger the actor-unregister path.
+            Ref = erlang:monitor(process, ActorPid),
             exit(ActorPid, kill),
-            {reply, ok, State};
+            Reply =
+                receive
+                    {'DOWN', Ref, process, ActorPid, _Reason} -> ok
+                after 5000 ->
+                    erlang:demonitor(Ref, [flush]),
+                    {error, timeout}
+                end,
+            {reply, Reply, State};
         false ->
             {reply, {error, not_found}, State}
     end;
