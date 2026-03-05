@@ -162,4 +162,5 @@ Actor subclass: HTTPClient
   /// ```
   request: method path: path: String options: opts: Dictionary -> HTTPResponse =>
     url := self.baseUrl ++ path
-    (Erlang beamtalk_http) request: method url: url options: opts
+    defaults := #{#headers => self.headers, #timeout => self.timeout}
+    (Erlang beamtalk_http) request: method url: url options: (defaults merge: opts)
