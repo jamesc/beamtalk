@@ -1,9 +1,9 @@
-# Beamtalk
-
 [![CI](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml/badge.svg)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
 [![API Docs](https://img.shields.io/badge/docs-API%20Reference-blue)](https://www.beamtalk.dev/apidocs/)
 [![Rust coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamesc/beamtalk/badges/rust-coverage.json)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
 [![Erlang coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamesc/beamtalk/badges/erlang-coverage.json)](https://github.com/jamesc/beamtalk/actions/workflows/ci.yml)
+
+<img src="docs/images/beamtalk-logo-light.svg" width="480"/>
 
 **A live, interactive Smalltalk-like language for the BEAM VM**
 
