@@ -70,12 +70,12 @@ bootstrap_sets_beamtalk_class_var_test_() ->
         ]
     end}.
 
-%% Test that bootstrap wires WorkspaceInterface singleton
+%% Test that bootstrap wires WorkspaceInterface singleton (Phase 2 compiled actor)
 bootstrap_sets_workspace_class_var_test_() ->
     {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
         [
             ?_test(begin
-                {ok, WPid} = beamtalk_workspace_interface:start_link({local, 'Workspace'}),
+                {ok, WPid} = 'bt@stdlib@workspace_interface':start_link({local, 'Workspace'}, #{}),
                 {ok, _} = beamtalk_workspace_bootstrap:start_link(),
                 ?assertEqual(WPid, whereis('Workspace'))
             end)
