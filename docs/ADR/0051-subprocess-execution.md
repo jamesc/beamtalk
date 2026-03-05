@@ -30,7 +30,7 @@ This ADR addresses both use cases:
 
 ### Constraints
 
-1. **BEAM port limitations** — `open_port/2` cannot deliver stdout and stderr as separate streams. `stderr_to_stdout` merges them; otherwise stderr goes to the VM's terminal unseen. Separate stderr requires a helper process (erlexec pattern).
+1. **BEAM port limitations** — `open_port/2` cannot deliver stdout and stderr as separate streams. `stderr_to_stdout` merges them; otherwise stderr goes to the VM's terminal unseen. Separate stderr requires a helper process. A Rust helper binary (`beamtalk_exec`) provides this — the BEAM communicates with the helper via an ETF port protocol (same pattern as `beamtalk_compiler_port`), and the helper manages the actual subprocess with separate stdio pipes.
 2. **Port ownership is process-local** — the process that calls `open_port/2` becomes the port owner. Only the owner can send commands. Port-backed streams have the same cross-process constraint as file-backed streams (ADR 0021). This means a port-backed Stream cannot be returned from an actor to its caller — the Stream generator would run in the caller's process but the port lives in the actor's process.
 3. **Zombie process risk** — closing a port sends EOF to the subprocess's stdin. Programs that don't monitor stdin for EOF become orphans. The BEAM has no built-in mechanism to forcefully terminate port children.
 4. **Security** — shell invocation (`{spawn, Command}`) enables injection. `{spawn_executable, Path}` with `{args, List}` is safe but requires absolute paths resolved via `os:find_executable/1`.
@@ -77,7 +77,7 @@ System output: "tail" args: #("-f", "server.log") do: [:stream |
 ```
 
 **Return types:**
-- `System run:args:` returns a `CommandResult` value object with `output` (String), `exitCode` (Integer), and `isSuccess` (Boolean)
+- `System run:args:` returns a `CommandResult` value object with `output` (String, stdout), `stderr` (String), `exitCode` (Integer), and `isSuccess` (Boolean)
 - `System output:args:` returns a `Stream` of lines (lazy, constant memory) with a finalizer that closes the port and terminates the subprocess
 - `System output:args:do:` evaluates the block with a `Stream`, then deterministically closes the port and terminates the subprocess when the block returns — even on exception. This is the preferred form for long-running commands where cleanup timing matters.
 
@@ -86,8 +86,11 @@ System output: "tail" args: #("-f", "server.log") do: [:stream |
 ```beamtalk
 sealed Value subclass: CommandResult
 
-  /// The subprocess output (stdout + stderr merged) as a String.
+  /// The subprocess stdout as a String.
   output -> String => @primitive "output"
+
+  /// The subprocess stderr as a String.
+  stderr -> String => @primitive "stderr"
 
   /// The process exit code (0 = success by convention).
   exitCode -> Integer => @primitive "exitCode"
@@ -186,10 +189,13 @@ Actor subclass: Subprocess
   /// Read one line from stdout. Blocks until available. Returns nil at EOF.
   readLine -> String | Nil => @primitive "readLine"
 
+  /// Read one line from stderr. Blocks until available. Returns nil at EOF.
+  readStderrLine -> String | Nil => @primitive "readStderrLine"
+
   /// Get the exit code. Returns nil if the subprocess is still running.
   exitCode -> Integer | Nil => @primitive "exitCode"
 
-  /// Force-close the subprocess (port_close + OS kill).
+  /// Force-close the subprocess (sends kill to process group).
   close -> Nil => @primitive "close"
 ```
 
@@ -333,67 +339,48 @@ agent writeLine: "hello".
 
 ### Stderr Handling
 
-Both tiers merge stderr into stdout via `stderr_to_stdout`. The API does not expose this as a feature — output is simply "the subprocess output." This is forward-compatible with separate stderr in a future phase:
+The Rust helper binary (`beamtalk_exec`) manages separate stdout and stderr pipes to the subprocess. Both streams are forwarded to the BEAM over the ETF port protocol with tagged messages (`{stdout, Data}` / `{stderr, Data}`).
+
+**Tier 1:** `CommandResult` exposes both `output` (stdout) and `stderr` as separate strings:
 
 ```beamtalk
-// Current: output contains both stdout and stderr (merged)
 result := System run: "gcc" args: #("-Wall", "main.c")
-result output      // => "main.c:5: warning: unused variable\n"
-
-// Future phase: separate stderr (non-breaking addition)
+result output      // => "" (stdout — empty for compile-only)
 result stderr      // => "main.c:5: warning: unused variable\n"
-result stdout      // => "" (separate from stderr)
+result exitCode    // => 0
 ```
+
+**Tier 2:** `Subprocess` provides `readLine` (stdout) and `readStderrLine` (stderr) as separate methods:
+
+```beamtalk
+agent := Subprocess open: "codex" args: #("--full-auto", "fix the bug")
+line := agent readLine.              // reads from stdout
+errLine := agent readStderrLine.     // reads from stderr
+```
+
+Both methods use the same deferred-reply buffering pattern, with independent queues for stdout and stderr.
 
 ### Zombie Process Prevention
 
+The Rust helper binary (`beamtalk_exec`) handles all subprocess lifecycle management, including clean shutdown and process group kill. This eliminates the PID reuse, grandchild orphaning, and shell-based kill issues that raw `open_port` would have.
+
+**Rust helper cleanup sequence:**
+1. The helper spawns each subprocess in its own process group (Unix: `setsid()`; Windows: Job Object)
+2. On shutdown request from the BEAM: sends SIGTERM to the process group, waits up to 2 seconds, then sends SIGKILL to the process group
+3. Process-group kill ensures grandchild processes are also terminated — no orphaning
+4. On Windows: `TerminateJobObject()` kills all processes in the Job Object
+
 **Tier 1 (System output:):**
-1. **Port finalizer** — `System output:args:` attaches a Stream finalizer (per ADR 0021 pattern) that calls `port_close/1` and then terminates the OS process via its PID. The finalizer runs when the stream is fully consumed or when a terminal operation completes.
-2. **Block-scoped cleanup** — `System output:args:do:` closes the port and terminates the OS process in an `ensure:` block when the block exits (normally or via exception). This is the deterministic alternative — use it for long-running commands where relying on the finalizer is insufficient.
-3. **Process linking** — the port is linked to the calling process. If the caller crashes, the port closes, sending EOF to the subprocess.
+1. **Stream finalizer** — `System output:args:` attaches a Stream finalizer that sends a shutdown command to the Rust helper. The finalizer runs when the stream is fully consumed or when a terminal operation completes.
+2. **Block-scoped cleanup** — `System output:args:do:` sends a shutdown command to the helper in an `ensure:` block when the block exits (normally or via exception). This is the deterministic alternative — use it for long-running commands where relying on the finalizer is insufficient.
+3. **Process linking** — the BEAM port to the Rust helper is linked to the calling process. If the caller crashes, the port closes, and the helper cleans up the subprocess.
 
 **Tier 2 (Subprocess actor):**
-4. **Actor lifecycle** — the port is owned by the actor's gen_server process. When the actor stops (via `stop.` or crash), `terminate/2` closes the port and kills the OS process.
-5. **Explicit close** — `agent close.` immediately closes the port and kills the OS process.
-6. **Supervision** — Subprocess actors can be supervised like any other Actor. If the supervisor restarts the actor, a new subprocess is spawned.
+4. **Actor lifecycle** — the port to the Rust helper is owned by the actor's gen_server process. When the actor stops (via `stop.` or crash), `terminate/2` sends a shutdown command to the helper, which cleans up the subprocess with the SIGTERM → SIGKILL sequence.
+5. **Explicit close** — `agent close.` sends an immediate kill command to the helper.
+6. **Supervision** — Subprocess actors can be supervised like any other Actor. If the supervisor restarts the actor, a new subprocess is spawned via the helper.
 
-**Shared cleanup helper:**
-```erlang
-%% In beamtalk_subprocess_util.erl — shared by Tier 1 and Tier 2
-cleanup_port(Port) ->
-    case erlang:port_info(Port, os_pid) of
-        {os_pid, OsPid} ->
-            catch port_close(Port),
-            %% SIGTERM first — allow graceful shutdown
-            signal_os_process(OsPid, sigterm),
-            %% Wait briefly for process to exit
-            timer:sleep(100),
-            %% Check if still alive, then SIGKILL
-            case is_os_process_alive(OsPid) of
-                true  -> signal_os_process(OsPid, sigkill);
-                false -> ok
-            end;
-        undefined ->
-            catch port_close(Port)
-    end.
-
-%% Platform-appropriate process signaling
--ifdef(WIN32).
-signal_os_process(OsPid, _Signal) ->
-    os:cmd("taskkill /F /PID " ++ integer_to_list(OsPid)).
-is_os_process_alive(OsPid) ->
-    os:cmd("tasklist /FI \"PID eq " ++ integer_to_list(OsPid) ++ "\"") =/= [].
--else.
-signal_os_process(OsPid, sigterm) ->
-    os:cmd("kill -15 " ++ integer_to_list(OsPid) ++ " 2>/dev/null");
-signal_os_process(OsPid, sigkill) ->
-    os:cmd("kill -9 " ++ integer_to_list(OsPid) ++ " 2>/dev/null").
-is_os_process_alive(OsPid) ->
-    os:cmd("kill -0 " ++ integer_to_list(OsPid) ++ " 2>/dev/null") =:= [].
--endif.
-```
-
-**PID reuse caveat:** Between `port_close` and the kill signal, the OS may have recycled the PID. In practice this is extremely rare (PIDs cycle through large ranges on modern systems), and the 100ms window is short. Process-group-based kill (`kill -<PGID>`) would eliminate this risk but requires `erlexec` or a helper process. This is deferred to Phase 4 along with erlexec integration.
+**Rust helper crash safety:** If the Rust helper itself crashes or is killed, the subprocess's process group becomes orphaned. However, the helper is a simple, well-tested binary with no dynamic memory management concerns — it is far less likely to crash than a complex C++ program. If the BEAM VM exits, the helper detects stdin EOF and cleans up all managed subprocesses before exiting.
 
 ### Abandoned Stream Cleanup (Tier 1)
 
@@ -430,16 +417,17 @@ An abandoned `System output:` Stream (assigned to a variable but never fully con
 - **Adopted:** Concept of result object with exit status and output. Concept of an interactive process handle (Pharo's `OSSUnixSubprocess` ↔ Beamtalk's `Subprocess` actor).
 - **Rejected:** Mutable configure-then-run pattern — doesn't fit Beamtalk's value-object philosophy (ADR 0042). Configuration is passed as method arguments instead.
 - **Adapted:** Pharo's `stdout` stream → Beamtalk's `readLine` sync method. The BEAM's cross-process port constraint prevents exposing a Stream, so we use per-line sync calls instead. This is actually simpler and avoids Pharo's pipe-deadlock polling problem.
-- **Not achievable (Phase 1):** Separate stderr — BEAM's port mechanism cannot deliver it without a helper process.
+- **Achieved via helper:** Separate stderr — the Rust helper binary provides separate stdout/stderr pipes, matching Pharo's fd-level control.
 
 ### Newspeak
 - No subprocess concept — deliberately, as an object-capability language. OS authority must be explicitly injected. Beamtalk is more pragmatic about OS access.
 
 ### erlexec (Erlang library) and Porcelain (Elixir library)
-- erlexec uses a C++ helper process for separate stdout/stderr, signal management, and process group control.
-- Porcelain uses a Go helper binary (goon) for the same purpose.
+- erlexec uses a C++ helper process for separate stdout/stderr, signal management, and process group control. **Unix-only** — does not support Windows.
+- Porcelain uses a Go helper binary (goon) for the same purpose, also Unix-focused.
 - Both confirm that separate stderr on BEAM requires a helper process.
-- **Deferred:** erlexec/helper-process architecture is the path to separate stderr in a future phase. The current API is designed so stderr can be added as new methods without breaking existing code.
+- **Adopted (architecture):** The helper-process pattern is the right approach. Beamtalk uses a Rust helper binary (`beamtalk_exec`) instead of erlexec's C++ or Porcelain's Go, because: (a) Beamtalk already has a Rust toolchain and the `beamtalk_compiler_port` establishes the ETF-over-port protocol pattern, (b) Rust's `std::process::Command` provides cross-platform subprocess management (Linux, macOS, Windows), and (c) Rust eliminates the C++ memory safety concerns of erlexec's implementation.
+- **Not adopted (erlexec directly):** erlexec is Unix-only, requires a C++ compiler, and is a runtime dependency we'd need to maintain. Building the equivalent functionality in Rust (~400-500 lines) is a small effort and gives us cross-platform support and full control.
 
 ### Node.js `child_process`
 - `child_process.spawn()` returns a `ChildProcess` object with `.stdin` (writable stream), `.stdout` (readable stream), and `.stderr` (readable stream).
@@ -549,25 +537,26 @@ Create `Subprocess` as a non-actor class wrapping a port handle, with methods li
 ### Positive
 - Beamtalk gains both one-shot and interactive OS command execution — unblocks scripting, automation, tooling, and orchestration
 - No shell injection by construction — `spawn_executable` with argument lists only
+- **Separate stdout/stderr from day one** — the Rust helper provides separate pipes, unlike raw `open_port` which can only merge them
+- **Process group kill** — the Rust helper spawns subprocesses in their own process group, so grandchild processes are cleaned up correctly. No PID reuse risk.
+- **Cross-platform** — the Rust helper works on Linux, macOS, and Windows, unlike erlexec (Unix-only)
 - Tier 1 Stream integration follows established `File lines:` pattern from ADR 0021
 - Tier 2 actor model provides natural lifecycle management — subprocess cleanup is tied to actor lifecycle via OTP supervision
 - `readLine` / `writeLine:` as sync actor messages aligns with ADR 0043 (sync-by-default)
 - `CommandResult` as a Value class is consistent with ADR 0042
 - Tier 2 hides the cross-process port constraint — callers interact with a simple actor, not a port
-- API is forward-compatible with separate stderr (adding methods to existing classes)
 - API is forward-compatible with push-based event streams (adding `onLine:` to Subprocess later)
 - Symphony orchestrator use case is fully addressable with Tier 2
+- The Rust helper follows the same ETF-over-port pattern as `beamtalk_compiler_port` — proven architecture
 
 ### Negative
-- No separate stderr — merged output may confuse users who expect to distinguish error output
 - `readLine` loop is less ergonomic than a Stream pipeline for consuming output — `whileTrue:` with nil-check instead of `do:`. This creates conceptual discontinuity between Tier 1 (`System output:` returns a Stream) and Tier 2 (`readLine` returns one line at a time). If BT-507 enables cross-process Streams, a `lines` method should be added to bridge this gap.
 - **Single consumer:** Subprocess's `readLine` supports at most one blocked caller at a time. Multiple concurrent readers will see lines distributed non-deterministically between them (not duplicated). This is sufficient for the Symphony use case (one coordinator per subprocess) but limits fan-out patterns.
-- **`kill.` bypasses cleanup:** Actor's inherited `kill.` sends SIGKILL to the BEAM process, bypassing `terminate/2`. The OS subprocess may become a zombie if it doesn't monitor stdin for EOF. Users should prefer `close.` for Subprocess actors. This should be documented prominently.
-- **Grandchild process orphaning:** When a subprocess spawns its own child processes (e.g., a test runner forking workers), killing only the direct subprocess PID orphans grandchildren. Process-group-based kill (`kill -<PGID>`) would fix this but requires `erlexec` or a helper process. Deferred to Phase 4.
+- **`kill.` bypasses cleanup:** Actor's inherited `kill.` sends SIGKILL to the BEAM process, bypassing `terminate/2`. The Rust helper will detect the port close and clean up the subprocess, but there is a brief window where the subprocess may still be running. Users should prefer `close.` for Subprocess actors.
 - Bare `System output:` Streams from long-running commands can leak subprocess resources if abandoned (mitigated by block-scoped form and documentation)
 - Windows: `.bat`/`.cmd` resolution via `os:find_executable` may reintroduce shell semantics (documented caveat, not fully preventable)
-- Zombie prevention relies on OS-level process termination via `os:cmd("kill ...")` — which itself uses a shell. This is standard practice in the BEAM ecosystem (Elixir's `System.cmd` does the same) but is ironic given the "no shell" security stance for user-facing APIs.
 - `beamtalk_subprocess.erl` is a hand-written Erlang module rather than generated code — it won't benefit from codegen improvements to actor dispatch
+- The Rust helper binary adds ~400-500 lines of Rust code to the build — a new binary artifact alongside the compiler binary
 
 ### Neutral
 - `Port.bt` remains unchanged — still an opaque BEAM interop type
@@ -576,60 +565,75 @@ Create `Subprocess` as a non-actor class wrapping a port handle, with methods li
 - Port-backed Streams (Tier 1) have the same cross-process constraint as file-backed Streams (ADR 0021) — no new constraint introduced
 - The stdlib dependency on OTP's `os:find_executable/1` is minimal and well-tested
 - Deferred reply pattern in readLine is standard OTP — no new runtime mechanisms needed
+- The Rust helper binary is built by the same `cargo build` that builds the compiler — no new build tooling needed
 
 ## Implementation
 
-### Phase 1: `System run:args:` and `CommandResult` (M)
+### Phase 1: Rust subprocess helper binary — `beamtalk_exec` (S-M)
+
+Build a standalone Rust binary that the BEAM spawns as a port. The binary manages child process spawning, stdio piping, process group lifecycle, and signal handling. The BEAM communicates with it via ETF-encoded messages over the port protocol (same pattern as `beamtalk_compiler_port`).
+
+**New Rust crate: `beamtalk-exec`** (~400-500 lines)
+- `crates/beamtalk-exec/src/main.rs` — entry point, ETF port protocol loop
+- Spawns child processes via `std::process::Command` with separate stdout/stderr/stdin pipes
+- Creates each subprocess in its own process group (Unix: `setsid()` via `pre_exec`; Windows: Job Object via `windows-rs`)
+- Handles shutdown commands: SIGTERM → wait (2s) → SIGKILL to process group (Unix); `TerminateJobObject` (Windows)
+- Forwards tagged stdout/stderr data to the BEAM: `{stdout, ChildId, Data}`, `{stderr, ChildId, Data}`, `{exit, ChildId, Code}`
+- On stdin EOF (BEAM port closed / VM exited): cleans up all managed subprocesses before exiting
+
+**Erlang interface: `beamtalk_exec_port.erl`**
+- `runtime/apps/beamtalk_runtime/src/beamtalk_exec_port.erl` — singleton port manager (like `beamtalk_compiler_port.erl`)
+- Opens the `beamtalk_exec` binary as a port on first use, reuses for subsequent subprocess requests
+- Translates Beamtalk subprocess commands to ETF messages and routes responses
+
+**Build integration:**
+- Add `beamtalk-exec` crate to the Cargo workspace
+- `just build` compiles both the compiler binary and the exec helper
+- Binary is distributed alongside the compiler in the same package
+
+**Components:** new Rust crate, runtime
+**Tests:** Rust unit tests for protocol encoding/decoding, integration tests via `stdlib/test/exec_helper_test.bt` — spawn echo process, verify separate stdout/stderr, process group kill
+
+### Phase 2: `System run:args:` and `CommandResult` (M)
 
 **New class: `CommandResult`**
-- `stdlib/src/CommandResult.bt` — sealed Value subclass with `output`, `exitCode`, `isSuccess`
+- `stdlib/src/CommandResult.bt` — sealed Value subclass with `output`, `stderr`, `exitCode`, `isSuccess`
 - `runtime/apps/beamtalk_runtime/src/beamtalk_command_result.erl` — value dispatch
 
 **Extend `System`:**
 - Add `run:args:` and `run:args:env:dir:` to `stdlib/src/System.bt`
 - Add runtime dispatch in `runtime/apps/beamtalk_runtime/src/beamtalk_system.erl`
-- Implement via `open_port({spawn_executable, os:find_executable(Cmd)}, [binary, exit_status, stderr_to_stdout, {args, Args}])`
-- Collect all port data until `{Port, {exit_status, N}}`, return `CommandResult`
-
-**Shared utility:**
-- `runtime/apps/beamtalk_runtime/src/beamtalk_subprocess_util.erl` — `cleanup_port/1`, `kill_os_process/1`, `find_executable/1` (validates and resolves command path)
+- Implement via `beamtalk_exec_port` — sends spawn command to Rust helper, collects tagged stdout/stderr until exit, returns `CommandResult`
 
 **Components:** stdlib, runtime, codegen (builtins registration for `CommandResult`)
-**Tests:** `stdlib/test/system_command_test.bt` — spawn/capture, exit codes, command not found, env/dir overrides
+**Tests:** `stdlib/test/system_command_test.bt` — spawn/capture, exit codes, separate stdout/stderr, command not found, env/dir overrides
 
-### Phase 2: `System output:args:` streaming (M)
+### Phase 3: `System output:args:` streaming (M)
 
 **Extend `System`:**
 - Add `output:args:` and `output:args:do:` to `stdlib/src/System.bt`
-- Implement port-backed Stream generator following `beamtalk_file.erl` line-stream pattern
-- Stream finalizer calls `beamtalk_subprocess_util:cleanup_port/1`
-- `output:args:do:` wraps block in `ensure:` for deterministic cleanup
+- Implement Stream generator backed by `beamtalk_exec_port` — the Erlang module receives tagged stdout data from the Rust helper and feeds the Stream
+- `output:args:do:` wraps block in `ensure:` for deterministic cleanup — sends shutdown command to helper on block exit
 
 **Components:** stdlib, runtime
 **Tests:** `stdlib/test/system_output_test.bt` — streaming, pipeline composition, block-scoped cleanup, abandoned stream behavior
 
-### Phase 3: `Subprocess` actor (L)
+### Phase 4: `Subprocess` actor (L)
 
 **New class: `Subprocess`**
-- `stdlib/src/Subprocess.bt` — Actor subclass with `open:args:`, `readLine`, `writeLine:`, `exitCode`, `close`
+- `stdlib/src/Subprocess.bt` — Actor subclass with `open:args:`, `readLine`, `readStderrLine`, `writeLine:`, `exitCode`, `close`
 - `runtime/apps/beamtalk_runtime/src/beamtalk_subprocess.erl` — hand-written gen_server module:
-  - `init/1` — opens port from config map (`command`, `args`), initializes buffer queue
-  - `handle_info/2` — receives `{Port, {data, Data}}` and `{Port, {exit_status, N}}`, buffers lines, replies to deferred `readLine` callers
-  - `handle_call/3` — dispatches `readLine`, `writeLine:`, `exitCode`, `close` via method map
-  - `terminate/2` — calls `beamtalk_subprocess_util:cleanup_port/1`
+  - `init/1` — sends spawn command to `beamtalk_exec_port`, initializes stdout/stderr buffer queues
+  - `handle_info/2` — receives `{stdout, ChildId, Data}`, `{stderr, ChildId, Data}`, and `{exit, ChildId, Code}` from the Rust helper, buffers lines, replies to deferred `readLine`/`readStderrLine` callers
+  - `handle_call/3` — dispatches `readLine`, `readStderrLine`, `writeLine:`, `exitCode`, `close` via method map
+  - `terminate/2` — sends shutdown command to `beamtalk_exec_port` for this child
 
 **Codegen registration:**
 - Register `Subprocess` as a builtin actor class in codegen (similar to how `Actor` is registered)
 - The class method `open:args:` is a standard class method that calls `spawnWith:` — no codegen changes needed
 
 **Components:** stdlib, runtime, codegen (builtins registration)
-**Tests:** `stdlib/test/subprocess_test.bt` — spawn/readLine/writeLine, exit codes, close/stop lifecycle, deferred readLine blocking, EOF handling, error on write after close
-
-### Phase 4 (Future): Separate stderr
-- Add erlexec dependency or build a Rust helper binary (following Porcelain/goon pattern)
-- Add `stderr` and `stdout` to `CommandResult`
-- Add `readStderr` to `Subprocess`
-- Non-breaking: new methods on existing classes
+**Tests:** `stdlib/test/subprocess_test.bt` — spawn/readLine/writeLine, separate stderr, exit codes, close/stop lifecycle, deferred readLine blocking, EOF handling, error on write after close
 
 ### Phase 5 (Future): Push-based event stream
 - Add `onLine:` to `Subprocess` — registers a block as a callback for incoming lines
