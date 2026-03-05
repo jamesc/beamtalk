@@ -584,3 +584,550 @@ handle_lines_wrong_map_test() ->
         },
         beamtalk_file:handle_lines(#{foo => bar})
     ).
+
+%%% ============================================================================
+%%% Test Helpers (Directory)
+%%% ============================================================================
+
+%% @doc Create a temporary directory tree, run Fun, then recursively delete it.
+with_temp_dir(Name, Fun) ->
+    ok = filelib:ensure_path(Name),
+    try
+        Fun()
+    after
+        file:del_dir_r(Name)
+    end.
+
+%%% ============================================================================
+%%% isDirectory:/1
+%%% ============================================================================
+
+isDirectory_on_directory_test() ->
+    with_temp_dir("_bt_eunit_isdir", fun() ->
+        ?assert(beamtalk_file:'isDirectory:'(<<"_bt_eunit_isdir">>))
+    end).
+
+isDirectory_on_file_test() ->
+    with_temp_file("_bt_eunit_isdir_file.txt", <<"x">>, fun() ->
+        ?assertNot(beamtalk_file:'isDirectory:'(<<"_bt_eunit_isdir_file.txt">>))
+    end).
+
+isDirectory_on_missing_path_test() ->
+    ?assertNot(beamtalk_file:'isDirectory:'(<<"_bt_eunit_no_such_dir_xyz">>)).
+
+isDirectory_invalid_path_returns_false_test() ->
+    ?assertNot(beamtalk_file:'isDirectory:'(<<"/etc">>)).
+
+isDirectory_traversal_returns_false_test() ->
+    ?assertNot(beamtalk_file:'isDirectory:'(<<"../parent">>)).
+
+isDirectory_type_error_returns_false_test() ->
+    ?assertNot(beamtalk_file:'isDirectory:'(42)).
+
+%%% ============================================================================
+%%% isFile:/1
+%%% ============================================================================
+
+isFile_on_file_test() ->
+    with_temp_file("_bt_eunit_isfile.txt", <<"x">>, fun() ->
+        ?assert(beamtalk_file:'isFile:'(<<"_bt_eunit_isfile.txt">>))
+    end).
+
+isFile_on_directory_test() ->
+    with_temp_dir("_bt_eunit_isfile_dir", fun() ->
+        ?assertNot(beamtalk_file:'isFile:'(<<"_bt_eunit_isfile_dir">>))
+    end).
+
+isFile_on_missing_path_test() ->
+    ?assertNot(beamtalk_file:'isFile:'(<<"_bt_eunit_no_such_file_xyz.txt">>)).
+
+isFile_invalid_path_returns_false_test() ->
+    ?assertNot(beamtalk_file:'isFile:'(<<"/etc/passwd">>)).
+
+isFile_traversal_returns_false_test() ->
+    ?assertNot(beamtalk_file:'isFile:'(<<"../secret.txt">>)).
+
+isFile_type_error_returns_false_test() ->
+    ?assertNot(beamtalk_file:'isFile:'(42)).
+
+%%% ============================================================================
+%%% mkdir:/1
+%%% ============================================================================
+
+mkdir_success_test() ->
+    Dir = "_bt_eunit_mkdir",
+    try
+        ?assertEqual(nil, beamtalk_file:'mkdir:'(list_to_binary(Dir))),
+        ?assert(filelib:is_dir(Dir))
+    after
+        file:del_dir(Dir)
+    end.
+
+mkdir_already_exists_test() ->
+    with_temp_dir("_bt_eunit_mkdir_exists", fun() ->
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = already_exists, class = 'File', selector = 'mkdir:'
+                }
+            },
+            beamtalk_file:'mkdir:'(<<"_bt_eunit_mkdir_exists">>)
+        )
+    end).
+
+mkdir_missing_parent_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = directory_not_found, class = 'File', selector = 'mkdir:'
+            }
+        },
+        beamtalk_file:'mkdir:'(<<"_bt_eunit_no_parent_xyz/child">>)
+    ).
+
+mkdir_invalid_path_absolute_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'mkdir:'
+            }
+        },
+        beamtalk_file:'mkdir:'(<<"/tmp/evil">>)
+    ).
+
+mkdir_invalid_path_traversal_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'mkdir:'
+            }
+        },
+        beamtalk_file:'mkdir:'(<<"../escape">>)
+    ).
+
+mkdir_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'mkdir:'
+            }
+        },
+        beamtalk_file:'mkdir:'(42)
+    ).
+
+%%% ============================================================================
+%%% mkdirAll:/1
+%%% ============================================================================
+
+mkdirAll_success_test() ->
+    try
+        ?assertEqual(nil, beamtalk_file:'mkdirAll:'(<<"_bt_eunit_mkdirall/a/b/c">>)),
+        ?assert(filelib:is_dir("_bt_eunit_mkdirall/a/b/c"))
+    after
+        file:del_dir_r("_bt_eunit_mkdirall")
+    end.
+
+mkdirAll_idempotent_test() ->
+    Dir = "_bt_eunit_mkdirall_idem",
+    try
+        ?assertEqual(nil, beamtalk_file:'mkdirAll:'(list_to_binary(Dir))),
+        ?assertEqual(nil, beamtalk_file:'mkdirAll:'(list_to_binary(Dir))),
+        ?assert(filelib:is_dir(Dir))
+    after
+        file:del_dir_r(Dir)
+    end.
+
+mkdirAll_invalid_path_absolute_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'mkdirAll:'
+            }
+        },
+        beamtalk_file:'mkdirAll:'(<<"/tmp/evil">>)
+    ).
+
+mkdirAll_invalid_path_traversal_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'mkdirAll:'
+            }
+        },
+        beamtalk_file:'mkdirAll:'(<<"../escape">>)
+    ).
+
+mkdirAll_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'mkdirAll:'
+            }
+        },
+        beamtalk_file:'mkdirAll:'(42)
+    ).
+
+%%% ============================================================================
+%%% listDirectory:/1
+%%% ============================================================================
+
+listDirectory_success_test() ->
+    with_temp_dir("_bt_eunit_listdir", fun() ->
+        ok = file:write_file("_bt_eunit_listdir/a.txt", <<"a">>),
+        ok = file:write_file("_bt_eunit_listdir/b.txt", <<"b">>),
+        Entries = beamtalk_file:'listDirectory:'(<<"_bt_eunit_listdir">>),
+        ?assertEqual([<<"a.txt">>, <<"b.txt">>], lists:sort(Entries))
+    end).
+
+listDirectory_empty_dir_test() ->
+    with_temp_dir("_bt_eunit_listdir_empty", fun() ->
+        ?assertEqual([], beamtalk_file:'listDirectory:'(<<"_bt_eunit_listdir_empty">>))
+    end).
+
+listDirectory_not_a_directory_test() ->
+    %% filelib:is_regular/1 check ensures consistent error on all OSes
+    with_temp_file("_bt_eunit_listdir_file.txt", <<"x">>, fun() ->
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = not_a_directory, class = 'File', selector = 'listDirectory:'
+                }
+            },
+            beamtalk_file:'listDirectory:'(<<"_bt_eunit_listdir_file.txt">>)
+        )
+    end).
+
+listDirectory_directory_not_found_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = directory_not_found, class = 'File', selector = 'listDirectory:'
+            }
+        },
+        beamtalk_file:'listDirectory:'(<<"_bt_eunit_no_such_dir_xyz">>)
+    ).
+
+listDirectory_invalid_path_absolute_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'listDirectory:'
+            }
+        },
+        beamtalk_file:'listDirectory:'(<<"/etc">>)
+    ).
+
+listDirectory_invalid_path_traversal_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'listDirectory:'
+            }
+        },
+        beamtalk_file:'listDirectory:'(<<"../parent">>)
+    ).
+
+listDirectory_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'listDirectory:'
+            }
+        },
+        beamtalk_file:'listDirectory:'(42)
+    ).
+
+%%% ============================================================================
+%%% delete:/1
+%%% ============================================================================
+
+delete_file_test() ->
+    FileName = "_bt_eunit_delete_file.txt",
+    ok = file:write_file(FileName, <<"x">>),
+    ?assertEqual(nil, beamtalk_file:'delete:'(list_to_binary(FileName))),
+    ?assertNot(filelib:is_regular(FileName)).
+
+delete_empty_dir_test() ->
+    Dir = "_bt_eunit_delete_emptydir",
+    ok = file:make_dir(Dir),
+    ?assertEqual(nil, beamtalk_file:'delete:'(list_to_binary(Dir))),
+    ?assertNot(filelib:is_dir(Dir)).
+
+delete_not_empty_test() ->
+    with_temp_dir("_bt_eunit_delete_nonempty", fun() ->
+        ok = file:write_file("_bt_eunit_delete_nonempty/child.txt", <<"x">>),
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = not_empty, class = 'File', selector = 'delete:'
+                }
+            },
+            beamtalk_file:'delete:'(<<"_bt_eunit_delete_nonempty">>)
+        )
+    end).
+
+delete_file_not_found_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = file_not_found, class = 'File', selector = 'delete:'
+            }
+        },
+        beamtalk_file:'delete:'(<<"_bt_eunit_no_such_file_xyz.txt">>)
+    ).
+
+delete_invalid_path_absolute_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'delete:'
+            }
+        },
+        beamtalk_file:'delete:'(<<"/tmp/evil.txt">>)
+    ).
+
+delete_invalid_path_traversal_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'delete:'
+            }
+        },
+        beamtalk_file:'delete:'(<<"../escape.txt">>)
+    ).
+
+delete_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'delete:'
+            }
+        },
+        beamtalk_file:'delete:'(42)
+    ).
+
+%%% ============================================================================
+%%% deleteAll:/1
+%%% ============================================================================
+
+deleteAll_success_test() ->
+    try
+        ok = filelib:ensure_path("_bt_eunit_deleteall/a/b"),
+        ok = file:write_file("_bt_eunit_deleteall/a/b/file.txt", <<"x">>),
+        ?assertEqual(nil, beamtalk_file:'deleteAll:'(<<"_bt_eunit_deleteall">>)),
+        ?assertNot(filelib:is_dir("_bt_eunit_deleteall"))
+    after
+        file:del_dir_r("_bt_eunit_deleteall")
+    end.
+
+deleteAll_file_not_found_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = file_not_found, class = 'File', selector = 'deleteAll:'
+            }
+        },
+        beamtalk_file:'deleteAll:'(<<"_bt_eunit_no_such_dir_xyz">>)
+    ).
+
+deleteAll_invalid_path_absolute_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'deleteAll:'
+            }
+        },
+        beamtalk_file:'deleteAll:'(<<"/tmp/evil">>)
+    ).
+
+deleteAll_invalid_path_traversal_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'deleteAll:'
+            }
+        },
+        beamtalk_file:'deleteAll:'(<<"../escape">>)
+    ).
+
+deleteAll_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'deleteAll:'
+            }
+        },
+        beamtalk_file:'deleteAll:'(42)
+    ).
+
+%%% ============================================================================
+%%% rename:to:/2
+%%% ============================================================================
+
+rename_to_file_test() ->
+    Src = "_bt_eunit_rename_src.txt",
+    Dst = "_bt_eunit_rename_dst.txt",
+    ok = file:write_file(Src, <<"content">>),
+    try
+        ?assertEqual(
+            nil, beamtalk_file:'rename:to:'(list_to_binary(Src), list_to_binary(Dst))
+        ),
+        ?assertNot(filelib:is_regular(Src)),
+        ?assert(filelib:is_regular(Dst)),
+        ?assertEqual({ok, <<"content">>}, file:read_file(Dst))
+    after
+        file:delete(Src),
+        file:delete(Dst)
+    end.
+
+rename_to_directory_test() ->
+    Src = "_bt_eunit_rename_dir_src",
+    Dst = "_bt_eunit_rename_dir_dst",
+    ok = file:make_dir(Src),
+    try
+        ?assertEqual(
+            nil, beamtalk_file:'rename:to:'(list_to_binary(Src), list_to_binary(Dst))
+        ),
+        ?assertNot(filelib:is_dir(Src)),
+        ?assert(filelib:is_dir(Dst))
+    after
+        file:del_dir(Src),
+        file:del_dir(Dst)
+    end.
+
+rename_to_file_not_found_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = file_not_found, class = 'File', selector = 'rename:to:'
+            }
+        },
+        beamtalk_file:'rename:to:'(<<"_bt_eunit_no_such_xyz.txt">>, <<"_bt_eunit_dst.txt">>)
+    ).
+
+rename_to_invalid_source_path_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'rename:to:'
+            }
+        },
+        beamtalk_file:'rename:to:'(<<"/tmp/evil.txt">>, <<"_bt_eunit_dst.txt">>)
+    ).
+
+rename_to_invalid_dest_path_test() ->
+    with_temp_file("_bt_eunit_rename_valid_src.txt", <<"x">>, fun() ->
+        ?assertError(
+            #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{
+                    kind = invalid_path, class = 'File', selector = 'rename:to:'
+                }
+            },
+            beamtalk_file:'rename:to:'(
+                <<"_bt_eunit_rename_valid_src.txt">>, <<"/tmp/evil.txt">>
+            )
+        )
+    end).
+
+rename_to_type_error_from_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'rename:to:'
+            }
+        },
+        beamtalk_file:'rename:to:'(42, <<"dst.txt">>)
+    ).
+
+rename_to_type_error_to_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'rename:to:'
+            }
+        },
+        beamtalk_file:'rename:to:'(<<"src.txt">>, 42)
+    ).
+
+%%% ============================================================================
+%%% absolutePath:/1
+%%% ============================================================================
+
+absolutePath_success_test() ->
+    Input = <<"some/relative/path">>,
+    Result = beamtalk_file:'absolutePath:'(Input),
+    ?assert(is_binary(Result)),
+    %% Absolute path is strictly longer than the relative input
+    ?assert(byte_size(Result) > byte_size(Input)),
+    %% Must contain the original relative component
+    ?assertNotEqual(nomatch, binary:match(Result, Input)).
+
+absolutePath_invalid_path_absolute_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'absolutePath:'
+            }
+        },
+        beamtalk_file:'absolutePath:'(<<"/etc/passwd">>)
+    ).
+
+absolutePath_invalid_path_traversal_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = invalid_path, class = 'File', selector = 'absolutePath:'
+            }
+        },
+        beamtalk_file:'absolutePath:'(<<"../secret">>)
+    ).
+
+absolutePath_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'File', selector = 'absolutePath:'
+            }
+        },
+        beamtalk_file:'absolutePath:'(42)
+    ).
+
+%%% ============================================================================
+%%% tempDirectory/0
+%%% ============================================================================
+
+tempDirectory_returns_binary_test() ->
+    ?assert(is_binary(beamtalk_file:'tempDirectory'())).
+
+tempDirectory_non_empty_test() ->
+    ?assert(byte_size(beamtalk_file:'tempDirectory'()) > 0).
