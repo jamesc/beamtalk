@@ -179,7 +179,7 @@ apply_with_coercion(Module, FunName, Args, OrigSelector) ->
             error(Wrapped);
         error:undef:_Stack ->
             %% TOCTOU: function unloaded between export check and apply
-            raise_undef_error(Module, FunName, OrigSelector);
+            raise_undef_error(Module, FunName, length(Args), OrigSelector);
         error:badarg:Stack ->
             CoercedArgs = coerce_binaries_to_charlists(Args),
             case CoercedArgs =/= Args of
@@ -193,7 +193,7 @@ apply_with_coercion(Module, FunName, Args, OrigSelector) ->
                         error:#{error := #beamtalk_error{}} = Wrapped:_ ->
                             error(Wrapped);
                         error:undef:_Stack2 ->
-                            raise_undef_error(Module, FunName, OrigSelector)
+                            raise_undef_error(Module, FunName, length(CoercedArgs), OrigSelector)
                     end;
                 false ->
                     raise_badarg_error(Module, FunName, OrigSelector, Stack)
@@ -310,7 +310,14 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
                                                 Module, FunName, OrigSelector, Stack2
                                             );
                                         error:#{error := #beamtalk_error{}} = Wrapped:_Stack2 ->
-                                            error(Wrapped)
+                                            error(Wrapped);
+                                        error:undef:_Stack2 ->
+                                            raise_undef_error(
+                                                Module,
+                                                FunName,
+                                                length(CoercedArgs),
+                                                OrigSelector
+                                            )
                                     end;
                                 false ->
                                     raise_badarg_error(Module, FunName, OrigSelector, Stack)
@@ -467,14 +474,16 @@ raise_function_or_arity_error(Module, FunName, Arity, OrigSelector, Exports) ->
     end.
 
 %% @doc Raise a structured undef error (TOCTOU: function unloaded between check and apply).
--spec raise_undef_error(atom(), atom(), atom()) -> no_return().
-raise_undef_error(Module, FunName, OrigSelector) ->
+%%
+%% Pass the actual arity so the error message is accurate (not "0 arguments").
+-spec raise_undef_error(atom(), atom(), non_neg_integer(), atom()) -> no_return().
+raise_undef_error(Module, FunName, Arity, OrigSelector) ->
     case get_exports(Module) of
         {error, not_loaded} ->
             raise_module_not_loaded(Module, OrigSelector);
         {ok, Exports} ->
             raise_function_or_arity_error(
-                Module, FunName, 0, OrigSelector, Exports
+                Module, FunName, Arity, OrigSelector, Exports
             )
     end.
 

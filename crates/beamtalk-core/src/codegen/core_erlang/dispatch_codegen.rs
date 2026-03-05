@@ -442,12 +442,13 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-682: Generates a direct `call 'module':'function'(args)` for Erlang interop.
+    /// BT-682: Generates a proxy-routed call for Erlang interop (BT-1127).
     ///
-    /// Converts Beamtalk selectors to Erlang function names:
-    /// - Unary: `node` → `call 'erlang':'node'()` (zero-arg)
-    /// - Keyword single: `reverse:` → `call 'lists':'reverse'(Xs)` (first keyword = fn name)
-    /// - Keyword multi: `seq:with:` → `call 'lists':'seq'(1, 10)` (first keyword = fn name)
+    /// Converts Beamtalk selectors to Erlang function names and routes through
+    /// `beamtalk_erlang_proxy:direct_call/3` for automatic binary→charlist coercion:
+    /// - Unary: `node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])` (zero-arg)
+    /// - Keyword single: `reverse:` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'reverse', [Xs])`
+    /// - Keyword multi: `seq:with:` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'seq', [1, 10])`
     ///
     /// Returns `None` for selectors that are Object/ProtoObject protocol methods
     /// (e.g. `printString`, `asString`) — these must go through runtime dispatch
