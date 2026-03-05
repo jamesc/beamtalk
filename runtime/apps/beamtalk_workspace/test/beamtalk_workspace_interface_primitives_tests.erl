@@ -26,6 +26,23 @@
 fake_self(Pid) ->
     {beamtalk_object, 'WorkspaceInterface', 'bt@stdlib@workspace_interface', Pid}.
 
+%% Start the actor registry defensively — tolerates already-started.
+ensure_registry_started() ->
+    case beamtalk_repl_actors:start_link(registered) of
+        {ok, Pid} -> {ok, Pid};
+        {error, {already_started, Pid}} -> {ok, Pid}
+    end.
+
+%% Clean up ETS entries for a given PID in the bindings table.
+cleanup_ets_for(Pid) ->
+    case ets:info(beamtalk_wi_user_bindings, id) of
+        undefined ->
+            ok;
+        _ ->
+            ets:match_delete(beamtalk_wi_user_bindings, {{Pid, '_'}, '_'}),
+            ok
+    end.
+
 %%====================================================================
 %% actors Tests
 %%====================================================================
@@ -36,7 +53,7 @@ actors_returns_empty_when_no_registry_test() ->
     ?assertEqual([], Result).
 
 actors_returns_live_actors_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(registered),
+    {ok, RegistryPid} = ensure_registry_started(),
     {ok, Actor1} = test_counter:start_link(0),
     {ok, Actor2} = test_counter:start_link(10),
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
@@ -58,14 +75,13 @@ actors_returns_live_actors_test() ->
     gen_server:stop(RegistryPid).
 
 actors_filters_dead_processes_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(registered),
+    {ok, RegistryPid} = ensure_registry_started(),
     {ok, Actor1} = test_counter:start_link(0),
     {ok, Actor2} = test_counter:start_link(10),
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Counter', test_counter),
 
     gen_server:stop(Actor1),
-    timer:sleep(50),
 
     Result = beamtalk_workspace_interface_primitives:dispatch(actors, [], fake_self(self())),
     ?assertEqual(1, length(Result)),
@@ -78,7 +94,7 @@ actors_filters_dead_processes_test() ->
 %%====================================================================
 
 actor_at_returns_object_for_valid_pid_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(registered),
+    {ok, RegistryPid} = ensure_registry_started(),
     {ok, Actor} = test_counter:start_link(0),
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
 
@@ -92,7 +108,7 @@ actor_at_returns_object_for_valid_pid_test() ->
     gen_server:stop(RegistryPid).
 
 actor_at_returns_nil_for_unknown_pid_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(registered),
+    {ok, RegistryPid} = ensure_registry_started(),
     Result = beamtalk_workspace_interface_primitives:dispatch(
         'actorAt:', [<<"<0.99999.0>">>], fake_self(self())
     ),
@@ -120,12 +136,11 @@ actor_at_returns_nil_for_invalid_pid_string_test() ->
     ).
 
 actor_at_returns_nil_for_dead_actor_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(registered),
+    {ok, RegistryPid} = ensure_registry_started(),
     {ok, Actor} = test_counter:start_link(0),
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
     PidStr = list_to_binary(pid_to_list(Actor)),
     gen_server:stop(Actor),
-    timer:sleep(50),
 
     Result = beamtalk_workspace_interface_primitives:dispatch(
         'actorAt:', [PidStr], fake_self(self())
@@ -140,7 +155,7 @@ actor_at_returns_nil_when_no_registry_test() ->
     ?assertEqual(nil, Result).
 
 actor_at_accepts_list_string_test() ->
-    {ok, RegistryPid} = beamtalk_repl_actors:start_link(registered),
+    {ok, RegistryPid} = ensure_registry_started(),
     {ok, Actor} = test_counter:start_link(0),
     ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
 
@@ -204,7 +219,11 @@ bind_and_unbind_test_() ->
                 end
             end)
         end,
-        fun(Proxy) -> Proxy ! stop end, fun(Proxy) ->
+        fun(Proxy) ->
+            cleanup_ets_for(Proxy),
+            Proxy ! stop
+        end,
+        fun(Proxy) ->
             Self = fake_self(Proxy),
             [
                 {"bind:as: stores value under atom name", fun() ->
@@ -325,7 +344,7 @@ get_user_bindings_returns_empty_when_no_workspace_registered_test() ->
 
 get_user_bindings_returns_bound_values_test() ->
     Self = fake_self(self()),
-    %% Register self() as 'Workspace'
+    catch unregister('Workspace'),
     register('Workspace', self()),
     try
         beamtalk_workspace_interface_primitives:dispatch(
@@ -335,6 +354,7 @@ get_user_bindings_returns_bound_values_test() ->
         ?assert(maps:is_key(wsVar, Result)),
         ?assertEqual(100, maps:get(wsVar, Result))
     after
+        cleanup_ets_for(self()),
         catch unregister('Workspace')
     end.
 
@@ -348,6 +368,7 @@ get_session_bindings_returns_empty_when_no_workspace_registered_test() ->
     ?assertEqual(#{}, Result).
 
 get_session_bindings_includes_workspace_singleton_test() ->
+    catch unregister('Workspace'),
     register('Workspace', self()),
     try
         Result = beamtalk_workspace_interface_primitives:get_session_bindings(),
@@ -359,6 +380,7 @@ get_session_bindings_includes_workspace_singleton_test() ->
     end.
 
 get_session_bindings_includes_user_bindings_test() ->
+    catch unregister('Workspace'),
     register('Workspace', self()),
     Self = fake_self(self()),
     try
@@ -369,5 +391,6 @@ get_session_bindings_includes_user_bindings_test() ->
         ?assert(maps:is_key(sessionVar, Result)),
         ?assertEqual(<<"hello">>, maps:get(sessionVar, Result))
     after
+        cleanup_ets_for(self()),
         catch unregister('Workspace')
     end.
