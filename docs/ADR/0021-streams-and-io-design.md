@@ -31,12 +31,12 @@ Streams cannot cross process boundaries because:
 | File I/O (caller-owned handle) | Yes | `File lines: "data.csv"` |
 | Collection transforms | Yes | `#(1, 2, 3) stream select: [...]` |
 | Pure generators | Yes | `Stream from: 1 by: [:n | n * 2]` |
-| Actor → caller data flow | **No** | `readLine` polling (ADR 0051) |
-| Subprocess output | **No** | `Subprocess readLine.` |
-| Network sockets via actors | **No** | Sync methods on socket actor |
-| Cross-process anything | **No** | Materialize to List first |
+| Actor → caller data flow (via message-send generator) | **Yes** | `agent lines` — Stream generator calls `readLine` via gen_server:call (ADR 0051) |
+| Subprocess output | **Yes** | `agent lines do: [:line | ...]` — no port handle crosses boundary |
+| Network sockets via actors | **Yes** (same pattern) | Actor exposes `lines` method returning message-send-backed Stream |
+| Direct port/handle across processes | **No** | Materialize to List first, or use message-send generator pattern |
 
-Streams remain valuable for their core use case — lazy, composable pipelines over caller-owned data — but they are not and cannot be a universal abstraction across BEAM's process boundaries. The "Future integration points" listed in the Decision section have been revised accordingly.
+**Revised 2026-03-05:** The original revision overstated the limitation. Streams *can* work across process boundaries when the generator uses **message sends** (gen_server:call) rather than **direct resource access** (port reads, file handle reads). The key insight from ADR 0051: `Subprocess lines` returns a Stream whose generator closure calls `gen_server:call(ActorPid, {readLine, []}, infinity)` — a message send that runs in the caller's process. The actor reads from the port in its own process. No resource handle crosses the boundary, only the actor's PID (which is safe to share). This "message-send generator" pattern restores Stream composability for actor-mediated data sources.
 
 ### The Insight
 
@@ -102,11 +102,11 @@ Stream from: 1 by: [:n | n * 2]  // => infinite Stream: 1, 2, 4, 8, ...
 fib := FibonacciGenerator spawn   // Actor that speaks Stream protocol
 fib take: 10                      // => #(0, 1, 1, 2, 3, 5, 8, 13, 21, 34)
 
-// NOT Streams — these use sync actor methods instead (ADR 0043, ADR 0051):
-// Subprocess readLine.            // => sync gen_server:call, not a Stream
-// socket readLine.                // => sync call on socket actor
-// Console readLine.               // => sync call, not a Stream
-// See ADR 0051 for the rationale: cross-process Streams don't work on BEAM.
+// Actor-mediated Streams — generator uses message sends, not direct port access
+// (ADR 0051 "message-send generator" pattern)
+agent := Subprocess open: "tail" args: #("-f", "log").
+agent lines do: [:line | Transcript show: line]  // Stream backed by readLine calls
+agent stderrLines select: [:l | l includesSubstring: "WARN"]
 ```
 
 ### The Universal Protocol
@@ -475,10 +475,10 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 - **Actor-based generators** — Actors that speak the Stream protocol (`take:`, `select:`, etc.) for stateful/imperative generators. This avoids hiding a process inside a value type. When Behaviours land, formalize as `Streamable` behaviour.
 - Behaviours-based `Streamable` protocol (when Behaviours land)
 
-**Removed (revised 2026-03-05):** The following were listed as future Stream integration points but are better served by sync actor methods due to cross-process constraints (see Scope Limitation in Context):
-- ~~`Console lines` — Stream of stdin lines~~ → `Console readLine` (sync call)
-- ~~Network streaming — TCP/UDP socket lines as Streams~~ → sync methods on socket actor
-- ~~`Process output:` — OS command output as Stream~~ → `Subprocess readLine.` (ADR 0051) or block-scoped `System output:args:do:` (same-process Stream, not cross-process)
+**Restored (revised 2026-03-05):** The message-send generator pattern (ADR 0051 `Subprocess lines`) means these integration points ARE viable as Streams — the generator calls the actor via gen_server:call, no resource handle crosses the process boundary:
+- `Console lines` — Stream backed by `Console readLine` message sends
+- Network streaming — `socketActor lines` returning a message-send-backed Stream
+- `Subprocess lines` — Stream backed by `readLine` message sends (ADR 0051, implemented)
 
 ## Migration Path
 

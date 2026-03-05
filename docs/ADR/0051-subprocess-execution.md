@@ -172,6 +172,16 @@ line := agent readLine.
   line := agent readLine.
 ]
 
+// Stream-based consumption — same composability as Tier 1
+agent lines do: [:line |
+  Transcript show: line
+]
+
+// Compose with Stream pipeline
+agent lines
+  select: [:line | line includesSubstring: "error"]
+  take: 10
+
 // Timeout-based loop — detect hung subprocess
 line := agent readLine: 30000.
 [line notNil] whileTrue: [
@@ -261,7 +271,18 @@ SubprocessBase subclass: Subprocess
 
   /// Non-blocking read from stderr. Returns nil immediately if no data buffered.
   tryReadStderrLine -> String | Nil => @primitive "tryReadStderrLine"
+
+  /// Return a Stream of stdout lines. The Stream's generator calls readLine
+  /// internally via gen_server:call — runs in the caller's process, no
+  /// cross-process Stream constraint violated. Terminates (returns done)
+  /// when readLine returns nil (EOF).
+  lines -> Stream => @primitive "lines"
+
+  /// Return a Stream of stderr lines. Same mechanics as lines.
+  stderrLines -> Stream => @primitive "stderrLines"
 ```
+
+**Why `lines` works despite the cross-process constraint:** The Stream returned by `lines` has a generator closure that calls `gen_server:call(ActorPid, {readLine, []}, infinity)` — a message send, not a direct port read. The generator executes in the caller's process (correct for Streams), and each `next` step sends a sync message to the actor to get the next line. The actor reads from the port in its own process (correct for ports). No resource handle crosses the process boundary — only the actor's PID, which is safe to share. This is the same pattern as wrapping any actor method in a Stream generator.
 
 #### SubprocessListener — Push Mode (Callbacks)
 
@@ -735,7 +756,7 @@ Create `Subprocess` as a non-actor class wrapping a port handle, with methods li
 - The Rust helper follows the same ETF-over-port pattern as `beamtalk_compiler_port` — proven architecture
 
 ### Negative
-- `Subprocess readLine` loop is less ergonomic than a Stream pipeline for consuming output — `whileTrue:` with nil-check instead of `do:`. `SubprocessListener` with `onLine:` is more ergonomic for consumption but doesn't support request-response protocols. This creates conceptual discontinuity between Tier 1 (`System output:` returns a Stream) and Tier 2 (two different consumption modes). If BT-507 enables cross-process Streams, a `lines` method should be added to bridge this gap.
+- `Subprocess readLine` loop is less ergonomic than a Stream pipeline — but `agent lines` bridges this gap by returning a Stream whose generator calls `readLine` via gen_server:call. The Stream runs in the caller's process (valid), each step is a sync message to the actor (no port handle crosses the boundary). This gives Tier 2 the same composability as Tier 1 (`System output:`) for simple consumption. However, `lines` doesn't support timeouts — use `readLine:` directly for timeout-based patterns.
 - **Single consumer:** Subprocess's `readLine` supports at most one blocked caller at a time. Multiple concurrent readers will see lines distributed non-deterministically between them (not duplicated). This is sufficient for the Symphony use case (one coordinator per subprocess) but limits fan-out patterns.
 - **`kill.` bypasses cleanup:** Actor's inherited `kill.` sends SIGKILL to the BEAM process, bypassing `terminate/2`. The Rust helper will detect the port close and clean up the subprocess, but there is a brief window where the subprocess may still be running. Users should prefer `close.` for Subprocess actors.
 - Bare `System output:` Streams from long-running commands can leak subprocess resources if abandoned (mitigated by block-scoped form and documentation)
