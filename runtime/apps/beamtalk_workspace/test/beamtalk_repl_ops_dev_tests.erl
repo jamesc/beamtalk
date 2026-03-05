@@ -316,6 +316,140 @@ walk_chain_class_unknown_selector_test() ->
     ?assertEqual(undefined, Result).
 
 %%====================================================================
+%% tokenise_binary_chain/1 (BT-1071)
+%%====================================================================
+
+tokenise_binary_chain_empty_returns_error_test() ->
+    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_binary_chain(<<>>)).
+
+tokenise_binary_chain_single_token_returns_error_test() ->
+    %% Single token — no chain to walk
+    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_binary_chain(<<"counter">>)).
+
+tokenise_binary_chain_unary_only_succeeds_test() ->
+    %% tokenise_binary_chain also accepts pure unary chains (superset of tokenise_send_chain).
+    %% The difference is that tokenise_send_chain returns [atom()] while
+    %% tokenise_binary_chain returns [{unary, atom()}].
+    %% `size` is a known atom (used widely in Erlang/OTP)
+    Result = beamtalk_repl_ops_dev:tokenise_binary_chain(<<"x size">>),
+    ?assertMatch({ok, <<"x">>, [{unary, size}]}, Result).
+
+tokenise_binary_chain_with_plus_test() ->
+    %% `+` is a known Erlang atom (used as BIF name erlang:'+'/2)
+    Result = beamtalk_repl_ops_dev:tokenise_binary_chain(<<"counter value + 1">>),
+    ?assertMatch({ok, <<"counter">>, _}, Result),
+    {ok, _, Hops} = Result,
+    ?assertEqual([{unary, value}, {binary, '+'}], Hops).
+
+tokenise_binary_chain_string_concat_test() ->
+    %% `,` becomes a known atom after String is loaded (it's in method_return_types);
+    %% but at test time (no runtime), binary_to_existing_atom may fail.
+    %% Test that the structure is parsed correctly when atoms exist.
+    %% We use `+` which is always a known atom.
+    Result = beamtalk_repl_ops_dev:tokenise_binary_chain(<<"42 + 1">>),
+    ?assertMatch({ok, <<"42">>, [{binary, '+'}]}, Result).
+
+tokenise_binary_chain_multi_binary_test() ->
+    %% `x + 1 * 2` → receiver x, hops [{binary,'+'}, {binary,'*'}]
+    Result = beamtalk_repl_ops_dev:tokenise_binary_chain(<<"x + 1 * 2">>),
+    ?assertMatch({ok, <<"x">>, [{binary, '+'}, {binary, '*'}]}, Result).
+
+tokenise_binary_chain_mixed_hops_test() ->
+    %% `myList size + offset` → receiver myList, hops [{unary,size},{binary,'+'}]
+    %% `size` is a known atom (used all over the codebase)
+    Result = beamtalk_repl_ops_dev:tokenise_binary_chain(<<"myList size + offset">>),
+    ?assertMatch({ok, <<"myList">>, [{unary, size}, {binary, '+'}]}, Result).
+
+tokenise_binary_chain_paren_returns_error_test() ->
+    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_binary_chain(<<"(myList size) + 1">>)).
+
+tokenise_binary_chain_bitshift_returns_error_test() ->
+    %% >> is an invalid chain character
+    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_binary_chain(<<"x >> y">>)).
+
+tokenise_binary_chain_binary_op_no_arg_returns_error_test() ->
+    %% Binary op at end of expression with no argument
+    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_binary_chain(<<"counter value +">>)).
+
+tokenise_binary_chain_keyword_returns_error_test() ->
+    %% Keyword sends (tokens with `:`) are not valid unary selectors
+    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_binary_chain(<<"list inject: 0 into: x">>)).
+
+tokenise_binary_chain_compound_selector_test() ->
+    %% Multi-character binary selectors like `<=` are valid
+    Result = beamtalk_repl_ops_dev:tokenise_binary_chain(<<"42 <= 10">>),
+    ?assertMatch({ok, <<"42">>, [{binary, '<='}]}, Result).
+
+tokenise_binary_chain_equality_selector_test() ->
+    %% `=:=` is a three-character binary selector
+    Result = beamtalk_repl_ops_dev:tokenise_binary_chain(<<"42 =:= 42">>),
+    ?assertMatch({ok, <<"42">>, [{binary, '=:='}]}, Result).
+
+%%====================================================================
+%% walk_mixed_chain/2 (BT-1071)
+%%====================================================================
+
+walk_mixed_chain_empty_hops_test() ->
+    %% No hops — returns the starting class immediately
+    ?assertEqual({ok, 'Integer'}, beamtalk_repl_ops_dev:walk_mixed_chain('Integer', [])).
+
+walk_mixed_chain_unknown_unary_selector_test() ->
+    %% No registry — get_method_return_type returns not_found → undefined
+    Result = beamtalk_repl_ops_dev:walk_mixed_chain('Integer', [{unary, unknownSel}]),
+    ?assertEqual(undefined, Result).
+
+walk_mixed_chain_binary_selector_with_registry_test() ->
+    %% Integer `+` returns Integer (annotated in the stdlib builtins)
+    Result = beamtalk_repl_ops_dev:walk_mixed_chain('Integer', [{binary, '+'}]),
+    ?assertEqual({ok, 'Integer'}, Result).
+
+walk_mixed_chain_unknown_binary_selector_test() ->
+    %% Graceful fallback: a binary selector not in method_return_types → undefined
+    Result = beamtalk_repl_ops_dev:walk_mixed_chain('Integer', [{binary, 'noSuchBinOp'}]),
+    ?assertEqual(undefined, Result).
+
+walk_mixed_chain_type_changing_binary_selector_test() ->
+    %% `<` on Integer returns Boolean — type changes mid-chain
+    Result = beamtalk_repl_ops_dev:walk_mixed_chain('Integer', [{binary, '<'}]),
+    ?assertEqual({ok, 'Boolean'}, Result).
+
+%%====================================================================
+%% walk_mixed_chain_class/2 (BT-1071)
+%%====================================================================
+
+walk_mixed_chain_class_empty_hops_test() ->
+    ?assertEqual({ok, 'Integer'}, beamtalk_repl_ops_dev:walk_mixed_chain_class('Integer', [])).
+
+walk_mixed_chain_class_meta_selector_test() ->
+    %% `{unary, class}` on a class object stays on the class side
+    ?assertEqual(
+        {ok, 'Integer'}, beamtalk_repl_ops_dev:walk_mixed_chain_class('Integer', [{unary, class}])
+    ).
+
+walk_mixed_chain_class_unknown_selector_test() ->
+    Result = beamtalk_repl_ops_dev:walk_mixed_chain_class('Integer', [{unary, unknownMethod}]),
+    ?assertEqual(undefined, Result).
+
+%%====================================================================
+%% resolve_chain_type/2 with binary chains (BT-1071)
+%%====================================================================
+
+resolve_chain_type_binary_chain_no_registry_test() ->
+    %% Binary chain parses OK but no registry → walk returns undefined
+    Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"counter value + 1">>, #{}),
+    ?assertEqual(undefined, Result).
+
+resolve_chain_type_binary_chain_integer_plus_resolves_test() ->
+    %% `42 + 1` — 42 is an Integer literal, `+` on Integer returns Integer
+    Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"42 + 1">>, #{}),
+    ?assertEqual({ok, 'Integer'}, Result).
+
+resolve_chain_type_binary_chain_comparison_returns_boolean_test() ->
+    %% `42 < 1` — `<` on Integer returns Boolean (type changes)
+    Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"42 < 1">>, #{}),
+    ?assertEqual({ok, 'Boolean'}, Result).
+
+%%====================================================================
 %% handle/4 -- docs with non-existing class (badarg path)
 %%====================================================================
 

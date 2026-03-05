@@ -1269,6 +1269,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "<=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None] },
                 MethodInfo { selector: ">=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None] },
                 MethodInfo { selector: "++".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("String".into())] },
+                MethodInfo { selector: ",".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("String".into())] },
                 MethodInfo { selector: "length".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![] },
                 MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("Integer".into())] },

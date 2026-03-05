@@ -15,7 +15,7 @@ pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<D
         // Comparison (ADR 0002: Erlang operators)
         "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
         // Concatenation, length, access, case, whitespace, reverse
-        "++" | "length" | "at:" | "uppercase" | "lowercase" | "capitalize" | "trim"
+        "++" | "," | "length" | "at:" | "uppercase" | "lowercase" | "capitalize" | "trim"
         | "trimLeft" | "trimRight" | "reverse" => generate_string_transform_bif(selector, params),
         // Search, splitting, replace, substring, padding
         "includes:" | "startsWith:" | "endsWith:" | "indexOf:" | "split:" | "splitOn:"
@@ -39,7 +39,7 @@ pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<D
 fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     let p0 = param(params, 0, "_Arg0");
     match selector {
-        "++" => Some(docvec![
+        "++" | "," => Some(docvec![
             "call 'erlang':'iolist_to_binary'([Self, ",
             p0.to_string(),
             "])"

@@ -91,6 +91,17 @@ sealed typed Collection subclass: String
   /// ```
   ++ other: String -> String => @primitive "++"
 
+  /// Concatenate the receiver with another string (Smalltalk-style comma operator).
+  ///
+  /// Equivalent to `++`. Provided for Smalltalk compatibility.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "foo" , "bar"   // => "foobar"
+  /// "hello" , " world"  // => "hello world"
+  /// ```
+  , other: String -> String => @primitive ","
+
   /// Number of grapheme clusters in the string.
   ///
   /// ## Examples
