@@ -1303,7 +1303,7 @@ mod tests {
         let source = "Object subclass: Counter\n  count => 42";
         service.update_file(file.clone(), source.to_string());
 
-        // "  count => 42" starts at byte 25 (after "Object subclass: Counter\n")
+        // "  count => 42" starts at byte 27 (after "Object subclass: Counter\n")
         let method_start = len32("Object subclass: Counter\n  "); // 27
         let actions = service.code_actions(&file, method_start, method_start);
         assert!(
