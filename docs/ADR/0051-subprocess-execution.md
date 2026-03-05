@@ -1,7 +1,7 @@
 # ADR 0051: Subprocess Execution — System Commands and Interactive Subprocess Actor
 
 ## Status
-Proposed (2026-03-05)
+Accepted (2026-03-05)
 
 ## Context
 
@@ -103,13 +103,13 @@ sealed Value subclass: CommandResult
 
 Add a `Subprocess` Actor subclass for bidirectional communication with long-lived OS processes. The actor owns the port, buffers stdout data internally, and exposes sync methods for reading/writing.
 
-#### Design Resolution: Why Not Streams?
+#### Design Resolution: Why Naive Streams Don't Work — and How `lines` Solves It
 
-The initial design considered returning a Stream from the actor (e.g., `agent lines.`). This fails for three reasons, all now resolved:
+The initial design considered returning a Stream directly from the actor (e.g., a port-backed generator). This fails for three reasons, all now resolved:
 
 1. **Cross-process Stream constraint (ADR 0021)** — the port lives in the actor's gen_server process, but a returned Stream's generator would execute in the caller's process. Port-backed Streams cannot cross process boundaries.
 
-   **Resolution:** Don't use Streams. The actor buffers port output internally and exposes `readLine` as a sync `gen_server:call`. Each call returns the next buffered line (String) or `nil` at EOF. No Stream crosses the process boundary.
+   **Resolution:** The `lines` method returns a Stream whose generator calls `gen_server:call(ActorPid, {readLine, []}, infinity)` — a message send, not a direct port read. The generator executes in the caller's process (correct for Streams), and each `next` step sends a sync message to the actor to get the next line. No resource handle crosses the process boundary — only the actor's PID. `readLine` remains as the lower-level primitive for timeout-based and request-response patterns.
 
 2. **Actor constructor pattern** — `Actor.bt` only has `spawn` and `spawnWith:`. A `Subprocess open: "cmd" args: #("a")` factory method doesn't exist in the current protocol.
 
@@ -125,9 +125,9 @@ The initial design considered returning a Stream from the actor (e.g., `agent li
 
    This requires no new Actor protocol machinery — it's a standard class method calling the existing `spawnWith:`. The config dictionary supports optional `"env"` (Dictionary of String => String) and `"dir"` (String working directory) keys — omitted keys inherit from the parent process.
 
-3. **Sync-messaging conflict (ADR 0043)** — `.` terminator = `gen_server:call`. Returning a lazy Stream from a sync call is semantically broken when the Stream's generator needs the actor's port.
+3. **Sync-messaging conflict (ADR 0043)** — `.` terminator = `gen_server:call`. Returning a lazy Stream from a sync call is semantically broken when the Stream's generator needs the actor's port directly.
 
-   **Resolution:** Already solved by point 1. All methods return simple values (String, Integer, Boolean, nil). `readLine.` is a sync call that returns the next line. No lazy data structures escape the actor.
+   **Resolution:** Already solved by point 1. The `lines` Stream generator uses message sends (not direct port reads), so each step is a valid sync call returning a simple value. `readLine.` is also a sync call that returns the next line. No port handle escapes the actor.
 
 #### API
 
@@ -210,12 +210,10 @@ agent close.                  // port_close + OS kill signal
 A single Actor subclass handles port lifecycle, buffered reads, and stdin writing. No abstract base class, no separate push-mode class — one class, one Erlang module.
 
 ```beamtalk
+// Note: Subprocess is backed by hand-written beamtalk_subprocess.erl, not codegen.
+// State (port, stdout/stderr queues, exitCode, portClosed flag) lives in the
+// Erlang gen_server state map — there are no Beamtalk-level state: declarations.
 Actor subclass: Subprocess
-  state: port = nil
-  state: stdoutBuffer = nil
-  state: stderrBuffer = nil
-  state: exitCode = nil
-  state: portClosed = false
 
   /// Convenience factory — desugars to spawnWith:
   class open: command args: args =>
@@ -229,16 +227,16 @@ Actor subclass: Subprocess
   writeLine: data -> Nil => @primitive "writeLine:"
 
   /// Read one line from stdout. Blocks forever until available. Returns nil at EOF.
-  readLine -> String | Nil => @primitive "readLine"
+  readLine -> Object => @primitive "readLine"
 
   /// Read one line from stdout with timeout (ms). Returns nil on timeout or EOF.
-  readLine: timeout -> String | Nil => @primitive "readLine:"
+  readLine: timeout -> Object => @primitive "readLine:"
 
   /// Read one line from stderr. Blocks forever until available. Returns nil at EOF.
-  readStderrLine -> String | Nil => @primitive "readStderrLine"
+  readStderrLine -> Object => @primitive "readStderrLine"
 
   /// Read one line from stderr with timeout (ms). Returns nil on timeout or EOF.
-  readStderrLine: timeout -> String | Nil => @primitive "readStderrLine:"
+  readStderrLine: timeout -> Object => @primitive "readStderrLine:"
 
   /// Return a Stream of stdout lines. Generator calls readLine via gen_server:call.
   lines -> Stream => @primitive "lines"
@@ -247,7 +245,7 @@ Actor subclass: Subprocess
   stderrLines -> Stream => @primitive "stderrLines"
 
   /// Get the exit code. Returns nil if the subprocess is still running.
-  exitCode -> Integer | Nil => @primitive "exitCode"
+  exitCode -> Object => @primitive "exitCode"
 
   /// Force-close the subprocess (sends kill to process group).
   close -> Nil => @primitive "close"
@@ -764,9 +762,7 @@ A push-based `SubprocessListener` (with `onLine:`, `onStderrLine:`, `onExit:` ca
 
 ```beamtalk
 // User-space push wrapper — no stdlib support needed
-reader := Actor subclass: SubprocessReader
-  state: subprocess = nil
-  state: callback = nil
+Actor subclass: SubprocessReader
 
   class on: subprocess do: callback =>
     self spawnWith: #{"subprocess" => subprocess, "callback" => callback}
