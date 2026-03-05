@@ -152,12 +152,15 @@ fn visit_actor_new(
                 && class_name != "Actor"
                 && hierarchy.is_actor_subclass(class_name)
             {
-                let mut diag = Diagnostic::warning(
-                    format!("Actor subclass `{class_name}` should use `spawn` instead of `{sel}`"),
-                    *span,
+                diagnostics.push(
+                    Diagnostic::warning(
+                        format!(
+                            "Actor subclass `{class_name}` should use `spawn` instead of `{sel}`"
+                        ),
+                        *span,
+                    )
+                    .with_hint("Use spawn instead of new for Actor subclasses"),
                 );
-                diag.hint = Some("Use spawn instead of new for Actor subclasses".into());
-                diagnostics.push(diag);
             }
         }
     }
@@ -173,14 +176,15 @@ fn visit_actor_new(
                     && class_name != "Actor"
                     && hierarchy.is_actor_subclass(class_name)
                 {
-                    let mut diag = Diagnostic::warning(
-                        format!(
-                            "Actor subclass `{class_name}` should use `spawn` instead of `{sel}`"
-                        ),
-                        msg.span,
+                    diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Actor subclass `{class_name}` should use `spawn` instead of `{sel}`"
+                            ),
+                            msg.span,
+                        )
+                        .with_hint("Use spawn instead of new for Actor subclasses"),
                     );
-                    diag.hint = Some("Use spawn instead of new for Actor subclasses".into());
-                    diagnostics.push(diag);
                 }
             }
         }
@@ -256,13 +260,14 @@ fn validate_map_field_names(
     for pair in pairs {
         if let Expression::Literal(crate::ast::Literal::Symbol(sym), sym_span) = &pair.key {
             if !declared_state.iter().any(|s| s.as_str() == sym.as_str()) {
-                let mut diag = Diagnostic::warning(
-                    format!("Unknown field `{sym}` for class `{class_name}`"),
-                    *sym_span,
-                );
                 let fields: Vec<&str> = declared_state.iter().map(EcoString::as_str).collect();
-                diag.hint = Some(format!("Declared fields: {}", fields.join(", ")).into());
-                diagnostics.push(diag);
+                diagnostics.push(
+                    Diagnostic::warning(
+                        format!("Unknown field `{sym}` for class `{class_name}`"),
+                        *sym_span,
+                    )
+                    .with_hint(format!("Declared fields: {}", fields.join(", "))),
+                );
             }
         }
     }
@@ -300,24 +305,22 @@ fn visit_classvar_access(
                     if hierarchy.has_class(class_name)
                         && !class_vars.iter().any(|cv| cv.as_str() == var_name.as_str())
                     {
-                        let mut diag = Diagnostic::warning(
-                            format!(
-                                "Undefined class variable `{var_name}` on class `{class_name}`"
-                            ),
-                            *span,
-                        );
-                        if class_vars.is_empty() {
-                            diag.hint = Some(
-                                format!("`{class_name}` has no declared class variables").into(),
-                            );
+                        let hint = if class_vars.is_empty() {
+                            format!("`{class_name}` has no declared class variables")
                         } else {
                             let vars: Vec<&str> =
                                 class_vars.iter().map(EcoString::as_str).collect();
-                            diag.hint = Some(
-                                format!("Declared class variables: {}", vars.join(", ")).into(),
-                            );
-                        }
-                        diagnostics.push(diag);
+                            format!("Declared class variables: {}", vars.join(", "))
+                        };
+                        diagnostics.push(
+                            Diagnostic::warning(
+                                format!(
+                                    "Undefined class variable `{var_name}` on class `{class_name}`"
+                                ),
+                                *span,
+                            )
+                            .with_hint(hint),
+                        );
                     }
                 }
             }
@@ -339,25 +342,22 @@ fn visit_classvar_access(
                         if hierarchy.has_class(class_name)
                             && !class_vars.iter().any(|cv| cv.as_str() == var_name.as_str())
                         {
-                            let mut diag = Diagnostic::warning(
-                                format!(
-                                    "Undefined class variable `{var_name}` on class `{class_name}`"
-                                ),
-                                msg.span,
-                            );
-                            if class_vars.is_empty() {
-                                diag.hint = Some(
-                                    format!("`{class_name}` has no declared class variables")
-                                        .into(),
-                                );
+                            let hint = if class_vars.is_empty() {
+                                format!("`{class_name}` has no declared class variables")
                             } else {
                                 let vars: Vec<&str> =
                                     class_vars.iter().map(EcoString::as_str).collect();
-                                diag.hint = Some(
-                                    format!("Declared class variables: {}", vars.join(", ")).into(),
-                                );
-                            }
-                            diagnostics.push(diag);
+                                format!("Declared class variables: {}", vars.join(", "))
+                            };
+                            diagnostics.push(
+                                Diagnostic::warning(
+                                    format!(
+                                        "Undefined class variable `{var_name}` on class `{class_name}`"
+                                    ),
+                                    msg.span,
+                                )
+                                .with_hint(hint),
+                            );
                         }
                     }
                 }
@@ -383,18 +383,18 @@ pub fn check_stdlib_name_shadowing(module: &Module, diagnostics: &mut Vec<Diagno
     for class in &module.classes {
         let name = class.name.name.as_str();
         if ClassHierarchy::is_runtime_protected_class(name) {
-            let mut diag = Diagnostic::warning(
-                format!(
-                    "Class name `{name}` conflicts with a stdlib class. \
-                     Loading will fail because stdlib class names are protected."
-                ),
-                class.name.span,
+            diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "Class name `{name}` conflicts with a stdlib class. \
+                         Loading will fail because stdlib class names are protected."
+                    ),
+                    class.name.span,
+                )
+                .with_hint(format!(
+                    "Choose a different name. `{name}` is a protected stdlib class name."
+                )),
             );
-            diag.hint = Some(
-                format!("Choose a different name. `{name}` is a protected stdlib class name.")
-                    .into(),
-            );
-            diagnostics.push(diag);
         }
         // BT-1041: `Self` is reserved as a return type keyword
         if name == "Self" {
@@ -493,41 +493,37 @@ fn report_self_slot_assignment(
 ) {
     let with_selector = format!("with{}:", capitalize_first(slot_name));
     if is_value {
-        let mut diag = Diagnostic::error(
-            format!(
-                "Cannot assign to slot `{slot_name}` on value type \
-                 — use `self {with_selector} newValue` to create a new instance"
-            ),
-            span,
-        );
-        diag.hint = Some(
-            format!(
+        diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "Cannot assign to slot `{slot_name}` on value type \
+                     — use `self {with_selector} newValue` to create a new instance"
+                ),
+                span,
+            )
+            .with_hint(format!(
                 "Value types are immutable. \
                  Use `self {with_selector}` to return a new instance with the updated slot."
-            )
-            .into(),
+            )),
         );
-        diagnostics.push(diag);
     } else if method_selector != with_selector
         && hierarchy.find_method(class_name, &with_selector).is_some()
     {
         // Actor: warn only when we are NOT inside the withSlot: method
         // itself, and the method exists in the hierarchy (user-defined).
-        let mut diag = Diagnostic::warning(
-            format!(
-                "Direct slot assignment `self.{slot_name} :=` bypasses \
-                 the `{with_selector}` method defined in the class hierarchy"
-            ),
-            span,
-        );
-        diag.hint = Some(
-            format!(
+        diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "Direct slot assignment `self.{slot_name} :=` bypasses \
+                     the `{with_selector}` method defined in the class hierarchy"
+                ),
+                span,
+            )
+            .with_hint(format!(
                 "Consider using `self {with_selector} newValue` \
                  to go through the `{with_selector}` method."
-            )
-            .into(),
+            )),
         );
-        diagnostics.push(diag);
     }
 }
 
@@ -647,12 +643,13 @@ pub(crate) fn check_redundant_assignment(module: &Module, diagnostics: &mut Vec<
             ) = (target.as_ref(), value.as_ref())
             {
                 if lhs == rhs {
-                    let mut diag = Diagnostic::warning(
-                        format!("Redundant assignment: `{lhs} := {lhs}` has no effect"),
-                        *span,
+                    diagnostics.push(
+                        Diagnostic::warning(
+                            format!("Redundant assignment: `{lhs} := {lhs}` has no effect"),
+                            *span,
+                        )
+                        .with_hint("Remove this assignment or assign a different value."),
                     );
-                    diag.hint = Some("Remove this assignment or assign a different value.".into());
-                    diagnostics.push(diag);
                 }
             }
         }
@@ -768,18 +765,20 @@ fn check_self_capture_at(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
             }
             if let Expression::Block(block) = arg {
                 if find_self_reference_in_block(block).is_some() {
-                    let mut diag = Diagnostic::hint(
-                        format!("`self` capture in block passed to `{selector_str}` may deadlock"),
-                        *span,
+                    diagnostics.push(
+                        Diagnostic::hint(
+                            format!(
+                                "`self` capture in block passed to `{selector_str}` may deadlock"
+                            ),
+                            *span,
+                        )
+                        .with_hint(
+                            "Sending `self` from within a collection block re-enters the \
+                             `calling_self` dispatch and can deadlock. \
+                             Inline the logic or bind the result to a local variable before \
+                             entering the block.",
+                        ),
                     );
-                    diag.hint = Some(
-                        "Sending `self` from within a collection block re-enters the \
-                         `calling_self` dispatch and can deadlock. \
-                         Inline the logic or bind the result to a local variable before \
-                         entering the block."
-                            .into(),
-                    );
-                    diagnostics.push(diag);
                 }
             }
         }
@@ -850,10 +849,10 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
             let selector_str = selector.name();
             if is_boolean_conditional_selector(&selector_str) {
                 let literal_name = if is_true { "true" } else { "false" };
-                let mut diag =
-                    Diagnostic::warning(format!("Condition is always `{literal_name}`"), *span);
-                diag.hint = Some(dead_branch_hint(is_true, &selector_str).into());
-                diagnostics.push(diag);
+                diagnostics.push(
+                    Diagnostic::warning(format!("Condition is always `{literal_name}`"), *span)
+                        .with_hint(dead_branch_hint(is_true, &selector_str)),
+                );
             }
         }
     }
@@ -873,12 +872,13 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
             for msg in messages {
                 let selector_str = msg.selector.name();
                 if is_boolean_conditional_selector(&selector_str) {
-                    let mut diag = Diagnostic::warning(
-                        format!("Condition is always `{literal_name}`"),
-                        msg.span,
+                    diagnostics.push(
+                        Diagnostic::warning(
+                            format!("Condition is always `{literal_name}`"),
+                            msg.span,
+                        )
+                        .with_hint(dead_branch_hint(is_true, &selector_str)),
                     );
-                    diag.hint = Some(dead_branch_hint(is_true, &selector_str).into());
-                    diagnostics.push(diag);
                 }
             }
         }
@@ -895,30 +895,25 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
         for method in class.methods.iter().chain(class.class_methods.iter()) {
             if method.body.is_empty() {
                 let selector = method.selector.name();
-                let mut diag = Diagnostic::error(
-                    format!("Method `{selector}` has an empty body"),
-                    method.span,
-                )
-                .with_category(DiagnosticCategory::EmptyBody);
-                diag.hint = Some(
-                    "Use `self notImplemented` for stubs, or `self subclassResponsibility` for abstract methods".into(),
+                diagnostics.push(
+                    Diagnostic::error(format!("Method `{selector}` has an empty body"), method.span)
+                        .with_category(DiagnosticCategory::EmptyBody)
+                        .with_hint("Use `self notImplemented` for stubs, or `self subclassResponsibility` for abstract methods"),
                 );
-                diagnostics.push(diag);
             }
         }
     }
     for standalone in &module.method_definitions {
         if standalone.method.body.is_empty() {
             let selector = standalone.method.selector.name();
-            let mut diag = Diagnostic::error(
-                format!("Method `{selector}` has an empty body"),
-                standalone.method.span,
-            )
-            .with_category(DiagnosticCategory::EmptyBody);
-            diag.hint = Some(
-                "Use `self notImplemented` for stubs, or `self subclassResponsibility` for abstract methods".into(),
+            diagnostics.push(
+                Diagnostic::error(
+                    format!("Method `{selector}` has an empty body"),
+                    standalone.method.span,
+                )
+                .with_category(DiagnosticCategory::EmptyBody)
+                .with_hint("Use `self notImplemented` for stubs, or `self subclassResponsibility` for abstract methods"),
             );
-            diagnostics.push(diag);
         }
     }
 }
@@ -1094,10 +1089,11 @@ fn check_seq_for_effect_free(
         let is_last = i == len - 1;
         if !is_last && is_effect_free(expr) {
             let label = effect_free_label(expr);
-            let mut diag = Diagnostic::lint(format!("this {label} has no effect"), expr.span());
-            diag.hint =
-                Some("Remove this expression, or assign its value to a variable if needed.".into());
-            diagnostics.push(diag);
+            diagnostics.push(
+                Diagnostic::lint(format!("this {label} has no effect"), expr.span()).with_hint(
+                    "Remove this expression, or assign its value to a variable if needed.",
+                ),
+            );
         }
         walk_expr_for_effect_free(expr, diagnostics);
     }
@@ -1270,22 +1266,20 @@ fn check_method_nil_return(
         return;
     }
     let selector = method.selector.name();
-    let mut diag = Diagnostic::error(
-        format!(
-            "method `{selector}` returns Nil on a Value type \
-             — Value types should not have side-effecting void methods; \
-             consider `Object subclass:` instead"
-        ),
-        method.span,
-    );
-    diag.hint = Some(
-        format!(
+    diagnostics.push(
+        Diagnostic::error(
+            format!(
+                "method `{selector}` returns Nil on a Value type \
+                 — Value types should not have side-effecting void methods; \
+                 consider `Object subclass:` instead"
+            ),
+            method.span,
+        )
+        .with_hint(format!(
             "Value types (ADR 0042) are immutable transformations. \
              Move `{class_name}` to inherit from `Object` if it needs void methods."
-        )
-        .into(),
+        )),
     );
-    diagnostics.push(diag);
 }
 
 #[cfg(test)]

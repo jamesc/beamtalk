@@ -44,18 +44,18 @@ fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
 
     if let Expression::Return { span, .. } = &last_stmt.expression {
         let method_name = method.selector.name();
-        let mut diag = Diagnostic::lint(
-            format!(
-                "trailing `^` in method `{method_name}` is redundant — \
-                 the last expression is returned implicitly"
+        diagnostics.push(
+            Diagnostic::lint(
+                format!(
+                    "trailing `^` in method `{method_name}` is redundant — \
+                     the last expression is returned implicitly"
+                ),
+                *span,
+            )
+            .with_hint(
+                "Remove the `^` — in Beamtalk, the last expression is always returned implicitly",
             ),
-            *span,
         );
-        diag.hint = Some(
-            "Remove the `^` — in Beamtalk, the last expression is always returned implicitly"
-                .into(),
-        );
-        diagnostics.push(diag);
     }
 }
 

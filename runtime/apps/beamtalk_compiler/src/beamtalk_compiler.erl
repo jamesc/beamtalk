@@ -24,7 +24,8 @@
     compile/2,
     diagnostics/1,
     version/0,
-    compile_core_erlang/1
+    compile_core_erlang/1,
+    resolve_completion_type/1
 ]).
 
 %% @doc Compile a REPL expression.
@@ -83,6 +84,14 @@ diagnostics(Source) ->
 -spec version() -> {ok, binary()} | {error, term()}.
 version() ->
     beamtalk_compiler_server:version().
+
+%% @doc Resolve the type of an expression for REPL completion fallback (BT-1068).
+%%
+%% `Expression' is the receiver expression-up-to-cursor with the incomplete
+%% prefix stripped. Returns `{ok, ClassName}' or `{error, type_unknown}'.
+-spec resolve_completion_type(binary()) -> {ok, atom()} | {error, type_unknown}.
+resolve_completion_type(Expression) ->
+    beamtalk_compiler_server:resolve_completion_type(Expression).
 
 %% @doc Compile Core Erlang source to BEAM bytecode in memory.
 %%

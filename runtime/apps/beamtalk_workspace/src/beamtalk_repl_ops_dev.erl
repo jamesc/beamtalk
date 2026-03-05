@@ -522,6 +522,10 @@ is_valid_unary_selector(_) ->
 %%
 %% Tokenises the expression, classifies the receiver, then walks the chain by
 %% looking up each send's return type in `method_return_types` on the class registry.
+%%
+%% When the tokenizer fails (e.g. parenthesised subexpressions, binary message
+%% chains, keyword sends mid-chain), falls back to compiler-based type resolution
+%% (BT-1068, ADR 0045 Option C).
 -spec resolve_chain_type(binary(), map()) -> {ok, atom()} | undefined.
 resolve_chain_type(Expr, Bindings) ->
     case tokenise_send_chain(Expr) of
@@ -532,7 +536,23 @@ resolve_chain_type(Expr, Bindings) ->
                 undefined -> undefined
             end;
         error ->
-            undefined
+            %% BT-1068: tokeniser can't parse the expression — try the compiler port.
+            resolve_type_via_compiler(Expr)
+    end.
+
+%% @private
+%% @doc Compiler-based type resolution fallback for complex expressions (BT-1068).
+%%
+%% Sends the expression to the Rust compiler via the port. The compiler parses
+%% it fully, runs type inference, and returns the type of the last expression.
+%% Falls back to `undefined' if the compiler is unavailable or the type is unknown.
+-spec resolve_type_via_compiler(binary()) -> {ok, atom()} | undefined.
+resolve_type_via_compiler(Expr) ->
+    try beamtalk_compiler:resolve_completion_type(Expr) of
+        {ok, ClassName} -> {ok, ClassName};
+        {error, type_unknown} -> undefined
+    catch
+        _:_ -> undefined
     end.
 
 %% @private
@@ -729,7 +749,7 @@ get_session_bindings(SessionPid) ->
 -spec get_workspace_bindings() -> map().
 get_workspace_bindings() ->
     try
-        beamtalk_workspace_interface:get_session_bindings()
+        beamtalk_workspace_interface_primitives:get_session_bindings()
     catch
         _:_ -> #{}
     end.

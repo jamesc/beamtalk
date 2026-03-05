@@ -91,20 +91,18 @@ fn check_sequence(exprs: &[ExpressionStatement], diagnostics: &mut Vec<Diagnosti
                 let first_span = exprs[run_start].expression.span();
                 let last_span = exprs[i - 1].expression.span();
                 let span = first_span.merge(last_span);
-                let mut diag = Diagnostic::lint(
-                    format!(
-                        "`{recv}` receives {run_len} consecutive messages; consider using a cascade"
-                    ),
-                    span,
-                );
-                diag.hint = Some(
-                    format!(
+                diagnostics.push(
+                    Diagnostic::lint(
+                        format!(
+                            "`{recv}` receives {run_len} consecutive messages; consider using a cascade"
+                        ),
+                        span,
+                    )
+                    .with_hint(format!(
                         "Replace the {run_len} separate sends with a cascade: \
                          `{recv} msg1; msg2; ...`"
-                    )
-                    .into(),
+                    )),
                 );
-                diagnostics.push(diag);
             }
             // Recurse into each expression in the run
             for stmt in &exprs[run_start..i] {

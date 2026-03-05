@@ -969,6 +969,45 @@ fn handle_version() -> Term {
     ]))
 }
 
+/// Handle a `resolve_completion_type` request (BT-1068).
+///
+/// Resolves the type of an arbitrary expression for REPL completion fallback.
+/// This is called when `tokenise_send_chain/1` fails (e.g. parenthesised
+/// subexpressions, binary message chains, keyword sends mid-chain).
+///
+/// Request fields:
+/// - `expression` (binary): the full receiver expression with the incomplete prefix stripped
+/// - `class_hierarchy` (optional map): user-defined class metadata from the REPL session
+///
+/// Response: `#{status => ok, class_name => <<"String">>}` on success,
+/// or `#{status => not_found}` when the type cannot be inferred.
+fn handle_resolve_completion_type(request: &Map) -> Term {
+    let Some(expression) = map_get(request, "expression").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'expression' field".to_string()]);
+    };
+
+    let pre_class_hierarchy = match map_get(request, "class_hierarchy") {
+        None => vec![],
+        Some(term) => parse_class_hierarchy_from_term(term),
+    };
+
+    let mut hierarchy = beamtalk_core::semantic_analysis::ClassHierarchy::with_builtins();
+    if !pre_class_hierarchy.is_empty() {
+        hierarchy.add_from_beam_meta(pre_class_hierarchy);
+    }
+
+    match beamtalk_core::queries::completion_provider::resolve_expression_type(
+        &expression,
+        &hierarchy,
+    ) {
+        Some(class_name) => Term::from(Map::from([
+            (atom("status"), atom("ok")),
+            (atom("class_name"), binary(&class_name)),
+        ])),
+        None => Term::from(Map::from([(atom("status"), atom("not_found"))])),
+    }
+}
+
 /// Handle a single request and return a response Term.
 fn handle_request(request_term: &Term) -> Term {
     let Term::Map(map) = request_term else {
@@ -986,6 +1025,7 @@ fn handle_request(request_term: &Term) -> Term {
         "compile" => handle_compile(map),
         "diagnostics" => handle_diagnostics(map),
         "version" => handle_version(),
+        "resolve_completion_type" => handle_resolve_completion_type(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }
@@ -1308,6 +1348,68 @@ mod tests {
             Some(&atom("ok")),
             "compile with class_hierarchy should succeed: {response:?}"
         );
+    }
+
+    // --- resolve_completion_type tests (BT-1068) ---
+
+    #[test]
+    fn resolve_completion_type_string_literal() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_completion_type")),
+            (atom("expression"), binary("\"hello\"")),
+        ]);
+        let response = handle_resolve_completion_type(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")));
+        assert_eq!(
+            map_get(m, "class_name").and_then(term_to_string),
+            Some("String".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_completion_type_parenthesized_binary_send() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_completion_type")),
+            (atom("expression"), binary("(\"foo\" ++ \"bar\")")),
+        ]);
+        let response = handle_resolve_completion_type(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")));
+        assert_eq!(
+            map_get(m, "class_name").and_then(term_to_string),
+            Some("String".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_completion_type_unknown_expression() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_completion_type")),
+            (atom("expression"), binary("unknownVar")),
+        ]);
+        let response = handle_resolve_completion_type(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("not_found")));
+    }
+
+    #[test]
+    fn resolve_completion_type_empty_expression() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_completion_type")),
+            (atom("expression"), binary("")),
+        ]);
+        let response = handle_resolve_completion_type(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("not_found")));
     }
 
     #[test]

@@ -240,12 +240,13 @@ fn validate_stdlib_restriction(
         ));
     } else {
         // Default: hard error
-        let mut diag = Diagnostic::error(
-            "Primitives can only be declared in the standard library",
-            span,
+        diagnostics.push(
+            Diagnostic::error(
+                "Primitives can only be declared in the standard library",
+                span,
+            )
+            .with_hint("Use --allow-primitives flag only if implementing FFI bindings"),
         );
-        diag.hint = Some("Use --allow-primitives flag only if implementing FFI bindings".into());
-        diagnostics.push(diag);
     }
 }
 
@@ -253,9 +254,10 @@ fn validate_stdlib_restriction(
 fn validate_intrinsic_name(name: &str, span: Span, diagnostics: &mut Vec<Diagnostic>) {
     if !STRUCTURAL_INTRINSICS.contains(&name) {
         let known = STRUCTURAL_INTRINSICS.join(", ");
-        let mut diag = Diagnostic::error(format!("Unknown intrinsic '{name}'"), span);
-        diag.hint = Some(format!("Known intrinsics: {known}").into());
-        diagnostics.push(diag);
+        diagnostics.push(
+            Diagnostic::error(format!("Unknown intrinsic '{name}'"), span)
+                .with_hint(format!("Known intrinsics: {known}")),
+        );
     }
 }
 

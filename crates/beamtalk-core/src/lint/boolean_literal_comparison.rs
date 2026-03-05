@@ -115,9 +115,10 @@ fn check_boolean_comparison(
             format!("Replace with `{other_repr} not`"),
         )
     };
-    let mut diag = Diagnostic::lint(format!("Redundant boolean comparison: {suggestion}"), span);
-    diag.hint = Some(hint_text.into());
-    diagnostics.push(diag);
+    diagnostics.push(
+        Diagnostic::lint(format!("Redundant boolean comparison: {suggestion}"), span)
+            .with_hint(hint_text),
+    );
 }
 
 #[cfg(test)]

@@ -236,13 +236,15 @@ fn check_block(block: &Block, scope: &mut LintScope, diagnostics: &mut Vec<Diagn
     for param in &block.parameters {
         let name = param.name.as_str();
         if scope.is_defined_in_any_scope(name) {
-            let mut diag = Diagnostic::lint(
-                format!("block parameter `{name}` shadows an outer variable"),
-                param.span,
+            diagnostics.push(
+                Diagnostic::lint(
+                    format!("block parameter `{name}` shadows an outer variable"),
+                    param.span,
+                )
+                .with_hint(format!(
+                    "Rename `{name}` to avoid shadowing the outer binding."
+                )),
             );
-            diag.hint =
-                Some(format!("Rename `{name}` to avoid shadowing the outer binding.").into());
-            diagnostics.push(diag);
         }
     }
 

@@ -378,16 +378,13 @@ impl NameResolver {
             // Same-depth duplicates (e.g., [:x :x |]) are not shadowing.
             if outer.depth < self.scope.current_depth() {
                 let outer_span = outer.defined_at;
-                let mut diag =
-                    Diagnostic::warning(format!("Variable `{name}` shadows outer variable"), span);
-                diag.hint = Some(
-                    format!(
-                        "Outer variable defined at offset {}. Use a different name to avoid confusion",
-                        outer_span.start()
-                    )
-                    .into(),
+                self.diagnostics.push(
+                    Diagnostic::warning(format!("Variable `{name}` shadows outer variable"), span)
+                        .with_hint(format!(
+                            "Outer variable defined at offset {}. Use a different name to avoid confusion",
+                            outer_span.start()
+                        )),
                 );
-                self.diagnostics.push(diag);
             }
         }
     }
@@ -405,10 +402,10 @@ impl NameResolver {
             let expr = &stmt.expression;
             if saw_return && !warned {
                 // First unreachable expression after early return — warn once
-                let mut diag =
-                    Diagnostic::warning("Unreachable code after early return", expr.span());
-                diag.hint = Some("Code after an early return (^) will never execute".into());
-                self.diagnostics.push(diag);
+                self.diagnostics.push(
+                    Diagnostic::warning("Unreachable code after early return", expr.span())
+                        .with_hint("Code after an early return (^) will never execute"),
+                );
                 warned = true;
             }
 
@@ -435,11 +432,13 @@ impl NameResolver {
             .map(|b| (b.name.clone(), b.defined_at))
             .collect();
         for (name, span) in unused {
-            let mut diag = Diagnostic::warning(format!("Unused variable `{name}`"), span)
-                .with_category(DiagnosticCategory::Unused);
-            diag.hint =
-                Some(format!("If this is intentional, prefix with underscore: _{name}").into());
-            self.diagnostics.push(diag);
+            self.diagnostics.push(
+                Diagnostic::warning(format!("Unused variable `{name}`"), span)
+                    .with_category(DiagnosticCategory::Unused)
+                    .with_hint(format!(
+                        "If this is intentional, prefix with underscore: _{name}"
+                    )),
+            );
         }
     }
 
@@ -457,11 +456,13 @@ impl NameResolver {
             .map(|b| (b.name.clone(), b.defined_at))
             .collect();
         for (name, span) in unused {
-            let mut diag = Diagnostic::warning(format!("Unused parameter `{name}`"), span)
-                .with_category(DiagnosticCategory::Unused);
-            diag.hint =
-                Some(format!("If this is intentional, prefix with underscore: _{name}").into());
-            self.diagnostics.push(diag);
+            self.diagnostics.push(
+                Diagnostic::warning(format!("Unused parameter `{name}`"), span)
+                    .with_category(DiagnosticCategory::Unused)
+                    .with_hint(format!(
+                        "If this is intentional, prefix with underscore: _{name}"
+                    )),
+            );
         }
     }
 }

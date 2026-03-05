@@ -13,18 +13,22 @@
 //! This is part of BT-340: making compiled stdlib modules self-sufficient
 //! so hand-written Erlang dispatch modules can be deleted.
 
+mod actor_types;
 mod array;
 mod behaviour;
 mod block;
 mod character;
 mod collection;
 mod dictionary;
+mod error_handling;
 mod float;
 mod integer;
 mod list;
 mod metaclass;
-mod misc;
+mod reflection;
 mod string;
+mod system;
+mod value_types;
 
 use super::document::Document;
 use crate::docvec;
@@ -53,35 +57,35 @@ pub fn generate_primitive_bif(
         "Float" => float::generate_float_bif(selector, params),
         "String" => string::generate_string_bif(selector, params),
         "Block" => block::generate_block_bif(selector, params),
-        "File" => misc::generate_file_bif(selector, params),
-        "Exception" => misc::generate_exception_bif(selector, params),
-        "Symbol" => misc::generate_symbol_bif(selector, params),
-        "Tuple" => misc::generate_tuple_bif(selector, params),
+        "File" => system::generate_file_bif(selector, params),
+        "Exception" => error_handling::generate_exception_bif(selector, params),
+        "Symbol" => reflection::generate_symbol_bif(selector, params),
+        "Tuple" => value_types::generate_tuple_bif(selector, params),
         "List" => list::generate_list_bif(selector, params),
         "Dictionary" => dictionary::generate_dictionary_bif(selector, params),
-        "Object" => misc::generate_object_bif(selector, params),
-        "Set" => misc::generate_set_bif(selector, params),
-        "CompiledMethod" => misc::generate_compiled_method_bif(selector, params),
+        "Object" => value_types::generate_object_bif(selector, params),
+        "Set" => value_types::generate_set_bif(selector, params),
+        "CompiledMethod" => reflection::generate_compiled_method_bif(selector, params),
         "Character" => character::generate_character_bif(selector, params),
-        "TestCase" => misc::generate_test_case_bif(selector, params),
-        "TestRunner" => misc::generate_test_runner_bif(selector, params),
-        "TestResult" => misc::generate_test_result_bif(selector, params),
-        "Stream" => misc::generate_stream_bif(selector, params),
-        "JSON" => misc::generate_json_bif(selector, params),
-        "Random" => misc::generate_random_bif(selector, params),
-        "Regex" => misc::generate_regex_bif(selector, params),
-        "System" => misc::generate_system_bif(selector, params),
-        "DateTime" => misc::generate_datetime_bif(selector, params),
+        "TestCase" => value_types::generate_test_case_bif(selector, params),
+        "TestRunner" => value_types::generate_test_runner_bif(selector, params),
+        "TestResult" => value_types::generate_test_result_bif(selector, params),
+        "Stream" => system::generate_stream_bif(selector, params),
+        "JSON" => reflection::generate_json_bif(selector, params),
+        "Random" => system::generate_random_bif(selector, params),
+        "Regex" => reflection::generate_regex_bif(selector, params),
+        "System" => system::generate_system_bif(selector, params),
+        "DateTime" => system::generate_datetime_bif(selector, params),
         "Collection" => collection::generate_collection_bif(selector, params),
         "Behaviour" => behaviour::generate_behaviour_bif(selector, params),
         "Class" => behaviour::generate_class_bif(selector, params),
         "Metaclass" => metaclass::generate_metaclass_bif(selector, params),
-        "StackFrame" => misc::generate_stack_frame_bif(selector, params),
-        "Pid" => misc::generate_pid_bif(selector, params),
-        "Port" => misc::generate_port_bif(selector, params),
-        "Reference" => misc::generate_reference_bif(selector, params),
-        "Future" => misc::generate_future_bif(selector, params),
-        "FileHandle" => misc::generate_file_handle_bif(selector, params),
+        "StackFrame" => error_handling::generate_stack_frame_bif(selector, params),
+        "Pid" => actor_types::generate_pid_bif(selector, params),
+        "Port" => actor_types::generate_port_bif(selector, params),
+        "Reference" => actor_types::generate_reference_bif(selector, params),
+        "Future" => actor_types::generate_future_bif(selector, params),
+        "FileHandle" => actor_types::generate_file_handle_bif(selector, params),
         _ => None,
     }
 }
@@ -153,21 +157,6 @@ pub(crate) fn core_erlang_binary_string(s: &str) -> Document<'static> {
         .map(|b| format!("#<{b}>(8,1,'integer',['unsigned'|['big']])"))
         .collect();
     Document::String(format!("#{{{}}}#", segments.join(",")))
-}
-
-/// Generates a call to a `_ops` Erlang module's dispatch/3 function.
-pub(crate) fn ops_dispatch(module: &str, selector: &str, params: &[String]) -> Document<'static> {
-    let mut parts: Vec<Document<'static>> = vec![Document::String(format!(
-        "call '{module}':'dispatch'('{selector}', ["
-    ))];
-    for (i, param) in params.iter().enumerate() {
-        if i > 0 {
-            parts.push(Document::Str(", "));
-        }
-        parts.push(Document::String(param.clone()));
-    }
-    parts.push(Document::Str("], Self)"));
-    Document::Vec(parts)
 }
 
 #[cfg(test)]
