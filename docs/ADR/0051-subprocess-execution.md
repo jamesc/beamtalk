@@ -118,9 +118,12 @@ The initial design considered returning a Stream from the actor (e.g., `agent li
    ```beamtalk
    class open: command args: args =>
      self spawnWith: #{"command" => command, "args" => args}
+
+   class open: command args: args env: env dir: dir =>
+     self spawnWith: #{"command" => command, "args" => args, "env" => env, "dir" => dir}
    ```
 
-   This requires no new Actor protocol machinery — it's a standard class method calling the existing `spawnWith:`.
+   This requires no new Actor protocol machinery — it's a standard class method calling the existing `spawnWith:`. The config dictionary supports optional `"env"` (Dictionary of String => String) and `"dir"` (String working directory) keys — omitted keys inherit from the parent process.
 
 3. **Sync-messaging conflict (ADR 0043)** — `.` terminator = `gen_server:call`. Returning a lazy Stream from a sync call is semantically broken when the Stream's generator needs the actor's port.
 
@@ -137,6 +140,12 @@ agent := Subprocess spawnWith: #{
 
 // Convenience factory method (desugars to spawnWith:)
 agent := Subprocess open: "codex" args: #("--full-auto", "fix the login bug")
+
+// With custom environment and working directory
+agent := Subprocess open: "make" args: #("test") env: #{
+  "CC" => "clang",
+  "CFLAGS" => "-O2"
+} dir: "/path/to/project"
 
 // Write a line to the subprocess's stdin
 agent writeLine: (JSON generate: #{
@@ -182,6 +191,10 @@ Actor subclass: Subprocess
   /// Convenience factory — desugars to spawnWith:
   class open: command args: args =>
     self spawnWith: #{"command" => command, "args" => args}
+
+  /// Convenience factory with environment and working directory.
+  class open: command args: args env: env dir: dir =>
+    self spawnWith: #{"command" => command, "args" => args, "env" => env, "dir" => dir}
 
   /// Write a line to the subprocess's stdin (appends newline).
   writeLine: data -> Nil => @primitive "writeLine:"

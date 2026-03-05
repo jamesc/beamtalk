@@ -1,19 +1,42 @@
-# ADR 0021: Stream — Universal Data Interface
+# ADR 0021: Stream — Lazy Pipeline for Value-Side Data
 
 ## Status
-Implemented (2026-02-15)
+Implemented (2026-02-15), Revised (2026-03-05)
 
 ## Context
 
 ### Problem
 
-Beamtalk has basic file I/O (`File readAll:`, `File writeAll:contents:`) and eager collection iteration (`do:`, `collect:`, `select:`), but no **universal interface for sequential data**. Every data source — files, collections, network sockets, OS processes, generators — needs its own iteration pattern today.
+Beamtalk has basic file I/O (`File readAll:`, `File writeAll:contents:`) and eager collection iteration (`do:`, `collect:`, `select:`), but no **lazy interface for sequential data**. Every data source — files, collections, generators — needs its own iteration pattern today.
 
-Without a unified Stream abstraction, Beamtalk users cannot:
+Without a Stream abstraction, Beamtalk users cannot:
 1. Read files line-by-line (only `File readAll:` which slurps entire content)
 2. Process large data lazily (everything is eager — full result materialized)
-3. Compose data pipelines across different sources
-4. Write code that works with any sequential data source (file, collection, stdin, network)
+3. Compose data pipelines across different value-side sources
+4. Write code that works with any caller-owned sequential data source (file, collection, generator)
+
+### Scope Limitation — Value-Side Only
+
+**Revised 2026-03-05:** The original ADR framed Stream as a "universal data interface" covering files, collections, network sockets, OS processes, and generators. Experience with ADR 0043 (sync-by-default actor messaging) and ADR 0051 (subprocess execution) has shown that Streams are fundamentally limited to **value-side use cases** — where the caller owns the data source and evaluates the stream in its own process.
+
+Streams cannot cross process boundaries because:
+1. **Port/file handles are process-local** — the process that opens a port or file handle is the only one that can read from it. A Stream's generator closure captures a handle, so the Stream must be consumed by the same process that created it.
+2. **ADR 0043 (sync-by-default)** — `.` is `gen_server:call`. An actor method must return a complete value, not a lazy generator that depends on actor-internal resources. Returning a port-backed Stream from an actor is semantically broken — the generator would run in the caller's process but the port lives in the actor's process.
+3. **Proven by ADR 0051** — the Subprocess actor cannot return a Stream of stdout lines. Instead it uses `readLine` (a sync `gen_server:call` that returns the next buffered line). This is the correct pattern for cross-process sequential data on BEAM.
+
+**What this means in practice:**
+
+| Context | Streams work? | Pattern instead |
+|---------|--------------|-----------------|
+| File I/O (caller-owned handle) | Yes | `File lines: "data.csv"` |
+| Collection transforms | Yes | `#(1, 2, 3) stream select: [...]` |
+| Pure generators | Yes | `Stream from: 1 by: [:n | n * 2]` |
+| Actor → caller data flow | **No** | `readLine` polling (ADR 0051) |
+| Subprocess output | **No** | `Subprocess readLine.` |
+| Network sockets via actors | **No** | Sync methods on socket actor |
+| Cross-process anything | **No** | Materialize to List first |
+
+Streams remain valuable for their core use case — lazy, composable pipelines over caller-owned data — but they are not and cannot be a universal abstraction across BEAM's process boundaries. The "Future integration points" listed in the Decision section have been revised accordingly.
 
 ### The Insight
 
@@ -51,7 +74,7 @@ Beamtalk's opportunity: implement this idea with modern (closure-based lazy) mec
 
 ## Decision
 
-Introduce `Stream` as Beamtalk's **universal interface for sequential data** — a single, lazy, closure-based type that unifies collection processing, file I/O, and all future data sources under one protocol.
+Introduce `Stream` as Beamtalk's **lazy pipeline for value-side sequential data** — a single, closure-based type that unifies collection processing, file I/O, and pure generators under one protocol. Stream covers caller-owned data sources; cross-process data flow uses sync actor methods instead (see Scope Limitation above).
 
 ### Class Hierarchy
 
@@ -79,10 +102,11 @@ Stream from: 1 by: [:n | n * 2]  // => infinite Stream: 1, 2, 4, 8, ...
 fib := FibonacciGenerator spawn   // Actor that speaks Stream protocol
 fib take: 10                      // => #(0, 1, 1, 2, 3, 5, 8, 13, 21, 34)
 
-// Future integration points (not part of this ADR)
-Console lines                      // => Stream of stdin lines
-socket lines                       // => Stream of TCP lines
-Process output: 'ls -la'          // => Stream of command output lines
+// NOT Streams — these use sync actor methods instead (ADR 0043, ADR 0051):
+// Subprocess readLine.            // => sync gen_server:call, not a Stream
+// socket readLine.                // => sync call on socket actor
+// Console readLine.               // => sync call, not a Stream
+// See ADR 0051 for the rationale: cross-process Streams don't work on BEAM.
 ```
 
 ### The Universal Protocol
@@ -412,7 +436,7 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 - No dedicated string building class (use `List join` or string concatenation for now)
 - Imperative yield-style generators (`generate:`) deferred — requires hiding a process inside a value type, which breaks the mental model. Stateful generators use actors instead (duck-typing the Stream protocol). This is the right pattern for BEAM but less convenient than Kotlin's `sequence { yield() }`.
 - Abandoned file streams (not fully consumed, not block-scoped) rely on process exit for handle cleanup — could leak handles in long-lived processes. `File open:do:` is the safe pattern.
-- **Cross-process limitation:** File-backed Streams cannot be sent as messages to actors — BEAM file handles are process-local. A file Stream consumed by a different process than the one that opened it will fail. Collection-backed and generator-backed Streams (pure closures) transfer safely. This limits the "universal" promise in actor-heavy code. Mitigation: use `File open:do:` (block-scoped, same process) or collect to List before sending.
+- **Cross-process limitation (revised 2026-03-05):** Streams are fundamentally value-side — they cannot cross BEAM process boundaries. File-backed and port-backed Streams capture process-local handles in their generator closures, so consuming them in a different process fails. ADR 0043 (sync-by-default) compounds this: an actor method returns a complete value via `gen_server:call`, not a lazy generator that depends on actor-internal resources. ADR 0051 (subprocess execution) proved this constraint in practice — the Subprocess actor uses `readLine` (sync polling) instead of returning a Stream. This means Streams serve file I/O, collection transforms, and pure generators well, but cross-process sequential data uses sync actor methods. Mitigation: use `File open:do:` (block-scoped, same process), collect to List before sending to actors, or use the readLine polling pattern for actor-mediated I/O.
 - **Auto-await interaction:** When an actor method returns a Stream, auto-await resolves the Future but the Stream's closures still reference the actor's process context. File-backed Streams from actors will fail on the caller side. This interaction must be documented clearly; full resolution is deferred to BT-507 (Future class ADR).
 
 ### Neutral
@@ -449,10 +473,12 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 
 ### Future Phases (separate ADRs/issues)
 - **Actor-based generators** — Actors that speak the Stream protocol (`take:`, `select:`, etc.) for stateful/imperative generators. This avoids hiding a process inside a value type. When Behaviours land, formalize as `Streamable` behaviour.
-- `Console lines` — Stream of stdin lines
-- Network streaming — TCP/UDP socket lines as Streams
-- `Process output:` — OS command output as Stream
 - Behaviours-based `Streamable` protocol (when Behaviours land)
+
+**Removed (revised 2026-03-05):** The following were listed as future Stream integration points but are better served by sync actor methods due to cross-process constraints (see Scope Limitation in Context):
+- ~~`Console lines` — Stream of stdin lines~~ → `Console readLine` (sync call)
+- ~~Network streaming — TCP/UDP socket lines as Streams~~ → sync methods on socket actor
+- ~~`Process output:` — OS command output as Stream~~ → `Subprocess readLine.` (ADR 0051) or block-scoped `System output:args:do:` (same-process Stream, not cross-process)
 
 ## Migration Path
 
@@ -476,7 +502,7 @@ aSet select: [:x | x > 0]   // Now works, returns a Set
 ```
 
 ## References
-- Related ADRs: ADR 0005 (sealed classes — Stream follows this pattern), ADR 0006 (unified dispatch), ADR 0007 (compilable stdlib), ADR 0009 (OTP structure), ADR 0014 (test framework — Stream tests use terminal ops in `// =>` assertions), ADR 0016 (module naming — Stream becomes `bt@stdlib@stream`), ADR 0019 (singleton access)
+- Related ADRs: ADR 0005 (sealed classes — Stream follows this pattern), ADR 0006 (unified dispatch), ADR 0007 (compilable stdlib), ADR 0009 (OTP structure), ADR 0014 (test framework — Stream tests use terminal ops in `// =>` assertions), ADR 0016 (module naming — Stream becomes `bt@stdlib@stream`), ADR 0019 (singleton access), ADR 0043 (sync-by-default — limits Stream to value-side), ADR 0051 (subprocess execution — proves readLine pattern over cross-process Streams)
 - Related issues: BT-506 (pipeline chaining syntax research), BT-507 (Future class ADR)
 - Existing I/O: `stdlib/src/File.bt`, `stdlib/src/TranscriptStream.bt`
 - Elixir Stream module: https://hexdocs.pm/elixir/Stream.html (primary inspiration)
