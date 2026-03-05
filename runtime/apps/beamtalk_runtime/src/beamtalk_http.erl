@@ -53,6 +53,15 @@
     'delete:headers:'/2,
     'request:url:options:'/3
 ]).
+
+%% No-colon aliases for Beamtalk proxy dispatch (BT-1117).
+%%
+%% The Beamtalk codegen routes `(Erlang M) keyword: arg` through
+%% `beamtalk_erlang_proxy:direct_call(M, stripped_fun, args)` where
+%% `stripped_fun` has the trailing colon removed (e.g. `get:` → `get`).
+%% These delegates expose the colon-style implementations under the
+%% expected no-colon names so `(Erlang beamtalk_http) get: url` works.
+-export([get/1, post/2, put/2, delete/1, request/3]).
 %% Exported for unit testing (beamtalk_http_tests)
 -export([
     normalise_method/1,
@@ -209,6 +218,31 @@ has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
     type_error('request:url:options:', <<"Url must be a String">>);
 'request:url:options:'(_, _, Options) when not is_map(Options) ->
     type_error('request:url:options:', <<"Options must be a Dictionary">>).
+
+%%% ============================================================================
+%%% No-colon delegates for Beamtalk proxy dispatch (BT-1117)
+%%% ============================================================================
+
+%% @doc GET delegate called by `(Erlang beamtalk_http) get: url` from Beamtalk.
+-spec get(binary()) -> map().
+get(Url) -> 'get:'(Url).
+
+%% @doc POST delegate called by `(Erlang beamtalk_http) post: url body: body`.
+-spec post(binary(), binary()) -> map().
+post(Url, Body) -> 'post:body:'(Url, Body).
+
+%% @doc PUT delegate called by `(Erlang beamtalk_http) put: url body: body`.
+-spec put(binary(), binary()) -> map().
+put(Url, Body) -> 'put:body:'(Url, Body).
+
+%% @doc DELETE delegate called by `(Erlang beamtalk_http) delete: url`.
+-spec delete(binary()) -> map().
+delete(Url) -> 'delete:'(Url).
+
+%% @doc Generic request delegate called by
+%% `(Erlang beamtalk_http) request: method url: url options: opts`.
+-spec request(term(), binary(), map()) -> map().
+request(Method, Url, Options) -> 'request:url:options:'(Method, Url, Options).
 
 %%% ============================================================================
 %%% Internal implementation

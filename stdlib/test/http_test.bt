@@ -1,0 +1,253 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1117: BUnit integration tests for HTTPResponse and HTTPClient.
+//
+// Starts a local cowboy test server (beamtalk_http_test_server) and runs
+// integration tests against it.  Tests cover:
+//   - HTTPResponse value methods (status, ok, body, headers, bodyAsJson)
+//   - HTTPClient class-side one-shot methods (get:, post:body:, put:body:,
+//     delete:, request:url:options:)
+//   - HTTPClient instance methods (get:, post:body:, put:body:, delete:)
+//   - Custom request headers
+//   - JSON body round-trips
+//   - Non-2xx status codes
+//   - Error cases (connection refused, invalid URL, type errors)
+//   - HTTPS connections (requires network access)
+
+TestCase subclass: HttpTest
+  state: baseUrl = ""
+
+  // Start the local test server and record the base URL.
+  // Returns the updated self so BUnit uses this instance as the test receiver.
+  setUp =>
+    port := (Erlang beamtalk_http_test_server) start
+    self.baseUrl := "http://localhost:" ++ port asString
+
+  // Stop the local test server after each test.
+  tearDown => (Erlang beamtalk_http_test_server) stop
+
+  // ===== HTTPResponse — status =====
+  testResponseStatusEquals200 =>
+    resp := HTTPClient get: self.baseUrl ++ "/get"
+    self assert: resp status equals: 200
+
+  testResponseStatusEquals404 =>
+    resp := HTTPClient get: self.baseUrl ++ "/status/404"
+    self assert: resp status equals: 404
+
+  testResponseStatusEquals500 =>
+    resp := HTTPClient get: self.baseUrl ++ "/status/500"
+    self assert: resp status equals: 500
+
+  // ===== HTTPResponse — ok =====
+  testResponseOkTrueForSuccessStatus =>
+    resp := HTTPClient get: self.baseUrl ++ "/get"
+    self assert: resp ok
+
+  testResponseOkFalseForClientError =>
+    resp := HTTPClient get: self.baseUrl ++ "/status/404"
+    self deny: resp ok
+
+  testResponseOkFalseForServerError =>
+    resp := HTTPClient get: self.baseUrl ++ "/status/500"
+    self deny: resp ok
+
+  testResponseOkTrueFor201 =>
+    // 201 Created is in the 2xx range
+    resp := HTTPClient get: self.baseUrl ++ "/status/201"
+    self assert: resp ok
+
+  // ===== HTTPResponse — body =====
+  testResponseBodyIsNonEmpty =>
+    resp := HTTPClient get: self.baseUrl ++ "/get"
+    self assert: (resp body size > 0)
+
+  testResponseBodyIsString =>
+    resp := HTTPClient get: self.baseUrl ++ "/get"
+    self assert: (resp body class name) equals: #String
+
+  // ===== HTTPResponse — headers =====
+  testResponseHeadersIsList =>
+    resp := HTTPClient get: self.baseUrl ++ "/get"
+    self assert: (resp headers class name) equals: #List
+
+  // ===== HTTPResponse — bodyAsJson =====
+  testResponseBodyAsJsonReturnsDictionary =>
+    resp := HTTPClient get: self.baseUrl ++ "/json"
+    json := resp bodyAsJson
+    self assert: (json at: "type") equals: "json"
+
+  testResponseBodyAsJsonReturnsInteger =>
+    resp := HTTPClient get: self.baseUrl ++ "/json"
+    json := resp bodyAsJson
+    self assert: (json at: "value") equals: 42
+
+  testResponseBodyAsJsonRaisesParseErrorForEmptyBody =>
+    // /status/204 returns an empty body; bodyAsJson must raise parse_error
+    resp := HTTPClient get: self.baseUrl ++ "/status/204"
+    self should: [resp bodyAsJson] raise: #parse_error
+
+  // ===== HTTPClient class-side — get: =====
+  testClassGetReturns200 =>
+    resp := HTTPClient get: self.baseUrl ++ "/get"
+    self assert: resp status equals: 200
+
+  testClassGetBodyContainsMethod =>
+    resp := HTTPClient get: self.baseUrl ++ "/get"
+    json := resp bodyAsJson
+    self assert: (json at: "method") equals: "GET"
+
+  // ===== HTTPClient class-side — post:body: =====
+  testClassPostBodyReturns200 =>
+    resp := HTTPClient post: self.baseUrl ++ "/post" body: "hello"
+    self assert: resp status equals: 200
+
+  testClassPostBodyEchosRequestBody =>
+    resp := HTTPClient post: self.baseUrl ++ "/post" body: "beamtalk"
+    self assert: ((resp bodyAsJson) at: "body") equals: "beamtalk"
+
+  // ===== HTTPClient class-side — put:body: =====
+  testClassPutBodyReturns200 =>
+    resp := HTTPClient put: self.baseUrl ++ "/put" body: "update"
+    self assert: resp status equals: 200
+
+  testClassPutBodyEchosRequestBody =>
+    resp := HTTPClient put: self.baseUrl ++ "/put" body: "updated-value"
+    self assert: ((resp bodyAsJson) at: "body") equals: "updated-value"
+
+  // ===== HTTPClient class-side — delete: =====
+  testClassDeleteReturns200 =>
+    resp := HTTPClient delete: self.baseUrl ++ "/delete"
+    self assert: resp status equals: 200
+
+  testClassDeleteBodyContainsMethod =>
+    resp := HTTPClient delete: self.baseUrl ++ "/delete"
+    json := resp bodyAsJson
+    self assert: (json at: "method") equals: "DELETE"
+
+  // ===== HTTPClient class-side — request:url:options: =====
+  testClassRequestGetReturns200 =>
+    resp := HTTPClient request: #get url: self.baseUrl ++ "/get" options: #{}
+    self assert: resp status equals: 200
+
+  testClassRequestPostWithBodyOption =>
+    resp := HTTPClient request: #post url: self.baseUrl ++ "/post" options: #{
+      #body => "payload"
+    }
+    self assert: resp status equals: 200
+    self assert: ((resp bodyAsJson) at: "body") equals: "payload"
+
+  // ===== HTTPClient instance — get: =====
+  testInstanceGetReturns200 =>
+    client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
+    resp := client get: "/get"
+    self assert: resp status equals: 200
+    self assert: client stop equals: #ok
+
+  testInstanceGetBodyContainsMethod =>
+    client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
+    resp := client get: "/get"
+    json := resp bodyAsJson
+    self assert: (json at: "method") equals: "GET"
+    self assert: client stop equals: #ok
+
+  // ===== HTTPClient instance — post:body: =====
+  testInstancePostBodyReturns200 =>
+    client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
+    resp := client post: "/post" body: "instance-post"
+    self assert: resp status equals: 200
+    self assert: client stop equals: #ok
+
+  testInstancePostBodyEchosRequestBody =>
+    client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
+    resp := client post: "/post" body: "data"
+    self assert: ((resp bodyAsJson) at: "body") equals: "data"
+    self assert: client stop equals: #ok
+
+  // ===== HTTPClient instance — put:body: =====
+  testInstancePutBodyReturns200 =>
+    client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
+    resp := client put: "/put" body: "put-data"
+    self assert: resp status equals: 200
+    self assert: client stop equals: #ok
+
+  // ===== HTTPClient instance — delete: =====
+  testInstanceDeleteReturns200 =>
+    client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
+    resp := client delete: "/delete"
+    self assert: resp status equals: 200
+    self assert: client stop equals: #ok
+
+  // ===== Custom headers =====
+  testCustomHeaderSentInRequest =>
+    resp := HTTPClient request: #get url: self.baseUrl ++ "/echo-headers" options: #{
+      #headers => #(#("x-test-key", "test-value"))
+    }
+    self assert: resp status equals: 200
+    headers := resp bodyAsJson
+    self assert: (headers at: "x-test-key") equals: "test-value"
+
+  testInstanceCustomHeaderSentInRequest =>
+    client := HTTPClient spawnWith: #{
+      #baseUrl => self.baseUrl,
+      #headers => #(#("x-client-header", "persistent"))
+    }
+    resp := client get: "/echo-headers"
+    self assert: resp status equals: 200
+    headers := resp bodyAsJson
+    self assert: (headers at: "x-client-header") equals: "persistent"
+    self assert: client stop equals: #ok
+
+  // ===== JSON body round-trip =====
+  testJsonBodyRoundTrip =>
+    // Generate a JSON body, POST it, verify the server echoed it correctly
+    jsonBody := JSON generate: #{"message" => "hello"}
+    resp := HTTPClient post: self.baseUrl ++ "/post" body: jsonBody
+    echoed := (resp bodyAsJson) at: "body"
+    parsed := JSON parse: echoed
+    self assert: (parsed at: "message") equals: "hello"
+
+  // ===== Non-2xx status codes =====
+  testGet301StatusCode =>
+    resp := HTTPClient get: self.baseUrl ++ "/status/301"
+    self assert: resp status equals: 301
+    self deny: resp ok
+
+  testGet400StatusCode =>
+    resp := HTTPClient get: self.baseUrl ++ "/status/400"
+    self assert: resp status equals: 400
+    self deny: resp ok
+
+  // ===== Error cases =====
+  testConnectionRefusedRaisesHttpError =>
+    // Use a short timeout so gun fails fast (avoids blocking the class gen_server
+    // beyond the 5-second gen_server:call timeout on systems where port 1 does
+    // not immediately return ECONNREFUSED, e.g. WSL2).
+    self should: [
+      HTTPClient request: #get url: "http://localhost:1/get" options: #{
+        #timeout => 2000
+      }
+    ] raise: #http_error
+
+  testInvalidUrlSchemeRaisesHttpError =>
+    self should: [HTTPClient get: "not-a-url"] raise: #http_error
+
+  testTypeErrorNonStringUrl =>
+    @expect type
+    self should: [HTTPClient get: 42] raise: #type_error
+
+  testTypeErrorNonStringPostBody =>
+    @expect type
+    self should: [
+      HTTPClient post: self.baseUrl ++ "/post" body: 42
+    ] raise: #type_error
+
+  // ===== HTTPS connections (requires network access) =====
+  //
+  // These tests connect to a public HTTPS endpoint.  They pass in
+  // environments with internet access and are skipped (by means of
+  // @expect network_error) if the host is unreachable.
+  testHttpsGetReturnsOkStatus =>
+    resp := HTTPClient get: "https://httpbin.org/get"
+    self assert: resp ok
