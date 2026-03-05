@@ -236,7 +236,7 @@ handle_actor_at(_) ->
 %% @private Return all loaded user classes (those with a source file recorded).
 -spec handle_classes() -> [tuple()].
 handle_classes() ->
-    beamtalk_class_registry:user_classes().
+    beamtalk_runtime_api:user_classes().
 
 %% @private Load a .bt file, compiling and registering the class.
 -spec handle_load(term()) -> nil | {error, #beamtalk_error{}}.
@@ -388,7 +388,7 @@ wrap_actor(#{pid := Pid, class := Class, module := Module}) ->
 %% @private Resolve a singleton class instance.
 -spec resolve_singleton(atom()) -> tuple() | 'nil'.
 resolve_singleton(ClassName) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
+    case beamtalk_runtime_api:whereis_class(ClassName) of
         undefined ->
             nil;
         ClassPid ->
@@ -402,7 +402,7 @@ resolve_singleton(ClassName) ->
 %% @private Extract the base class name from a class tag (e.g. 'Counter class' -> 'Counter').
 -spec base_class_name(atom()) -> atom().
 base_class_name(Tag) ->
-    Bin = beamtalk_class_registry:class_display_name(Tag),
+    Bin = beamtalk_runtime_api:class_display_name(Tag),
     try
         binary_to_existing_atom(Bin, utf8)
     catch

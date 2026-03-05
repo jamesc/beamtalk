@@ -109,7 +109,7 @@ build_class_superclass_index() ->
         (_, Acc) ->
             Acc
     end,
-    beamtalk_class_hierarchy_table:foldl(FoldFun, #{}).
+    beamtalk_runtime_api:hierarchy_foldl(FoldFun, #{}).
 
 %% @doc Build a class→module index from all registered class gen-servers.
 %%
@@ -121,15 +121,15 @@ build_class_superclass_index() ->
 build_class_module_index() ->
     ClassPids =
         try
-            beamtalk_class_registry:all_classes()
+            beamtalk_runtime_api:all_classes()
         catch
             _:_ -> []
         end,
     lists:foldl(
         fun(Pid, Acc) ->
             try
-                ClassName = gen_server:call(Pid, class_name, 1000),
-                ModuleName = gen_server:call(Pid, module_name, 1000),
+                ClassName = beamtalk_runtime_api:class_name(Pid),
+                ModuleName = beamtalk_runtime_api:module_name(Pid),
                 case {ClassName, ModuleName} of
                     {CN, MN} when is_atom(CN), is_atom(MN) ->
                         Acc#{atom_to_binary(CN, utf8) => atom_to_binary(MN, utf8)};

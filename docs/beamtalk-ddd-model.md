@@ -918,22 +918,9 @@ code_change(OldVsn, OldState, Extra) ->
 
 **Runtime Boundary (Customer-Supplier with Object System & Hot Reload):**
 
-Workspace is a *customer* of the Object System context and the Hot Reload context. Workspace source files may call the following Object System and Hot Reload functions directly — these form the approved cross-context API:
+Workspace is a *customer* of the Object System context and the Hot Reload context. All cross-context calls from workspace source files to runtime modules are routed exclusively through `beamtalk_runtime_api` (implemented in BT-1106) — the sole approved entry point. Workspace source files must **never** call internal runtime modules directly.
 
-| Module | Approved Functions | Purpose |
-|---|---|---|
-| `beamtalk_class_registry` | `all_classes/0`, `whereis_class/1`, `inherits_from/2`, `class_object_tag/1`, `class_display_name/1`, `is_class_name/1`, `drain_class_warnings_by_names/1`, `drain_pending_load_errors_by_names/1`, `get_method_return_type/2`, `get_class_method_return_type/2` | Class discovery and metadata |
-| `beamtalk_object_class` | `class_name/1`, `module_name/1`, `set_class_var/3`, `start_link/2`, `methods/1`, `local_class_methods/1`, `local_class_methods_map/1`, `local_instance_methods/1`, `instance_variables/1`, `superclass/1` | Per-class introspection |
-| `beamtalk_object_instances` | `all/1` | Instance enumeration for hot reload |
-| `beamtalk_dispatch` | `lookup/5` | Method lookup for workspace-level dispatch |
-| `beamtalk_reflection` | `field_names/1` | Actor field introspection |
-| `beamtalk_tagged_map` | `class_of/1`, `is_tagged/1` | Tagged map class lookup |
-| `beamtalk_primitive` | `print_string/1`, `class_of/1` | Primitive value printing and classification |
-| `beamtalk_hot_reload` | `trigger_code_change/2`, `trigger_code_change/3`, `code_change/3` | Hot reload triggers |
-
-Direct calls to any other function in these modules, or to any other runtime module not listed above, require an explicit cross-context justification comment or must go through `beamtalk_workspace_interface` (the workspace façade).
-
-**Future work:** BT-1106 tracks creation of a dedicated `beamtalk_runtime_api` façade module to replace all direct cross-context calls from workspace source files.
+See `docs/development/erlang-guidelines.md` § Approved Cross-Context API for the full function mapping table.
 
 **Example Domain Logic:**
 

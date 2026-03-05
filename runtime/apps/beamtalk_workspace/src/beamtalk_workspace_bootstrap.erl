@@ -154,7 +154,7 @@ class_module(ClassName) ->
 %% @private Set the `current` class variable on the class.
 set_class_variable(ClassName, Obj) ->
     try
-        beamtalk_object_class:set_class_var(ClassName, current, Obj)
+        beamtalk_runtime_api:set_class_var(ClassName, current, Obj)
     catch
         error:#beamtalk_error{kind = class_not_found} ->
             ?LOG_WARNING("Bootstrap: class not loaded yet", #{class => ClassName})

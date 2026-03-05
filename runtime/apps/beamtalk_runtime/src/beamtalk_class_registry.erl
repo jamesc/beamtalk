@@ -50,6 +50,11 @@
     get_class_method_return_type/2
 ]).
 
+-export_type([
+    class_entry/0,
+    user_class_entry/0
+]).
+
 -type class_name() :: atom().
 
 %%====================================================================

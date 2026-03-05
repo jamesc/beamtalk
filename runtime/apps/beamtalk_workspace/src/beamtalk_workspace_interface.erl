@@ -292,7 +292,7 @@ handle_call({Selector, Args}, From, State) when is_atom(Selector), is_list(Args)
     spawn(fun() ->
         Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
         try
-            beamtalk_dispatch:lookup(
+            beamtalk_runtime_api:dispatch_lookup(
                 Selector,
                 Args,
                 Self,
@@ -330,16 +330,16 @@ handle_call(Request, _From, State) ->
 -spec handle_cast(term(), #workspace_interface_state{}) ->
     {noreply, #workspace_interface_state{}}.
 handle_cast({actors, [], FuturePid}, State) when is_pid(FuturePid) ->
-    beamtalk_future:resolve(FuturePid, handle_actors()),
+    beamtalk_runtime_api:future_resolve(FuturePid, handle_actors()),
     {noreply, State};
 handle_cast({'actorAt:', [PidStr], FuturePid}, State) when is_pid(FuturePid) ->
-    beamtalk_future:resolve(FuturePid, handle_actor_at(PidStr)),
+    beamtalk_runtime_api:future_resolve(FuturePid, handle_actor_at(PidStr)),
     {noreply, State};
 handle_cast({classes, [], FuturePid}, State) when is_pid(FuturePid) ->
     %% classes iterates all class PIDs — spawn to avoid blocking gen_server mailbox
     spawn_cast_worker(FuturePid, classes, fun handle_classes/0, State);
 handle_cast({'actorsOf:', [AClass], FuturePid}, State) when is_pid(FuturePid) ->
-    beamtalk_future:resolve(FuturePid, handle_actors_of(AClass)),
+    beamtalk_runtime_api:future_resolve(FuturePid, handle_actors_of(AClass)),
     {noreply, State};
 handle_cast({testClasses, [], FuturePid}, State) when is_pid(FuturePid) ->
     %% testClasses calls handle_classes internally — spawn for the same reason
@@ -354,7 +354,7 @@ handle_cast({globals, [], FuturePid}, State) when is_pid(FuturePid) ->
 handle_cast({'bind:as:', [Value, Name], FuturePid}, State) when is_pid(FuturePid) ->
     case to_atom_name(Name) of
         {error, Err} ->
-            beamtalk_future:reject(FuturePid, Err),
+            beamtalk_runtime_api:future_reject(FuturePid, Err),
             {noreply, State};
         AtomName ->
             case check_bind_conflicts(AtomName) of
@@ -363,17 +363,17 @@ handle_cast({'bind:as:', [Value, Name], FuturePid}, State) when is_pid(FuturePid
                     NewBindings = maps:put(AtomName, Value, UserBindings),
                     NewState = State#workspace_interface_state{user_bindings = NewBindings},
                     spawn(fun() -> maybe_warn_loaded_class(AtomName) end),
-                    beamtalk_future:resolve(FuturePid, nil),
+                    beamtalk_runtime_api:future_resolve(FuturePid, nil),
                     {noreply, NewState};
                 {error, Err} ->
-                    beamtalk_future:reject(FuturePid, Err),
+                    beamtalk_runtime_api:future_reject(FuturePid, Err),
                     {noreply, State}
             end
     end;
 handle_cast({'unbind:', [Name], FuturePid}, State) when is_pid(FuturePid) ->
     case to_atom_name(Name) of
         {error, Err} ->
-            beamtalk_future:reject(FuturePid, Err),
+            beamtalk_runtime_api:future_reject(FuturePid, Err),
             {noreply, State};
         AtomName ->
             UserBindings = State#workspace_interface_state.user_bindings,
@@ -381,7 +381,7 @@ handle_cast({'unbind:', [Name], FuturePid}, State) when is_pid(FuturePid) ->
                 true ->
                     NewBindings = maps:remove(AtomName, UserBindings),
                     NewState = State#workspace_interface_state{user_bindings = NewBindings},
-                    beamtalk_future:resolve(FuturePid, nil),
+                    beamtalk_runtime_api:future_resolve(FuturePid, nil),
                     {noreply, NewState};
                 false ->
                     Err0 = beamtalk_error:new(name_not_found, 'WorkspaceInterface'),
@@ -393,7 +393,7 @@ handle_cast({'unbind:', [Name], FuturePid}, State) when is_pid(FuturePid) ->
                             <<" is not a registered workspace name">>
                         ])
                     ),
-                    beamtalk_future:reject(FuturePid, Err2),
+                    beamtalk_runtime_api:future_reject(FuturePid, Err2),
                     {noreply, State}
             end
     end;
@@ -412,7 +412,7 @@ handle_cast({Selector, Args, FuturePid}, State) when
     spawn(fun() ->
         Self = {beamtalk_object, 'WorkspaceInterface', ?MODULE, GenServerPid},
         try
-            beamtalk_dispatch:lookup(
+            beamtalk_runtime_api:dispatch_lookup(
                 Selector,
                 Args,
                 Self,
@@ -421,16 +421,16 @@ handle_cast({Selector, Args, FuturePid}, State) when
             )
         of
             {reply, Value, _NewState} ->
-                beamtalk_future:resolve(FuturePid, Value);
+                beamtalk_runtime_api:future_resolve(FuturePid, Value);
             {error, Error} ->
-                beamtalk_future:reject(FuturePid, Error)
+                beamtalk_runtime_api:future_reject(FuturePid, Error)
         catch
             Class:Reason:Stack ->
                 ?LOG_ERROR("workspace dispatch handler crashed", #{
                     selector => Selector, class => Class, reason => Reason, stacktrace => Stack
                 }),
                 Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-                beamtalk_future:reject(
+                beamtalk_runtime_api:future_reject(
                     FuturePid,
                     beamtalk_error:with_selector(
                         beamtalk_error:with_message(Err, <<"Internal error">>), Selector
@@ -501,15 +501,15 @@ spawn_call_worker(From, Op, Fun, State) ->
 spawn_cast_worker(FuturePid, Op, Fun, State) ->
     spawn(fun() ->
         try Fun() of
-            {error, Err} -> beamtalk_future:reject(FuturePid, Err);
-            Result -> beamtalk_future:resolve(FuturePid, Result)
+            {error, Err} -> beamtalk_runtime_api:future_reject(FuturePid, Err);
+            Result -> beamtalk_runtime_api:future_resolve(FuturePid, Result)
         catch
             Class:Reason:Stack ->
                 ?LOG_ERROR("workspace handler crashed", #{
                     op => Op, class => Class, reason => Reason, stacktrace => Stack
                 }),
                 Err = beamtalk_error:new(runtime_error, 'WorkspaceInterface'),
-                beamtalk_future:reject(
+                beamtalk_runtime_api:future_reject(
                     FuturePid,
                     beamtalk_error:with_message(
                         Err,
@@ -573,7 +573,7 @@ handle_actors_of(AClass) ->
     lists:filter(
         fun
             ({beamtalk_object, ActorClass, _Mod, _Pid}) ->
-                beamtalk_class_registry:inherits_from(ActorClass, AClassName);
+                beamtalk_runtime_api:inherits_from(ActorClass, AClassName);
             (_) ->
                 false
         end,
@@ -584,7 +584,7 @@ handle_actors_of(AClass) ->
 %% Excludes stdlib and ClassBuilder-created classes (they have no source file).
 -spec handle_classes() -> [tuple()].
 handle_classes() ->
-    beamtalk_class_registry:user_classes().
+    beamtalk_runtime_api:user_classes().
 
 %% @doc Return classes that are TestCase subclasses.
 %% Equivalent to: self classes select: [:c | c inheritsFrom: TestCase]
@@ -595,7 +595,7 @@ handle_test_classes() ->
         fun
             ({beamtalk_object, ClassTag, _Mod, _Pid}) ->
                 ClassName = base_class_name(ClassTag),
-                beamtalk_class_registry:inherits_from(ClassName, 'TestCase');
+                beamtalk_runtime_api:inherits_from(ClassName, 'TestCase');
             (_) ->
                 false
         end,
@@ -684,7 +684,7 @@ handle_load(Other) ->
 %% @doc Run all test classes via TestRunner.
 -spec handle_test() -> term().
 handle_test() ->
-    case beamtalk_class_registry:whereis_class('TestRunner') of
+    case beamtalk_runtime_api:whereis_class('TestRunner') of
         undefined ->
             {error,
                 beamtalk_error:with_message(
@@ -698,7 +698,7 @@ handle_test() ->
 %% @doc Run a specific test class via TestRunner.
 -spec handle_test_class(term()) -> term().
 handle_test_class(TestClass) ->
-    case beamtalk_class_registry:whereis_class('TestRunner') of
+    case beamtalk_runtime_api:whereis_class('TestRunner') of
         undefined ->
             {error,
                 beamtalk_error:with_message(
@@ -790,7 +790,7 @@ maybe_warn_loaded_class(AtomName) ->
                     ok;
                 TranscriptObj ->
                     try
-                        beamtalk_message_dispatch:send(TranscriptObj, 'show:', [WarningMsg])
+                        beamtalk_runtime_api:message_send(TranscriptObj, 'show:', [WarningMsg])
                     catch
                         _:_ -> ok
                     end
@@ -834,7 +834,7 @@ class_name_from_arg(_) ->
 %% @doc Extract the base class name from a class tag (e.g. 'Counter class' -> 'Counter').
 -spec base_class_name(atom()) -> atom().
 base_class_name(Tag) ->
-    Bin = beamtalk_class_registry:class_display_name(Tag),
+    Bin = beamtalk_runtime_api:class_display_name(Tag),
     try
         binary_to_existing_atom(Bin, utf8)
     catch
@@ -844,7 +844,7 @@ base_class_name(Tag) ->
 %% @doc Resolve a singleton class instance (e.g. TranscriptStream current).
 -spec resolve_singleton(atom()) -> tuple() | 'nil'.
 resolve_singleton(ClassName) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
+    case beamtalk_runtime_api:whereis_class(ClassName) of
         undefined ->
             nil;
         ClassPid ->
@@ -860,9 +860,9 @@ resolve_singleton(ClassName) ->
 register_class() ->
     try
         ClassInfo = class_info(),
-        case beamtalk_class_registry:whereis_class('WorkspaceInterface') of
+        case beamtalk_runtime_api:whereis_class('WorkspaceInterface') of
             undefined ->
-                case beamtalk_object_class:start_link('WorkspaceInterface', ClassInfo) of
+                case beamtalk_runtime_api:start_link_class('WorkspaceInterface', ClassInfo) of
                     {ok, _Pid} ->
                         ?LOG_DEBUG("Registered WorkspaceInterface class", #{});
                     {error, RegReason} ->

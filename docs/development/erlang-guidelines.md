@@ -633,38 +633,62 @@ immutable_primitive_error(Class, FieldName) ->
 
 ## Workspace→Runtime Cross-Context Coupling Rules
 
-The Workspace context (DDD Context: `Workspace Context`) is a *customer* of the Object System context and the Hot Reload context. These rules govern direct calls from workspace source files to **Object System and Hot Reload internals only**. Shared infrastructure modules (`beamtalk_error`, `beamtalk_actor`, `beamtalk_future`, etc.) that are used across all contexts are not subject to these rules.
+The Workspace context (DDD Context: `Workspace Context`) is a *customer* of the Object System context and the Hot Reload context. These rules govern direct calls from workspace source files to **Object System and Hot Reload internals only**. Shared infrastructure modules (`beamtalk_error`, `beamtalk_actor`, etc.) that are used across all contexts are not subject to these rules.
 
 ### Approved Cross-Context API
 
-Workspace source files (`beamtalk_workspace/src/*.erl`) may call the following Object System and Hot Reload functions directly:
+**All cross-context calls from workspace to runtime must go through `beamtalk_runtime_api`.** This module is the sole approved entry point for workspace code calling into the runtime — implemented as part of BT-1106.
 
-| Module | Approved Functions |
+Do **not** call the underlying runtime modules directly from workspace source files. Adding a new cross-context call requires adding a delegating function to `beamtalk_runtime_api` with a matching `-spec`.
+
+The following functions are exposed by `beamtalk_runtime_api`:
+
+| Facade Function | Delegates To |
 |---|---|
-| `beamtalk_class_registry` | `all_classes/0`, `whereis_class/1`, `inherits_from/2`, `class_object_tag/1`, `class_display_name/1`, `is_class_name/1`, `drain_class_warnings_by_names/1`, `drain_pending_load_errors_by_names/1`, `get_method_return_type/2`, `get_class_method_return_type/2` |
-| `beamtalk_object_class` | `class_name/1`, `module_name/1`, `set_class_var/3`, `start_link/2`, `methods/1`, `local_class_methods/1`, `local_class_methods_map/1`, `local_instance_methods/1`, `instance_variables/1`, `superclass/1` |
-| `beamtalk_object_instances` | `all/1` |
-| `beamtalk_dispatch` | `lookup/5` |
-| `beamtalk_reflection` | `field_names/1` |
-| `beamtalk_tagged_map` | `class_of/1`, `is_tagged/1` |
-| `beamtalk_primitive` | `print_string/1`, `class_of/1` |
-| `beamtalk_hot_reload` | `trigger_code_change/2`, `trigger_code_change/3`, `code_change/3` |
+| `all_classes/0` | `beamtalk_class_registry:all_classes/0` |
+| `whereis_class/1` | `beamtalk_class_registry:whereis_class/1` |
+| `user_classes/0` | `beamtalk_class_registry:user_classes/0` |
+| `inherits_from/2` | `beamtalk_class_registry:inherits_from/2` |
+| `class_object_tag/1` | `beamtalk_class_registry:class_object_tag/1` |
+| `class_display_name/1` | `beamtalk_class_registry:class_display_name/1` |
+| `is_class_name/1` | `beamtalk_class_registry:is_class_name/1` |
+| `drain_class_warnings_by_names/1` | `beamtalk_class_registry:drain_class_warnings_by_names/1` |
+| `drain_pending_load_errors_by_names/1` | `beamtalk_class_registry:drain_pending_load_errors_by_names/1` |
+| `get_method_return_type/2` | `beamtalk_class_registry:get_method_return_type/2` |
+| `get_class_method_return_type/2` | `beamtalk_class_registry:get_class_method_return_type/2` |
+| `class_name/1` | `beamtalk_object_class:class_name/1` |
+| `module_name/1` | `beamtalk_object_class:module_name/1` |
+| `set_class_var/3` | `beamtalk_object_class:set_class_var/3` |
+| `start_link_class/2` | `beamtalk_object_class:start_link/2` |
+| `class_methods/1` | `beamtalk_object_class:methods/1` |
+| `local_class_methods/1` | `beamtalk_object_class:local_class_methods/1` |
+| `local_class_methods_map/1` | `beamtalk_object_class:local_class_methods_map/1` |
+| `local_instance_methods/1` | `beamtalk_object_class:local_instance_methods/1` |
+| `instance_variables/1` | `beamtalk_object_class:instance_variables/1` |
+| `superclass/1` | `beamtalk_object_class:superclass/1` |
+| `is_sealed/1` | `beamtalk_object_class:is_sealed/1` |
+| `is_abstract/1` | `beamtalk_object_class:is_abstract/1` |
+| `all_instances/1` | `beamtalk_object_instances:all/1` |
+| `dispatch_lookup/5` | `beamtalk_dispatch:lookup/5` |
+| `message_send/3` | `beamtalk_message_dispatch:send/3` |
+| `field_names/1` | `beamtalk_reflection:field_names/1` |
+| `tagged_map_class_of/1` | `beamtalk_tagged_map:class_of/1` |
+| `is_tagged/1` | `beamtalk_tagged_map:is_tagged/1` |
+| `print_string/1` | `beamtalk_primitive:print_string/1` |
+| `primitive_class_of/1` | `beamtalk_primitive:class_of/1` |
+| `trigger_code_change/2` | `beamtalk_hot_reload:trigger_code_change/2` |
+| `trigger_code_change/3` | `beamtalk_hot_reload:trigger_code_change/3` |
+| `hot_reload_code_change/3` | `beamtalk_hot_reload:code_change/3` |
+| `future_resolve/2` | `beamtalk_future:resolve/2` |
+| `future_reject/2` | `beamtalk_future:reject/2` |
+| `future_await/2` | `beamtalk_future:await/2` |
+| `hierarchy_foldl/2` | `beamtalk_class_hierarchy_table:foldl/2` |
 
 ### Rules
 
-1. **Only call approved functions.** Any call to an Object System or Hot Reload function not in the table above requires explicit justification and team review.
+1. **Only call `beamtalk_runtime_api`.** Workspace source files must never call the underlying runtime modules directly. Any new cross-context call requires a corresponding delegating function in `beamtalk_runtime_api`.
 
-2. **Mark unapproved calls.** If a workspace file must call a non-approved runtime function temporarily, add a comment:
-   ```erlang
-   %% CROSS-CONTEXT: calling beamtalk_XXX:foo/2 directly — see BT-1106 for façade work
-   beamtalk_XXX:foo(A, B)
-   ```
-
-3. **Prefer `beamtalk_workspace_interface` as the internal façade.** When adding new workspace functionality that needs runtime access, add a helper to `beamtalk_workspace_interface` or `beamtalk_workspace_interface_primitives` rather than calling runtime modules directly from deep inside REPL ops handlers.
-
-4. **No calls from runtime to workspace.** The dependency is one-way: Workspace → Object System / Hot Reload. Runtime modules must never import or call workspace modules.
-
-5. **Follow-up:** BT-1106 tracks creation of a dedicated `beamtalk_runtime_api` façade module to consolidate and enforce this boundary programmatically.
+2. **No calls from runtime to workspace.** The dependency is one-way: Workspace → `beamtalk_runtime_api` → Object System / Hot Reload. Runtime modules must never import or call workspace modules.
 
 ---
 
