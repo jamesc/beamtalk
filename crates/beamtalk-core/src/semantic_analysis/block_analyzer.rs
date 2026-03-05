@@ -269,3 +269,115 @@ impl Analyser {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::semantic_analysis::{BlockContext, analyse};
+    use crate::source_analysis::Severity;
+
+    fn parse_module(src: &str) -> crate::ast::Module {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, diagnostics) = crate::source_analysis::parse(tokens);
+        let parse_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            parse_errors.is_empty(),
+            "Test fixture failed to parse cleanly: {parse_errors:?}"
+        );
+        module
+    }
+
+    #[test]
+    fn control_flow_block_has_control_flow_context() {
+        let src = "Object subclass: Foo\n  bar => true ifTrue: [42]";
+        let module = parse_module(src);
+        let result = analyse(&module);
+        assert!(
+            result
+                .block_info
+                .values()
+                .any(|b| b.context == BlockContext::ControlFlow),
+            "Expected ControlFlow block context, got: {:?}",
+            result
+                .block_info
+                .values()
+                .map(|b| b.context)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn stored_block_has_stored_context() {
+        let src = "Object subclass: Foo\n  bar =>\n    f := [42].\n    f";
+        let module = parse_module(src);
+        let result = analyse(&module);
+        assert!(
+            result
+                .block_info
+                .values()
+                .any(|b| b.context == BlockContext::Stored),
+            "Expected Stored block context, got: {:?}",
+            result
+                .block_info
+                .values()
+                .map(|b| b.context)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn outer_variable_captured_in_block() {
+        let src = "Object subclass: Foo\n  bar =>\n    x := 42.\n    [:y | x + y]";
+        let module = parse_module(src);
+        let result = analyse(&module);
+        let has_capture = result
+            .block_info
+            .values()
+            .any(|b| b.captures.iter().any(|c| c.name == "x"));
+        assert!(
+            has_capture,
+            "Expected x to be captured in block, captures: {:?}",
+            result
+                .block_info
+                .values()
+                .map(|b| &b.captures)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn field_mutation_in_stored_block_produces_error() {
+        let src = "Object subclass: Foo\n  state: x = 0\n  bar =>\n    f := [self.x := 1].\n    f";
+        let module = parse_module(src);
+        let result = analyse(&module);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("cannot assign to field")),
+            "Expected field-in-stored-block error, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn block_passed_as_message_arg_has_passed_context() {
+        let src = "Object subclass: Foo\n  bar => self doWith: [42]";
+        let module = parse_module(src);
+        let result = analyse(&module);
+        assert!(
+            result
+                .block_info
+                .values()
+                .any(|b| b.context == BlockContext::Passed),
+            "Expected Passed block context, got: {:?}",
+            result
+                .block_info
+                .values()
+                .map(|b| b.context)
+                .collect::<Vec<_>>()
+        );
+    }
+}

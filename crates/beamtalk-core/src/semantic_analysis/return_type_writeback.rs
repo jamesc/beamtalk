@@ -79,3 +79,78 @@ pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarc
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::semantic_analysis::ClassHierarchy;
+
+    fn parse_module(src: &str) -> Module {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, diagnostics) = crate::source_analysis::parse(tokens);
+        let parse_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == crate::source_analysis::Severity::Error)
+            .collect();
+        assert!(
+            parse_errors.is_empty(),
+            "Test fixture failed to parse cleanly: {parse_errors:?}"
+        );
+        module
+    }
+
+    fn build_hierarchy(module: &Module) -> ClassHierarchy {
+        let (result, diagnostics) = ClassHierarchy::build(module);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.severity != crate::source_analysis::Severity::Error),
+            "Hierarchy build produced errors: {diagnostics:?}"
+        );
+        result.expect("ClassHierarchy::build failed for test fixture")
+    }
+
+    #[test]
+    fn writeback_sets_return_type_for_integer_method() {
+        let src = "Object subclass: Foo\n  bar => 42";
+        let mut module = parse_module(src);
+        let hierarchy = build_hierarchy(&module);
+        apply_return_type_writeback(&mut module, &hierarchy);
+        let return_type = &module.classes[0].methods[0].return_type;
+        assert!(
+            return_type.is_some(),
+            "Expected writeback to set return_type for Integer method, got None"
+        );
+    }
+
+    #[test]
+    fn writeback_preserves_explicit_annotation() {
+        let src = "Object subclass: Foo\n  bar -> Integer => 42";
+        let mut module = parse_module(src);
+        let hierarchy = build_hierarchy(&module);
+        let original = module.classes[0].methods[0].return_type.clone();
+        assert!(
+            original.is_some(),
+            "Method should already have an explicit annotation"
+        );
+        apply_return_type_writeback(&mut module, &hierarchy);
+        assert_eq!(
+            module.classes[0].methods[0].return_type, original,
+            "Writeback should not overwrite an explicit type annotation"
+        );
+    }
+
+    #[test]
+    fn writeback_does_not_set_type_for_dynamic_method() {
+        // A method whose body type cannot be statically resolved stays None
+        let src = "Object subclass: Foo\n  bar: x => x doSomething";
+        let mut module = parse_module(src);
+        let hierarchy = build_hierarchy(&module);
+        apply_return_type_writeback(&mut module, &hierarchy);
+        let return_type = &module.classes[0].methods[0].return_type;
+        assert!(
+            return_type.is_none(),
+            "Dynamic method should not get writeback, got: {return_type:?}"
+        );
+    }
+}

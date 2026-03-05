@@ -472,3 +472,116 @@ impl Default for NameResolver {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source_analysis::{Severity, Span};
+
+    fn parse_module(src: &str) -> crate::ast::Module {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        let (module, diagnostics) = crate::source_analysis::parse(tokens);
+        let parse_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            parse_errors.is_empty(),
+            "Test fixture failed to parse cleanly: {parse_errors:?}"
+        );
+        module
+    }
+
+    fn run(src: &str) -> NameResolver {
+        let module = parse_module(src);
+        let mut resolver = NameResolver::new();
+        resolver.resolve_module(&module);
+        resolver
+    }
+
+    #[test]
+    fn defined_variable_produces_no_undefined_error() {
+        let resolver = run("x := 42. x + 1");
+        let errors: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("Undefined variable"))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "Expected no undefined errors, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn undefined_variable_produces_error() {
+        let resolver = run("undeclared_var");
+        assert!(
+            resolver
+                .diagnostics()
+                .iter()
+                .any(|d| d.message.contains("Undefined variable: undeclared_var")),
+            "Expected undefined variable error, got: {:?}",
+            resolver.diagnostics()
+        );
+    }
+
+    #[test]
+    fn method_parameter_visible_in_body() {
+        let resolver = run("Object subclass: Foo\n  bar: x => x + 1");
+        let errors: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("Undefined variable: x")
+            })
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "Parameter x should be in scope, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn block_parameter_shadowing_outer_produces_warning() {
+        let resolver = run("x := 1.\n[:x | x + 1]");
+        assert!(
+            resolver
+                .diagnostics()
+                .iter()
+                .any(|d| d.severity == Severity::Warning && d.message.contains("shadows")),
+            "Expected shadowing warning, got: {:?}",
+            resolver.diagnostics()
+        );
+    }
+
+    #[test]
+    fn define_known_vars_prevents_undefined_error() {
+        let module = parse_module("sessionVar");
+        let mut resolver = NameResolver::new();
+        resolver.define_known_vars(&["sessionVar"], Span::new(0, 0));
+        resolver.resolve_module(&module);
+        let errors: Vec<_> = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Undefined variable: sessionVar"))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "sessionVar should be defined via known_vars, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn self_outside_method_produces_error() {
+        let resolver = run("self foo");
+        assert!(
+            resolver
+                .diagnostics()
+                .iter()
+                .any(|d| d.message.contains("self can only be used")),
+            "Expected self-outside-method error, got: {:?}",
+            resolver.diagnostics()
+        );
+    }
+}
