@@ -15,6 +15,21 @@
 -include("beamtalk.hrl").
 
 %%% ============================================================================
+%%% Helpers
+%%% ============================================================================
+
+%% @doc Block until the given process exits or the timeout (ms) elapses.
+%% Fails the test if the process does not exit within Timeout ms.
+wait_for_exit(Pid, Timeout) ->
+    MRef = erlang:monitor(process, Pid),
+    receive
+        {'DOWN', MRef, process, Pid, _Reason} -> ok
+    after Timeout ->
+        erlang:demonitor(MRef, [flush]),
+        ?assert(false, "process did not exit within timeout")
+    end.
+
+%%% ============================================================================
 %%% after:do: — construction
 %%% ============================================================================
 
@@ -118,8 +133,7 @@ cancel_already_cancelled_returns_false_test() ->
 
 cancel_fired_timer_returns_false_test() ->
     T = beamtalk_timer:'after:do:'(10, fun() -> ok end),
-    %% Wait for timer to fire and process to exit
-    timer:sleep(100),
+    wait_for_exit(maps:get(pid, T), 1000),
     ?assertNot(beamtalk_timer:cancel(T)).
 
 cancel_repeating_timer_returns_true_test() ->
@@ -152,7 +166,7 @@ is_active_after_cancel_test() ->
 
 is_active_after_fired_test() ->
     T = beamtalk_timer:'after:do:'(10, fun() -> ok end),
-    timer:sleep(100),
+    wait_for_exit(maps:get(pid, T), 1000),
     ?assertNot(beamtalk_timer:'isActive'(T)).
 
 is_active_repeating_stays_active_test() ->
