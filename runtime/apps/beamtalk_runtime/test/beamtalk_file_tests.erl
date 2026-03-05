@@ -50,11 +50,41 @@ has_method_lines_test() ->
 has_method_open_do_test() ->
     ?assert(beamtalk_file:has_method('open:do:')).
 
+has_method_isDirectory_test() ->
+    ?assert(beamtalk_file:has_method('isDirectory:')).
+
+has_method_isFile_test() ->
+    ?assert(beamtalk_file:has_method('isFile:')).
+
+has_method_mkdir_test() ->
+    ?assert(beamtalk_file:has_method('mkdir:')).
+
+has_method_mkdirAll_test() ->
+    ?assert(beamtalk_file:has_method('mkdirAll:')).
+
+has_method_listDirectory_test() ->
+    ?assert(beamtalk_file:has_method('listDirectory:')).
+
+has_method_delete_test() ->
+    ?assert(beamtalk_file:has_method('delete:')).
+
+has_method_deleteAll_test() ->
+    ?assert(beamtalk_file:has_method('deleteAll:')).
+
+has_method_rename_to_test() ->
+    ?assert(beamtalk_file:has_method('rename:to:')).
+
+has_method_absolutePath_test() ->
+    ?assert(beamtalk_file:has_method('absolutePath:')).
+
+has_method_tempDirectory_test() ->
+    ?assert(beamtalk_file:has_method('tempDirectory')).
+
 has_method_unknown_test() ->
     ?assertNot(beamtalk_file:has_method('foo')).
 
 has_method_unknown_atom_test() ->
-    ?assertNot(beamtalk_file:has_method('delete:')).
+    ?assertNot(beamtalk_file:has_method('noSuchMethod:')).
 
 %%% ============================================================================
 %%% handle_has_method/1
