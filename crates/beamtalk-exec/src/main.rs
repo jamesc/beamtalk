@@ -30,7 +30,7 @@ use std::io::{self, Read, Write};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 use clap::{ArgAction, Parser};
