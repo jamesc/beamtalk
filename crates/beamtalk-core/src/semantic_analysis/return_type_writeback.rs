@@ -87,13 +87,27 @@ mod tests {
 
     fn parse_module(src: &str) -> Module {
         let tokens = crate::source_analysis::lex_with_eof(src);
-        let (module, _) = crate::source_analysis::parse(tokens);
+        let (module, diagnostics) = crate::source_analysis::parse(tokens);
+        let parse_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == crate::source_analysis::Severity::Error)
+            .collect();
+        assert!(
+            parse_errors.is_empty(),
+            "Test fixture failed to parse cleanly: {parse_errors:?}"
+        );
         module
     }
 
     fn build_hierarchy(module: &Module) -> ClassHierarchy {
-        let (result, _) = ClassHierarchy::build(module);
-        result.unwrap_or_else(|_| ClassHierarchy::with_builtins())
+        let (result, diagnostics) = ClassHierarchy::build(module);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.severity != crate::source_analysis::Severity::Error),
+            "Hierarchy build produced errors: {diagnostics:?}"
+        );
+        result.expect("ClassHierarchy::build failed for test fixture")
     }
 
     #[test]

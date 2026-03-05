@@ -273,10 +273,19 @@ impl Analyser {
 #[cfg(test)]
 mod tests {
     use crate::semantic_analysis::{BlockContext, analyse};
+    use crate::source_analysis::Severity;
 
     fn parse_module(src: &str) -> crate::ast::Module {
         let tokens = crate::source_analysis::lex_with_eof(src);
-        let (module, _) = crate::source_analysis::parse(tokens);
+        let (module, diagnostics) = crate::source_analysis::parse(tokens);
+        let parse_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            parse_errors.is_empty(),
+            "Test fixture failed to parse cleanly: {parse_errors:?}"
+        );
         module
     }
 
