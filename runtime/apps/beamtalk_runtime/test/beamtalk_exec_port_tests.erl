@@ -47,18 +47,28 @@ open_close_test() ->
 %%% ============================================================================
 
 spawn_child_true_exits_with_zero_test() ->
-    Port = beamtalk_exec_port:open(),
-    beamtalk_exec_port:spawn_child(Port, 1, <<"/bin/true">>, []),
-    ExitCode = receive_exit(Port, 1, 5000),
-    beamtalk_exec_port:close(Port),
-    ?assertEqual(0, ExitCode).
+    case os:type() of
+        {unix, _} ->
+            Port = beamtalk_exec_port:open(),
+            beamtalk_exec_port:spawn_child(Port, 1, <<"/bin/true">>, []),
+            ExitCode = receive_exit(Port, 1, 5000),
+            beamtalk_exec_port:close(Port),
+            ?assertEqual(0, ExitCode);
+        _ ->
+            {skip, "Unix-only test"}
+    end.
 
 spawn_child_false_exits_nonzero_test() ->
-    Port = beamtalk_exec_port:open(),
-    beamtalk_exec_port:spawn_child(Port, 2, <<"/bin/false">>, []),
-    ExitCode = receive_exit(Port, 2, 5000),
-    beamtalk_exec_port:close(Port),
-    ?assertNotEqual(0, ExitCode).
+    case os:type() of
+        {unix, _} ->
+            Port = beamtalk_exec_port:open(),
+            beamtalk_exec_port:spawn_child(Port, 2, <<"/bin/false">>, []),
+            ExitCode = receive_exit(Port, 2, 5000),
+            beamtalk_exec_port:close(Port),
+            ?assertNotEqual(0, ExitCode);
+        _ ->
+            {skip, "Unix-only test"}
+    end.
 
 %%% ============================================================================
 %%% write_stdin — data flows through stdin
