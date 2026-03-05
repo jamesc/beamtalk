@@ -1,0 +1,129 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Subprocess — Actor for interactive bidirectional communication with OS processes.
+///
+/// Backed by `beamtalk_subprocess.erl` (hand-written gen_server). State — port,
+/// stdout/stderr queues, exitCode, portClosed flag — lives entirely in the Erlang
+/// gen_server; there are no Beamtalk-level state: declarations.
+///
+/// ## Basic usage
+///
+/// ```beamtalk
+/// agent := Subprocess open: "echo" args: #("hello")
+/// line := agent readLine.   // => "hello"
+/// agent exitCode.           // => 0
+/// agent close.
+/// ```
+///
+/// ## Environment and working directory
+///
+/// ```beamtalk
+/// agent := Subprocess open: "make" args: #("test")
+///   env: #{#"CI" => #"true"}
+///   dir: #"/path/to/project"
+/// ```
+///
+/// ## Streaming stdout
+///
+/// ```beamtalk
+/// agent lines do: [:line | Transcript show: line]
+/// ```
+Actor subclass: Subprocess
+
+  /// Convenience factory — open a subprocess with command and args.
+  ///
+  /// Desugars to `spawnWith:` with a config dictionary.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// agent := Subprocess open: "ls" args: #("-la")
+  /// ```
+  class open: command args: args =>
+    self spawnWith: #{"command" => command, "args" => args}
+
+  /// Convenience factory — open a subprocess with command, args, environment, and working directory.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// agent := Subprocess open: "make" args: #("test") env: #{#"CI" => #"true"} dir: #"/tmp"
+  /// ```
+  class open: command args: args env: env dir: dir =>
+    self spawnWith: #{
+      "command" => command,
+      "args" => args,
+      "env" => env,
+      "dir" => dir
+    }
+
+  /// Write a line to the subprocess's stdin (appends newline).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// agent writeLine: "{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
+  /// ```
+  writeLine: data -> Nil => @primitive "writeLine:"
+
+  /// Read one line from stdout. Blocks until a line is available. Returns nil at EOF.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// line := agent readLine.   // => "hello" or nil
+  /// ```
+  readLine -> Object => @primitive "readLine"
+
+  /// Read one line from stdout with a timeout in milliseconds. Returns nil on timeout or EOF.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// line := agent readLine: 5000.   // => String or nil
+  /// ```
+  readLine: timeout -> Object => @primitive "readLine:"
+
+  /// Read one line from stderr. Blocks until a line is available. Returns nil at EOF.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// errLine := agent readStderrLine.
+  /// ```
+  readStderrLine -> Object => @primitive "readStderrLine"
+
+  /// Read one line from stderr with a timeout in milliseconds. Returns nil on timeout or EOF.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// errLine := agent readStderrLine: 5000.
+  /// ```
+  readStderrLine: timeout -> Object => @primitive "readStderrLine:"
+
+  /// Return a Stream of stdout lines. Each step sends a sync message to the actor.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// agent lines do: [:line | Transcript show: line]
+  /// ```
+  lines -> Stream => @primitive "lines"
+
+  /// Return a Stream of stderr lines. Same mechanics as lines.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// agent stderrLines do: [:line | Transcript show: line]
+  /// ```
+  stderrLines -> Stream => @primitive "stderrLines"
+
+  /// Get the exit code. Returns nil if the subprocess is still running.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// agent exitCode.   // => 0
+  /// ```
+  exitCode -> Object => @primitive "exitCode"
+
+  /// Force-close the subprocess (sends kill to process group).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// agent close.
+  /// ```
+  close -> Nil => @primitive "close"

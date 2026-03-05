@@ -347,3 +347,45 @@ parse_url_no_scheme_test() ->
 
 parse_url_garbage_test() ->
     ?assertEqual({error, invalid_url}, beamtalk_http:parse_url(<<"not a url">>)).
+
+%%% ============================================================================
+%%% No-colon delegate type-error guards (BT-1117)
+%%%
+%%% Each delegate must forward type errors from the colon-style implementation.
+%%% ============================================================================
+
+get_delegate_type_error_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error}},
+        beamtalk_http:get(not_a_binary)
+    ).
+
+post_delegate_type_error_url_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error}},
+        beamtalk_http:post(not_a_binary, <<"body">>)
+    ).
+
+post_delegate_type_error_body_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error}},
+        beamtalk_http:post(<<"http://example.com">>, not_a_binary)
+    ).
+
+put_delegate_type_error_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error}},
+        beamtalk_http:put(not_a_binary, <<"body">>)
+    ).
+
+delete_delegate_type_error_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error}},
+        beamtalk_http:delete(not_a_binary)
+    ).
+
+request_delegate_type_error_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error}},
+        beamtalk_http:request(get, not_a_binary, #{})
+    ).
