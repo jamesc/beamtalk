@@ -249,10 +249,14 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
     let pgid = child.id() as libc::pid_t;
 
     // Insert entry before spawning threads, so kill/write_stdin can find it.
+    // Reject duplicate child_id to avoid silently orphaning the old process.
     {
         let mut map = children
             .lock()
             .map_err(|e| format!("children lock poisoned: {e}"))?;
+        if map.contains_key(&child_id) {
+            return Err(format!("child_id {child_id} already in use"));
+        }
         map.insert(
             child_id,
             ChildEntry {
@@ -367,7 +371,15 @@ fn handle_kill(request: &Map, children: &ChildMap) -> Result<(), String> {
     {
         // SIGTERM to the whole process group, then wait up to 2 s for exit.
         // SAFETY: kill(2) with a valid pgid is well-defined.
-        unsafe { libc::kill(-pgid, libc::SIGTERM) };
+        let rc = unsafe { libc::kill(-pgid, libc::SIGTERM) };
+        if rc < 0 {
+            let err = io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::ESRCH) {
+                // Process group already gone — nothing to wait for.
+                return Ok(());
+            }
+            warn!("SIGTERM to pgid -{pgid} failed: {err}");
+        }
 
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
@@ -489,6 +501,19 @@ fn kill_all_children(children: &ChildMap) {
         for pgid in &pgids {
             // SAFETY: SIGKILL to a valid process group.
             unsafe { libc::kill(-pgid, libc::SIGKILL) };
+        }
+    }
+
+    // Windows: Job Object termination is tracked in BT-1133.
+    // For now, close all stdin pipes to signal EOF; orphaned processes will
+    // be cleaned up by the OS when the helper exits.
+    #[cfg(not(unix))]
+    {
+        let count = children.lock().map(|m| m.len()).unwrap_or(0);
+        if count > 0 {
+            warn!(
+                "kill_all_children: {count} subprocess(es) not forcefully terminated on Windows (see BT-1133)"
+            );
         }
     }
 }

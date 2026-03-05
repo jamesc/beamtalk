@@ -1,36 +1,36 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc OTP Port interface to the beamtalk-exec Rust binary (ADR 0051, Phase 1).
-%%
-%% **DDD Context:** Runtime (Anti-Corruption Layer)
-%%
-%% Spawns `beamtalk-exec` as an OTP port with `{packet, 4}` framing and
-%% ETF-encoded commands. The binary manages OS subprocesses and sends
-%% events back as ETF tuples: `{stdout, ChildId, Data}`,
-%% `{stderr, ChildId, Data}`, `{exit, ChildId, ExitCode}`.
-%%
-%% The caller is responsible for receiving port messages and dispatching
-%% events. This module only handles port open/close/command mechanics.
-%%
-%% == Protocol ==
-%%
-%% Commands (BEAM → binary) — ETF maps:
-%% ```
-%% #{command => spawn,       child_id => N, executable => Bin, args => [Bin],
-%%                           env => #{Bin => Bin}, dir => Bin}
-%% #{command => kill,        child_id => N}
-%% #{command => write_stdin, child_id => N, data => Bin}
-%% #{command => close_stdin, child_id => N}
-%% ```
-%%
-%% Events (binary → BEAM) — ETF tuples on the port:
-%% ```
-%% {Port, {data, Bin}}  where binary_to_term(Bin) is one of:
-%%   {stdout, ChildId, Data}
-%%   {stderr, ChildId, Data}
-%%   {exit,   ChildId, ExitCode}
-%% ```
+%%% @doc OTP Port interface to the beamtalk-exec Rust binary (ADR 0051, Phase 1).
+%%%
+%%% **DDD Context:** runtime
+%%%
+%%% Spawns `beamtalk-exec` as an OTP port with `{packet, 4}` framing and
+%%% ETF-encoded commands. The binary manages OS subprocesses and sends
+%%% events back as ETF tuples: `{stdout, ChildId, Data}`,
+%%% `{stderr, ChildId, Data}`, `{exit, ChildId, ExitCode}`.
+%%%
+%%% The caller is responsible for receiving port messages and dispatching
+%%% events. This module only handles port open/close/command mechanics.
+%%%
+%%% == Protocol ==
+%%%
+%%% Commands (BEAM → binary) — ETF maps:
+%%% ```
+%%% #{command => spawn,       child_id => N, executable => Bin, args => [Bin],
+%%%                           env => #{Bin => Bin}, dir => Bin}
+%%% #{command => kill,        child_id => N}
+%%% #{command => write_stdin, child_id => N, data => Bin}
+%%% #{command => close_stdin, child_id => N}
+%%% ```
+%%%
+%%% Events (binary → BEAM) — ETF tuples on the port:
+%%% ```
+%%% {Port, {data, Bin}}  where binary_to_term(Bin) is one of:
+%%%   {stdout, ChildId, Data}
+%%%   {stderr, ChildId, Data}
+%%%   {exit,   ChildId, ExitCode}
+%%% ```
 
 -module(beamtalk_exec_port).
 
@@ -87,15 +87,20 @@ spawn_child(Port, ChildId, Executable, Args) ->
 -spec spawn_child(port(), non_neg_integer(), binary(), [binary()], map()) -> true.
 spawn_child(Port, ChildId, Executable, Args, Options) ->
     Env = maps:get(env, Options, #{}),
-    Dir = maps:get(dir, Options, <<"">>),
-    Cmd = #{
+    Base = #{
         command => spawn,
         child_id => ChildId,
         executable => Executable,
         args => Args,
-        env => Env,
-        dir => Dir
+        env => Env
     },
+    %% Only include dir when explicitly provided — empty string causes
+    %% Command::current_dir("") to fail with ENOENT on the Rust side.
+    Cmd =
+        case maps:find(dir, Options) of
+            {ok, Dir} when byte_size(Dir) > 0 -> Base#{dir => Dir};
+            _ -> Base
+        end,
     port_command(Port, term_to_binary(Cmd)).
 
 %% @doc Send a graceful kill to a subprocess (SIGTERM, then SIGKILL after 2s).
@@ -156,7 +161,8 @@ find_exec_binary_dev() ->
                 true ->
                     ReleasePath;
                 false ->
-                    case os:find_executable("beamtalk-exec") of
+                    %% Use ExeName so Windows finds "beamtalk-exec.exe" via PATHEXT.
+                    case os:find_executable(ExeName) of
                         false ->
                             error({exec_not_found, "beamtalk-exec binary not found"});
                         Path ->
@@ -173,7 +179,8 @@ find_project_root() ->
 find_project_root(Dir) ->
     case filename:dirname(Dir) of
         Dir ->
-            filename:absname("");
+            %% Reached filesystem root without finding Cargo.toml.
+            error({exec_not_found, "could not locate project root (Cargo.toml not found)"});
         Parent ->
             case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
                 true -> Dir;
