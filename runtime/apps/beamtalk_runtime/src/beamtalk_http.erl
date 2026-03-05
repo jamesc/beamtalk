@@ -25,7 +25,8 @@
 %%%
 %%% ## Response Format
 %%%
-%%% All requests return `#{status => Status, headers => Headers, body => Body}`:
+%%% All requests return an `HTTPResponse` tagged map:
+%%% `#{'$beamtalk_class' => 'HTTPResponse', status => Status, headers => Headers, body => Body}`:
 %%% - `status` — integer HTTP status code (e.g., 200)
 %%% - `headers` — list of `[Name, Value]` binary pairs
 %%% - `body` — binary response body
