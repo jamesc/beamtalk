@@ -1,0 +1,72 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Timer — schedule delayed and repeating work via Erlang timer primitives.
+///
+/// Provides one-shot delays, repeating intervals, and process sleep.
+/// Timer instances are cancellable value objects wrapping a spawned process.
+///
+/// ## Examples
+/// ```beamtalk
+/// t := Timer after: 100 do: ['hello' printNl]  // fire once after 100ms
+/// t cancel                                       // => true
+/// Timer sleep: 50                                // sleep 50ms
+/// ```
+sealed Object subclass: Timer
+
+  // ===== Class Methods =====
+
+  /// Evaluate `block` once after `ms` milliseconds. Returns a cancellable Timer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// t := Timer after: 100 do: ['fired' printNl]
+  /// t class    // => Timer
+  /// ```
+  class sealed after: ms: Integer do: block: Block -> Timer =>
+    @primitive "after:do:"
+
+  /// Evaluate `block` every `ms` milliseconds. Returns a cancellable Timer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// t := Timer every: 100 do: ['tick' printNl]
+  /// t class    // => Timer
+  /// t cancel   // => true
+  /// ```
+  class sealed every: ms: Integer do: block: Block -> Timer =>
+    @primitive "every:do:"
+
+  /// Block the current process for `ms` milliseconds.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Timer sleep: 10    // => nil
+  /// ```
+  class sealed sleep: ms: Integer -> Nil => @primitive "sleep:"
+
+  // ===== Instance Methods =====
+
+  /// Cancel this timer. Returns true if the timer was active, false if already done.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// t := Timer after: 10000 do: ['never' printNl]
+  /// t cancel    // => true
+  /// t cancel    // => false
+  /// ```
+  cancel -> Boolean => @primitive "cancel"
+
+  /// True if this timer is still scheduled to fire.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// t := Timer after: 10000 do: ['never' printNl]
+  /// t isActive    // => true
+  /// t cancel      // => true
+  /// t isActive    // => false
+  /// ```
+  isActive -> Boolean => @primitive "isActive"
+
+  /// Human-readable representation.
+  printString -> String => @primitive "printString"

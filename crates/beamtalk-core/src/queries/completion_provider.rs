@@ -1583,4 +1583,31 @@ mod tests {
         let result = resolve_expression_type("(myList size)", &hierarchy);
         assert_eq!(result, None);
     }
+
+    // --- BT-1072: keyword sends mid-chain ---
+
+    #[test]
+    fn resolve_expression_type_keyword_send_collect_returns_array() {
+        // #[1, 2, 3] collect: [:x | x * 2] — Array#collect: returns Array
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("#[1, 2, 3] collect: [:x | x * 2]", &hierarchy);
+        assert_eq!(result.as_deref(), Some("Array"));
+    }
+
+    #[test]
+    fn resolve_expression_type_keyword_send_inject_no_annotation_returns_none() {
+        // #[1, 2, 3] inject:into: has no return type annotation — graceful fallback
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result =
+            resolve_expression_type("#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]", &hierarchy);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn resolve_expression_type_keyword_send_untyped_receiver_returns_none() {
+        // myList collect: [...] — myList is untyped (Dynamic), graceful fallback
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("myList collect: [:x | x]", &hierarchy);
+        assert_eq!(result, None);
+    }
 }

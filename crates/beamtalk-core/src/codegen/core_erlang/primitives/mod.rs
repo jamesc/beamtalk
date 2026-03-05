@@ -77,6 +77,7 @@ pub fn generate_primitive_bif(
         "Regex" => reflection::generate_regex_bif(selector, params),
         "System" => system::generate_system_bif(selector, params),
         "DateTime" => system::generate_datetime_bif(selector, params),
+        "Timer" => system::generate_timer_bif(selector, params),
         "Collection" => collection::generate_collection_bif(selector, params),
         "Behaviour" => behaviour::generate_behaviour_bif(selector, params),
         "Class" => behaviour::generate_class_bif(selector, params),
