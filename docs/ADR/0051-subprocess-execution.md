@@ -113,7 +113,7 @@ The initial design considered returning a Stream from the actor (e.g., `agent li
 
 2. **Actor constructor pattern** — `Actor.bt` only has `spawn` and `spawnWith:`. A `Subprocess open: "cmd" args: #("a")` factory method doesn't exist in the current protocol.
 
-   **Resolution:** `spawnWith:` with a config dictionary is sufficient. The actor's `initialize` method receives the config and opens the port. A convenience class method `open:args:` desugars to `spawnWith:`:
+   **Resolution:** `spawnWith:` with a config dictionary is sufficient. The Erlang-side `init/1` callback receives the config map and opens the port. A convenience class method `open:args:` desugars to `spawnWith:`:
 
    ```beamtalk
    class open: command args: args =>
