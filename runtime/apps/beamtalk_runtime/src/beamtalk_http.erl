@@ -25,7 +25,8 @@
 %%%
 %%% ## Response Format
 %%%
-%%% All requests return `#{status => Status, headers => Headers, body => Body}`:
+%%% All requests return an `HTTPResponse` tagged map:
+%%% `#{'$beamtalk_class' => 'HTTPResponse', status => Status, headers => Headers, body => Body}`:
 %%% - `status` — integer HTTP status code (e.g., 200)
 %%% - `headers` — list of `[Name, Value]` binary pairs
 %%% - `body` — binary response body
@@ -137,7 +138,7 @@ has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
 %% @doc Perform a GET request.
 %%
 %% `Headers` is a list of `[Name, Value]` binary pairs.
-%% Returns `#{status => Status, headers => Headers, body => Body}`.
+%% Returns an `HTTPResponse` tagged map.
 -spec 'get:headers:'(binary(), list()) -> map().
 'get:headers:'(Url, Headers) when is_binary(Url), is_list(Headers) ->
     do_request(<<"GET">>, Url, Headers, <<>>, ?DEFAULT_TIMEOUT, 'get:headers:');
@@ -324,11 +325,11 @@ collect_response(ConnPid, StreamRef, MRef, Deadline, Selector) ->
             http_error(Selector, #{reason => Reason}, <<"Request failed">>)
     end.
 
-%% @private Build a Beamtalk HTTP response map.
+%% @private Build a Beamtalk HTTPResponse tagged map.
 -spec make_response(non_neg_integer(), list(), binary()) -> map().
 make_response(Status, GunHeaders, Body) ->
     BtHeaders = from_gun_headers(GunHeaders),
-    #{status => Status, headers => BtHeaders, body => Body}.
+    #{'$beamtalk_class' => 'HTTPResponse', status => Status, headers => BtHeaders, body => Body}.
 
 %% @private Parse a URL binary into connection components.
 %%
