@@ -75,27 +75,37 @@ spawn_child_false_exits_nonzero_test() ->
 %%% ============================================================================
 
 write_stdin_cat_test() ->
-    Port = beamtalk_exec_port:open(),
-    beamtalk_exec_port:spawn_child(Port, 3, <<"/bin/cat">>, []),
-    beamtalk_exec_port:write_stdin(Port, 3, <<"hello\n">>),
-    beamtalk_exec_port:close_stdin(Port, 3),
-    Stdout = receive_stdout(Port, 3, 5000),
-    beamtalk_exec_port:close(Port),
-    ?assertEqual(<<"hello\n">>, Stdout).
+    case os:type() of
+        {unix, _} ->
+            Port = beamtalk_exec_port:open(),
+            beamtalk_exec_port:spawn_child(Port, 3, <<"/bin/cat">>, []),
+            beamtalk_exec_port:write_stdin(Port, 3, <<"hello\n">>),
+            beamtalk_exec_port:close_stdin(Port, 3),
+            Stdout = receive_stdout(Port, 3, 5000),
+            beamtalk_exec_port:close(Port),
+            ?assertEqual(<<"hello\n">>, Stdout);
+        _ ->
+            {skip, "Unix-only test"}
+    end.
 
 %%% ============================================================================
 %%% kill_child — process is terminated
 %%% ============================================================================
 
 kill_child_sleep_test() ->
-    Port = beamtalk_exec_port:open(),
-    beamtalk_exec_port:spawn_child(Port, 4, <<"/bin/sleep">>, [<<"60">>]),
-    beamtalk_exec_port:kill_child(Port, 4),
-    % Should receive exit event (SIGTERM -> exit)
-    ExitCode = receive_exit(Port, 4, 5000),
-    beamtalk_exec_port:close(Port),
-    % SIGTERM exit codes are system-dependent; just assert we got an exit event.
-    ?assert(is_integer(ExitCode)).
+    case os:type() of
+        {unix, _} ->
+            Port = beamtalk_exec_port:open(),
+            beamtalk_exec_port:spawn_child(Port, 4, <<"/bin/sleep">>, [<<"60">>]),
+            beamtalk_exec_port:kill_child(Port, 4),
+            % Should receive exit event (SIGTERM -> exit)
+            ExitCode = receive_exit(Port, 4, 5000),
+            beamtalk_exec_port:close(Port),
+            % SIGTERM exit codes are system-dependent; just assert we got an exit event.
+            ?assert(is_integer(ExitCode));
+        _ ->
+            {skip, "Unix-only test"}
+    end.
 
 %%% ============================================================================
 %%% Internal helpers
