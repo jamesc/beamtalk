@@ -63,7 +63,7 @@ bootstrap_sets_beamtalk_class_var_test_() ->
     {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
         [
             ?_test(begin
-                {ok, BPid} = beamtalk_interface:start_link({local, 'Beamtalk'}, []),
+                {ok, BPid} = 'bt@stdlib@beamtalk_interface':start_link({local, 'Beamtalk'}, #{}),
                 {ok, _} = beamtalk_workspace_bootstrap:start_link(),
                 ?assertEqual(BPid, whereis('Beamtalk'))
             end)
