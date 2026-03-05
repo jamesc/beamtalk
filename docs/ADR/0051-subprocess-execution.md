@@ -23,7 +23,7 @@ This ADR addresses both use cases:
 - `Port.bt` provides only display/comparison methods for port identifiers received from Erlang interop
 - No `beamtalk_port.erl` runtime module exists — port primitives are handled inline in `beamtalk_primitive.erl`
 - The workaround is raw Erlang FFI: `Erlang os cmd: "ls -la"` — which has no exit code, no streaming, shell injection risk, and blocks the caller
-- ADR 0021 explicitly deferred `Process output: 'ls -la'` as a future Stream integration point
+- ADR 0021 explicitly deferred `Process output: "ls -la"` as a future Stream integration point
 - ADR 0022 established the OTP Port pattern for the compiler: `open_port({spawn_executable, ...})` with `{packet, 4}`, ETF framing, and OTP supervision — this is the internal template for subprocess management
 - `System.bt` already handles OS-level concerns (`getEnv:`, `osPlatform`, `pid`) — a natural home for simple command execution
 - `Actor.bt` provides `spawn` / `spawnWith:` for creating actor processes with `gen_server`-backed lifecycle — the foundation for interactive subprocess management
@@ -207,69 +207,88 @@ Key runtime mechanics:
 
 ```erlang
 %% In beamtalk_subprocess.erl
+%%
+%% The BEAM port connects to the beamtalk_exec Rust helper, which
+%% communicates via ETF over {packet, 4}. The helper sends tagged
+%% tuples: {stdout, ChildId, Data}, {stderr, ChildId, Data},
+%% {exit, ChildId, Code}.
 
-%% Port messages arrive via handle_info (the actor owns the port)
-handle_info({Port, {data, Data}}, #{port := Port} = State) ->
-    %% Buffer incoming data, split into lines
-    Buffer = maps:get(buffer, State),
-    Pending = maps:get(pending, State, <<>>),
-    Combined = <<Pending/binary, Data/binary>>,
-    {Lines, Remainder} = split_lines(Combined),
-    NewBuffer = queue:join(Buffer, queue:from_list(Lines)),
-    %% If a readLine caller is waiting, reply immediately
-    case maps:get(waiting, State, undefined) of
-        undefined ->
-            {noreply, State#{buffer => NewBuffer, pending => Remainder}};
-        {From, _} when not queue:is_empty(NewBuffer) ->
-            {{value, Line}, Rest} = queue:out(NewBuffer),
-            gen_server:reply(From, Line),
-            {noreply, State#{buffer => Rest, pending => Remainder,
-                             waiting => undefined}}
-    end;
-
-handle_info({Port, {exit_status, Code}}, #{port := Port} = State) ->
-    %% Subprocess exited — record exit code, flush remaining data
-    NewState = State#{exit_code => Code, port_closed => true},
-    %% If a readLine caller is waiting and buffer is empty, return nil (EOF)
-    case maps:get(waiting, NewState, undefined) of
-        {From, _} when queue:is_empty(maps:get(buffer, NewState)) ->
-            gen_server:reply(From, nil),
-            {noreply, NewState#{waiting => undefined}};
-        _ ->
-            {noreply, NewState}
+%% Helper messages arrive as ETF via {packet,4} — decode and dispatch
+handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
+    case erlang:binary_to_term(Packet) of
+        {stdout, _ChildId, Data} ->
+            buffer_and_maybe_reply(stdout, Data, State);
+        {stderr, _ChildId, Data} ->
+            buffer_and_maybe_reply(stderr, Data, State);
+        {exit, _ChildId, Code} ->
+            NewState = State#{exit_code => Code, port_closed => true},
+            %% If readLine callers are waiting and buffers are empty, reply nil (EOF)
+            S1 = maybe_reply_eof(stdout, NewState),
+            S2 = maybe_reply_eof(stderr, S1),
+            {noreply, S2};
+        _Other ->
+            {noreply, State}
     end;
 
 handle_info(Msg, State) ->
     beamtalk_actor:handle_info(Msg, State).
 
+%% Shared helper — buffers data for stdout or stderr, replies to waiting caller
+buffer_and_maybe_reply(Channel, Data, State) ->
+    BufKey = {Channel, buffer},
+    PendKey = {Channel, pending},
+    WaitKey = {Channel, waiting},
+    Buffer = maps:get(BufKey, State),
+    Pending = maps:get(PendKey, State, <<>>),
+    Combined = <<Pending/binary, Data/binary>>,
+    {Lines, Remainder} = split_lines(Combined),
+    NewBuffer = queue:join(Buffer, queue:from_list(Lines)),
+    case maps:get(WaitKey, State, undefined) of
+        undefined ->
+            {noreply, State#{BufKey => NewBuffer, PendKey => Remainder}};
+        From when not queue:is_empty(NewBuffer) ->
+            {{value, Line}, Rest} = queue:out(NewBuffer),
+            gen_server:reply(From, Line),
+            {noreply, State#{BufKey => Rest, PendKey => Remainder,
+                             WaitKey => undefined}}
+    end.
+
 %% readLine — sync call, blocks caller until a line or EOF
-handle_readLine([], State) ->
-    Buffer = maps:get(buffer, State),
+handle_readLine([], From, State) ->
+    read_line_for(stdout, From, State).
+
+handle_readStderrLine([], From, State) ->
+    read_line_for(stderr, From, State).
+
+read_line_for(Channel, From, State) ->
+    BufKey = {Channel, buffer},
+    WaitKey = {Channel, waiting},
+    Buffer = maps:get(BufKey, State),
     case queue:is_empty(Buffer) of
         false ->
             {{value, Line}, Rest} = queue:out(Buffer),
-            {reply, Line, State#{buffer => Rest}};
+            {reply, Line, State#{BufKey => Rest}};
         true when maps:get(port_closed, State, false) ->
             %% EOF — no more data coming
             {reply, nil, State};
         true ->
-            %% No data yet — defer reply until handle_info delivers data
-            %% (uses gen_server noreply + gen_server:reply/2 from handle_info)
-            {noreply_defer, State}
+            %% No data yet — stash From, return {noreply, State}
+            %% gen_server:reply/2 called from handle_info when data arrives
+            {noreply, State#{WaitKey => From}}
     end.
 
 %% writeLine — sync call, writes to port stdin
-handle_writeLine([Data], #{port := Port} = State) ->
+handle_writeLine([Data], _From, #{port := Port} = State) ->
     Line = <<(iolist_to_binary(Data))/binary, $\n>>,
     port_command(Port, Line),
     {reply, nil, State}.
 ```
 
-The `noreply_defer` pattern means `readLine` blocks the caller's `gen_server:call` until either:
+The deferred reply pattern means `readLine` blocks the caller's `gen_server:call` until either:
 - New data arrives via `handle_info` → the actor calls `gen_server:reply(From, Line)`
 - The subprocess exits with empty buffer → the actor calls `gen_server:reply(From, nil)`
 
-This is standard OTP — `gen_server:call` supports deferred replies via `{noreply, State}` with manual `gen_server:reply/2`.
+This is standard OTP — `handle_call` returns `{noreply, State}` to defer the reply, stashing `From` in the state. When data arrives via `handle_info`, the actor calls `gen_server:reply(From, Value)` to unblock the caller. The same pattern is used for both `readLine` (stdout) and `readStderrLine` (stderr), each with independent buffers and waiting callers.
 
 **Timeout handling:** ADR 0043 notes that `gen_server:call` defaults to a 5000ms timeout. For `readLine`, this is wrong — a subprocess may produce no output for minutes (e.g., a coding agent thinking). The runtime must use `gen_server:call(AgentPid, {readLine, []}, infinity)` for `readLine` specifically. This is an implementation detail, not an API change — Beamtalk's `.` message send syntax does not expose timeout control. If per-method timeout configuration is added later (per ADR 0043's roadmap), `readLine` should default to `infinity` rather than the standard 5000ms.
 
@@ -629,7 +648,7 @@ Build a standalone Rust binary that the BEAM spawns as a port. The binary manage
   - `terminate/2` — sends shutdown command to `beamtalk_exec_port` for this child
 
 **Codegen registration:**
-- Register `Subprocess` as a builtin actor class in codegen (similar to how `Actor` is registered)
+- Register `Subprocess` as a built-in actor class in codegen (similar to how `Actor` is registered)
 - The class method `open:args:` is a standard class method that calls `spawnWith:` — no codegen changes needed
 
 **Components:** stdlib, runtime, codegen (builtins registration)
