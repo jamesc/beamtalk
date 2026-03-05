@@ -136,7 +136,7 @@ The selector `detect:ifNone:` is now immediately distinguishable from the parame
 
 ### Error Examples
 
-```
+```text
 // Missing type after ::
 deposit: amount :: => ...
 Error: Expected type name after '::', found '=>'
