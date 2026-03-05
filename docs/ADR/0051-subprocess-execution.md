@@ -161,9 +161,6 @@ line := agent readLine.       // => "{\"jsonrpc\":\"2.0\",\"result\":...}"
 // Read with timeout (milliseconds) — returns nil on timeout or EOF
 line := agent readLine: 5000. // => String, or nil after 5 seconds
 
-// Non-blocking check — returns nil immediately if no data buffered
-line := agent tryReadLine.    // => String if data available, nil otherwise
-
 // Read in a loop until EOF
 line := agent readLine.
 [line notNil] whileTrue: [
@@ -208,22 +205,15 @@ agent stop.                   // inherited from Actor
 agent close.                  // port_close + OS kill signal
 ```
 
-#### Class Hierarchy
+#### Subprocess Class
 
-Both pull-mode (`Subprocess`) and push-mode (`SubprocessListener`) actors share port lifecycle, stdin writing, and exit code management via a common abstract base class:
-
-```
-Actor
-└── SubprocessBase (abstract — owns port, lifecycle, writeLine:)
-    ├── Subprocess (pull — readLine, buffering, deferred reply)
-    └── SubprocessListener (push — onLine:, onStderrLine:, onExit:)
-```
-
-#### SubprocessBase — Shared Port Lifecycle
+A single Actor subclass handles port lifecycle, buffered reads, and stdin writing. No abstract base class, no separate push-mode class — one class, one Erlang module.
 
 ```beamtalk
-abstract Actor subclass: SubprocessBase
+Actor subclass: Subprocess
   state: port = nil
+  state: stdoutBuffer = nil
+  state: stderrBuffer = nil
   state: exitCode = nil
   state: portClosed = false
 
@@ -238,30 +228,11 @@ abstract Actor subclass: SubprocessBase
   /// Write a line to the subprocess's stdin (appends newline).
   writeLine: data -> Nil => @primitive "writeLine:"
 
-  /// Get the exit code. Returns nil if the subprocess is still running.
-  exitCode -> Integer | Nil => @primitive "exitCode"
-
-  /// Force-close the subprocess (sends kill to process group).
-  close -> Nil => @primitive "close"
-```
-
-#### Subprocess — Pull Mode (Buffered Reads)
-
-For bidirectional protocols (JSON-RPC, orchestration) where the caller drives the conversation.
-
-```beamtalk
-SubprocessBase subclass: Subprocess
-  state: stdoutBuffer = nil
-  state: stderrBuffer = nil
-
   /// Read one line from stdout. Blocks forever until available. Returns nil at EOF.
   readLine -> String | Nil => @primitive "readLine"
 
   /// Read one line from stdout with timeout (ms). Returns nil on timeout or EOF.
   readLine: timeout -> String | Nil => @primitive "readLine:"
-
-  /// Non-blocking read from stdout. Returns nil immediately if no data buffered.
-  tryReadLine -> String | Nil => @primitive "tryReadLine"
 
   /// Read one line from stderr. Blocks forever until available. Returns nil at EOF.
   readStderrLine -> String | Nil => @primitive "readStderrLine"
@@ -269,91 +240,35 @@ SubprocessBase subclass: Subprocess
   /// Read one line from stderr with timeout (ms). Returns nil on timeout or EOF.
   readStderrLine: timeout -> String | Nil => @primitive "readStderrLine:"
 
-  /// Non-blocking read from stderr. Returns nil immediately if no data buffered.
-  tryReadStderrLine -> String | Nil => @primitive "tryReadStderrLine"
-
-  /// Return a Stream of stdout lines. The Stream's generator calls readLine
-  /// internally via gen_server:call — runs in the caller's process, no
-  /// cross-process Stream constraint violated. Terminates (returns done)
-  /// when readLine returns nil (EOF).
+  /// Return a Stream of stdout lines. Generator calls readLine via gen_server:call.
   lines -> Stream => @primitive "lines"
 
   /// Return a Stream of stderr lines. Same mechanics as lines.
   stderrLines -> Stream => @primitive "stderrLines"
+
+  /// Get the exit code. Returns nil if the subprocess is still running.
+  exitCode -> Integer | Nil => @primitive "exitCode"
+
+  /// Force-close the subprocess (sends kill to process group).
+  close -> Nil => @primitive "close"
 ```
 
-**Why `lines` works despite the cross-process constraint:** The Stream returned by `lines` has a generator closure that calls `gen_server:call(ActorPid, {readLine, []}, infinity)` — a message send, not a direct port read. The generator executes in the caller's process (correct for Streams), and each `next` step sends a sync message to the actor to get the next line. The actor reads from the port in its own process (correct for ports). No resource handle crosses the process boundary — only the actor's PID, which is safe to share. This is the same pattern as wrapping any actor method in a Stream generator.
+**Choosing between `lines` and `readLine`:**
+- Use `lines` for simple consumption — `agent lines do: [:line | ...]` or `agent lines select: [...] take: 10`. Same composability as Tier 1 Streams.
+- Use `readLine:` with a timeout for request-response protocols (JSON-RPC) or when the caller must remain responsive to other messages. Timeout returns nil, letting the caller detect a hung subprocess.
+
+**Why `lines` works despite the cross-process constraint:** The Stream returned by `lines` has a generator closure that calls `gen_server:call(ActorPid, {readLine, []}, infinity)` — a message send, not a direct port read. The generator executes in the caller's process (correct for Streams), and each `next` step sends a sync message to the actor to get the next line. No resource handle crosses the process boundary — only the actor's PID.
 
 **`lines` caveats:**
-1. **Single-consumer:** The Stream's generator pulls from the actor's shared readLine buffer. If two consumers iterate the same `lines` Stream (e.g., `s := agent lines. s do: [...]. s do: [...]`), lines are distributed non-deterministically between iterations — the Stream protocol contract (`do:` iterates all elements) is silently violated. This is inherent to all stateful-generator Streams (file-backed Streams have the same property). Each call to `lines` should be consumed by exactly one terminal operation.
-2. **Caller blocking:** Each step of a `lines` iteration calls `gen_server:call` with `infinity` timeout. If the subprocess goes quiet for minutes, the caller's process is frozen for that duration. **If the caller is itself an actor**, its gen_server cannot process any other messages during the wait — supervised actors may be killed by their supervisor's health check. Use `readLine: timeout` for callers that must remain responsive, or spawn a dedicated process for the read loop.
-3. **Abandoned Stream buffer growth:** If a `lines` Stream is abandoned mid-iteration (assigned to a variable but never fully consumed), the actor's stdout buffer grows without bound as the subprocess continues producing output. Unlike Tier 1 abandoned Streams (cleaned up when the caller's process exits), the Tier 2 actor's lifetime is independent of the Stream consumer. Use `close.` to stop the subprocess when the Stream is no longer needed.
-
-#### SubprocessListener — Push Mode (Callbacks)
-
-For event-driven use cases (log tailing, build output, monitoring) where the subprocess drives the flow. Callbacks execute in the actor's process — no cross-process constraint.
-
-```beamtalk
-SubprocessBase subclass: SubprocessListener
-  state: lineCallback = nil
-  state: stderrLineCallback = nil
-  state: exitCallback = nil
-
-  /// Register a callback for each stdout line. Replaces any previous callback.
-  onLine: aBlock -> Nil => @primitive "onLine:"
-
-  /// Register a callback for each stderr line. Replaces any previous callback.
-  onStderrLine: aBlock -> Nil => @primitive "onStderrLine:"
-
-  /// Register a callback for subprocess exit. Receives the exit code.
-  onExit: aBlock -> Nil => @primitive "onExit:"
-```
-
-**Usage:**
-
-```beamtalk
-// Event-driven log monitoring
-tail := SubprocessListener open: "tail" args: #("-f", "server.log").
-tail onLine: [:line |
-  (line includesSubstring: "ERROR") ifTrue: [
-    Transcript show: "ALERT: ", line
-  ]
-].
-tail onExit: [:code |
-  Transcript show: "tail exited with code ", code asString
-].
-
-// Build output streaming
-build := SubprocessListener open: "make" args: #("all").
-build onLine: [:line | Transcript show: line].
-build onStderrLine: [:line | Transcript show: "[stderr] ", line].
-build onExit: [:code |
-  code =:= 0
-    ifTrue: [Transcript show: "Build succeeded"]
-    ifFalse: [Transcript show: "Build failed"]
-].
-```
-
-**Callback semantics:**
-- Callbacks execute in the actor's gen_server process, not the caller's — so they are serialized and safe to mutate actor state from.
-- `onLine:` replaces any previous stdout callback. Pass `nil` to unregister.
-- Lines that arrive before `onLine:` is registered are dropped (no buffering in push mode).
-- If no callback is registered for a channel, lines on that channel are silently discarded.
-- `onExit:` fires once when the subprocess exits, after all buffered lines have been delivered to `onLine:`/`onStderrLine:`.
-
-**Callback blocking warning:** Callbacks run in the actor's `handle_info` — if a callback blocks (e.g., `[:line | System run: "notify-send" args: #(line)]`), **all line delivery halts** until the callback returns. Meanwhile the subprocess continues writing to stdout; the OS pipe buffer fills (typically 64KB on Linux); the subprocess blocks on `write()`. Both the actor and the subprocess are frozen. Callbacks must be fast and non-blocking. For slow processing, send a message to another actor from within the callback rather than doing the work inline.
+1. **Single-consumer:** The Stream's generator pulls from the actor's shared readLine buffer. If two consumers iterate the same `lines` Stream (e.g., `s := agent lines. s do: [...]. s do: [...]`), lines are distributed non-deterministically between iterations. Each call to `lines` should be consumed by exactly one terminal operation.
+2. **Caller blocking:** Each step of a `lines` iteration calls `gen_server:call` with `infinity` timeout. If the subprocess goes quiet for minutes, the caller's process is frozen. **If the caller is itself an actor**, its gen_server cannot process other messages — supervised actors may be killed by their supervisor's health check. Use `readLine: timeout` for callers that must remain responsive, or spawn a dedicated process for the read loop.
+3. **Abandoned Stream buffer growth:** If a `lines` Stream is abandoned mid-iteration, the actor's stdout buffer grows without bound as the subprocess continues producing output. Use `close.` to stop the subprocess when the Stream is no longer needed.
 
 #### Runtime Implementation
 
-All three classes are backed by hand-written Erlang modules rather than generated codegen. This follows the same pattern as `beamtalk_compiler_port.erl` — specialized port management that needs direct `handle_info` control.
+`Subprocess` is backed by a hand-written Erlang module (`beamtalk_subprocess.erl`) rather than generated codegen. This follows the same pattern as `beamtalk_compiler_port.erl` — specialized port management that needs direct `handle_info` control.
 
-**OTP behaviour choice:** `gen_server`, not `gen_statem`. The subprocess has a simple linear state machine (`starting → running → draining → closed`) with 4 states — easy to encode as a `phase` key in the gen_server state map. `gen_statem` would be cleaner but SubprocessBase needs to interoperate with Beamtalk's Actor infrastructure (which is gen_server-based). When Beamtalk adds full OTP behaviour support including `gen_statem` wrappers, SubprocessBase can be migrated.
-
-- `beamtalk_subprocess_base.erl` — shared `init/1` (opens port), `writeLine`, `exitCode`, `close`, `terminate/2` cleanup
-- `beamtalk_subprocess.erl` — extends base with buffering, deferred reply, timeout management
-- `beamtalk_subprocess_listener.erl` — extends base with callback dispatch, no buffering
-
-The `handle_info` for incoming data differs between the two subclasses:
+**OTP behaviour choice:** `gen_server`, not `gen_statem`. The subprocess has a simple linear state machine (`starting → running → draining → closed`) with 4 states — easy to encode as a `phase` key in the gen_server state map. `gen_statem` would be cleaner but Subprocess needs to interoperate with Beamtalk's Actor infrastructure (which is gen_server-based). When Beamtalk adds full OTP behaviour support including `gen_statem` wrappers, Subprocess can be migrated.
 
 Key runtime mechanics:
 
@@ -413,18 +328,11 @@ handle_readLine([], From, State) ->
 handle_readLine([Timeout], From, State) ->
     read_line_for(stdout, From, Timeout, State).
 
-%% tryReadLine — non-blocking, returns nil if no data buffered
-handle_tryReadLine([], _From, State) ->
-    try_read_line_for(stdout, State).
-
 handle_readStderrLine([], From, State) ->
     read_line_for(stderr, From, infinity, State).
 
 handle_readStderrLine([Timeout], From, State) ->
     read_line_for(stderr, From, Timeout, State).
-
-handle_tryReadStderrLine([], _From, State) ->
-    try_read_line_for(stderr, State).
 
 read_line_for(Channel, From, Timeout, State) ->
     BufKey = {Channel, buffer},
@@ -447,17 +355,6 @@ read_line_for(Channel, From, Timeout, State) ->
             {noreply, State#{WaitKey => {From, TimerRef}}}
     end.
 
-try_read_line_for(Channel, State) ->
-    BufKey = {Channel, buffer},
-    Buffer = maps:get(BufKey, State),
-    case queue:is_empty(Buffer) of
-        false ->
-            {{value, Line}, Rest} = queue:out(Buffer),
-            {reply, Line, State#{BufKey => Rest}};
-        true ->
-            {reply, nil, State}
-    end.
-
 %% writeLine — sync call, writes to port stdin
 handle_writeLine([Data], _From, #{port := Port} = State) ->
     Line = <<(iolist_to_binary(Data))/binary, $\n>>,
@@ -471,12 +368,11 @@ The deferred reply pattern means `readLine` blocks the caller's `gen_server:call
 
 This is standard OTP — `handle_call` returns `{noreply, State}` to defer the reply, stashing `From` in the state. When data arrives via `handle_info`, the actor calls `gen_server:reply(From, Value)` to unblock the caller. The same pattern is used for both `readLine` (stdout) and `readStderrLine` (stderr), each with independent buffers and waiting callers.
 
-**Timeout handling:** Three read variants cover different needs:
+**Timeout handling:** Two read variants cover different needs:
 - `readLine` — blocks forever (`gen_server:call` with `infinity` timeout). For loops where data is expected eventually.
 - `readLine: timeout` — blocks up to `timeout` milliseconds. The runtime uses `erlang:send_after/3` to schedule a `{read_timeout, Channel}` message. If the timer fires before data arrives, `handle_info` replies `nil` and cancels the wait. Returns `nil` on timeout or EOF.
-- `tryReadLine` — non-blocking. Returns the next buffered line immediately, or `nil` if the buffer is empty. Does not stash `From` or defer the reply.
 
-All three variants exist for stderr too (`readStderrLine`, `readStderrLine:`, `tryReadStderrLine`).
+Both variants exist for stderr too (`readStderrLine`, `readStderrLine:`).
 
 ADR 0043 notes that `gen_server:call` defaults to a 5000ms timeout. For the blocking `readLine` variant, the runtime must use `gen_server:call(AgentPid, {readLine, []}, infinity)` — a subprocess may produce no output for minutes (e.g., a coding agent thinking). For `readLine:`, the gen_server:call also uses `infinity` — the timeout is managed internally via `erlang:send_after`, not via OTP's call timeout, so the actor can clean up its waiting state properly.
 
@@ -585,9 +481,9 @@ Streams are value-side only (ADR 0021 revised). `System output:args:` is a valid
 2. **Block-scoped cleanup** — `System output:args:do:` sends a shutdown command to the helper in an `ensure:` block when the block exits (normally or via exception). This is the deterministic alternative — use it for long-running commands where relying on the finalizer is insufficient.
 3. **Process linking** — the BEAM port to the Rust helper is linked to the calling process. If the caller crashes, the port closes, and the helper cleans up the subprocess.
 
-**Tier 2 (Subprocess/SubprocessListener actor) — Streams do NOT work here:**
+**Tier 2 (Subprocess actor) — direct Streams do NOT work, but `lines` bridges the gap:**
 
-Streams cannot be used in Tier 2 because the port is owned by the actor's gen_server process, not the caller's. A Stream returned from an actor method would have a generator closure that captures the actor's port — but the closure executes in the caller's process, which cannot read from that port. This is why Tier 2 uses `readLine` (pull) and `onLine:` (push) instead of Streams. See ADR 0021 "Scope Limitation" and the "Design Resolution: Why Not Streams?" section above.
+A Stream whose generator directly reads from the port cannot be returned from an actor — the generator closure would execute in the caller's process, which cannot read from the actor's port. However, the `lines` method works around this by returning a Stream whose generator calls `gen_server:call(ActorPid, {readLine, []}, infinity)` — a message send, not a direct port read. See ADR 0021 "Scope Limitation" and the "Design Resolution: Why Not Streams?" section above.
 
 4. **Actor lifecycle** — the port to the Rust helper is owned by the actor's gen_server process. When the actor stops (via `stop.` or crash), `terminate/2` sends a shutdown command to the helper, which cleans up the subprocess with the SIGTERM → SIGKILL sequence.
 5. **Explicit close** — `agent close.` sends an immediate kill command to the helper.
@@ -694,7 +590,7 @@ The API-validation argument is genuine: committing to `run:args:` is a surface a
 
 **Why rejected:** The cross-process Stream constraint (ADR 0021) makes this impossible without fundamental changes to Stream semantics. A Stream's generator function runs in the caller's process, but the port is owned by the actor's gen_server process. Returning a Stream would require either: (a) violating the cross-process constraint (unsafe), (b) spawning a proxy process per Stream consumer (complex, fragile), or (c) redesigning Streams to support remote generators (large scope via BT-507).
 
-The API coherence concern is real and should not be dismissed as "2 lines of code." The `readLine` model creates genuine conceptual discontinuity between Tier 1 and Tier 2. If BT-507 (Future combinators / cross-process Streams) is implemented, the Subprocess API should be revisited to add an `agent lines.` method that returns a cross-process-safe Stream. The `readLine` API would remain as the lower-level primitive, and `lines` would be sugar built on top of it. This future path is noted in Phase 5.
+The API coherence concern is real and should not be dismissed as "2 lines of code." However, the `lines` method already bridges this gap — it returns a Stream whose generator calls `readLine` via `gen_server:call`, giving Tier 2 the same composability as Tier 1. The `readLine` API remains as the lower-level primitive for timeout-based and request-response patterns.
 
 ### Option C: Use `Process` as the class name (per ADR 0021 sketch)
 
@@ -711,15 +607,15 @@ The API coherence concern is real and should not be dismissed as "2 lines of cod
 - **Operator**: "With `readLine` as a blocking `gen_server:call`, the actor has at most one pending caller at a time. Every consumer of Subprocess output must be sequential — there is no way to have two BEAM processes independently reading lines from the same subprocess. A push model makes the subscription relationship explicit in state and visible to BEAM tooling like `sys:get_state/1`."
 - **Language designer**: "The `readLine` + `onLine:` future path creates two competing APIs for consuming output. If both are active simultaneously, they race for lines. This is not a neutral future extension — it's a protocol design commitment that constrains what `onLine:` can look like."
 
-**Why rejected for Phase 1:** Push-based messaging adds significant complexity: subscriber registration, back-pressure handling, message ordering guarantees, and what happens when the subscriber crashes. The sync `readLine` model is simpler, correct, and sufficient for the motivating JSON-RPC use case (request-response with line-delimited messages).
+**Why rejected:** Push-based messaging adds significant complexity: subscriber registration, back-pressure handling, message ordering guarantees, and what happens when the subscriber crashes. The sync `readLine` model is simpler, correct, and sufficient for the motivating JSON-RPC use case (request-response with line-delimited messages).
 
-The single-consumer limitation is real but acceptable for Phase 1: the Symphony orchestrator pattern is one coordinator process per subprocess, not multiple concurrent readers. The operator's observability concern is valid — the implementation should include the subscriber identity in the `waiting` state field (not just `{From, _}` but `{From, WaitingSince}`) for debugging.
+The single-consumer limitation is real but acceptable: the Symphony orchestrator pattern is one coordinator process per subprocess, not multiple concurrent readers. The operator's observability concern is valid — the implementation should include the subscriber identity in the `waiting` state field (not just `{From, _}` but `{From, WaitingSince}`) for debugging.
 
-A push-based extension can be added later, but the ADR acknowledges this is not fully neutral — `readLine` and `onLine:` will need coordination to avoid consuming lines intended for the other. The likely design is mutual exclusion: a Subprocess uses either pull (`readLine`) or push (`onLine:`) mode, not both simultaneously. This constraint should be documented when `onLine:` is designed.
+A push-based wrapper can be built in ~15 lines of Beamtalk on top of `Subprocess` (see "Future: Push-Based Callbacks" in Implementation). If the pattern becomes common enough, a stdlib class can be added without changing the `Subprocess` API.
 
 ### Tension Points
-- **Stream vs readLine:** Stream advocates want `agent lines.` for API consistency; the cross-process constraint makes this impossible today. If BT-507 enables cross-process Streams, the Subprocess API should be revisited.
-- **Push vs pull:** Push-model advocates want event-driven efficiency and multi-consumer support; Phase 1 prioritizes simplicity. The single-consumer limitation is acceptable for the Symphony use case but should be documented.
+- **Stream vs readLine:** Resolved — `agent lines` returns a Stream via message-send generator, bridging the gap. `readLine:` remains for timeout-based patterns.
+- **Push vs pull:** Push-model advocates want event-driven efficiency; pull-based `readLine` + `lines` is simpler and sufficient. Push wrappers can be built in user-space (~15 lines).
 - **Incrementalists vs security-first:** `os:cmd` first would validate API ergonomics cheaply; `open_port` first gets security right from day one at minimal extra cost.
 - **Naming:** `Process` is available (BEAM processes are "Actors") but clashes with ecosystem tooling. `Subprocess` is unambiguous but imports Unix vocabulary.
 
@@ -758,7 +654,7 @@ Create `Subprocess` as a non-actor class wrapping a port handle, with methods li
 - `readLine` / `writeLine:` as sync actor messages aligns with ADR 0043 (sync-by-default)
 - `CommandResult` as a Value class is consistent with ADR 0042
 - Tier 2 hides the cross-process port constraint — callers interact with a simple actor, not a port
-- Two consumption modes (pull via `Subprocess`, push via `SubprocessListener`) with shared base class — users pick the right tool for their use case
+- Single `Subprocess` class with both pull (`readLine`) and Stream (`lines`) consumption — simple, no class hierarchy overhead
 - Symphony orchestrator use case is fully addressable with Tier 2
 - The Rust helper follows the same ETF-over-port pattern as `beamtalk_compiler_port` — proven architecture
 
@@ -774,7 +670,7 @@ Create `Subprocess` as a non-actor class wrapping a port handle, with methods li
 ### Neutral
 - `Port.bt` remains unchanged — still an opaque BEAM interop type
 - `System.bt` gains three method families — moderate surface area expansion
-- `SubprocessBase`, `Subprocess`, and `SubprocessListener` add three new Actor subclasses — moderate addition to the class hierarchy
+- `Subprocess` adds one new Actor subclass — minimal addition to the class hierarchy
 - Port-backed Streams (Tier 1) have the same cross-process constraint as file-backed Streams (ADR 0021) — no new constraint introduced
 - The stdlib dependency on OTP's `os:find_executable/1` is minimal and well-tested
 - Deferred reply pattern in readLine is standard OTP — no new runtime mechanisms needed
@@ -831,40 +727,46 @@ Build a standalone Rust binary that the BEAM spawns as a port. The binary manage
 **Components:** stdlib, runtime
 **Tests:** `stdlib/test/system_output_test.bt` — streaming, pipeline composition, block-scoped cleanup, abandoned stream behavior
 
-### Phase 4: `SubprocessBase` and `Subprocess` actor (L)
+### Phase 4: `Subprocess` actor (L)
 
-**New abstract base class: `SubprocessBase`**
-- `stdlib/src/SubprocessBase.bt` — Actor subclass with `open:args:`, `open:args:env:dir:`, `writeLine:`, `exitCode`, `close`
-- `runtime/apps/beamtalk_runtime/src/beamtalk_subprocess_base.erl` — shared gen_server logic:
-  - `init/1` — sends spawn command to `beamtalk_exec_port`, initializes port state
-  - `handle_call/3` — dispatches `writeLine:`, `exitCode`, `close`
+**New class: `Subprocess`**
+- `stdlib/src/Subprocess.bt` — Actor subclass with `open:args:`, `open:args:env:dir:`, `writeLine:`, `readLine`, `readLine:`, `readStderrLine`, `readStderrLine:`, `lines`, `stderrLines`, `exitCode`, `close`
+- `runtime/apps/beamtalk_runtime/src/beamtalk_subprocess.erl` — hand-written gen_server:
+  - `init/1` — sends spawn command to `beamtalk_exec_port`, initializes port state and buffer queues
+  - `handle_call/3` — dispatches `writeLine:`, `readLine`, `readLine:`, `readStderrLine`, `readStderrLine:`, `exitCode`, `close`, `lines`, `stderrLines`
+  - `handle_info/2` — receives `{stdout, ChildId, Data}`, `{stderr, ChildId, Data}`, and `{exit, ChildId, Code}` from the Rust helper, buffers lines, replies to deferred `readLine`/`readStderrLine` callers
+  - Timeout management via `erlang:send_after`
   - `terminate/2` — sends shutdown command to `beamtalk_exec_port` for this child
 
-**New class: `Subprocess` (pull mode)**
-- `stdlib/src/Subprocess.bt` — SubprocessBase subclass adding `readLine`, `readLine:`, `tryReadLine`, `readStderrLine`, `readStderrLine:`, `tryReadStderrLine`
-- `runtime/apps/beamtalk_runtime/src/beamtalk_subprocess.erl` — extends base with:
-  - Stdout/stderr buffer queues
-  - `handle_info/2` — receives `{stdout, ChildId, Data}`, `{stderr, ChildId, Data}`, and `{exit, ChildId, Code}` from the Rust helper, buffers lines, replies to deferred `readLine`/`readStderrLine` callers
-  - `handle_call/3` — adds `readLine`, `readLine:`, `tryReadLine` and stderr equivalents
-  - Timeout management via `erlang:send_after`
-
 **Codegen registration:**
-- Register `SubprocessBase`, `Subprocess` as built-in actor classes in codegen (similar to how `Actor` is registered)
+- Register `Subprocess` as a built-in actor class in codegen (similar to how `Actor` is registered)
 - The class method `open:args:` is a standard class method that calls `spawnWith:` — no codegen changes needed
 
 **Components:** stdlib, runtime, codegen (builtins registration)
-**Tests:** `stdlib/test/subprocess_test.bt` — spawn/readLine/writeLine, separate stderr, exit codes, close/stop lifecycle, deferred readLine blocking, timeout variants, tryReadLine, EOF handling, error on write after close
+**Tests:** `stdlib/test/subprocess_test.bt` — spawn/readLine/writeLine, separate stderr, exit codes, close/stop lifecycle, deferred readLine blocking, timeout variants, lines Stream consumption, EOF handling, error on write after close
 
-### Phase 5: SubprocessListener — Push-Based Callbacks
-- Implement `beamtalk_subprocess_listener.erl` extending `beamtalk_subprocess_base.erl`
-- `onLine:`, `onStderrLine:`, `onExit:` — callback registration via `gen_server:call`
-- `handle_info` dispatches decoded lines directly to registered callbacks (no buffering)
-- `onExit:` fires after final line callbacks, with exit code as argument
-- Create `stdlib/src/SubprocessListener.bt` class definition
-- Register in codegen builtins
+### Future: Push-Based Callbacks (Deferred)
 
-**Components:** stdlib, runtime
-**Tests:** `stdlib/test/subprocess_listener_test.bt` — callback registration, stdout/stderr dispatch, onExit sequencing, no-callback-drops-lines, writeLine from callback
+A push-based `SubprocessListener` (with `onLine:`, `onStderrLine:`, `onExit:` callbacks) was considered and deferred. The pull-based `Subprocess` with `readLine` + `lines` covers the motivating use cases (Symphony orchestrator, scripting). Push-based callbacks can be built in ~15 lines of Beamtalk on top of `Subprocess` by spawning a dedicated reader actor:
+
+```beamtalk
+// User-space push wrapper — no stdlib support needed
+reader := Actor subclass: SubprocessReader
+  state: subprocess = nil
+  state: callback = nil
+
+  class on: subprocess do: callback =>
+    self spawnWith: #{"subprocess" => subprocess, "callback" => callback}
+
+  run =>
+    line := self.subprocess readLine.
+    [line notNil] whileTrue: [
+      self.callback value: line.
+      line := self.subprocess readLine.
+    ]
+```
+
+If this pattern becomes common enough to warrant stdlib support, a `SubprocessListener` class can be added in a future phase without changing the `Subprocess` API.
 
 ## References
 - Related issues: [BT-1119](https://linear.app/beamtalk/issue/BT-1119) (Subprocess execution), [BT-1125](https://linear.app/beamtalk/issue/BT-1125) (Interactive Subprocess actor), [BT-1118](https://linear.app/beamtalk/issue/BT-1118) (Epic: Stdlib Process, Timer, and Directory Libraries), [BT-1123](https://linear.app/beamtalk/issue/BT-1123) (Epic: Symphony-Style Orchestrator)
