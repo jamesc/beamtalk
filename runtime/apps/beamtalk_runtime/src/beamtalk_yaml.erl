@@ -283,7 +283,7 @@ generate_flow(B) when is_binary(B) -> yaml_double_quote(B);
 generate_flow(Map) when is_map(Map), map_size(Map) =:= 0 -> <<"{}">>;
 generate_flow(Map) when is_map(Map) ->
     Pairs = [
-        <<(yaml_double_quote(format_key(K)))/binary, ": ", (generate_flow(V))/binary>>
+        <<(render_key(K))/binary, ": ", (generate_flow(V))/binary>>
      || {K, V} <- maps:to_list(Map)
     ],
     <<"{", (iolist_to_binary(lists:join(<<", ">>, Pairs)))/binary, "}">>;
@@ -294,12 +294,19 @@ generate_flow(List) when is_list(List) ->
     <<"[", (iolist_to_binary(lists:join(<<", ">>, Items)))/binary, "]">>.
 
 %% @private
-%% @doc Format a map key as a binary string for YAML output.
--spec format_key(term()) -> binary().
-format_key(K) when is_binary(K) -> K;
-format_key(K) when is_atom(K) -> atom_to_binary(K, utf8);
-format_key(K) when is_integer(K) -> integer_to_binary(K);
-format_key(K) when is_float(K) -> float_to_binary(K, [short]).
+%% @doc Render a map key for YAML flow output.
+%%
+%% Typed scalar keys (integer, float, boolean, nil) are emitted unquoted so
+%% a parse → generate round-trip preserves key types. String and atom keys
+%% are double-quoted to prevent ambiguity with YAML reserved words.
+-spec render_key(term()) -> binary().
+render_key(nil) -> <<"null">>;
+render_key(true) -> <<"true">>;
+render_key(false) -> <<"false">>;
+render_key(K) when is_integer(K) -> integer_to_binary(K);
+render_key(K) when is_float(K) -> float_to_binary(K, [short]);
+render_key(K) when is_atom(K) -> yaml_double_quote(atom_to_binary(K, utf8));
+render_key(K) when is_binary(K) -> yaml_double_quote(K).
 
 %% @private
 %% @doc Wrap a binary in double quotes, escaping internal special characters.

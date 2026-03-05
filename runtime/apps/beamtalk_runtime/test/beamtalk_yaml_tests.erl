@@ -277,6 +277,20 @@ roundtrip_unicode_test() ->
         <<"héllo"/utf8>>, beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(<<"héllo"/utf8>>))
     ).
 
+roundtrip_integer_key_map_test() ->
+    %% Integer keys must survive generate: → parse: as integers, not strings
+    application:ensure_all_started(yamerl),
+    Original = #{1 => <<"one">>, 2 => <<"two">>},
+    Result = beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(Original)),
+    ?assertEqual(<<"one">>, maps:get(1, Result)),
+    ?assertEqual(<<"two">>, maps:get(2, Result)).
+
+generate_integer_key_unquoted_test() ->
+    %% Integer keys must be emitted without quotes so they parse as integers
+    Generated = beamtalk_yaml:'generate:'(#{1 => <<"x">>}),
+    ?assertNotMatch(<<"{\"-", _/binary>>, Generated),
+    ?assertNotMatch(<<"{\"", _/binary>>, Generated).
+
 %%% ============================================================================
 %%% parseFile:
 %%% ============================================================================
