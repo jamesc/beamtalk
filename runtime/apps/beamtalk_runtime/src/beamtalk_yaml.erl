@@ -53,7 +53,7 @@
     Docs = parse_yaml_string(YamlStr, 'parse:'),
     case Docs of
         [] -> nil;
-        [Doc | _] -> convert_node(Doc)
+        [Doc | _] -> convert_node(Doc, 'parse:')
     end;
 'parse:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'Yaml'),
@@ -67,7 +67,7 @@
 -spec 'parseAll:'(binary()) -> list().
 'parseAll:'(YamlStr) when is_binary(YamlStr) ->
     Docs = parse_yaml_string(YamlStr, 'parseAll:'),
-    [convert_node(Doc) || Doc <- Docs];
+    [convert_node(Doc, 'parseAll:') || Doc <- Docs];
 'parseAll:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'Yaml'),
     Error1 = beamtalk_error:with_selector(Error0, 'parseAll:'),
@@ -196,37 +196,47 @@ unwrap_doc(Node) -> Node.
 %% @doc Convert a yamerl detailed node to a Beamtalk value.
 %%
 %% yamerl detailed nodes are tagged tuples with type information.
-%% This converter handles all standard YAML types.
--spec convert_node(term()) -> term().
-convert_node({yamerl_str, _, _, _, Charlist}) ->
+%% This converter handles all standard YAML types. Unsupported node types
+%% (anchors, aliases, custom tags) raise a parse_error.
+%%
+%% The Selector parameter is used for error attribution (parse: vs parseAll:).
+-spec convert_node(term(), atom()) -> term().
+convert_node({yamerl_str, _, _, _, Charlist}, _Selector) ->
     %% Strings are returned as charlists in yamerl detailed mode.
     %% Use unicode:characters_to_binary/1 (not list_to_binary/1) to safely
     %% handle codepoints > 255, which list_to_binary/1 would crash on.
     unicode:characters_to_binary(Charlist);
-convert_node({yamerl_int, _, _, _, Value}) ->
+convert_node({yamerl_int, _, _, _, Value}, _Selector) ->
     Value;
-convert_node({yamerl_float, _, _, _, Value}) ->
+convert_node({yamerl_float, _, _, _, Value}, _Selector) ->
     Value;
-convert_node({yamerl_bool, _, _, _, true}) ->
+convert_node({yamerl_bool, _, _, _, true}, _Selector) ->
     true;
-convert_node({yamerl_bool, _, _, _, false}) ->
+convert_node({yamerl_bool, _, _, _, false}, _Selector) ->
     false;
-convert_node({yamerl_null, _, _, _, null}) ->
+convert_node({yamerl_null, _, _, _}, _Selector) ->
     nil;
-convert_node({yamerl_seq, _, _, _, Items, _Count}) ->
-    [convert_node(Item) || Item <- Items];
-convert_node({yamerl_map, _, _, _, Pairs}) ->
+convert_node({yamerl_seq, _, _, _, Items, _Count}, Selector) ->
+    [convert_node(Item, Selector) || Item <- Items];
+convert_node({yamerl_map, _, _, _, Pairs}, Selector) ->
     maps:from_list([
-        {convert_node(K), convert_node(V)}
+        {convert_node(K, Selector), convert_node(V, Selector)}
      || {K, V} <- Pairs
     ]);
-convert_node(Other) ->
-    %% Fallback for unrecognized node types (e.g., aliases, anchors).
+convert_node(Other, Selector) ->
+    %% Fallback for unsupported node types: anchors, aliases, custom tags.
     %% Log only the node type tag to avoid exposing potentially sensitive values
     %% from YAML files (e.g. API keys, passwords) in log output.
     NodeType = element(1, Other),
-    ?LOG_WARNING("beamtalk_yaml: unrecognized yamerl node", #{node_type => NodeType}),
-    nil.
+    ?LOG_WARNING("beamtalk_yaml: unsupported yamerl node type", #{node_type => NodeType}),
+    Error0 = beamtalk_error:new(parse_error, 'Yaml'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_details(Error1, #{node_type => NodeType}),
+    Error3 = beamtalk_error:with_hint(
+        Error2,
+        <<"YAML anchors/aliases and custom tags are not supported">>
+    ),
+    beamtalk_error:raise(Error3).
 
 %%% ============================================================================
 %%% Internal Functions — Generation

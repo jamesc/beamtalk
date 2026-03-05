@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// HTTPResponse — Sealed value class for HTTP response objects.
+///
+/// Represents the result of an HTTP request: status code, headers, and body.
+/// HTTPResponse instances are returned by `Http` class methods and are
+/// immutable value objects (no actor process).
+///
+/// ## Examples
+/// ```beamtalk
+/// resp := Http get: "https://httpbin.org/get"
+/// resp status      // => 200
+/// resp ok          // => true
+/// resp body        // => "{...}"
+/// resp bodyAsJson  // => a Dictionary
+/// ```
+sealed Value subclass: HTTPResponse
+
+  /// HTTP status code (e.g. 200, 404, 500).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// resp status   // => 200
+  /// ```
+  sealed status -> Integer => @primitive "status"
+
+  /// Response headers as a List of [name, value] binary pairs.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// resp headers   // => #(#("content-type", "text/plain"), ...)
+  /// ```
+  sealed headers -> List => @primitive "headers"
+
+  /// Response body as a String.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// resp body   // => "Hello, World!"
+  /// ```
+  sealed body -> String => @primitive "body"
+
+  /// True if the status code is in the 2xx success range.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// resp ok   // => true   (for status 200)
+  /// resp ok   // => false  (for status 404)
+  /// ```
+  sealed ok -> Boolean => @primitive "ok"
+
+  /// Parse the response body as JSON and return the decoded value.
+  ///
+  /// Equivalent to `JSON parse: self body`. Raises a parse error if
+  /// the body is not valid JSON.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// resp bodyAsJson         // => a Dictionary or List
+  /// ```
+  sealed bodyAsJson -> Object => @primitive "bodyAsJson"
