@@ -54,11 +54,11 @@ handle(<<"inspect">>, Params, Msg, _SessionPid) ->
                         State = sys:get_state(Pid, 5000),
                         case State of
                             M when is_map(M) ->
-                                case beamtalk_tagged_map:is_tagged(M) of
+                                case beamtalk_runtime_api:is_tagged(M) of
                                     true ->
                                         %% Return only user-visible instance fields
                                         %% (filters out $beamtalk_class, __methods__, etc.)
-                                        UserFields = beamtalk_reflection:field_names(M),
+                                        UserFields = beamtalk_runtime_api:field_names(M),
                                         FieldMap = maps:with(UserFields, M),
                                         beamtalk_repl_protocol:encode_inspect(
                                             FieldMap, Msg, fun beamtalk_repl_json:term_to_json/1

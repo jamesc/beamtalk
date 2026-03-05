@@ -278,7 +278,7 @@ extract_assignment(Expression) ->
 %% @doc Auto-await a Future if the result is a tagged future tuple (BT-840).
 -spec maybe_await_future(term()) -> term().
 maybe_await_future({beamtalk_future, _} = Future) ->
-    try beamtalk_future:await(Future, 30000) of
+    try beamtalk_runtime_api:future_await(Future, 30000) of
         AwaitedValue -> AwaitedValue
     catch
         throw:#beamtalk_error{kind = timeout} = TimeoutError ->

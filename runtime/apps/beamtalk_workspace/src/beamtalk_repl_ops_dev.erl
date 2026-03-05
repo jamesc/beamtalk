@@ -295,14 +295,14 @@ get_completions(Prefix) when is_binary(Prefix) ->
     PrefixStr = binary_to_list(Prefix),
     ClassPids =
         try
-            beamtalk_class_registry:all_classes()
+            beamtalk_runtime_api:all_classes()
         catch
             _:_ -> []
         end,
     ClassNames = lists:filtermap(
         fun(Pid) ->
             try
-                Name = beamtalk_object_class:class_name(Pid),
+                Name = beamtalk_runtime_api:class_name(Pid),
                 {true, atom_to_binary(Name, utf8)}
             catch
                 _:_ -> false
@@ -570,7 +570,7 @@ walk_chain(ClassName, [], _Depth) ->
 walk_chain(_ClassName, _Selectors, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
     undefined;
 walk_chain(ClassName, [Selector | Rest], Depth) ->
-    case beamtalk_class_registry:get_method_return_type(ClassName, Selector) of
+    case beamtalk_runtime_api:get_method_return_type(ClassName, Selector) of
         {ok, NextClass} -> walk_chain(NextClass, Rest, Depth + 1);
         {error, not_found} -> undefined
     end.
@@ -592,7 +592,7 @@ walk_chain_class(ClassName, [class | Rest]) ->
     %% `ClassName class` → metaclass; for completions treat as still on the class side.
     walk_chain_class(ClassName, Rest);
 walk_chain_class(ClassName, [Selector | Rest]) ->
-    case beamtalk_class_registry:get_class_method_return_type(ClassName, Selector) of
+    case beamtalk_runtime_api:get_class_method_return_type(ClassName, Selector) of
         {ok, NextClass} -> walk_chain(NextClass, Rest, 1);
         {error, not_found} -> undefined
     end.
@@ -660,7 +660,7 @@ classify_receiver(<<H, _/binary>> = Receiver, Bindings) when H >= $A, H =< $Z ->
         {ok, ClassName} ->
             case
                 try
-                    beamtalk_class_registry:whereis_class(ClassName)
+                    beamtalk_runtime_api:whereis_class(ClassName)
                 catch
                     _:_ -> undefined
                 end
@@ -701,13 +701,13 @@ classify_receiver(Receiver, Bindings) ->
 
 %% @private
 %% @doc Classify a receiver by looking it up in the bindings map.
-%% Uses beamtalk_primitive:class_of/1 as the canonical type classifier,
+%% Uses beamtalk_runtime_api:primitive_class_of/1 as the canonical type classifier,
 %% which handles actors, tagged maps, primitives, symbols, blocks, nil, etc.
 -spec classify_by_binding(atom(), map()) -> {instance, atom()} | undefined.
 classify_by_binding(VarAtom, Bindings) ->
     case maps:find(VarAtom, Bindings) of
         {ok, Value} ->
-            ClassName = beamtalk_primitive:class_of(Value),
+            ClassName = beamtalk_runtime_api:primitive_class_of(Value),
             case maybe_class(ClassName) of
                 undefined -> undefined;
                 _ -> {instance, ClassName}
@@ -721,7 +721,7 @@ classify_by_binding(VarAtom, Bindings) ->
 maybe_class(ClassName) ->
     case
         try
-            beamtalk_class_registry:whereis_class(ClassName)
+            beamtalk_runtime_api:whereis_class(ClassName)
         catch
             _:_ -> undefined
         end
@@ -759,14 +759,14 @@ get_workspace_bindings() ->
 %% Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
 -spec collect_all_class_methods(atom(), non_neg_integer()) -> [atom()].
 collect_all_class_methods(ClassName, Depth) ->
-    collect_methods_with_fun(ClassName, Depth, fun beamtalk_object_class:local_class_methods/1).
+    collect_methods_with_fun(ClassName, Depth, fun beamtalk_runtime_api:local_class_methods/1).
 
 %% @private
 %% @doc Collect all instance method selectors for a class by walking the superclass chain.
 %% Guards against excessive depth via ?MAX_HIERARCHY_DEPTH (codebase convention).
 -spec collect_all_methods(atom(), non_neg_integer()) -> [atom()].
 collect_all_methods(ClassName, Depth) ->
-    collect_methods_with_fun(ClassName, Depth, fun beamtalk_object_class:methods/1).
+    collect_methods_with_fun(ClassName, Depth, fun beamtalk_runtime_api:class_methods/1).
 
 %% @private
 %% @doc Walk the superclass chain collecting methods via a caller-supplied getter fun.
@@ -776,7 +776,7 @@ collect_methods_with_fun(_ClassName, Depth, _Fun) when Depth > ?MAX_HIERARCHY_DE
 collect_methods_with_fun(ClassName, Depth, Fun) ->
     case
         try
-            beamtalk_class_registry:whereis_class(ClassName)
+            beamtalk_runtime_api:whereis_class(ClassName)
         catch
             _:_ -> undefined
         end
@@ -792,7 +792,7 @@ collect_methods_with_fun(ClassName, Depth, Fun) ->
                 end,
             Superclass =
                 try
-                    beamtalk_object_class:superclass(ClassPid)
+                    beamtalk_runtime_api:superclass(ClassPid)
                 catch
                     _:_ -> none
                 end,
@@ -890,14 +890,14 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
         {error, badarg} ->
             [];
         {ok, ClassName} ->
-            case beamtalk_class_registry:whereis_class(ClassName) of
+            case beamtalk_runtime_api:whereis_class(ClassName) of
                 undefined ->
                     [];
                 Pid ->
                     InstanceSelectors = lists:sort(
-                        beamtalk_object_class:local_instance_methods(Pid)
+                        beamtalk_runtime_api:local_instance_methods(Pid)
                     ),
-                    ClassMethodsMap = beamtalk_object_class:local_class_methods_map(Pid),
+                    ClassMethodsMap = beamtalk_runtime_api:local_class_methods_map(Pid),
                     ClassSelectors = lists:sort([
                         S
                      || {S, Info} <- maps:to_list(ClassMethodsMap),
@@ -930,11 +930,11 @@ list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
         {error, badarg} ->
             [];
         {ok, ClassName} ->
-            case beamtalk_class_registry:whereis_class(ClassName) of
+            case beamtalk_runtime_api:whereis_class(ClassName) of
                 undefined ->
                     [];
                 Pid ->
-                    IVars = beamtalk_object_class:instance_variables(Pid),
+                    IVars = beamtalk_runtime_api:instance_variables(Pid),
                     lists:sort([atom_to_binary(V, utf8) || V <- IVars])
             end
     end.

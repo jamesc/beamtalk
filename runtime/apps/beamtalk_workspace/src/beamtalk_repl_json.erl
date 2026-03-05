@@ -289,13 +289,17 @@ term_to_json(Value) when is_map(Value) ->
     %% For tagged value objects (user-defined classes), dispatch Beamtalk printString
     %% so that class overrides (e.g. TestResult) are used. Untagged maps fall back
     %% to the Erlang formatter which produces proper #{...} syntax.
-    case beamtalk_tagged_map:class_of(Value) of
+    case beamtalk_runtime_api:tagged_map_class_of(Value) of
         undefined ->
-            beamtalk_primitive:print_string(Value);
+            beamtalk_runtime_api:print_string(Value);
         ClassName ->
-            case (catch beamtalk_dispatch:lookup('printString', [], Value, Value, ClassName)) of
+            case
+                (catch beamtalk_runtime_api:dispatch_lookup(
+                    'printString', [], Value, Value, ClassName
+                ))
+            of
                 {reply, Result, _} when is_binary(Result) -> Result;
-                _ -> beamtalk_primitive:print_string(Value)
+                _ -> beamtalk_runtime_api:print_string(Value)
             end
     end;
 term_to_json(#beamtalk_error{} = Error) ->
@@ -304,12 +308,12 @@ term_to_json(Value) when is_tuple(Value) ->
     case Value of
         {beamtalk_object, 'Metaclass', _Module, Pid} ->
             %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
-            ClassName = beamtalk_object_class:class_name(Pid),
+            ClassName = beamtalk_runtime_api:class_name(Pid),
             iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
         {beamtalk_object, Class, _Module, Pid} ->
-            case beamtalk_class_registry:is_class_name(Class) of
+            case beamtalk_runtime_api:is_class_name(Class) of
                 true ->
-                    beamtalk_class_registry:class_display_name(Class);
+                    beamtalk_runtime_api:class_display_name(Class);
                 false ->
                     ClassBin = atom_to_binary(Class, utf8),
                     PidStr = pid_to_list(Pid),
@@ -327,7 +331,7 @@ term_to_json(Value) when is_tuple(Value) ->
         {future_rejected, Reason} ->
             iolist_to_binary([<<"#Future<rejected: ">>, format_rejection_reason(Reason), <<">">>]);
         _ ->
-            ElementStrs = [beamtalk_primitive:print_string(E) || E <- tuple_to_list(Value)],
+            ElementStrs = [beamtalk_runtime_api:print_string(E) || E <- tuple_to_list(Value)],
             iolist_to_binary([<<"{">>, lists:join(<<", ">>, ElementStrs), <<"}">>])
     end;
 term_to_json(Value) ->

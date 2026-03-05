@@ -931,9 +931,7 @@ Workspace is a *customer* of the Object System context and the Hot Reload contex
 | `beamtalk_primitive` | `print_string/1`, `class_of/1` | Primitive value printing and classification |
 | `beamtalk_hot_reload` | `trigger_code_change/2`, `trigger_code_change/3`, `code_change/3` | Hot reload triggers |
 
-Direct calls to any other function in these modules, or to any other runtime module not listed above, require an explicit cross-context justification comment or must go through `beamtalk_workspace_interface` (the workspace façade).
-
-**Future work:** BT-1106 tracks creation of a dedicated `beamtalk_runtime_api` façade module to replace all direct cross-context calls from workspace source files.
+All cross-context calls from workspace to runtime are routed through `beamtalk_runtime_api`, the sole approved entry point (implemented in BT-1106). Workspace source files must never call the underlying runtime modules directly. See `docs/development/erlang-guidelines.md` § Approved Cross-Context API for the full function mapping.
 
 **Example Domain Logic:**
 

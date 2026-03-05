@@ -364,4 +364,4 @@ notify_subscribers(Event, #state{subscribers = Subs}) ->
 
 %% @private
 code_change(OldVsn, State, Extra) ->
-    beamtalk_hot_reload:code_change(OldVsn, State, Extra).
+    beamtalk_runtime_api:hot_reload_code_change(OldVsn, State, Extra).
