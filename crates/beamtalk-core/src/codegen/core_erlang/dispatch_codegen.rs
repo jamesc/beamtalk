@@ -442,12 +442,13 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-682: Generates a direct `call 'module':'function'(args)` for Erlang interop.
+    /// BT-682: Generates a proxy-routed call for Erlang interop (BT-1127).
     ///
-    /// Converts Beamtalk selectors to Erlang function names:
-    /// - Unary: `node` → `call 'erlang':'node'()` (zero-arg)
-    /// - Keyword single: `reverse:` → `call 'lists':'reverse'(Xs)` (first keyword = fn name)
-    /// - Keyword multi: `seq:with:` → `call 'lists':'seq'(1, 10)` (first keyword = fn name)
+    /// Converts Beamtalk selectors to Erlang function names and routes through
+    /// `beamtalk_erlang_proxy:direct_call/3` for automatic binary→charlist coercion:
+    /// - Unary: `node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])` (zero-arg)
+    /// - Keyword single: `reverse:` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'reverse', [Xs])`
+    /// - Keyword multi: `seq:with:` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'seq', [1, 10])`
     ///
     /// Returns `None` for selectors that are Object/ProtoObject protocol methods
     /// (e.g. `printString`, `asString`) — these must go through runtime dispatch
@@ -476,10 +477,15 @@ impl CoreErlangGenerator {
                 if OBJECT_PROTOCOL_SELECTORS.contains(&function_name.as_str()) {
                     return Ok(None);
                 }
-                // Zero-arg Erlang call: `Erlang erlang node` → `call 'erlang':'node'()`
-                let doc = docvec![Document::String(format!(
-                    "call '{module_name}':'{function_name}'()"
-                ))];
+                // BT-1127: Route zero-arg calls through proxy (consistent with keyword sends).
+                // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])`
+                let doc = docvec![
+                    "call 'beamtalk_erlang_proxy':'direct_call'('",
+                    Document::String(module_name.to_string()),
+                    "', '",
+                    Document::String(function_name.to_string()),
+                    "', [])"
+                ];
                 Ok(Some(doc))
             }
             MessageSelector::Keyword(parts) => {
@@ -520,10 +526,17 @@ impl CoreErlangGenerator {
                     }
                 }
 
+                // BT-1127: Route through beamtalk_erlang_proxy:direct_call/3 to
+                // enable binary→charlist coercion for functions like os:cmd/1.
+                // Args are wrapped in a list: call 'proxy':'direct_call'('M','F',[args])
                 let call_doc = docvec![
-                    Document::String(format!("call '{module_name}':'{function_name}'(")),
+                    "call 'beamtalk_erlang_proxy':'direct_call'('",
+                    Document::String(module_name.to_string()),
+                    "', '",
+                    Document::String(function_name.to_string()),
+                    "', [",
                     Document::Vec(arg_parts),
-                    ")"
+                    "])"
                 ];
 
                 let doc = if preamble_docs.is_empty() {

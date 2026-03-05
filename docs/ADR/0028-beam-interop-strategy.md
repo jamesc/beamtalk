@@ -257,7 +257,7 @@ Beamtalk's interop is **transparent** — values are not wrapped, marshalled, or
 - ✅ Erlang tools (Observer, recon, crash dumps) see native values
 - ✅ Pattern matching works identically across languages
 - ⚠️ Erlang atoms like `ok`, `error`, `undefined` enter Beamtalk as Symbols — no automatic wrapping
-- ⚠️ Erlang charlists (`[104, 101, 108, 108, 111]`) are Lists, not Strings — programmer must convert
+- ✅ Erlang charlists (`[104, 101, 108, 108, 111]`) are auto-coerced at the FFI boundary (BT-1127): binary String args are converted to charlists on `badarg`, and charlist results are converted back to binary Strings. Functions like `os:cmd/1` and `file:read_file/1` work transparently.
 
 ### 3. Type Mapping at Boundaries
 
