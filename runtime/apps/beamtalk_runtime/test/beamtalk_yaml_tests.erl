@@ -155,6 +155,27 @@ parse_invalid_yaml_test() ->
     ).
 
 %%% ============================================================================
+%%% parse: — unsupported YAML features (BT-1126)
+%%% ============================================================================
+
+parse_binary_tag_raises_parse_error_test() ->
+    %% !!binary produces a yamerl_binary node — unsupported, must raise parse_error.
+    %% "SGVsbG8=" is base64 for "Hello".
+    application:ensure_all_started(yamerl),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}},
+        beamtalk_yaml:'parse:'(<<"!!binary \"SGVsbG8=\"">>)
+    ).
+
+parse_all_binary_tag_raises_parse_error_test() ->
+    %% Same unsupported node via parseAll: — error selector must be parseAll:.
+    application:ensure_all_started(yamerl),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}},
+        beamtalk_yaml:'parseAll:'(<<"!!binary \"SGVsbG8=\"">>)
+    ).
+
+%%% ============================================================================
 %%% parseAll:
 %%% ============================================================================
 
