@@ -17,11 +17,14 @@ Beamtalk brings Smalltalk's legendary live programming experience to Erlang's ba
 // Spawn an actor with state
 counter := Counter spawn
 
-// Send messages (async by default)
+// Send messages (sync by default)
 counter increment
 counter increment
-value := counter getValue await  // => 2
+value := counter getValue // => 2
 
+
+// Send message async
+counter increment!  // => ok
 // Cascades - multiple messages to same receiver
 Transcript show: "Hello"; cr; show: "World"
 
@@ -38,7 +41,6 @@ config := #{#host => "localhost", #port => 8080}
 | **Interactive-first** | REPL and live workspace, not batch compilation |
 | **Hot code reload** | Edit and reload modules in running systems |
 | **Actor model** | Actors are BEAM processes with independent fault isolation |
-| **Async by default** | Actor message sends return futures; blocking only via await |
 | **Reflection** | Inspect any actor's state and methods at runtime |
 | **Runs on BEAM** | Compiles to Core Erlang; deploy to existing OTP infrastructure |
 | **Testing built-in** | SUnit-style `TestCase` framework with `beamtalk test` |
@@ -58,18 +60,6 @@ Actor subclass: Counter
   increment => self.value := self.value + 1
   decrement => self.value := self.value - 1
   getValue => ^self.value
-```
-
-### Async Message Passing
-
-Messages are asynchronous by default, returning futures:
-
-```beamtalk
-// Returns immediately with a future
-result := agent analyze: data
-
-// Wait when you need the value
-value := result await
 ```
 
 ### Pattern Matching
@@ -110,41 +100,6 @@ Counter >> increment => self.value := self.value + 10
 // Existing actors immediately use the new code
 c increment  // now adds 10 instead of 1
 ```
-
----
-
-## Designed for AI Agents
-
-Beamtalk is purpose-built for multi-agent AI systems:
-
-- **Every actor is a BEAM process** — millions of concurrent isolated agents
-- **Live inspection** — query actor class, methods, and capabilities at runtime
-- **Hot-reload** — edit agent behavior while they run, no restart needed
-- **Fault tolerance** — actors crash independently; isolation via BEAM processes
-- **BEAM foundation** — inherits BEAM's distributed runtime; Beamtalk-level distribution API planned
-
-```beamtalk
-// Each agent is its own BEAM process — isolated, supervised, inspectable
-researcher := Researcher spawn
-critic := Critic spawn
-
-// Async messaging — returns futures
-analysis := researcher analyze: codeRepo
-findings := analysis await
-
-// Live introspection while running
-researcher class              // => Researcher
-researcher respondsTo: #plan: // => true
-Researcher methods            // => #(analyze:, plan:, query:, ...)
-
-// Hot-reload: redefine behavior mid-run, takes effect on next message
-Researcher >> plan: prompt =>
-  Transcript show: "Planning: ", prompt.
-  ^super plan: prompt
-```
-
-See [Agent-Native Development](docs/beamtalk-agent-native-development.md) for the full vision.
-
 ---
 
 ## Getting Started
@@ -255,17 +210,18 @@ Type :help for available commands, :exit to quit.
 > 2 + 3 * 4
 14
 
-> :load examples/hello.bt
-Loaded Hello
+> :load "examples/getting-started/src/hello.bt"
+nil
 
-> Hello new
-{__class__: Hello}
+> Hello new greeting
+│ Hello, World!
+a Hello
 ```
 
 ### Load Files
 
 ```text
-> :load examples/counter.bt
+> :load "examples/getting-started/src/counter.bt"
 Loaded Counter
 ```
 
@@ -421,41 +377,6 @@ Automatically installed in devcontainer:
 - `github.vscode-github-actions` — GitHub Actions integration
 - `github.vscode-pull-request-github` — PR management
 - `linear.linear` — Linear issue tracking
-
-### Troubleshooting
-
-#### `cargo clean` fails with "Device or resource busy"
-
-The `target/` directory is mounted as a Docker volume for performance. Use `just clean` instead:
-
-```bash
-# ❌ Fails in devcontainer
-cargo clean
-
-# ✅ Works in devcontainer
-just clean
-
-# Or manually (safe pattern that avoids .. expansion)
-find target -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-```
-
-#### Devcontainer won't start
-
-```bash
-# Rebuild container from scratch
-# In VS Code: Ctrl+Shift+P → Dev Containers: Rebuild Container
-```
-
-#### Git authentication fails
-
-```bash
-# Inside container, check gh authentication
-gh auth status
-
-# If failed, login manually
-gh auth login
-```
-
 ---
 
 ## Project Status
