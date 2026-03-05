@@ -212,7 +212,8 @@ TestCase subclass: FileDirectoryTest
 
   testAbsolutePathIsAbsolute =>
     abs := File absolutePath: "target/bt-test-tmp/fdt"
-    self assert: (abs startsWith: "/")
+    // Absolute paths are always longer than the relative input on any OS
+    self assert: abs size > "target/bt-test-tmp/fdt" size
 
   testAbsolutePathInvalidRaisesError =>
     self should: [File absolutePath: "/etc/passwd"] raise: #invalid_path

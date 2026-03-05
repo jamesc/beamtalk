@@ -441,34 +441,53 @@ handle_has_method(_) -> false.
 'listDirectory:'(Path) when is_binary(Path) ->
     case validate_path(Path) of
         {ok, ValidPath} ->
-            case file:list_dir(ValidPath) of
-                {ok, Entries} ->
-                    [list_to_binary(E) || E <- Entries];
-                {error, enoent} ->
-                    Error0 = beamtalk_error:new(directory_not_found, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(
-                        Error2, <<"Check that the directory exists">>
-                    ),
-                    beamtalk_error:raise(Error3);
-                {error, enotdir} ->
+            %% Check for regular file first: file:list_dir/1 returns different
+            %% error codes on different OSes when given a file path. By checking
+            %% filelib:is_regular/1 upfront we get a consistent not_a_directory
+            %% error on all platforms.
+            case filelib:is_regular(ValidPath) of
+                true ->
                     Error0 = beamtalk_error:new(not_a_directory, 'File'),
                     Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
                     Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
                     Error3 = beamtalk_error:with_hint(Error2, <<"Path is not a directory">>),
                     beamtalk_error:raise(Error3);
-                {error, eacces} ->
-                    Error0 = beamtalk_error:new(permission_denied, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
-                    Error3 = beamtalk_error:with_hint(Error2, <<"Check directory permissions">>),
-                    beamtalk_error:raise(Error3);
-                {error, Reason} ->
-                    Error0 = beamtalk_error:new(io_error, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
-                    Error2 = beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}),
-                    beamtalk_error:raise(Error2)
+                false ->
+                    case file:list_dir(ValidPath) of
+                        {ok, Entries} ->
+                            [list_to_binary(E) || E <- Entries];
+                        {error, enoent} ->
+                            Error0 = beamtalk_error:new(directory_not_found, 'File'),
+                            Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
+                            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                            Error3 = beamtalk_error:with_hint(
+                                Error2, <<"Check that the directory exists">>
+                            ),
+                            beamtalk_error:raise(Error3);
+                        {error, enotdir} ->
+                            Error0 = beamtalk_error:new(not_a_directory, 'File'),
+                            Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
+                            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                            Error3 = beamtalk_error:with_hint(
+                                Error2, <<"Path is not a directory">>
+                            ),
+                            beamtalk_error:raise(Error3);
+                        {error, eacces} ->
+                            Error0 = beamtalk_error:new(permission_denied, 'File'),
+                            Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
+                            Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+                            Error3 = beamtalk_error:with_hint(
+                                Error2, <<"Check directory permissions">>
+                            ),
+                            beamtalk_error:raise(Error3);
+                        {error, Reason} ->
+                            Error0 = beamtalk_error:new(io_error, 'File'),
+                            Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
+                            Error2 = beamtalk_error:with_details(Error1, #{
+                                path => Path, reason => Reason
+                            }),
+                            beamtalk_error:raise(Error2)
+                    end
             end;
         {error, Reason} ->
             raise_invalid_path(Reason, Path, 'listDirectory:')
@@ -663,15 +682,20 @@ handle_has_method(_) -> false.
 %% Returns the system temp directory as a String.
 -spec 'tempDirectory'() -> binary().
 'tempDirectory'() ->
-    %% Check standard environment variables, fall back to /tmp
+    %% Check standard environment variables, fall back to platform-appropriate temp dir
     Dir =
         case os:getenv("TMPDIR") of
             false ->
                 case os:getenv("TMP") of
                     false ->
                         case os:getenv("TEMP") of
-                            false -> "/tmp";
-                            V -> V
+                            false ->
+                                case os:type() of
+                                    {win32, _} -> "C:\\Windows\\Temp";
+                                    _ -> "/tmp"
+                                end;
+                            V ->
+                                V
                         end;
                     V ->
                         V
