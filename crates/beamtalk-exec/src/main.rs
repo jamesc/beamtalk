@@ -198,6 +198,7 @@ type ChildMap = Arc<Mutex<HashMap<u32, ChildEntry>>>;
 // ────────────────────────────────────────────────────────────────
 // Command handlers
 
+#[allow(clippy::too_many_lines)]
 fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Result<(), String> {
     let child_id = map_get(request, "child_id")
         .and_then(term_to_child_id)
@@ -215,7 +216,10 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
         .and_then(term_to_string_map)
         .unwrap_or_default();
 
-    let dir = map_get(request, "dir").and_then(term_to_string);
+    // Empty string means "inherit cwd" — only call current_dir for non-empty paths.
+    let dir = map_get(request, "dir")
+        .and_then(term_to_string)
+        .filter(|s| !s.is_empty());
 
     let mut cmd = Command::new(&executable);
     cmd.args(&args);

@@ -45,24 +45,45 @@ open_close_test() ->
 %%% ============================================================================
 
 spawn_child_true_exits_with_zero_test() ->
-    {skip, "beamtalk-exec port communication not yet functional"}.
+    Port = beamtalk_exec_port:open(),
+    beamtalk_exec_port:spawn_child(Port, 1, <<"/bin/true">>, []),
+    ExitCode = receive_exit(Port, 1, 5000),
+    beamtalk_exec_port:close(Port),
+    ?assertEqual(0, ExitCode).
 
 spawn_child_false_exits_nonzero_test() ->
-    {skip, "beamtalk-exec port communication not yet functional"}.
+    Port = beamtalk_exec_port:open(),
+    beamtalk_exec_port:spawn_child(Port, 2, <<"/bin/false">>, []),
+    ExitCode = receive_exit(Port, 2, 5000),
+    beamtalk_exec_port:close(Port),
+    ?assertNotEqual(0, ExitCode).
 
 %%% ============================================================================
 %%% write_stdin — data flows through stdin
 %%% ============================================================================
 
 write_stdin_cat_test() ->
-    {skip, "beamtalk-exec port communication not yet functional"}.
+    Port = beamtalk_exec_port:open(),
+    beamtalk_exec_port:spawn_child(Port, 3, <<"/bin/cat">>, []),
+    beamtalk_exec_port:write_stdin(Port, 3, <<"hello\n">>),
+    beamtalk_exec_port:close_stdin(Port, 3),
+    Stdout = receive_stdout(Port, 3, 5000),
+    beamtalk_exec_port:close(Port),
+    ?assertEqual(<<"hello\n">>, Stdout).
 
 %%% ============================================================================
 %%% kill_child — process is terminated
 %%% ============================================================================
 
 kill_child_sleep_test() ->
-    {skip, "beamtalk-exec port communication not yet functional"}.
+    Port = beamtalk_exec_port:open(),
+    beamtalk_exec_port:spawn_child(Port, 4, <<"/bin/sleep">>, [<<"60">>]),
+    beamtalk_exec_port:kill_child(Port, 4),
+    % Should receive exit event (SIGTERM -> exit)
+    ExitCode = receive_exit(Port, 4, 5000),
+    beamtalk_exec_port:close(Port),
+    % SIGTERM exit codes are system-dependent; just assert we got an exit event.
+    ?assert(is_integer(ExitCode)).
 
 %%% ============================================================================
 %%% Internal helpers
