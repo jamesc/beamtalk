@@ -77,7 +77,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0048](0048-class-side-method-syntax.md) | Class-Side Method Syntax Redesign | Proposed | 2026-03-02 |
 | [0049](0049-remove-method-level-sealed.md) | Remove Method-Level `sealed` — Infer Protection from `@primitive`/`@intrinsic` | Proposed | 2026-03-02 |
 | [0050](0050-incremental-compiler-class-hierarchy.md) | Incremental Compiler ClassHierarchy via BEAM Metadata Streaming | Proposed | 2026-03-04 |
-| [0051](0051-subprocess-execution.md) | Subprocess Execution — System Command API | Proposed | 2026-03-05 |
+| [0051](0051-subprocess-execution.md) | Subprocess Execution — System Commands and Interactive Subprocess Actor | Proposed | 2026-03-05 |
 
 ## Creating New ADRs
 
