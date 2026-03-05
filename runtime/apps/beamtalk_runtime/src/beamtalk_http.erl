@@ -138,7 +138,7 @@ has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
 %% @doc Perform a GET request.
 %%
 %% `Headers` is a list of `[Name, Value]` binary pairs.
-%% Returns `#{status => Status, headers => Headers, body => Body}`.
+%% Returns an `HTTPResponse` tagged map.
 -spec 'get:headers:'(binary(), list()) -> map().
 'get:headers:'(Url, Headers) when is_binary(Url), is_list(Headers) ->
     do_request(<<"GET">>, Url, Headers, <<>>, ?DEFAULT_TIMEOUT, 'get:headers:');
