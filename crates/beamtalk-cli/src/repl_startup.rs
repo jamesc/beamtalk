@@ -48,6 +48,8 @@ pub struct BeamPaths {
     pub cowlib_ebin: PathBuf,
     /// Path to the `ranch` acceptor pool's `ebin/` directory (cowboy dependency).
     pub ranch_ebin: PathBuf,
+    /// Path to the `gun` HTTP client's `ebin/` directory (BT-1114).
+    pub gun_ebin: PathBuf,
 }
 
 /// Compute the standard `-pa` directories from a runtime root.
@@ -72,6 +74,7 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
                 cowboy_ebin: build_lib_dir.join("cowboy/ebin"),
                 cowlib_ebin: build_lib_dir.join("cowlib/ebin"),
                 ranch_ebin: build_lib_dir.join("ranch/ebin"),
+                gun_ebin: build_lib_dir.join("gun/ebin"),
                 // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
                 stdlib_ebin: runtime_dir.join("apps/beamtalk_stdlib/ebin"),
             }
@@ -87,6 +90,7 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
                 cowboy_ebin: lib_dir.join("cowboy/ebin"),
                 cowlib_ebin: lib_dir.join("cowlib/ebin"),
                 ranch_ebin: lib_dir.join("ranch/ebin"),
+                gun_ebin: lib_dir.join("gun/ebin"),
                 stdlib_ebin: lib_dir.join("beamtalk_stdlib/ebin"),
             }
         }
@@ -220,6 +224,7 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
         &paths.cowboy_ebin,
         &paths.cowlib_ebin,
         &paths.ranch_ebin,
+        &paths.gun_ebin,
         &paths.stdlib_ebin,
     ];
     let mut args = Vec::with_capacity(dirs.len() * 2);
@@ -448,6 +453,10 @@ mod tests {
             PathBuf::from("/rt/_build/default/lib/ranch/ebin")
         );
         assert_eq!(
+            paths.gun_ebin,
+            PathBuf::from("/rt/_build/default/lib/gun/ebin")
+        );
+        assert_eq!(
             paths.stdlib_ebin,
             PathBuf::from("/rt/apps/beamtalk_stdlib/ebin")
         );
@@ -457,8 +466,8 @@ mod tests {
     fn beam_pa_args_alternates_flag_and_path() {
         let paths = beam_paths(Path::new("/rt"));
         let args = beam_pa_args(&paths);
-        // Should be 18 elements: 9 dirs × 2 (flag + path)
-        assert_eq!(args.len(), 18);
+        // Should be 20 elements: 10 dirs × 2 (flag + path)
+        assert_eq!(args.len(), 20);
         for i in (0..args.len()).step_by(2) {
             assert_eq!(args[i], "-pa");
         }
