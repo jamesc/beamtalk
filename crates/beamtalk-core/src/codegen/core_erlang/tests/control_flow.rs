@@ -430,8 +430,8 @@ fn test_validate_stored_closure_field_takes_precedence() {
 
 #[test]
 fn test_codegen_allows_stored_closure_with_field_assignment() {
-    // Integration test: verify the full codegen pipeline catches field assignments
-    // Build a module with: test := [ myBlock := [self.value := 1]. myBlock ]
+    // Integration test: verify the full codegen pipeline allows field assignments
+    // in stored closures and successfully generates code for: test := [ myBlock := [self.value := 1]. myBlock ]
     let module = Module {
         classes: vec![],
         method_definitions: Vec::new(),
@@ -494,7 +494,8 @@ fn test_codegen_allows_stored_closure_with_field_assignment() {
 
 #[test]
 fn test_codegen_allows_stored_closure_with_local_mutation() {
-    // Integration test: verify the full codegen pipeline catches local mutations
+    // Integration test: verify the full codegen pipeline successfully handles local mutations
+    // in stored closures via the Tier 2 protocol (i.e., codegen is allowed and succeeds).
     // Build a module with: test := [ count := 0. myBlock := [count := count + 1]. myBlock ]
     let module = Module {
         classes: vec![],
