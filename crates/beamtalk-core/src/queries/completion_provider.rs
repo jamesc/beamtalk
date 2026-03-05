@@ -1565,4 +1565,22 @@ mod tests {
         let result = resolve_expression_type("x", &hierarchy);
         assert_eq!(result, None);
     }
+
+    // --- BT-1070: parenthesised subexpression as receiver ---
+
+    #[test]
+    fn resolve_expression_type_parenthesized_unary_send() {
+        // ("hello" size) — the result of String#size (Integer) wrapped in parens
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("(\"hello\" size)", &hierarchy);
+        assert_eq!(result.as_deref(), Some("Integer"));
+    }
+
+    #[test]
+    fn resolve_expression_type_parenthesized_unknown_variable() {
+        // (myList size) — myList is untyped, graceful fallback
+        let hierarchy = ClassHierarchy::with_builtins();
+        let result = resolve_expression_type("(myList size)", &hierarchy);
+        assert_eq!(result, None);
+    }
 }

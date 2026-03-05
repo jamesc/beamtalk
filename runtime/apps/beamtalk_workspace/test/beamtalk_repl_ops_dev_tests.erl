@@ -82,6 +82,43 @@ parse_keyword_selector_as_prefix_test() ->
         beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"x ifTrue:">>)
     ).
 
+%% BT-1070: parenthesised subexpressions as receivers
+parse_paren_binary_send_returns_expression_test() ->
+    %% ("foo" ++ "bar") cla<TAB> — paren expression is multi-token, must use expression path
+    ?assertMatch(
+        {expression, _, <<"cla">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"(\"foo\" ++ \"bar\") cla">>)
+    ).
+
+parse_paren_binary_send_expression_content_test() ->
+    %% Verify the ReceiverExpr captures the full parenthesised expression
+    {expression, Expr, Prefix} = beamtalk_repl_ops_dev:parse_receiver_and_prefix(
+        <<"(\"foo\" ++ \"bar\") cla">>
+    ),
+    ?assertEqual(<<"(\"foo\" ++ \"bar\")">>, Expr),
+    ?assertEqual(<<"cla">>, Prefix).
+
+parse_paren_unary_send_returns_expression_test() ->
+    %% (myList size) sq<TAB>
+    ?assertMatch(
+        {expression, _, <<"sq">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"(myList size) sq">>)
+    ).
+
+parse_paren_unary_send_expression_content_test() ->
+    {expression, Expr, Prefix} = beamtalk_repl_ops_dev:parse_receiver_and_prefix(
+        <<"(myList size) sq">>
+    ),
+    ?assertEqual(<<"(myList size)">>, Expr),
+    ?assertEqual(<<"sq">>, Prefix).
+
+parse_paren_expr_empty_prefix_test() ->
+    %% ("foo" ++ "bar") <TAB> — empty prefix, expression path
+    ?assertMatch(
+        {expression, _, <<>>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"(\"foo\" ++ \"bar\") ">>)
+    ).
+
 %%====================================================================
 %% tokenise_send_chain/1
 %%====================================================================

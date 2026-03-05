@@ -48,3 +48,19 @@ tc := TypedCounter spawn
 // `tc ` — single-token actor binding → TypedCounter instance methods (not chain).
 :complete tc
 // => INCLUDES:getValue
+
+// ===========================================================================
+// PAREN SUBEXPRESSION AS RECEIVER (BT-1070)
+// ===========================================================================
+
+// `("foo" ++ "bar") <TAB>` — paren binary-send resolves to String via compiler.
+:complete ("foo" ++ "bar")
+// => INCLUDES:size
+
+// `("foo" ++ "bar") size <TAB>` — chain through compiler: String>>size → Integer.
+:complete ("foo" ++ "bar") size
+// => INCLUDES:abs
+
+// `(myList size) <TAB>` — myList is untyped (Dynamic), graceful fallback: no completions.
+:complete (myList size)
+// =>
