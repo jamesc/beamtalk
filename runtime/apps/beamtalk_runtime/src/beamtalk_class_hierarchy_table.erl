@@ -153,6 +153,7 @@ all_builtins() ->
         'False',
         'File',
         'FileHandle',
+        'HTTPClient',
         'HTTPResponse',
         'Float',
         'Future',
