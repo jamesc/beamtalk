@@ -429,7 +429,7 @@ fn test_validate_stored_closure_field_takes_precedence() {
 }
 
 #[test]
-fn test_codegen_rejects_stored_closure_with_field_assignment() {
+fn test_codegen_allows_stored_closure_with_field_assignment() {
     // Integration test: verify the full codegen pipeline catches field assignments
     // Build a module with: test := [ myBlock := [self.value := 1]. myBlock ]
     let module = Module {
@@ -493,7 +493,7 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
 }
 
 #[test]
-fn test_codegen_rejects_stored_closure_with_local_mutation() {
+fn test_codegen_allows_stored_closure_with_local_mutation() {
     // Integration test: verify the full codegen pipeline catches local mutations
     // Build a module with: test := [ count := 0. myBlock := [count := count + 1]. myBlock ]
     let module = Module {
