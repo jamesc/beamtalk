@@ -745,8 +745,15 @@ impl LanguageService for SimpleLanguageService {
                 if method.return_type.is_some() {
                     continue;
                 }
-                // Only offer for methods whose span overlaps the requested range
-                if method.span.end() < start || method.span.start() > end {
+                // Only offer for methods whose span overlaps the requested range.
+                // Distinguish cursor requests (start == end, point-in-span check) from
+                // selection requests (half-open interval overlap).
+                let overlaps = if start == end {
+                    method.span.start() <= start && start < method.span.end()
+                } else {
+                    method.span.start() < end && start < method.span.end()
+                };
+                if !overlaps {
                     continue;
                 }
                 let key = (
@@ -771,7 +778,12 @@ impl LanguageService for SimpleLanguageService {
             if method.return_type.is_some() {
                 continue;
             }
-            if method.span.end() < start || method.span.start() > end {
+            let overlaps = if start == end {
+                method.span.start() <= start && start < method.span.end()
+            } else {
+                method.span.start() < end && start < method.span.end()
+            };
+            if !overlaps {
                 continue;
             }
             let key = (
@@ -1280,6 +1292,39 @@ mod tests {
         assert!(
             actions.is_empty(),
             "method outside range should produce no action"
+        );
+    }
+
+    #[test]
+    fn code_actions_cursor_at_method_span_start_matches() {
+        // Cursor (start == end) placed exactly at the first byte of the method should match.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+        let source = "Object subclass: Counter\n  count => 42";
+        service.update_file(file.clone(), source.to_string());
+
+        // "  count => 42" starts at byte 25 (after "Object subclass: Counter\n")
+        let method_start = len32("Object subclass: Counter\n  "); // 27
+        let actions = service.code_actions(&file, method_start, method_start);
+        assert!(
+            !actions.is_empty(),
+            "cursor at method span start should match (start == end boundary)"
+        );
+    }
+
+    #[test]
+    fn code_actions_cursor_at_method_span_end_does_not_match() {
+        // Cursor placed exactly at span.end() (exclusive) should NOT match.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+        let source = "Object subclass: Counter\n  count => 42";
+        service.update_file(file.clone(), source.to_string());
+
+        let method_end = len32(source); // end of source == end of method span
+        let actions = service.code_actions(&file, method_end, method_end);
+        assert!(
+            actions.is_empty(),
+            "cursor at exclusive span end should NOT match"
         );
     }
 
