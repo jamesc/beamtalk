@@ -210,6 +210,45 @@ pub(crate) fn generate_random_bif(selector: &str, params: &[String]) -> Option<D
     }
 }
 
+/// `Timer` primitive implementations (BT-1121).
+///
+/// Class methods delegate to `beamtalk_timer` runtime module.
+/// Instance methods operate on Self (tagged map with `pid`).
+pub(crate) fn generate_timer_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    let p0 = param(params, 0, "_Arg0");
+    match selector {
+        "after:do:" => {
+            let p1 = param(params, 1, "_Arg1");
+            Some(docvec![
+                "call 'beamtalk_timer':'after:do:'(",
+                p0.to_string(),
+                ", ",
+                p1.to_string(),
+                ")",
+            ])
+        }
+        "every:do:" => {
+            let p1 = param(params, 1, "_Arg1");
+            Some(docvec![
+                "call 'beamtalk_timer':'every:do:'(",
+                p0.to_string(),
+                ", ",
+                p1.to_string(),
+                ")",
+            ])
+        }
+        "sleep:" => Some(docvec![
+            "call 'beamtalk_timer':'sleep:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "cancel" => Some(Document::Str("call 'beamtalk_timer':'cancel'(Self)")),
+        "isActive" => Some(Document::Str("call 'beamtalk_timer':'isActive'(Self)")),
+        "printString" => Some(Document::Str("call 'beamtalk_timer':'printString'(Self)")),
+        _ => None,
+    }
+}
+
 /// `DateTime` primitive implementations (BT-710).
 ///
 /// Class methods delegate to `beamtalk_datetime` runtime module.

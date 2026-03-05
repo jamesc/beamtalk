@@ -53,6 +53,7 @@
             {'bt@stdlib@test_result', 'TestResult', 'Object'},
             {'bt@stdlib@test_runner', 'TestRunner', 'Object'},
             {'bt@stdlib@throw_error', 'ThrowError', 'BEAMError'},
+            {'bt@stdlib@timer', 'Timer', 'Object'},
             {'bt@stdlib@transcript_stream', 'TranscriptStream', 'Actor'},
             {'bt@stdlib@true', 'True', 'Boolean'},
             {'bt@stdlib@tuple', 'Tuple', 'Collection'},
