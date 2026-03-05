@@ -142,6 +142,8 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             ?LOG_INFO("Subprocess exited", #{exit_code => Code}),
             %% Flush any partial line that lacked a trailing newline
             S0 = flush_pending(stdout, State),
+            %% Close the exec port — child is gone, no more I/O possible
+            catch beamtalk_exec_port:close(Port),
             NewState = S0#{exit_code => Code, port_closed => true},
             S1 = maybe_reply_eof(stdout, NewState),
             {noreply, S1};
@@ -227,6 +229,7 @@ read_line_for(Channel, From, Timeout, State) ->
     WaitKey = {Channel, waiting},
     Buffer = maps:get(BufKey, State),
     PortClosed = maps:get(port_closed, State, false),
+    ExistingWaiter = maps:get(WaitKey, State, undefined),
     case queue:is_empty(Buffer) of
         false ->
             {{value, Line}, Rest} = queue:out(Buffer),
@@ -234,6 +237,9 @@ read_line_for(Channel, From, Timeout, State) ->
         true when PortClosed ->
             %% EOF — no more data will arrive
             {reply, nil, State};
+        true when ExistingWaiter =/= undefined ->
+            %% Single-consumer: reject concurrent readLine callers (ADR 0051)
+            {reply, {error, read_in_progress}, State};
         true when Timeout =:= infinity ->
             %% Defer reply until data arrives via handle_info
             {noreply, State#{WaitKey => From}};
