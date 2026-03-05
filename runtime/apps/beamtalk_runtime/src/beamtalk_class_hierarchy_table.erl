@@ -175,6 +175,7 @@ all_builtins() ->
         'StackFrame',
         'Stream',
         'String',
+        'Subprocess',
         'Symbol',
         'System',
         'TestCase',

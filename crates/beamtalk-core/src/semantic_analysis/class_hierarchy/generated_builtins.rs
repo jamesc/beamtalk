@@ -61,6 +61,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "StackFrame"
             | "Stream"
             | "String"
+            | "Subprocess"
             | "Symbol"
             | "System"
             | "TestCase"
@@ -1388,6 +1389,36 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("List".into())] },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Subprocess".into(),
+        ClassInfo {
+            name: "Subprocess".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "writeLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![None] },
+                MethodInfo { selector: "readLine".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![] },
+                MethodInfo { selector: "readLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![None] },
+                MethodInfo { selector: "readStderrLine".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![] },
+                MethodInfo { selector: "readStderrLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![None] },
+                MethodInfo { selector: "lines".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: Some("Stream".into()), param_types: vec![] },
+                MethodInfo { selector: "stderrLines".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: Some("Stream".into()), param_types: vec![] },
+                MethodInfo { selector: "exitCode".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![] },
+                MethodInfo { selector: "close".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![] },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "open:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: None, param_types: vec![None, None] },
+                MethodInfo { selector: "open:args:env:dir:".into(), arity: 4, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: None, param_types: vec![None, None, None, None] },
             ],
             class_variables: vec![],
         },

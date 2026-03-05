@@ -49,6 +49,7 @@
             {'bt@stdlib@stack_frame', 'StackFrame', 'Value'},
             {'bt@stdlib@stream', 'Stream', 'Object'},
             {'bt@stdlib@string', 'String', 'Collection'},
+            {'bt@stdlib@subprocess', 'Subprocess', 'Actor'},
             {'bt@stdlib@symbol', 'Symbol', 'Object'},
             {'bt@stdlib@system', 'System', 'Object'},
             {'bt@stdlib@test_case', 'TestCase', 'Object'},
