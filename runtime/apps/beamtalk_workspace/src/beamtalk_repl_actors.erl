@@ -248,12 +248,14 @@ handle_call({kill, ActorPid}, _From, State) ->
             %% the existing monitor continues to trigger the actor-unregister path.
             Ref = erlang:monitor(process, ActorPid),
             exit(ActorPid, kill),
-            receive
-                {'DOWN', Ref, process, ActorPid, _Reason} -> ok
-            after 5000 ->
-                erlang:demonitor(Ref, [flush])
-            end,
-            {reply, ok, State};
+            Reply =
+                receive
+                    {'DOWN', Ref, process, ActorPid, _Reason} -> ok
+                after 5000 ->
+                    erlang:demonitor(Ref, [flush]),
+                    {error, timeout}
+                end,
+            {reply, Reply, State};
         false ->
             {reply, {error, not_found}, State}
     end;

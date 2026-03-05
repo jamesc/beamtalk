@@ -7,7 +7,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1]).
+-export([start_link/1, start/1]).
 
 %% gen_server callbacks
 -export([
@@ -30,6 +30,10 @@
 
 start_link(InitialValue) ->
     beamtalk_actor:start_link(?MODULE, InitialValue).
+
+%% @doc Start without a link (for kill tests — avoids propagating exit signals to the test process).
+start(InitialValue) ->
+    gen_server:start(?MODULE, InitialValue, []).
 
 init(InitialValue) ->
     beamtalk_actor:init(#{

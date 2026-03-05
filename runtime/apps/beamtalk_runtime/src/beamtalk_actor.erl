@@ -305,12 +305,27 @@ async_send(ActorPid, kill, [], FuturePid) ->
     %% is delivered.  If the process is already dead, the DOWN arrives instantly.
     Ref = erlang:monitor(process, ActorPid),
     exit(ActorPid, kill),
-    receive
-        {'DOWN', Ref, process, ActorPid, _Reason} -> ok
-    after 5000 ->
-        erlang:demonitor(Ref, [flush])
+    case
+        receive
+            {'DOWN', Ref, process, ActorPid, _Reason} -> ok
+        after 5000 ->
+            erlang:demonitor(Ref, [flush]),
+            timeout
+        end
+    of
+        ok ->
+            beamtalk_future:resolve(FuturePid, ok);
+        timeout ->
+            %% We did not observe a DOWN within 5 s; cannot guarantee the actor
+            %% is gone, so reject the future rather than silently claiming success.
+            Error = beamtalk_error:new(
+                timeout,
+                unknown,
+                kill,
+                <<"Actor kill timed out: did not receive DOWN within 5000ms">>
+            ),
+            beamtalk_future:reject(FuturePid, Error)
     end,
-    beamtalk_future:resolve(FuturePid, ok),
     ok;
 async_send(ActorPid, monitor, [], FuturePid) ->
     %% monitor is handled locally - creates an Erlang monitor
@@ -385,11 +400,16 @@ sync_send(ActorPid, kill, []) ->
     %% message so that is_process_alive returns false immediately after kill.
     Ref = erlang:monitor(process, ActorPid),
     exit(ActorPid, kill),
-    receive
-        {'DOWN', Ref, process, ActorPid, _Reason} -> ok
-    after 5000 ->
-        erlang:demonitor(Ref, [flush]),
-        ok
+    case
+        receive
+            {'DOWN', Ref, process, ActorPid, _Reason} -> ok
+        after 5000 ->
+            erlang:demonitor(Ref, [flush]),
+            timeout
+        end
+    of
+        ok -> ok;
+        timeout -> raise_timeout(kill)
     end;
 sync_send(ActorPid, monitor, []) ->
     erlang:monitor(process, ActorPid);
