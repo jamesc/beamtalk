@@ -151,7 +151,7 @@ Session locals (implicit)  →  Workspace user bindings  →  Workspace globals 
                                                            project singletons     Object = <class>
 ```
 
-Since BT-883, this is partially implemented: session startup walks Workspace globals (via `beamtalk_workspace_interface:get_session_bindings/0`) to inject singletons and `bind:as:` registered names into session bindings. Class names continue to resolve via `beamtalk_class_registry` (not injected into bindings). The model describes the *effective* resolution order that users experience:
+Since BT-883, this is partially implemented: session startup walks Workspace globals (via `beamtalk_workspace_interface_primitives:get_session_bindings/0`) to inject singletons and `bind:as:` registered names into session bindings. Class names continue to resolve via `beamtalk_class_registry` (not injected into bindings). The model describes the *effective* resolution order that users experience:
 
 1. **Session locals** — per-connection variable bindings (`x := 42`), implicit scope
 2. **Workspace user bindings** — workspace-level bindings registered via `bind:as:`
@@ -674,7 +674,7 @@ Session locals override workspace user bindings, which override workspace global
 
 ### Implementation
 
-- `beamtalk_workspace_interface.erl`: Added `user_bindings` field to gen_server state, `bind:as:` and `unbind:` dispatch with conflict checking
+- `beamtalk_workspace_interface_primitives.erl`: Implements `bind:as:` and `unbind:` with conflict checking; user bindings stored in ETS table `beamtalk_wi_user_bindings` (Phase 1 gen_server `beamtalk_workspace_interface.erl` removed in BT-1111)
 - `beamtalk_repl_eval.erl`: Merges workspace user bindings into session bindings before each eval; strips them from result to prevent session state accumulation
 - `WorkspaceInterface.bt`: Added `bind:as:` and `unbind:` as `@primitive` methods
 - `handle_globals/2`: Updated to include user bindings in the snapshot

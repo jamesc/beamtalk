@@ -908,7 +908,7 @@ code_change(OldVsn, OldState, Extra) ->
 - `ActorSupervisor` (`beamtalk_actor_sup`): `simple_one_for_one` supervisor for all user actors in the workspace; actors are `temporary` (no restart on crash by default)
 - `SessionSupervisor` (`beamtalk_session_sup`): `simple_one_for_one` supervisor for REPL session shell processes; sessions are `temporary`
 - `WorkspaceBootstrap` (`beamtalk_workspace_bootstrap`): Startup logic — reads config, starts stdlib, initialises metadata
-- `WorkspaceInterface` (`beamtalk_workspace_interface`): Public API façade used by the REPL ops handlers
+- `WorkspaceInterface` (`bt@stdlib@workspace_interface` + `beamtalk_workspace_interface_primitives`): Compiled Beamtalk singleton actor for workspace introspection; `@primitive` methods delegated to `beamtalk_workspace_interface_primitives`
 
 **Key Patterns:**
 - **Node-per-Workspace:** Each workspace is a separate BEAM node (isolated code path, separate port/cookie)
