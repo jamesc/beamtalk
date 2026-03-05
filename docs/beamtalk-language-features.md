@@ -1236,6 +1236,36 @@ File open: "data.csv" do: [:handle |
 
 **Cross-process constraint:** File-backed Streams must be consumed by the same process that created them (BEAM file handles are process-local). To pass file data to an actor, materialize first: `(File lines: "data.csv") take: 100` returns a List that can be sent safely. Collection-backed Streams have no such restriction.
 
+#### File I/O and Directory Operations
+
+`File` provides class methods for reading, writing, and managing files and directories. All paths must be relative (absolute paths and `..` traversal are rejected for safety).
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `File exists: path` | `Boolean` | Test if a file exists |
+| `File readAll: path` | `String` | Read entire file contents |
+| `File writeAll: path contents: text` | `nil` | Write text to file (create/overwrite) |
+| `File isFile: path` | `Boolean` | Test if path is a regular file |
+| `File isDirectory: path` | `Boolean` | Test if path is a directory |
+| `File mkdir: path` | `nil` | Create a directory (parent must exist) |
+| `File mkdirAll: path` | `nil` | Create directory and all parents |
+| `File listDirectory: path` | `List` | List entry names in a directory |
+| `File delete: path` | `nil` | Delete a file or empty directory |
+| `File deleteAll: path` | `nil` | Recursively delete a directory tree |
+| `File rename: from to: to` | `nil` | Rename/move a file or directory |
+| `File absolutePath: path` | `String` | Resolve relative path to absolute |
+| `File tempDirectory` | `String` | OS temporary directory path |
+
+```beamtalk
+File writeAll: "output.txt" contents: "hello"
+File readAll: "output.txt"              // => "hello"
+File mkdirAll: "target/data/logs"
+File listDirectory: "target/data"       // => ["logs"]
+File rename: "output.txt" to: "target/data/output.txt"
+File delete: "target/data/output.txt"
+File deleteAll: "target/data"
+```
+
 #### Side-Effect Timing ⚠️
 
 Side effects in lazy pipelines run at **terminal** time, not at definition time:

@@ -54,6 +54,57 @@ pub(crate) fn generate_file_bif(selector: &str, params: &[String]) -> Option<Doc
                 ")"
             ])
         }
+        "isDirectory:" => Some(docvec![
+            "call 'beamtalk_file':'isDirectory:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "isFile:" => Some(docvec![
+            "call 'beamtalk_file':'isFile:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "mkdir:" => Some(docvec![
+            "call 'beamtalk_file':'mkdir:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "mkdirAll:" => Some(docvec![
+            "call 'beamtalk_file':'mkdirAll:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "listDirectory:" => Some(docvec![
+            "call 'beamtalk_file':'listDirectory:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "delete:" => Some(docvec![
+            "call 'beamtalk_file':'delete:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "deleteAll:" => Some(docvec![
+            "call 'beamtalk_file':'deleteAll:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "rename:to:" => {
+            let p1 = param(params, 1, "_Arg1");
+            Some(docvec![
+                "call 'beamtalk_file':'rename:to:'(",
+                p0.to_string(),
+                ", ",
+                p1.to_string(),
+                ")"
+            ])
+        }
+        "absolutePath:" => Some(docvec![
+            "call 'beamtalk_file':'absolutePath:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "tempDirectory" => Some(Document::Str("call 'beamtalk_file':'tempDirectory'()")),
         _ => None,
     }
 }

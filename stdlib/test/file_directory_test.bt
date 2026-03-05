@@ -1,0 +1,232 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// File directory operation tests (BT-1120)
+
+TestCase subclass: FileDirectoryTest
+
+  // Clean up the test scratch area before each test for isolation.
+  // Must return self so the BUnit runner uses this instance as the test receiver.
+  setUp =>
+    (File isDirectory: "target/bt-test-tmp/fdt") ifTrue: [
+      File deleteAll: "target/bt-test-tmp/fdt"
+    ]
+    File mkdirAll: "target/bt-test-tmp/fdt"
+    self
+
+  // Remove the scratch area after the suite finishes.
+  tearDown =>
+    (File isDirectory: "target/bt-test-tmp/fdt") ifTrue: [
+      File deleteAll: "target/bt-test-tmp/fdt"
+    ]
+
+  testIsDirectoryOnExistingDirectory =>
+    self assert: (File isDirectory: "target/bt-test-tmp/fdt")
+
+  testIsDirectoryOnFile =>
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/isdir_file.txt" contents: "hello") equals: nil
+    self deny: (File isDirectory: "target/bt-test-tmp/fdt/isdir_file.txt")
+
+  testIsDirectoryOnMissingPath =>
+    self deny: (File isDirectory: "target/bt-test-tmp/fdt/no_such_dir")
+
+  testIsDirectoryInvalidPath =>
+    self deny: (File isDirectory: "/etc")
+    self deny: (File isDirectory: "../parent")
+
+  testIsFileOnFile =>
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/isfile_check.txt" contents: "data") equals: nil
+    self assert: (File isFile: "target/bt-test-tmp/fdt/isfile_check.txt")
+
+  testIsFileOnDirectory => self deny: (File isFile: "target/bt-test-tmp/fdt")
+
+  testIsFileOnMissingPath =>
+    self deny: (File isFile: "target/bt-test-tmp/fdt/no_such_file.txt")
+
+  testIsFileInvalidPath =>
+    self deny: (File isFile: "/etc/passwd")
+    self deny: (File isFile: "../secret.txt")
+
+  testMkdir =>
+    self assert: (File mkdir: "target/bt-test-tmp/fdt/mkdir_test") equals: nil
+    self assert: (File isDirectory: "target/bt-test-tmp/fdt/mkdir_test")
+
+  testMkdirAlreadyExistsRaisesError =>
+    self assert: (File mkdir: "target/bt-test-tmp/fdt/mkdir_exists") equals: nil
+    self should: [
+      File mkdir: "target/bt-test-tmp/fdt/mkdir_exists"
+    ] raise: #already_exists
+
+  testMkdirMissingParentRaisesError =>
+    self should: [
+      File mkdir: "target/bt-test-tmp/fdt/no_parent/child"
+    ] raise: #directory_not_found
+
+  testMkdirInvalidPathRaisesError =>
+    self should: [File mkdir: "/tmp/evil"] raise: #invalid_path
+    self should: [File mkdir: "../escape"] raise: #invalid_path
+
+  testMkdirTypeErrorRaisesError =>
+    @expect type
+    self should: [File mkdir: 42] raise: #type_error
+
+  testMkdirAll =>
+    self assert: (File mkdirAll: "target/bt-test-tmp/fdt/a/b/c") equals: nil
+    self assert: (File isDirectory: "target/bt-test-tmp/fdt/a/b/c")
+
+  testMkdirAllIdempotent =>
+    self assert: (File mkdirAll: "target/bt-test-tmp/fdt/idem") equals: nil
+    self assert: (File mkdirAll: "target/bt-test-tmp/fdt/idem") equals: nil
+    self assert: (File isDirectory: "target/bt-test-tmp/fdt/idem")
+
+  testMkdirAllInvalidPathRaisesError =>
+    self should: [File mkdirAll: "/tmp/evil"] raise: #invalid_path
+    self should: [File mkdirAll: "../escape"] raise: #invalid_path
+
+  testMkdirAllTypeErrorRaisesError =>
+    @expect type
+    self should: [File mkdirAll: 42] raise: #type_error
+
+  testListDirectory =>
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/a.txt" contents: "a") equals: nil
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/b.txt" contents: "b") equals: nil
+    entries := File listDirectory: "target/bt-test-tmp/fdt"
+    self assert: entries size equals: 2
+
+  testListDirectoryContainsExpectedEntry =>
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/hello.txt" contents: "hi") equals: nil
+    entries := File listDirectory: "target/bt-test-tmp/fdt"
+    self assert: (entries includes: "hello.txt")
+
+  testListDirectoryEmptyDirectory =>
+    self assert: (File mkdirAll: "target/bt-test-tmp/fdt/empty") equals: nil
+    entries := File listDirectory: "target/bt-test-tmp/fdt/empty"
+    self assert: entries size equals: 0
+
+  testListDirectoryMissingRaisesError =>
+    self should: [
+      File listDirectory: "target/bt-test-tmp/fdt/no_such_dir"
+    ] raise: #directory_not_found
+
+  testListDirectoryOnFileRaisesError =>
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/not_a_dir.txt" contents: "x") equals: nil
+    self should: [
+      File listDirectory: "target/bt-test-tmp/fdt/not_a_dir.txt"
+    ] raise: #not_a_directory
+
+  testListDirectoryInvalidPathRaisesError =>
+    self should: [File listDirectory: "/etc"] raise: #invalid_path
+    self should: [File listDirectory: "../parent"] raise: #invalid_path
+
+  testListDirectoryTypeErrorRaisesError =>
+    @expect type
+    self should: [File listDirectory: 42] raise: #type_error
+
+  testDeleteFile =>
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/delete_me.txt" contents: "bye") equals: nil
+    self assert: (File delete: "target/bt-test-tmp/fdt/delete_me.txt") equals: nil
+    self deny: (File exists: "target/bt-test-tmp/fdt/delete_me.txt")
+
+  testDeleteEmptyDirectory =>
+    self assert: (File mkdir: "target/bt-test-tmp/fdt/delete_dir") equals: nil
+    self assert: (File delete: "target/bt-test-tmp/fdt/delete_dir") equals: nil
+    self deny: (File isDirectory: "target/bt-test-tmp/fdt/delete_dir")
+
+  testDeleteNonExistentRaisesError =>
+    self should: [
+      File delete: "target/bt-test-tmp/fdt/no_such_file.txt"
+    ] raise: #file_not_found
+
+  testDeleteNonEmptyDirectoryRaisesError =>
+    self assert: (File mkdirAll: "target/bt-test-tmp/fdt/nonempty") equals: nil
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/nonempty/child.txt" contents: "x") equals: nil
+    self should: [
+      File delete: "target/bt-test-tmp/fdt/nonempty"
+    ] raise: #not_empty
+
+  testDeleteInvalidPathRaisesError =>
+    self should: [File delete: "/tmp/evil.txt"] raise: #invalid_path
+    self should: [File delete: "../escape.txt"] raise: #invalid_path
+
+  testDeleteTypeErrorRaisesError =>
+    @expect type
+    self should: [File delete: 42] raise: #type_error
+
+  testDeleteAll =>
+    self assert: (File mkdirAll: "target/bt-test-tmp/fdt/tree/a/b") equals: nil
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/tree/a/b/file.txt" contents: "x") equals: nil
+    self assert: (File deleteAll: "target/bt-test-tmp/fdt/tree") equals: nil
+    self deny: (File isDirectory: "target/bt-test-tmp/fdt/tree")
+
+  testDeleteAllNonExistentRaisesError =>
+    self should: [
+      File deleteAll: "target/bt-test-tmp/fdt/no_such_dir"
+    ] raise: #file_not_found
+
+  testDeleteAllInvalidPathRaisesError =>
+    self should: [File deleteAll: "/tmp/evil"] raise: #invalid_path
+    self should: [File deleteAll: "../escape"] raise: #invalid_path
+
+  testDeleteAllTypeErrorRaisesError =>
+    @expect type
+    self should: [File deleteAll: 42] raise: #type_error
+
+  testRename =>
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/src.txt" contents: "content") equals: nil
+    self assert: (File rename: "target/bt-test-tmp/fdt/src.txt" to: "target/bt-test-tmp/fdt/dst.txt") equals: nil
+    self deny: (File exists: "target/bt-test-tmp/fdt/src.txt")
+    self assert: (File exists: "target/bt-test-tmp/fdt/dst.txt")
+    self assert: (File readAll: "target/bt-test-tmp/fdt/dst.txt") equals: "content"
+
+  testRenameDirectory =>
+    self assert: (File mkdir: "target/bt-test-tmp/fdt/dir_src") equals: nil
+    self assert: (File rename: "target/bt-test-tmp/fdt/dir_src" to: "target/bt-test-tmp/fdt/dir_dst") equals: nil
+    self deny: (File isDirectory: "target/bt-test-tmp/fdt/dir_src")
+    self assert: (File isDirectory: "target/bt-test-tmp/fdt/dir_dst")
+
+  testRenameNonExistentRaisesError =>
+    self should: [
+      File rename: "target/bt-test-tmp/fdt/no_such_file.txt" to: "target/bt-test-tmp/fdt/dst.txt"
+    ] raise: #file_not_found
+
+  testRenameInvalidSourcePathRaisesError =>
+    self should: [
+      File rename: "/tmp/evil.txt" to: "target/bt-test-tmp/fdt/dst.txt"
+    ] raise: #invalid_path
+
+  testRenameInvalidDestPathRaisesError =>
+    self assert: (File writeAll: "target/bt-test-tmp/fdt/rename_src.txt" contents: "x") equals: nil
+    self should: [
+      File rename: "target/bt-test-tmp/fdt/rename_src.txt" to: "/tmp/evil.txt"
+    ] raise: #invalid_path
+
+  testRenameTypeErrorRaisesError =>
+    @expect type
+    self should: [
+      File rename: 42 to: "target/bt-test-tmp/fdt/dst.txt"
+    ] raise: #type_error
+
+  testAbsolutePath =>
+    abs := File absolutePath: "target/bt-test-tmp/fdt"
+    self assert: (abs includesSubstring: "target/bt-test-tmp/fdt")
+
+  testAbsolutePathIsAbsolute =>
+    abs := File absolutePath: "target/bt-test-tmp/fdt"
+    // Absolute paths are always longer than the relative input on any OS
+    self assert: abs size > "target/bt-test-tmp/fdt" size
+
+  testAbsolutePathInvalidRaisesError =>
+    self should: [File absolutePath: "/etc/passwd"] raise: #invalid_path
+    self should: [File absolutePath: "../secret"] raise: #invalid_path
+
+  testAbsolutePathTypeErrorRaisesError =>
+    @expect type
+    self should: [File absolutePath: 42] raise: #type_error
+
+  testTempDirectory =>
+    tmp := File tempDirectory
+    self assert: (tmp size > 0)
+
+  testTempDirectoryIsString =>
+    tmp := File tempDirectory
+    self assert: (tmp class name) equals: #String
