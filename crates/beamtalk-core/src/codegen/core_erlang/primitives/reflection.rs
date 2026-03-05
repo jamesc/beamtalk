@@ -6,7 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! Contains BIF generators for introspection and meta-level classes:
-//! `CompiledMethod`, `JSON`, `Regex`, `Symbol`.
+//! `CompiledMethod`, `JSON`, `Regex`, `Symbol`, `Yaml`.
 
 use super::super::document::Document;
 use super::{binary_bif, param};
@@ -91,6 +91,37 @@ pub(crate) fn generate_json_bif(selector: &str, params: &[String]) -> Option<Doc
         ]),
         "prettyPrint:" => Some(docvec![
             "call 'beamtalk_json':'prettyPrint:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        _ => None,
+    }
+}
+
+/// Yaml primitive implementations (BT-1122).
+///
+/// Yaml class methods delegate directly to `beamtalk_yaml` runtime module.
+/// These are class-level methods (no Self parameter needed).
+pub(crate) fn generate_yaml_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    let p0 = param(params, 0, "_Arg0");
+    match selector {
+        "parse:" => Some(docvec![
+            "call 'beamtalk_yaml':'parse:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "parseAll:" => Some(docvec![
+            "call 'beamtalk_yaml':'parseAll:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "generate:" => Some(docvec![
+            "call 'beamtalk_yaml':'generate:'(",
+            p0.to_string(),
+            ")"
+        ]),
+        "parseFile:" => Some(docvec![
+            "call 'beamtalk_yaml':'parseFile:'(",
             p0.to_string(),
             ")"
         ]),
