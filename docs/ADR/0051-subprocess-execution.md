@@ -549,12 +549,18 @@ The Rust helper binary (`beamtalk_exec`) handles all subprocess lifecycle manage
 3. Process-group kill ensures grandchild processes are also terminated — no orphaning
 4. On Windows: `TerminateJobObject()` kills all processes in the Job Object
 
-**Tier 1 (System output:):**
+**Tier 1 (System output:) — Streams work here:**
+
+Streams are value-side only (ADR 0021 revised). `System output:args:` is a valid use of Streams because the **caller's process** opens the port via the Rust helper, creates the Stream generator, and evaluates the pipeline — no process boundary is crossed. This is the same pattern as `File lines:` — caller-owned resource, same-process evaluation, lazy pipeline composition.
+
 1. **Stream finalizer** — `System output:args:` attaches a Stream finalizer that sends a shutdown command to the Rust helper. The finalizer runs when the stream is fully consumed or when a terminal operation completes.
 2. **Block-scoped cleanup** — `System output:args:do:` sends a shutdown command to the helper in an `ensure:` block when the block exits (normally or via exception). This is the deterministic alternative — use it for long-running commands where relying on the finalizer is insufficient.
 3. **Process linking** — the BEAM port to the Rust helper is linked to the calling process. If the caller crashes, the port closes, and the helper cleans up the subprocess.
 
-**Tier 2 (Subprocess actor):**
+**Tier 2 (Subprocess/SubprocessListener actor) — Streams do NOT work here:**
+
+Streams cannot be used in Tier 2 because the port is owned by the actor's gen_server process, not the caller's. A Stream returned from an actor method would have a generator closure that captures the actor's port — but the closure executes in the caller's process, which cannot read from that port. This is why Tier 2 uses `readLine` (pull) and `onLine:` (push) instead of Streams. See ADR 0021 "Scope Limitation" and the "Design Resolution: Why Not Streams?" section above.
+
 4. **Actor lifecycle** — the port to the Rust helper is owned by the actor's gen_server process. When the actor stops (via `stop.` or crash), `terminate/2` sends a shutdown command to the helper, which cleans up the subprocess with the SIGTERM → SIGKILL sequence.
 5. **Explicit close** — `agent close.` sends an immediate kill command to the helper.
 6. **Supervision** — Subprocess actors can be supervised like any other Actor. If the supervisor restarts the actor, a new subprocess is spawned via the helper.
