@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_subprocess gen_server (ADR 0051, Phase 4a).
+%%% @doc EUnit tests for beamtalk_subprocess gen_server (ADR 0051, Phase 4a+4b).
 %%%
 %%% **DDD Context:** runtime
 %%%
@@ -13,6 +13,9 @@
 %%% - exitCode: returns nil while the subprocess is running
 %%% - exitCode: returns the exit code integer after the subprocess exits
 %%% - close: terminates the subprocess and marks the port closed
+%%% - readStderrLine: blocks until stderr data arrives, returns nil at EOF
+%%% - readStderrLine: stdout and stderr buffers are independent
+%%% - lines: Stream yields correct sequence of stdout lines
 
 -module(beamtalk_subprocess_tests).
 
@@ -217,6 +220,117 @@ close_is_idempotent_test() ->
             ?assertEqual(nil, gen_server:call(Pid, {close, []})),
             %% Second close should not crash
             ?assertEqual(nil, gen_server:call(Pid, {close, []})),
+            gen_server:stop(Pid);
+        _ ->
+            {skip, "Unix-only test"}
+    end.
+
+%%% ============================================================================
+%%% readStderrLine — blocks until data, returns nil at EOF
+%%% ============================================================================
+
+readStderrLine_returns_nil_at_eof_test() ->
+    case os:type() of
+        {unix, _} ->
+            %% sh -c "echo err >&2" writes one line to stderr then exits
+            {ok, Pid} = beamtalk_subprocess:start(#{
+                executable => <<"/bin/sh">>,
+                args => [<<"-c">>, <<"echo err >&2">>]
+            }),
+            Line = gen_server:call(Pid, {readStderrLine, []}, 5000),
+            ?assertEqual(<<"err">>, Line),
+            %% Second call: process exited, buffer drained — must return nil
+            Eof = gen_server:call(Pid, {readStderrLine, []}, 5000),
+            ?assertEqual(nil, Eof),
+            gen_server:stop(Pid);
+        _ ->
+            {skip, "Unix-only test"}
+    end.
+
+%%% ============================================================================
+%%% readStderrLine — timeout returns nil
+%%% ============================================================================
+
+readStderrLine_timeout_returns_nil_test() ->
+    case os:type() of
+        {unix, _} ->
+            %% /bin/sleep produces no stderr — readStderrLine: with short timeout returns nil
+            {ok, Pid} = beamtalk_subprocess:start(#{
+                executable => <<"/bin/sleep">>,
+                args => [<<"60">>]
+            }),
+            Result = gen_server:call(Pid, {'readStderrLine:', [100]}, 5000),
+            ?assertEqual(nil, Result),
+            gen_server:call(Pid, {close, []}),
+            gen_server:stop(Pid);
+        _ ->
+            {skip, "Unix-only test"}
+    end.
+
+%%% ============================================================================
+%%% readStderrLine — stdout and stderr are independent
+%%% ============================================================================
+
+stdout_and_stderr_are_independent_test() ->
+    case os:type() of
+        {unix, _} ->
+            %% Writes "out" to stdout and "err" to stderr, then exits
+            Script = <<"echo out; echo err >&2">>,
+            {ok, Pid} = beamtalk_subprocess:start(#{
+                executable => <<"/bin/sh">>,
+                args => [<<"-c">>, Script]
+            }),
+            %% Read from stdout — should get "out", not "err"
+            StdoutLine = gen_server:call(Pid, {readLine, []}, 5000),
+            ?assertEqual(<<"out">>, StdoutLine),
+            %% Read from stderr — should get "err", not "out"
+            StderrLine = gen_server:call(Pid, {readStderrLine, []}, 5000),
+            ?assertEqual(<<"err">>, StderrLine),
+            %% Both channels now at EOF
+            ?assertEqual(nil, gen_server:call(Pid, {readLine, []}, 5000)),
+            ?assertEqual(nil, gen_server:call(Pid, {readStderrLine, []}, 5000)),
+            gen_server:stop(Pid);
+        _ ->
+            {skip, "Unix-only test"}
+    end.
+
+%%% ============================================================================
+%%% lines — Stream yields correct sequence
+%%% ============================================================================
+
+lines_stream_yields_correct_sequence_test() ->
+    case os:type() of
+        {unix, _} ->
+            %% printf produces three lines
+            Script = <<"printf 'alpha\\nbeta\\ngamma\\n'">>,
+            {ok, Pid} = beamtalk_subprocess:start(#{
+                executable => <<"/bin/sh">>,
+                args => [<<"-c">>, Script]
+            }),
+            Stream = gen_server:call(Pid, {lines, []}),
+            Lines = beamtalk_stream:as_list(Stream),
+            ?assertEqual([<<"alpha">>, <<"beta">>, <<"gamma">>], Lines),
+            gen_server:stop(Pid);
+        _ ->
+            {skip, "Unix-only test"}
+    end.
+
+%%% ============================================================================
+%%% stderrLines — Stream yields correct sequence
+%%% ============================================================================
+
+stderrLines_stream_yields_correct_sequence_test() ->
+    case os:type() of
+        {unix, _} ->
+            %% printf writes three lines to stderr
+            Script = <<"printf 'a\\nb\\nc\\n' >&2">>,
+            {ok, Pid} = beamtalk_subprocess:start(#{
+                executable => <<"/bin/sh">>,
+                args => [<<"-c">>, Script]
+            }),
+            Stream = gen_server:call(Pid, {stderrLines, []}),
+            Lines = beamtalk_stream:as_list(Stream),
+            ?assertEqual([<<"a">>, <<"b">>, <<"c">>], Lines),
             gen_server:stop(Pid);
         _ ->
             {skip, "Unix-only test"}

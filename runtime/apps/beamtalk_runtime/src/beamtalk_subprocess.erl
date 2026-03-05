@@ -1,14 +1,14 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc OTP gen_server for interactive subprocess management (ADR 0051, Phase 4a).
+%%% @doc OTP gen_server for interactive subprocess management (ADR 0051, Phase 4a+4b).
 %%%
 %%% **DDD Context:** runtime
 %%%
 %%% Each `beamtalk_subprocess` process owns one port to the `beamtalk_exec`
 %%% Rust helper binary and manages exactly one child subprocess (ChildId = 0).
-%%% stdout data is buffered internally in an OTP queue; callers block via
-%%% deferred `gen_server:reply/2` until a complete line is available.
+%%% stdout and stderr data are buffered independently in OTP queues; callers
+%%% block via deferred `gen_server:reply/2` until a complete line is available.
 %%%
 %%% == State Map ==
 %%%
@@ -18,7 +18,10 @@
 %%%   child_id      => 0,           % fixed — one child per gen_server
 %%%   {stdout, buffer}  => queue:queue(binary()),  % complete buffered lines
 %%%   {stdout, pending} => binary(),              % partial line fragment
-%%%   {stdout, waiting} => From | {From, TimerRef} | undefined,
+%%%   {stdout, waiting} => From | {timer, From, TimerRef} | undefined,
+%%%   {stderr, buffer}  => queue:queue(binary()),  % complete buffered lines
+%%%   {stderr, pending} => binary(),              % partial line fragment
+%%%   {stderr, waiting} => From | {timer, From, TimerRef} | undefined,
 %%%   exit_code     => nil | non_neg_integer(),
 %%%   port_closed   => boolean()
 %%% }
@@ -27,14 +30,19 @@
 %%% == Selectors ==
 %%%
 %%% * `{'writeLine:', [Data]}` — append newline and write to subprocess stdin
-%%% * `{readLine, []}` — deferred reply; blocks until a line or EOF
+%%% * `{readLine, []}` — deferred reply; blocks until a stdout line or EOF
 %%% * `{'readLine:', [Timeout]}` — like readLine but returns nil after Timeout ms
+%%% * `{readStderrLine, []}` — deferred reply; blocks until a stderr line or EOF
+%%% * `{'readStderrLine:', [Timeout]}` — like readStderrLine but returns nil after Timeout ms
+%%% * `{lines, []}` — returns a Stream whose generator calls readLine via gen_server:call
+%%% * `{stderrLines, []}` — returns a Stream whose generator calls readStderrLine via gen_server:call
 %%% * `{exitCode, []}` — returns nil while running, integer after exit
 %%% * `{close, []}` — send kill command to helper, close port
 %%%
 %%% == References ==
 %%%
 %%% * ADR 0051 "Subprocess Execution" — Tier 2 design
+%%% * ADR 0021 "Streams and I/O" — Stream generator pattern
 %%% * `beamtalk_exec_port` — low-level port commands
 
 -module(beamtalk_subprocess).
@@ -59,7 +67,7 @@
 %%% Types
 %%% ============================================================================
 
--type channel() :: stdout.
+-type channel() :: stdout | stderr.
 
 -type config() :: #{
     executable := binary(),
@@ -105,6 +113,9 @@ init(Config) ->
         {stdout, buffer} => queue:new(),
         {stdout, pending} => <<>>,
         {stdout, waiting} => undefined,
+        {stderr, buffer} => queue:new(),
+        {stderr, pending} => <<>>,
+        {stderr, waiting} => undefined,
         exit_code => nil,
         port_closed => false
     },
@@ -119,6 +130,18 @@ handle_call({readLine, []}, From, State) ->
     read_line_for(stdout, From, infinity, State);
 handle_call({'readLine:', [Timeout]}, From, State) when is_integer(Timeout), Timeout > 0 ->
     read_line_for(stdout, From, Timeout, State);
+handle_call({readStderrLine, []}, From, State) ->
+    read_line_for(stderr, From, infinity, State);
+handle_call({'readStderrLine:', [Timeout]}, From, State) when is_integer(Timeout), Timeout > 0 ->
+    read_line_for(stderr, From, Timeout, State);
+handle_call({lines, []}, _From, State) ->
+    Pid = self(),
+    Stream = make_readline_stream(Pid, stdout),
+    {reply, Stream, State};
+handle_call({stderrLines, []}, _From, State) ->
+    Pid = self(),
+    Stream = make_readline_stream(Pid, stderr),
+    {reply, Stream, State};
 handle_call({exitCode, []}, _From, State) ->
     {reply, maps:get(exit_code, State, nil), State};
 handle_call({close, []}, _From, State) ->
@@ -138,15 +161,19 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
     case erlang:binary_to_term(Packet, [safe]) of
         {stdout, _ChildId, Data} ->
             buffer_and_maybe_reply(stdout, Data, State);
+        {stderr, _ChildId, Data} ->
+            buffer_and_maybe_reply(stderr, Data, State);
         {exit, _ChildId, Code} ->
             ?LOG_INFO("Subprocess exited", #{exit_code => Code}),
-            %% Flush any partial line that lacked a trailing newline
+            %% Flush any partial line that lacked a trailing newline — both channels
             S0 = flush_pending(stdout, State),
+            S1 = flush_pending(stderr, S0),
             %% Close the exec port — child is gone, no more I/O possible
             catch beamtalk_exec_port:close(Port),
-            NewState = S0#{exit_code => Code, port_closed => true},
-            S1 = maybe_reply_eof(stdout, NewState),
-            {noreply, S1};
+            NewState = S1#{exit_code => Code, port_closed => true},
+            S2 = maybe_reply_eof(stdout, NewState),
+            S3 = maybe_reply_eof(stderr, S2),
+            {noreply, S3};
         _Other ->
             {noreply, State}
     end;
@@ -154,16 +181,18 @@ handle_info({Port, {exit_status, _N}}, #{port := Port} = State) ->
     %% beamtalk_exec binary itself exited — treat all channels as EOF
     ?LOG_WARNING("Exec port exited unexpectedly"),
     S0 = flush_pending(stdout, State),
-    NewState = S0#{port_closed => true},
-    S1 = maybe_reply_eof(stdout, NewState),
-    {noreply, S1};
+    S1 = flush_pending(stderr, S0),
+    NewState = S1#{port_closed => true},
+    S2 = maybe_reply_eof(stdout, NewState),
+    S3 = maybe_reply_eof(stderr, S2),
+    {noreply, S3};
 handle_info({read_timeout, Channel}, State) ->
     WaitKey = {Channel, waiting},
     case maps:get(WaitKey, State, undefined) of
         undefined ->
             %% Timer fired after data already arrived — ignore
             {noreply, State};
-        {From, _TimerRef} ->
+        {timer, From, _TimerRef} ->
             gen_server:reply(From, nil),
             {noreply, State#{WaitKey => undefined}};
         _Other ->
@@ -213,10 +242,11 @@ handle_close(State) ->
             beamtalk_exec_port:close(Port),
             NewState = State#{port_closed => true},
             S1 = maybe_reply_eof(stdout, NewState),
-            {reply, nil, S1}
+            S2 = maybe_reply_eof(stderr, S1),
+            {reply, nil, S2}
     end.
 
-%% @private Deferred-reply read for Channel (stdout).
+%% @private Deferred-reply read for Channel (stdout or stderr).
 %%
 %% Returns a buffered line immediately if one is available.
 %% If the buffer is empty and the port is closed, returns nil (EOF).
@@ -246,7 +276,7 @@ read_line_for(Channel, From, Timeout, State) ->
         true ->
             %% Defer with a timer; timeout message delivers nil
             TimerRef = erlang:send_after(Timeout, self(), {read_timeout, Channel}),
-            {noreply, State#{WaitKey => {From, TimerRef}}}
+            {noreply, State#{WaitKey => {timer, From, TimerRef}}}
     end.
 
 %%% ============================================================================
@@ -341,11 +371,41 @@ maybe_reply_eof(Channel, State) ->
 
 %% @private Reply to a waiting caller, cancelling any pending timer.
 -spec reply_to_waiter(term(), term()) -> ok.
-reply_to_waiter({From, TimerRef}, Value) when is_reference(TimerRef) ->
+reply_to_waiter({timer, From, TimerRef}, Value) ->
     erlang:cancel_timer(TimerRef),
     gen_server:reply(From, Value);
 reply_to_waiter(From, Value) ->
     gen_server:reply(From, Value).
+
+%% @private Build a Stream whose generator calls readLine or readStderrLine via gen_server:call.
+%%
+%% The generator executes in the caller's process (correct for Streams per ADR 0021).
+%% Each step sends a sync message to the actor to get the next line.
+%% Returns done when the subprocess sends nil (EOF).
+-spec make_readline_stream(pid(), channel()) -> map().
+make_readline_stream(Pid, Channel) ->
+    CallKey =
+        case Channel of
+            stdout -> {readLine, []};
+            stderr -> {readStderrLine, []}
+        end,
+    Desc =
+        case Channel of
+            stdout -> <<"Subprocess.lines">>;
+            stderr -> <<"Subprocess.stderrLines">>
+        end,
+    Gen = make_readline_gen(Pid, CallKey),
+    beamtalk_stream:make_stream(Gen, Desc).
+
+%% @private Recursive generator: calls gen_server, returns done on nil.
+-spec make_readline_gen(pid(), term()) -> fun(() -> {binary(), fun()} | done).
+make_readline_gen(Pid, CallKey) ->
+    fun() ->
+        case gen_server:call(Pid, CallKey, infinity) of
+            nil -> done;
+            Line -> {Line, make_readline_gen(Pid, CallKey)}
+        end
+    end.
 
 %% @private Kill child and close the exec port during shutdown.
 -spec cleanup_port(map()) -> ok.
