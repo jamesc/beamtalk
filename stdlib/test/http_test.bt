@@ -246,8 +246,8 @@ TestCase subclass: HttpTest
   // ===== HTTPS connections (requires network access) =====
   //
   // These tests connect to a public HTTPS endpoint.  They pass in
-  // environments with internet access and are skipped (by means of
-  // @expect network_error) if the host is unreachable.
+  // environments with internet access; they will fail if the host is
+  // unreachable (e.g. offline CI).
   testHttpsGetReturnsOkStatus =>
     resp := HTTPClient get: "https://httpbin.org/get"
     self assert: resp ok

@@ -3,6 +3,8 @@
 
 %%% @doc EUnit tests for beamtalk_http_test_server (BT-1117).
 %%%
+%%% **DDD Context:** Object System Context
+%%%
 %%% Verifies lifecycle operations on the cowboy-backed HTTP test server.
 %%% These tests start a real listener and make a real HTTP request to confirm
 %%% the server is functioning before the BUnit suite runs against it.
