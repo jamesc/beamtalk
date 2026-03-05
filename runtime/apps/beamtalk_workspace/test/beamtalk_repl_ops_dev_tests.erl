@@ -527,6 +527,34 @@ parse_multi_keyword_selector_test() ->
     ).
 
 %%====================================================================
+%% parse_receiver_and_prefix/1 -- keyword sends mid-chain (BT-1072)
+%%====================================================================
+
+parse_keyword_send_mid_chain_returns_expression_test() ->
+    %% `myList collect: [:x | x * 2] si<TAB>`
+    %% The full receiver expression is everything before `si`.
+    ?assertMatch(
+        {expression, _, <<"si">>},
+        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"myList collect: [:x | x * 2] si">>)
+    ).
+
+parse_keyword_send_mid_chain_expression_content_test() ->
+    %% Verify the ReceiverExpr captures the full keyword send expression
+    {expression, Expr, Prefix} = beamtalk_repl_ops_dev:parse_receiver_and_prefix(
+        <<"myList collect: [:x | x * 2] si">>
+    ),
+    ?assertEqual(<<"myList collect: [:x | x * 2]">>, Expr),
+    ?assertEqual(<<"si">>, Prefix).
+
+parse_keyword_send_inject_into_returns_expression_test() ->
+    %% `myList inject: 0 into: [:acc :x | acc + x] pr<TAB>`
+    {expression, Expr, Prefix} = beamtalk_repl_ops_dev:parse_receiver_and_prefix(
+        <<"myList inject: 0 into: [:acc :x | acc + x] pr">>
+    ),
+    ?assertEqual(<<"myList inject: 0 into: [:acc :x | acc + x]">>, Expr),
+    ?assertEqual(<<"pr">>, Prefix).
+
+%%====================================================================
 %% handle/4 -- describe deprecated ops
 %%====================================================================
 
