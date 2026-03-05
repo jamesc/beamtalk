@@ -601,7 +601,10 @@ parse_binary_hops([Token | Rest]) ->
                             %% Binary operator with no argument — malformed
                             error;
                         [ArgToken | Rest2] ->
-                            case has_invalid_chain_chars(ArgToken) of
+                            case
+                                has_invalid_chain_chars(ArgToken) orelse
+                                    binary:match(ArgToken, <<":">>) =/= nomatch
+                            of
                                 true ->
                                     error;
                                 false ->

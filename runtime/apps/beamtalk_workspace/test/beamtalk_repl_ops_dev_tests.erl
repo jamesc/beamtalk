@@ -369,6 +369,10 @@ tokenise_binary_chain_binary_op_no_arg_returns_error_test() ->
     %% Binary op at end of expression with no argument
     ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_binary_chain(<<"counter value +">>)).
 
+tokenise_binary_chain_keyword_arg_returns_error_test() ->
+    %% Keyword-style arg token (contains `:`) after a binary op must be rejected
+    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_binary_chain(<<"x + ifTrue:">>)).
+
 tokenise_binary_chain_keyword_returns_error_test() ->
     %% Keyword sends (tokens with `:`) are not valid unary selectors
     ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_binary_chain(<<"list inject: 0 into: x">>)).
