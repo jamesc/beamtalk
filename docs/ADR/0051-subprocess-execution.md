@@ -155,8 +155,14 @@ agent writeLine: (JSON generate: #{
   "params" => #{"model" => "gpt-4"}
 }).
 
-// Read one line from stdout (blocks until a line is available or EOF)
+// Read one line from stdout (blocks forever until a line is available or EOF)
 line := agent readLine.       // => "{\"jsonrpc\":\"2.0\",\"result\":...}"
+
+// Read with timeout (milliseconds) — returns nil on timeout or EOF
+line := agent readLine: 5000. // => String, or nil after 5 seconds
+
+// Non-blocking check — returns nil immediately if no data buffered
+line := agent tryReadLine.    // => String if data available, nil otherwise
 
 // Read in a loop until EOF
 line := agent readLine.
@@ -164,6 +170,19 @@ line := agent readLine.
   event := JSON parse: line.
   Transcript show: event.
   line := agent readLine.
+]
+
+// Timeout-based loop — detect hung subprocess
+line := agent readLine: 30000.
+[line notNil] whileTrue: [
+  Transcript show: line.
+  line := agent readLine: 30000.
+].
+line isNil ifTrue: [
+  agent isAlive ifTrue: [
+    Transcript show: "Subprocess appears hung — killing".
+    agent close.
+  ]
 ]
 
 // Check if the subprocess has exited
@@ -199,11 +218,23 @@ Actor subclass: Subprocess
   /// Write a line to the subprocess's stdin (appends newline).
   writeLine: data -> Nil => @primitive "writeLine:"
 
-  /// Read one line from stdout. Blocks until available. Returns nil at EOF.
+  /// Read one line from stdout. Blocks forever until available. Returns nil at EOF.
   readLine -> String | Nil => @primitive "readLine"
 
-  /// Read one line from stderr. Blocks until available. Returns nil at EOF.
+  /// Read one line from stdout with timeout (ms). Returns nil on timeout or EOF.
+  readLine: timeout -> String | Nil => @primitive "readLine:"
+
+  /// Non-blocking read from stdout. Returns nil immediately if no data buffered.
+  tryReadLine -> String | Nil => @primitive "tryReadLine"
+
+  /// Read one line from stderr. Blocks forever until available. Returns nil at EOF.
   readStderrLine -> String | Nil => @primitive "readStderrLine"
+
+  /// Read one line from stderr with timeout (ms). Returns nil on timeout or EOF.
+  readStderrLine: timeout -> String | Nil => @primitive "readStderrLine:"
+
+  /// Non-blocking read from stderr. Returns nil immediately if no data buffered.
+  tryReadStderrLine -> String | Nil => @primitive "tryReadStderrLine"
 
   /// Get the exit code. Returns nil if the subprocess is still running.
   exitCode -> Integer | Nil => @primitive "exitCode"
@@ -266,14 +297,28 @@ buffer_and_maybe_reply(Channel, Data, State) ->
                              WaitKey => undefined}}
     end.
 
-%% readLine — sync call, blocks caller until a line or EOF
+%% readLine — blocks forever until a line or EOF
 handle_readLine([], From, State) ->
-    read_line_for(stdout, From, State).
+    read_line_for(stdout, From, infinity, State).
+
+%% readLine: — blocks up to Timeout ms, returns nil on timeout
+handle_readLine([Timeout], From, State) ->
+    read_line_for(stdout, From, Timeout, State).
+
+%% tryReadLine — non-blocking, returns nil if no data buffered
+handle_tryReadLine([], _From, State) ->
+    try_read_line_for(stdout, State).
 
 handle_readStderrLine([], From, State) ->
-    read_line_for(stderr, From, State).
+    read_line_for(stderr, From, infinity, State).
 
-read_line_for(Channel, From, State) ->
+handle_readStderrLine([Timeout], From, State) ->
+    read_line_for(stderr, From, Timeout, State).
+
+handle_tryReadStderrLine([], _From, State) ->
+    try_read_line_for(stderr, State).
+
+read_line_for(Channel, From, Timeout, State) ->
     BufKey = {Channel, buffer},
     WaitKey = {Channel, waiting},
     Buffer = maps:get(BufKey, State),
@@ -284,10 +329,25 @@ read_line_for(Channel, From, State) ->
         true when maps:get(port_closed, State, false) ->
             %% EOF — no more data coming
             {reply, nil, State};
+        true when Timeout =:= infinity ->
+            %% No data yet — stash From, reply from handle_info
+            {noreply, State#{WaitKey => From}};
         true ->
-            %% No data yet — stash From, return {noreply, State}
-            %% gen_server:reply/2 called from handle_info when data arrives
-            {noreply, State#{WaitKey => From}}
+            %% No data yet — stash From with timer ref
+            TimerRef = erlang:send_after(Timeout, self(),
+                                         {read_timeout, Channel}),
+            {noreply, State#{WaitKey => {From, TimerRef}}}
+    end.
+
+try_read_line_for(Channel, State) ->
+    BufKey = {Channel, buffer},
+    Buffer = maps:get(BufKey, State),
+    case queue:is_empty(Buffer) of
+        false ->
+            {{value, Line}, Rest} = queue:out(Buffer),
+            {reply, Line, State#{BufKey => Rest}};
+        true ->
+            {reply, nil, State}
     end.
 
 %% writeLine — sync call, writes to port stdin
@@ -303,7 +363,14 @@ The deferred reply pattern means `readLine` blocks the caller's `gen_server:call
 
 This is standard OTP — `handle_call` returns `{noreply, State}` to defer the reply, stashing `From` in the state. When data arrives via `handle_info`, the actor calls `gen_server:reply(From, Value)` to unblock the caller. The same pattern is used for both `readLine` (stdout) and `readStderrLine` (stderr), each with independent buffers and waiting callers.
 
-**Timeout handling:** ADR 0043 notes that `gen_server:call` defaults to a 5000ms timeout. For `readLine`, this is wrong — a subprocess may produce no output for minutes (e.g., a coding agent thinking). The runtime must use `gen_server:call(AgentPid, {readLine, []}, infinity)` for `readLine` specifically. This is an implementation detail, not an API change — Beamtalk's `.` message send syntax does not expose timeout control. If per-method timeout configuration is added later (per ADR 0043's roadmap), `readLine` should default to `infinity` rather than the standard 5000ms.
+**Timeout handling:** Three read variants cover different needs:
+- `readLine` — blocks forever (`gen_server:call` with `infinity` timeout). For loops where data is expected eventually.
+- `readLine: timeout` — blocks up to `timeout` milliseconds. The runtime uses `erlang:send_after/3` to schedule a `{read_timeout, Channel}` message. If the timer fires before data arrives, `handle_info` replies `nil` and cancels the wait. Returns `nil` on timeout or EOF.
+- `tryReadLine` — non-blocking. Returns the next buffered line immediately, or `nil` if the buffer is empty. Does not stash `From` or defer the reply.
+
+All three variants exist for stderr too (`readStderrLine`, `readStderrLine:`, `tryReadStderrLine`).
+
+ADR 0043 notes that `gen_server:call` defaults to a 5000ms timeout. For the blocking `readLine` variant, the runtime must use `gen_server:call(AgentPid, {readLine, []}, infinity)` — a subprocess may produce no output for minutes (e.g., a coding agent thinking). For `readLine:`, the gen_server:call also uses `infinity` — the timeout is managed internally via `erlang:send_after`, not via OTP's call timeout, so the actor can clean up its waiting state properly.
 
 #### Actor Lifecycle and Cleanup
 
