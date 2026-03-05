@@ -1140,7 +1140,8 @@ fn test_erlang_interop_direct_call_keyword_multi_arg() {
 
 #[test]
 fn test_erlang_interop_direct_call_zero_arg() {
-    // `Erlang erlang node` → `call 'erlang':'node'()`
+    // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])`
+    // BT-1127: Routes through proxy for consistent validation/coercion
     let mut generator = CoreErlangGenerator::new("test");
 
     let inner_receiver = Expression::MessageSend {
@@ -1162,9 +1163,9 @@ fn test_erlang_interop_direct_call_zero_arg() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert_eq!(
-        output, "call 'erlang':'node'()",
-        "Should emit direct zero-arg call. Got: {output}"
+    assert!(
+        output.contains("call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])"),
+        "Should emit proxy-routed zero-arg call. Got: {output}"
     );
 }
 

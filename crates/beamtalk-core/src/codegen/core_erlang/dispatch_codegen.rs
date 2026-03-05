@@ -477,10 +477,15 @@ impl CoreErlangGenerator {
                 if OBJECT_PROTOCOL_SELECTORS.contains(&function_name.as_str()) {
                     return Ok(None);
                 }
-                // Zero-arg Erlang call: `Erlang erlang node` → `call 'erlang':'node'()`
-                let doc = docvec![Document::String(format!(
-                    "call '{module_name}':'{function_name}'()"
-                ))];
+                // BT-1127: Route zero-arg calls through proxy (consistent with keyword sends).
+                // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])`
+                let doc = docvec![
+                    "call 'beamtalk_erlang_proxy':'direct_call'('",
+                    Document::String(module_name.to_string()),
+                    "', '",
+                    Document::String(function_name.to_string()),
+                    "', [])"
+                ];
                 Ok(Some(doc))
             }
             MessageSelector::Keyword(parts) => {
