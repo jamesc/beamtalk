@@ -147,9 +147,11 @@ agent writeLine: (JSON generate: #{
 line := agent readLine.       // => "{\"jsonrpc\":\"2.0\",\"result\":...}"
 
 // Read in a loop until EOF
-[agent readLine.] whileNotNil: [:line |
+line := agent readLine.
+[line notNil] whileTrue: [
   event := JSON parse: line.
-  Transcript show: event
+  Transcript show: event.
+  line := agent readLine.
 ]
 
 // Check if the subprocess has exited
@@ -263,6 +265,8 @@ The `noreply_defer` pattern means `readLine` blocks the caller's `gen_server:cal
 
 This is standard OTP — `gen_server:call` supports deferred replies via `{noreply, State}` with manual `gen_server:reply/2`.
 
+**Timeout handling:** ADR 0043 notes that `gen_server:call` defaults to a 5000ms timeout. For `readLine`, this is wrong — a subprocess may produce no output for minutes (e.g., a coding agent thinking). The runtime must use `gen_server:call(AgentPid, {readLine, []}, infinity)` for `readLine` specifically. This is an implementation detail, not an API change — Beamtalk's `.` message send syntax does not expose timeout control. If per-method timeout configuration is added later (per ADR 0043's roadmap), `readLine` should default to `infinity` rather than the standard 5000ms.
+
 #### Actor Lifecycle and Cleanup
 
 ```
@@ -280,9 +284,10 @@ This is standard OTP — `gen_server:call` supports deferred replies via `{norep
   writeLine ──▶ port_command
 ```
 
-- **`stop.`** (inherited from Actor) — gracefully stops the gen_server, which triggers `terminate/2`. The terminate callback closes the port (sends EOF to stdin). If the subprocess doesn't exit within a grace period, it sends a kill signal.
-- **`close.`** — force-closes the port and sends a platform-appropriate kill signal to the OS process immediately.
-- **BEAM process crash** — if the actor's gen_server crashes, the port is automatically closed (port is linked to the owning process). The subprocess receives EOF on stdin.
+- **`stop.`** (inherited from Actor) — gracefully stops the gen_server, which triggers `terminate/2`. The `beamtalk_subprocess.erl` terminate callback (not inherited — Subprocess overrides it) closes the port (sends EOF to stdin), waits briefly for the subprocess to exit, then sends SIGTERM. If the subprocess still hasn't exited after a grace period, it sends SIGKILL.
+- **`close.`** — force-closes the port and sends SIGTERM followed by SIGKILL to the OS process. This is the explicit "shut down now" method for when `stop` is too gentle.
+- **`kill.`** (inherited from Actor) — sends `exit(Pid, kill)` to the actor's gen_server process. **Warning:** SIGKILL to the BEAM process bypasses `terminate/2`, which means `cleanup_port/1` does not run. The OS subprocess may become a zombie. However, the port is linked to the actor process, so port closure still sends EOF to the subprocess's stdin. Programs that monitor stdin for EOF will exit. Programs that don't will be orphaned. For this reason, prefer `close.` (which cleans up deterministically) over `kill.` for Subprocess actors. Document this prominently.
+- **BEAM process crash** — if the actor's gen_server crashes (not killed), `terminate/2` runs with `Reason =/= kill`, so cleanup runs normally. The port is also linked to the owning process, providing a backup EOF signal.
 - **Deferred readLine callers** — if the actor stops while a caller is blocked on `readLine`, the caller receives an exit signal from the gen_server (standard OTP behavior for `gen_server:call` when the server dies).
 
 ### Shared Security Model
@@ -359,22 +364,36 @@ cleanup_port(Port) ->
     case erlang:port_info(Port, os_pid) of
         {os_pid, OsPid} ->
             catch port_close(Port),
-            %% Brief grace for EOF-aware programs, then force terminate
-            timer:sleep(50),
-            kill_os_process(OsPid);
+            %% SIGTERM first — allow graceful shutdown
+            signal_os_process(OsPid, sigterm),
+            %% Wait briefly for process to exit
+            timer:sleep(100),
+            %% Check if still alive, then SIGKILL
+            case is_os_process_alive(OsPid) of
+                true  -> signal_os_process(OsPid, sigkill);
+                false -> ok
+            end;
         undefined ->
             catch port_close(Port)
     end.
 
-%% Platform-appropriate process termination
+%% Platform-appropriate process signaling
 -ifdef(WIN32).
-kill_os_process(OsPid) ->
+signal_os_process(OsPid, _Signal) ->
     os:cmd("taskkill /F /PID " ++ integer_to_list(OsPid)).
+is_os_process_alive(OsPid) ->
+    os:cmd("tasklist /FI \"PID eq " ++ integer_to_list(OsPid) ++ "\"") =/= [].
 -else.
-kill_os_process(OsPid) ->
+signal_os_process(OsPid, sigterm) ->
+    os:cmd("kill -15 " ++ integer_to_list(OsPid) ++ " 2>/dev/null");
+signal_os_process(OsPid, sigkill) ->
     os:cmd("kill -9 " ++ integer_to_list(OsPid) ++ " 2>/dev/null").
+is_os_process_alive(OsPid) ->
+    os:cmd("kill -0 " ++ integer_to_list(OsPid) ++ " 2>/dev/null") =:= [].
 -endif.
 ```
+
+**PID reuse caveat:** Between `port_close` and the kill signal, the OS may have recycled the PID. In practice this is extremely rare (PIDs cycle through large ranges on modern systems), and the 100ms window is short. Process-group-based kill (`kill -<PGID>`) would eliminate this risk but requires `erlexec` or a helper process. This is deferred to Phase 4 along with erlexec integration.
 
 ### Abandoned Stream Cleanup (Tier 1)
 
@@ -459,36 +478,49 @@ An abandoned `System output:` Stream (assigned to a variable but never fully con
 
 - **Newcomer**: "`os:cmd` works today, right now, zero risk. Ship something that works in a day, iterate."
 - **BEAM veteran**: "`os:cmd` is a known quantity — no port lifecycle complexity, no zombie concerns, no finalizer design. Add streaming later when there's a real use case that demands it."
-- **Incrementalist**: "Phase 0 with `os:cmd` proves the API ergonomics. If `System run: 'git' args: #('status')` feels right, then upgrade the internals to `open_port` without changing the API."
+- **Language designer**: "You are about to add permanent surface area to `System`. The argument for `os:cmd` first is not about speed or security — it's about **API validation before lock-in**. Pharo's `OSSubprocess` was initially the wrong API and had to be replaced. Prove that `run:args:` is the right granularity with a cheap shim. If it's right, swap in `open_port` later — pure implementation change. If it's wrong, you've wasted far less time than committing to the full port lifecycle design."
+- **Incrementalist**: "You're already phasing Tier 1 and Tier 2 across three phases. If you're comfortable with that level of incrementalism, why not also phase the underlying implementation? Phase 0 with `os:cmd` proves the API ergonomics; Phase 1 swaps in `open_port` without changing the API."
 
-**Why rejected:** `os:cmd/1` invokes `/bin/sh -c` — shell injection by design. It also discards the exit code, which is critical for scripting (checking `$?`). Starting with `os:cmd` would mean either (a) shipping an insecure API that we immediately deprecate, or (b) not exposing exit codes in Phase 0 and adding them as a breaking change in Phase 1. The `open_port` implementation is only marginally more complex and gets both security and exit codes right from day one.
+**Why rejected:** `os:cmd/1` invokes `/bin/sh -c` — shell injection by design. It also discards the exit code, which is critical for scripting (checking `$?`). Starting with `os:cmd` would mean either (a) shipping an insecure API that we immediately deprecate, or (b) not exposing exit codes in Phase 0 and adding them as a breaking change in Phase 1.
+
+The API-validation argument is genuine: committing to `run:args:` is a surface area decision. However, the `open_port` implementation is only marginally more complex than `os:cmd` — the real complexity is in the *streaming* and *actor* phases, not in `run:args:`. Phase 1 with `open_port` already serves as the API validation step. If `run:args:` turns out to be the wrong shape, we learn that in Phase 1 regardless of whether the implementation uses `os:cmd` or `open_port` underneath. The `os:cmd` indirection would save almost no implementation effort while adding a security liability.
 
 ### Option B: Use Streams from the Subprocess actor instead of readLine
 
-- **API designer**: "Streams are the established pattern for sequential data in Beamtalk (ADR 0021). `agent lines.` returning a Stream would be consistent with `File lines:` and `System output:`. The readLine polling loop feels like Go, not Smalltalk."
-- **Newcomer**: "I already know how Streams work from File. Having to write a `whileNotNil:` loop is a step backward."
+- **API designer**: "Streams are the established pattern for sequential data in Beamtalk (ADR 0021). `agent lines.` returning a Stream would be consistent with `File lines:` and `System output:`. The readLine polling loop creates a **conceptual discontinuity** — users who graduate from `System output:` (Stream) to `Subprocess` (readLine) must abandon everything they learned about Streams and adopt a different iteration model."
+- **Newcomer**: "I already know how Streams work from File and System output. Having to switch to a `whileTrue:` loop with explicit nil-checking is a step backward in ergonomics."
+- **Language designer**: "ADR 0021 explicitly promises that `Process output: 'ls -la'` will return a Stream. Tier 1 delivers on this promise with `System output:`. But Tier 2 breaks the promise for interactive processes — the same conceptual operation (reading output from a running program) uses two completely different APIs depending on whether the program is short-lived or long-lived. This is a model-level inconsistency, not just a syntactic inconvenience."
 
-**Why rejected:** The cross-process Stream constraint (ADR 0021) makes this impossible without fundamental changes to Stream semantics. A Stream's generator function runs in the caller's process, but the port is owned by the actor's gen_server process. Returning a Stream would require either: (a) violating the cross-process constraint (unsafe), (b) spawning a proxy process per Stream consumer (complex, fragile), or (c) redesigning Streams to support remote generators (large scope). The `readLine` approach is simple, correct, and follows standard OTP patterns. A `whileNotNil:` loop is 2 lines of code and avoids an entire class of cross-process bugs.
+**Why rejected:** The cross-process Stream constraint (ADR 0021) makes this impossible without fundamental changes to Stream semantics. A Stream's generator function runs in the caller's process, but the port is owned by the actor's gen_server process. Returning a Stream would require either: (a) violating the cross-process constraint (unsafe), (b) spawning a proxy process per Stream consumer (complex, fragile), or (c) redesigning Streams to support remote generators (large scope via BT-507).
+
+The API coherence concern is real and should not be dismissed as "2 lines of code." The `readLine` model creates genuine conceptual discontinuity between Tier 1 and Tier 2. If BT-507 (Future combinators / cross-process Streams) is implemented, the Subprocess API should be revisited to add an `agent lines.` method that returns a cross-process-safe Stream. The `readLine` API would remain as the lower-level primitive, and `lines` would be sugar built on top of it. This future path is noted in Phase 5.
 
 ### Option C: Use `Process` as the class name (per ADR 0021 sketch)
 
-- **Smalltalk purist**: "Pharo uses `OSProcess` — `Process` is the natural name."
-- **Newcomer**: "Process is what every other language calls it."
+- **Smalltalk purist**: "Pharo uses `OSProcess` / `OSSubprocess` — `Process` is the natural Smalltalk vocabulary."
+- **Newcomer**: "Process is what every other language calls it — Python has `Process`, Ruby has `Process`, Go has `os.Process`."
+- **Language designer**: "Beamtalk already hides BEAM processes behind the name 'Actor' — users never see the word 'process' for BEAM-level concurrency. So 'Process' is actually *available* as a class name. More importantly, naming signals intent: `Subprocess` imports Unix parent-child hierarchy semantics into the language vocabulary. `Process` or `ExternalProcess` frames this as a language-level abstraction for coordinating with external computations, which is more aligned with Beamtalk's Smalltalk heritage. Beamtalk shouldn't import OS implementation details into its vocabulary any more than it needs to."
 
-**Why rejected:** In the BEAM ecosystem, "process" universally means a lightweight BEAM process (gen_server, actor). Using `Process` for OS subprocesses creates confusion. `Subprocess` is unambiguous and widely understood (Python uses `subprocess`, Pharo uses `OSSubprocess`).
+**Why rejected:** While Beamtalk hides BEAM processes as "Actors" in user-facing code, the BEAM ecosystem documentation, tooling (observer, recon), and error messages all use "process." A Beamtalk class named `Process` would create confusion when users encounter BEAM process IDs, process monitors, and OTP process terminology in error messages and debugging output. `Subprocess` is unambiguous and widely understood (Python uses `subprocess`, Pharo uses `OSSubprocess`). The vocabulary concern is valid but the pragmatic disambiguation outweighs it — especially since Beamtalk targets BEAM developers as a key audience.
 
 ### Option D: Message-push model instead of readLine polling
 
 - **Concurrency expert**: "Push-based is more efficient — the actor pushes `{stdout, Line}` messages to a subscriber process via `gen_server:cast`. No blocking, no wasted gen_server:call round-trips. The subscriber registers interest and gets notified."
-- **Event-driven developer**: "This is how Node.js `child_process` works — events, not polling."
+- **Event-driven developer**: "This is how Node.js `child_process` works — events, not polling. For the Symphony use case (streaming JSON-RPC events from a long-running agent), push is the natural model."
+- **Operator**: "With `readLine` as a blocking `gen_server:call`, the actor has at most one pending caller at a time. Every consumer of Subprocess output must be sequential — there is no way to have two BEAM processes independently reading lines from the same subprocess. A push model makes the subscription relationship explicit in state and visible to BEAM tooling like `sys:get_state/1`."
+- **Language designer**: "The `readLine` + `onLine:` future path creates two competing APIs for consuming output. If both are active simultaneously, they race for lines. This is not a neutral future extension — it's a protocol design commitment that constrains what `onLine:` can look like."
 
-**Why rejected for Phase 1:** Push-based messaging adds significant complexity: subscriber registration, back-pressure handling, message ordering guarantees, and what happens when the subscriber crashes. The sync `readLine` model is simpler, correct, and sufficient for the motivating JSON-RPC use case (request-response with line-delimited messages). A push-based extension can be added later without breaking the sync API — e.g., `agent onLine: [:line | ...]` as a separate method.
+**Why rejected for Phase 1:** Push-based messaging adds significant complexity: subscriber registration, back-pressure handling, message ordering guarantees, and what happens when the subscriber crashes. The sync `readLine` model is simpler, correct, and sufficient for the motivating JSON-RPC use case (request-response with line-delimited messages).
+
+The single-consumer limitation is real but acceptable for Phase 1: the Symphony orchestrator pattern is one coordinator process per subprocess, not multiple concurrent readers. The operator's observability concern is valid — the implementation should include the subscriber identity in the `waiting` state field (not just `{From, _}` but `{From, WaitingSince}`) for debugging.
+
+A push-based extension can be added later, but the ADR acknowledges this is not fully neutral — `readLine` and `onLine:` will need coordination to avoid consuming lines intended for the other. The likely design is mutual exclusion: a Subprocess uses either pull (`readLine`) or push (`onLine:`) mode, not both simultaneously. This constraint should be documented when `onLine:` is designed.
 
 ### Tension Points
-- Stream advocates want `agent lines.` for API consistency; the cross-process constraint makes this impossible without Stream redesign.
-- Push-model advocates want event-driven efficiency; Phase 1 prioritizes simplicity and correctness.
-- Incrementalists prefer starting with `os:cmd`; security-first design demands `spawn_executable` from day one.
-- Naming: `Process` is intuitive but collides with BEAM terminology. `Subprocess` is unambiguous but unfamiliar to Smalltalk developers.
+- **Stream vs readLine:** Stream advocates want `agent lines.` for API consistency; the cross-process constraint makes this impossible today. If BT-507 enables cross-process Streams, the Subprocess API should be revisited.
+- **Push vs pull:** Push-model advocates want event-driven efficiency and multi-consumer support; Phase 1 prioritizes simplicity. The single-consumer limitation is acceptable for the Symphony use case but should be documented.
+- **Incrementalists vs security-first:** `os:cmd` first would validate API ergonomics cheaply; `open_port` first gets security right from day one at minimal extra cost.
+- **Naming:** `Process` is available (BEAM processes are "Actors") but clashes with ecosystem tooling. `Subprocess` is unambiguous but imports Unix vocabulary.
 
 ## Alternatives Considered
 
@@ -528,7 +560,10 @@ Create `Subprocess` as a non-actor class wrapping a port handle, with methods li
 
 ### Negative
 - No separate stderr — merged output may confuse users who expect to distinguish error output
-- `readLine` polling loop is less ergonomic than a Stream pipeline for consuming output — `whileNotNil:` instead of `do:`
+- `readLine` loop is less ergonomic than a Stream pipeline for consuming output — `whileTrue:` with nil-check instead of `do:`. This creates conceptual discontinuity between Tier 1 (`System output:` returns a Stream) and Tier 2 (`readLine` returns one line at a time). If BT-507 enables cross-process Streams, a `lines` method should be added to bridge this gap.
+- **Single consumer:** Subprocess's `readLine` supports at most one blocked caller at a time. Multiple concurrent readers will see lines distributed non-deterministically between them (not duplicated). This is sufficient for the Symphony use case (one coordinator per subprocess) but limits fan-out patterns.
+- **`kill.` bypasses cleanup:** Actor's inherited `kill.` sends SIGKILL to the BEAM process, bypassing `terminate/2`. The OS subprocess may become a zombie if it doesn't monitor stdin for EOF. Users should prefer `close.` for Subprocess actors. This should be documented prominently.
+- **Grandchild process orphaning:** When a subprocess spawns its own child processes (e.g., a test runner forking workers), killing only the direct subprocess PID orphans grandchildren. Process-group-based kill (`kill -<PGID>`) would fix this but requires `erlexec` or a helper process. Deferred to Phase 4.
 - Bare `System output:` Streams from long-running commands can leak subprocess resources if abandoned (mitigated by block-scoped form and documentation)
 - Windows: `.bat`/`.cmd` resolution via `os:find_executable` may reintroduce shell semantics (documented caveat, not fully preventable)
 - Zombie prevention relies on OS-level process termination via `os:cmd("kill ...")` — which itself uses a shell. This is standard practice in the BEAM ecosystem (Elixir's `System.cmd` does the same) but is ironic given the "no shell" security stance for user-facing APIs.
@@ -604,7 +639,7 @@ Create `Subprocess` as a non-actor class wrapping a port handle, with methods li
 
 ## References
 - Related issues: [BT-1119](https://linear.app/beamtalk/issue/BT-1119) (Subprocess execution), [BT-1125](https://linear.app/beamtalk/issue/BT-1125) (Interactive Subprocess actor), [BT-1118](https://linear.app/beamtalk/issue/BT-1118) (Epic: Stdlib Process, Timer, and Directory Libraries), [BT-1123](https://linear.app/beamtalk/issue/BT-1123) (Epic: Symphony-Style Orchestrator)
-- Related ADRs: [ADR 0021](0021-streams-and-io-design.md) (Stream — `Process output:` deferred as future integration), [ADR 0022](0022-embedded-compiler-via-otp-port.md) (OTP Port pattern for compiler), [ADR 0028](0028-beam-interop-strategy.md) (Port as BEAM interop type), [ADR 0042](0042-immutable-value-objects-actor-mutable-state.md) (Value objects vs actors), [ADR 0043](0043-sync-by-default-actor-messaging.md) (Sync-by-default messaging)
+- Related ADRs: [ADR 0021](0021-streams-and-io-design.md) (Stream — `Process output:` deferred as future integration), [ADR 0022](0022-embedded-compiler-via-otp-port.md) (OTP Port pattern for compiler), [ADR 0028](0028-beam-interop-strategy.md) (Port as BEAM interop type), [ADR 0041](0041-universal-state-threading-block-protocol.md) (Block protocol — affects `whileTrue:` loop in readLine pattern), [ADR 0042](0042-immutable-value-objects-actor-mutable-state.md) (Value objects vs actors), [ADR 0043](0043-sync-by-default-actor-messaging.md) (Sync-by-default messaging — timeout implications for readLine)
 - Erlang `open_port/2`: https://www.erlang.org/doc/apps/erts/erlang#open_port/2
 - EEF Security WG on external executables: https://security.erlef.org/secure_coding_and_deployment_hardening/external_executables.html
 - erlexec: https://github.com/saleyn/erlexec
