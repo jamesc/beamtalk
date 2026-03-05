@@ -1,0 +1,110 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Timer class (BT-1121)
+
+TestCase subclass: TimerTest
+
+  testSleepReturnsNil =>
+    // Timer sleep: returns nil
+    result := Timer sleep: 1
+    self assert: result isNil
+
+  testSleepZeroReturnsNil =>
+    // Timer sleep: 0 returns nil immediately
+    result := Timer sleep: 0
+    self assert: result isNil
+
+  testAfterReturnsTimer =>
+    // Timer after:do: returns a Timer instance
+    t := Timer after: 10000 do: []
+    self assert: t class equals: Timer
+    t cancel
+
+  testEveryReturnsTimer =>
+    // Timer every:do: returns a Timer instance
+    t := Timer every: 10000 do: []
+    self assert: t class equals: Timer
+    t cancel
+
+  testCancelPreventsExecution =>
+    // Cancelled after: timer process is dead (block never ran)
+    t := Timer after: 50 do: []
+    self assert: t isActive
+    t cancel
+    // after cancel, process is immediately dead — block never ran
+    self assert: t isActive not
+
+  testAfterFiresAndBecomesInactive =>
+    // after: block fires after delay; process exits, so isActive becomes false
+    t := Timer after: 20 do: []
+    self assert: t isActive
+    Timer sleep: 100
+    self assert: t isActive not
+
+  testEveryStaysActiveAcrossMultipleIntervals =>
+    // every: process stays alive across multiple intervals (repeating behaviour)
+    t := Timer every: 20 do: []
+    // still active after 3+ intervals have elapsed
+    Timer sleep: 100
+    self assert: t isActive
+    t cancel
+    self assert: t isActive not
+
+  testCancelReturnsTrueWhenActive =>
+    // cancel returns true for an active timer
+    t := Timer after: 10000 do: []
+    result := t cancel
+    self assert: result
+
+  testCancelReturnsFalseWhenInactive =>
+    // cancel returns false for an already-cancelled timer
+    t := Timer after: 10000 do: []
+    t cancel
+    result := t cancel
+    self assert: result not
+
+  testIsActiveWhenPending =>
+    // isActive returns true for a pending timer
+    t := Timer after: 10000 do: []
+    self assert: t isActive
+    t cancel
+
+  testIsActiveAfterCancel =>
+    // isActive returns false after cancel
+    t := Timer after: 10000 do: []
+    t cancel
+    self assert: t isActive not
+
+  testIsActiveAfterFired =>
+    // isActive returns false after a one-shot timer fires
+    t := Timer after: 10 do: []
+    Timer sleep: 100
+    self assert: t isActive not
+
+  testPrintString =>
+    // printString returns a String
+    t := Timer after: 10000 do: []
+    self assert: t printString class equals: String
+    t cancel
+
+  testErrorNegativeDurationAfter =>
+    // after: with negative ms raises type_error
+    self should: [Timer after: -1 do: []] raise: #type_error
+
+  testErrorNegativeDurationSleep =>
+    // sleep: with negative ms raises type_error
+    self should: [Timer sleep: -1] raise: #type_error
+
+  testErrorNonIntegerSleep =>
+    // sleep: with non-integer raises type_error
+    @expect type
+    self should: [Timer sleep: "bad"] raise: #type_error
+
+  testErrorZeroDurationEvery =>
+    // every: with zero ms raises type_error (must be positive)
+    self should: [Timer every: 0 do: []] raise: #type_error
+
+  testErrorNegativeDurationEvery =>
+    // every: with negative ms raises type_error
+    self should: [Timer every: -1 do: []] raise: #type_error

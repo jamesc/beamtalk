@@ -65,6 +65,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "TestResult"
             | "TestRunner"
             | "ThrowError"
+            | "Timer"
             | "TranscriptStream"
             | "True"
             | "Tuple"
@@ -1466,6 +1467,31 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Timer".into(),
+        ClassInfo {
+            name: "Timer".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "cancel".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
+                MethodInfo { selector: "isActive".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![] },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "after:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: true, return_type: Some("Timer".into()), param_types: vec![Some("Integer".into()), Some("Block".into())] },
+                MethodInfo { selector: "every:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: true, return_type: Some("Timer".into()), param_types: vec![Some("Integer".into()), Some("Block".into())] },
+                MethodInfo { selector: "sleep:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Timer".into(), is_sealed: true, return_type: Some("Nil".into()), param_types: vec![Some("Integer".into())] },
+            ],
             class_variables: vec![],
         },
     );

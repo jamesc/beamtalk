@@ -179,6 +179,7 @@ all_builtins() ->
         'TestResult',
         'TestRunner',
         'ThrowError',
+        'Timer',
         'TranscriptStream',
         'True',
         'Tuple',
