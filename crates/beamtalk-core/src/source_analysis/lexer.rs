@@ -377,8 +377,12 @@ impl<'src> Lexer<'src> {
         let start = self.current_position();
         self.advance_while(|c| c.is_ascii_alphanumeric() || c == '_');
 
-        // Check if followed by colon (keyword selector)
-        if self.peek_char() == Some(':') && self.peek_char_n(1) != Some('=') {
+        // Check if followed by colon (keyword selector).
+        // Guard against `:=` (assignment) and `::` (type annotation) — those are not keyword selectors.
+        if self.peek_char() == Some(':')
+            && self.peek_char_n(1) != Some('=')
+            && self.peek_char_n(1) != Some(':')
+        {
             self.advance(); // consume the colon
             let text = self.text_for(self.span_from(start));
             TokenKind::Keyword(EcoString::from(text))
@@ -1599,6 +1603,20 @@ mod tests {
     fn lex_colon_assign() {
         // `:=` lexes as Assign
         assert_eq!(lex_kinds(":="), vec![TokenKind::Assign]);
+    }
+
+    #[test]
+    fn lex_identifier_not_consumed_as_keyword_before_double_colon() {
+        // `amount::Integer` — non-canonical but accepted (ADR 0053).
+        // `::` must not be swallowed into a keyword: `amount` stays Identifier.
+        assert_eq!(
+            lex_kinds("amount::Integer"),
+            vec![
+                TokenKind::Identifier("amount".into()),
+                TokenKind::DoubleColon,
+                TokenKind::Identifier("Integer".into()),
+            ]
+        );
     }
 
     #[test]
