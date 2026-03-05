@@ -214,7 +214,7 @@ collect_load_warnings(Classes) ->
         end,
         Classes
     ),
-    Collisions = beamtalk_class_registry:drain_class_warnings_by_names(ClassNames),
+    Collisions = beamtalk_runtime_api:drain_class_warnings_by_names(ClassNames),
     [
         format_collision_warning(ClassName, OldModule, NewModule)
      || {ClassName, OldModule, NewModule} <- Collisions
@@ -269,7 +269,7 @@ trigger_actor_code_change(ModuleAtom, Classes) ->
                             {CountAcc, FailAcc};
                         {ok, Pids} ->
                             {ok, Upgraded, Failures} =
-                                beamtalk_hot_reload:trigger_code_change(Mod, Pids),
+                                beamtalk_runtime_api:trigger_code_change(Mod, Pids),
                             NewFailAcc = lists:foldl(
                                 fun(F, A) -> [F | A] end, FailAcc, Failures
                             ),
@@ -316,7 +316,7 @@ resolve_module_atoms(undefined, Classes) ->
 resolve_class_to_module(ClassName) ->
     ClassPids =
         try
-            beamtalk_class_registry:all_classes()
+            beamtalk_runtime_api:all_classes()
         catch
             _:_ -> []
         end,
@@ -326,9 +326,9 @@ resolve_class_to_module(ClassName, []) ->
     ClassName;
 resolve_class_to_module(ClassName, [Pid | Rest]) ->
     try
-        case gen_server:call(Pid, class_name, 1000) of
+        case beamtalk_runtime_api:class_name(Pid) of
             ClassName ->
-                gen_server:call(Pid, module_name, 1000);
+                beamtalk_runtime_api:module_name(Pid);
             _ ->
                 resolve_class_to_module(ClassName, Rest)
         end
@@ -359,15 +359,15 @@ resolve_source_path(ModName) ->
 module_to_class_name_map() ->
     Pids =
         try
-            beamtalk_class_registry:all_classes()
+            beamtalk_runtime_api:all_classes()
         catch
             _:_ -> []
         end,
     lists:foldl(
         fun(Pid, Acc) ->
             try
-                ModAtom = gen_server:call(Pid, module_name, 500),
-                ClassName = gen_server:call(Pid, class_name, 500),
+                ModAtom = beamtalk_runtime_api:module_name(Pid),
+                ClassName = beamtalk_runtime_api:class_name(Pid),
                 Acc#{ModAtom => atom_to_binary(ClassName, utf8)}
             catch
                 _:_ -> Acc

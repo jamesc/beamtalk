@@ -500,47 +500,6 @@ fn test_dictionary_size_on_identifier() {
 }
 
 #[test]
-fn test_state_version_should_increment_for_local_var_assignment() {
-    // This test verifies the EXPECTED behavior (currently failing due to bug).
-    // The bug is in control_flow.rs:978 where state_version is not incremented
-    // between reading current_state (lines 966-970) and creating new_state (line 978).
-    //
-    // Expected Core Erlang pattern:
-    //   let _Val1 = <value> in
-    //   let StateAcc1 = call 'maps':'put'('x', _Val1, StateAcc) in
-    //                   ^^^^^^^^^                             ^^^^^^^^
-    //                   version 1 (new)                       version 0 (current)
-    //
-    // Actual (buggy) pattern:
-    //   let _Val1 = <value> in
-    //   let StateAcc = call 'maps':'put'('x', _Val1, StateAcc) in
-    //       ^^^^^^^^                                 ^^^^^^^^
-    //       same version - INVALID!
-
-    // This test documents the issue. The fix will be in control_flow.rs line 975-978
-    // by adding: let _ = self.next_state_var();
-}
-
-#[test]
-fn test_sequential_field_assignments_should_not_double_in() {
-    // This test verifies the EXPECTED behavior (currently failing due to bug).
-    // The bug is in control_flow.rs:1177 where " in " is written before every
-    // expression when i > 0, but generate_field_assignment_open() already writes
-    // a trailing " in ".
-    //
-    // Expected Core Erlang pattern for two field assignments:
-    //   let _Val1 = 1 in let StateAcc1 = ... in let _Val2 = 2 in let StateAcc2 = ... in
-    //                                       ^^^ single " in "
-    //
-    // Actual (buggy) pattern:
-    //   let _Val1 = 1 in let StateAcc1 = ... in  in let _Val2 = 2 in let StateAcc2 = ... in
-    //                                         ^^^^^^^ double " in " - INVALID!
-
-    // This test documents the issue. The fix will be in control_flow.rs
-    // by ensuring only non-assignment expressions write " in " when necessary.
-}
-
-#[test]
 fn test_string_interpolation_simple_variable() {
     // "Hello, {name}!" — variable interpolation
     let segments = vec![

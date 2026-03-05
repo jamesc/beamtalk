@@ -43,7 +43,7 @@ transcript_cleanup_on_stop_test() ->
 %%====================================================================
 
 sysdict_registered_name_test() ->
-    {ok, Pid} = beamtalk_interface:start_link({local, 'Beamtalk'}, []),
+    {ok, Pid} = 'bt@stdlib@beamtalk_interface':start_link({local, 'Beamtalk'}, #{}),
     try
         ?assertEqual(Pid, whereis('Beamtalk'))
     after
@@ -52,7 +52,7 @@ sysdict_registered_name_test() ->
 
 sysdict_non_named_no_registration_test() ->
     %% Non-named start_link should NOT register a name
-    {ok, Pid} = beamtalk_interface:start_link(),
+    {ok, Pid} = 'bt@stdlib@beamtalk_interface':start_link(#{}),
     try
         ?assertEqual(undefined, whereis('Beamtalk'))
     after
@@ -60,7 +60,7 @@ sysdict_non_named_no_registration_test() ->
     end.
 
 sysdict_cleanup_on_stop_test() ->
-    {ok, Pid} = beamtalk_interface:start_link({local, 'Beamtalk'}, []),
+    {ok, Pid} = 'bt@stdlib@beamtalk_interface':start_link({local, 'Beamtalk'}, #{}),
     ?assertEqual(Pid, whereis('Beamtalk')),
     gen_server:stop(Pid),
     ?assertEqual(undefined, whereis('Beamtalk')).

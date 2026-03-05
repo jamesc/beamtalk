@@ -43,14 +43,14 @@
 format_class_docs('Metaclass') ->
     {ok, format_metaclass_docs()};
 format_class_docs(ClassName) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
+    case beamtalk_runtime_api:whereis_class(ClassName) of
         undefined ->
             {error, {class_not_found, ClassName}};
         ClassPid ->
             try
-                Superclass = gen_server:call(ClassPid, superclass, 5000),
-                IsSealed = gen_server:call(ClassPid, is_sealed, 5000),
-                IsAbstract = gen_server:call(ClassPid, is_abstract, 5000),
+                Superclass = beamtalk_runtime_api:superclass(ClassPid),
+                IsSealed = beamtalk_runtime_api:is_sealed(ClassPid),
+                IsAbstract = beamtalk_runtime_api:is_abstract(ClassPid),
 
                 %% Get class doc from runtime (ADR 0033)
                 ModuleDoc =
@@ -113,7 +113,7 @@ format_class_docs(ClassName) ->
 format_method_doc('Metaclass', SelectorBin) ->
     format_metaclass_method_doc(SelectorBin);
 format_method_doc(ClassName, SelectorBin) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
+    case beamtalk_runtime_api:whereis_class(ClassName) of
         undefined ->
             {error, {class_not_found, ClassName}};
         ClassPid ->
@@ -291,22 +291,22 @@ find_defining_class(ClassPid, Selector) ->
 
 -spec find_defining_class(pid(), atom(), non_neg_integer()) -> atom().
 find_defining_class(ClassPid, Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    ClassName = gen_server:call(ClassPid, class_name, 5000),
+    ClassName = beamtalk_runtime_api:class_name(ClassPid),
     ?LOG_WARNING(
         "find_defining_class: max hierarchy depth ~p exceeded at ~p for selector ~p — possible cycle",
         [?MAX_HIERARCHY_DEPTH, ClassName, Selector]
     ),
     ClassName;
 find_defining_class(ClassPid, Selector, Depth) ->
-    ClassName = gen_server:call(ClassPid, class_name, 5000),
+    ClassName = beamtalk_runtime_api:class_name(ClassPid),
     case gen_server:call(ClassPid, {method, Selector}, 5000) of
         nil ->
             %% Not in local instance_methods — check superclass
-            case gen_server:call(ClassPid, superclass, 5000) of
+            case beamtalk_runtime_api:superclass(ClassPid) of
                 none ->
                     ClassName;
                 Super ->
-                    case beamtalk_class_registry:whereis_class(Super) of
+                    case beamtalk_runtime_api:whereis_class(Super) of
                         undefined -> ClassName;
                         SuperPid -> find_defining_class(SuperPid, Selector, Depth + 1)
                     end
@@ -325,19 +325,19 @@ find_defining_class_method(ClassPid, Selector) ->
 
 -spec find_defining_class_method(pid(), atom(), non_neg_integer()) -> atom().
 find_defining_class_method(ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    gen_server:call(ClassPid, class_name, 5000);
+    beamtalk_runtime_api:class_name(ClassPid);
 find_defining_class_method(ClassPid, Selector, Depth) ->
-    ClassName = gen_server:call(ClassPid, class_name, 5000),
+    ClassName = beamtalk_runtime_api:class_name(ClassPid),
     LocalClassMethods = gen_server:call(ClassPid, get_local_class_methods, 5000),
     case maps:is_key(Selector, LocalClassMethods) of
         true ->
             ClassName;
         false ->
-            case gen_server:call(ClassPid, superclass, 5000) of
+            case beamtalk_runtime_api:superclass(ClassPid) of
                 none ->
                     ClassName;
                 Super ->
-                    case beamtalk_class_registry:whereis_class(Super) of
+                    case beamtalk_runtime_api:whereis_class(Super) of
                         undefined -> ClassName;
                         SuperPid -> find_defining_class_method(SuperPid, Selector, Depth + 1)
                     end
@@ -503,7 +503,7 @@ collect_flattened_methods(ClassName, _ClassPid, Depth) when Depth > ?MAX_HIERARC
 collect_flattened_methods(ClassName, ClassPid, Depth) ->
     {ok, LocalMethods} = gen_server:call(ClassPid, get_instance_methods, 5000),
     LocalFlat = maps:map(fun(_Sel, Info) -> {ClassName, Info} end, LocalMethods),
-    Superclass = gen_server:call(ClassPid, superclass, 5000),
+    Superclass = beamtalk_runtime_api:superclass(ClassPid),
     SuperFlat = collect_chain_methods(Superclass, Depth + 1),
     maps:merge(SuperFlat, LocalFlat).
 
@@ -511,7 +511,7 @@ collect_flattened_methods(ClassName, ClassPid, Depth) ->
 collect_chain_methods(none, _Depth) ->
     #{};
 collect_chain_methods(SuperName, Depth) ->
-    case beamtalk_class_registry:whereis_class(SuperName) of
+    case beamtalk_runtime_api:whereis_class(SuperName) of
         undefined -> #{};
         SuperPid -> collect_flattened_methods(SuperName, SuperPid, Depth)
     end.

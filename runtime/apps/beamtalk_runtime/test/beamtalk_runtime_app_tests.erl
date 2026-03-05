@@ -86,14 +86,16 @@ system_dictionary_loaded_after_start_test() ->
     %% Start (or get already running) supervisor
     Result = start_runtime(),
 
-    %% The BeamtalkInterface module provides system reflection (allClasses, classNamed:, etc.)
-    %% via beamtalk_interface, replacing the legacy compiled beamtalk module.
-    %% Use ensure_loaded to verify the module is available (not just loaded as side-effect).
+    %% The BeamtalkInterface class provides system reflection (allClasses, classNamed:, etc.).
+    %% The primitives are dispatched via beamtalk_interface_primitives (Phase 2).
+    %% Verify the dispatch module is available and can handle allClasses (selector with no args).
     ?assertEqual(
-        {module, beamtalk_interface},
-        code:ensure_loaded(beamtalk_interface)
+        {module, beamtalk_interface_primitives},
+        code:ensure_loaded(beamtalk_interface_primitives)
     ),
-    ?assertEqual(true, beamtalk_interface:has_method(allClasses)),
+    %% Verify that allClasses is a valid selector (dispatch doesn't raise)
+    ClassList = beamtalk_interface_primitives:dispatch(allClasses, [], undefined),
+    ?assert(is_list(ClassList)),
 
     %% Clean up only if we started it
     stop_runtime(Result).

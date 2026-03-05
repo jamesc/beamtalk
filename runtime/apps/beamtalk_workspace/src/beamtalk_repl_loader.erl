@@ -114,7 +114,7 @@ load_class_module(ClassInfo, Expression, State) ->
             {ok, ClassName, TrailingInfo, NewState2};
         {error, Reason} ->
             ClassAtoms = class_name_atoms(Classes),
-            case beamtalk_class_registry:drain_pending_load_errors_by_names(ClassAtoms) of
+            case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
                 [{_ClassName, StructuredError} | _] ->
                     {error, StructuredError, State};
                 [] ->
@@ -266,7 +266,7 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
             {ok, ClassNames, NewState3};
         {error, Reason} ->
             ClassAtoms = class_name_atoms(ClassNames),
-            case beamtalk_class_registry:drain_pending_load_errors_by_names(ClassAtoms) of
+            case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
                 [{_ClassName, StructuredError} | _] ->
                     {error, StructuredError, State};
                 [] ->
@@ -345,14 +345,14 @@ hot_reload_class(ModuleName, ClassMap) ->
         undefined ->
             ok;
         _ ->
-            Pids = beamtalk_object_instances:all(ClassName),
+            Pids = beamtalk_runtime_api:all_instances(ClassName),
             case Pids of
                 [] ->
                     ok;
                 _ ->
                     IVars = fetch_instance_vars(ClassName),
                     Extra = {IVars, ModuleName},
-                    beamtalk_hot_reload:trigger_code_change(ModuleName, Pids, Extra)
+                    beamtalk_runtime_api:trigger_code_change(ModuleName, Pids, Extra)
             end
     end.
 
@@ -389,12 +389,12 @@ safe_list_to_atom(List) ->
 %% Fetch instance variables from the class registry.
 -spec fetch_instance_vars(atom()) -> list().
 fetch_instance_vars(ClassName) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
+    case beamtalk_runtime_api:whereis_class(ClassName) of
         undefined ->
             [];
         ClassPid ->
             try
-                gen_server:call(ClassPid, instance_variables)
+                beamtalk_runtime_api:instance_variables(ClassPid)
             catch
                 _:_ -> []
             end
@@ -512,7 +512,7 @@ load_recompiled_method(
             {ok, Result, <<>>, AllWarnings, NewState};
         {error, LoadReason} ->
             ClassAtoms = class_name_atoms(Classes),
-            case beamtalk_class_registry:drain_pending_load_errors_by_names(ClassAtoms) of
+            case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
                 [{_ClassName, StructuredError} | _] ->
                     {error, StructuredError, <<>>, AllWarnings, State};
                 [] ->
