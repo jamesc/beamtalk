@@ -64,3 +64,20 @@ tc := TypedCounter spawn
 // `(myList size) <TAB>` — myList is untyped (Dynamic), graceful fallback: no completions.
 :complete (myList size)
 // =>
+
+// ===========================================================================
+// KEYWORD SENDS MID-CHAIN (BT-1072)
+// ===========================================================================
+
+// `#[1, 2, 3] collect: [:x | x * 2] <TAB>` — Array#collect: returns Array → offer Array methods.
+:complete #[1, 2, 3] collect: [:x | x * 2]
+// => INCLUDES:size
+
+// `#[1, 2, 3] inject: 0 into: [...] <TAB>` — inject:into: has no return-type annotation → graceful
+// fallback, no completions.
+:complete #[1, 2, 3] inject: 0 into: [:acc :x | acc + x]
+// =>
+
+// `myList collect: [:x | x] <TAB>` — myList is untyped (Dynamic) → graceful fallback.
+:complete myList collect: [:x | x]
+// =>
