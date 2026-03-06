@@ -367,6 +367,7 @@ pre code { background: none; color: inherit; padding: 0; font-size: 0.875rem; }
 /* --- Tables --- */
 table { border-collapse: collapse; width: 100%; margin-bottom: 1.25rem; font-size: 0.9rem; }
 th, td { border: 1px solid var(--border); padding: 0.5rem 0.875rem; text-align: left; overflow-wrap: break-word; word-break: break-word; }
+td.adr-num { white-space: nowrap; }
 th {
   background: var(--accent-bg);
   font-weight: 600;
