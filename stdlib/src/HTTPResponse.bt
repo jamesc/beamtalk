@@ -23,9 +23,12 @@
 /// resp bodyAsJson  // => a Dictionary
 /// ```
 sealed Value subclass: HTTPResponse
-  state: status :: Integer = 0  // HTTP status code (e.g. 200, 404, 500)
-  state: headers :: List = #()  // List of [name, value] binary pairs
-  state: body :: String = ""  // Response body as a String
+  /// HTTP status code (e.g. 200, 404, 500).
+  state: status :: Integer = 0
+  /// Response headers as a List of [name, value] binary pairs.
+  state: headers :: List = #()
+  /// Response body as a String.
+  state: body :: String = ""
 
   /// True if the status code is in the 2xx success range.
   ///
