@@ -7,7 +7,7 @@
 %%% Tests string operations: indexing, slicing, searching, casing, and trimming.
 
 -module(beamtalk_string_ops_tests).
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================

@@ -102,12 +102,12 @@ from_by(_, _) ->
 on(List) when is_list(List) ->
     make_stream(make_list_gen(List), <<"Stream(on: [...])">>);
 on(Str) when is_binary(Str) ->
-    Graphemes = beamtalk_string_ops:as_list(Str),
+    Graphemes = [unicode:characters_to_binary([G]) || G <- string:to_graphemes(Str)],
     make_stream(make_list_gen(Graphemes), <<"Stream(on: '...')">>);
 on(Map) when is_map(Map) ->
     case beamtalk_tagged_map:class_of(Map) of
         'Set' ->
-            Elements = beamtalk_set_ops:as_list(Map),
+            Elements = maps:get(elements, Map, []),
             make_stream(make_list_gen(Elements), <<"Stream(on: Set(...))">>);
         undefined ->
             raise_type_error(

@@ -154,7 +154,9 @@ print_string_map(X) ->
             ElemStrs = [print_string(E) || E <- maps:get(elements, X, [])],
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
         'Array' ->
-            beamtalk_array_ops:print_string(X);
+            Elements = array:to_list(maps:get(data, X)),
+            Parts = lists:map(fun(E) -> print_string(E) end, Elements),
+            iolist_to_binary(["#[", lists:join(<<", ">>, Parts), "]"]);
         'Stream' ->
             maps:get(description, X);
         'CompiledMethod' ->
@@ -162,7 +164,18 @@ print_string_map(X) ->
         'ErlangModule' ->
             beamtalk_erlang_proxy:dispatch('printString', [], X);
         undefined ->
-            beamtalk_map_ops:print_string(X);
+            PlainMap = maps:remove('$beamtalk_class', X),
+            Pairs = maps:fold(
+                fun(K, V, Acc) ->
+                    KeyStr = print_string(K),
+                    ValStr = print_string(V),
+                    [iolist_to_binary([KeyStr, <<" => ">>, ValStr]) | Acc]
+                end,
+                [],
+                PlainMap
+            ),
+            SortedPairs = lists:sort(Pairs),
+            iolist_to_binary([<<"#{">>, lists:join(<<", ">>, SortedPairs), <<"}">>]);
         Class ->
             case beamtalk_exception_handler:is_exception_class(Class) of
                 true ->
