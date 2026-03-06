@@ -996,13 +996,20 @@ impl Parser {
     /// Note: `name:size` lexes as `Keyword("name:")` + size-token (no space needed between
     /// the name and the colon). The `name / type` form (with space) lexes as
     /// `Identifier("name")` + `BinarySelector("/")` + `Identifier("type")`.
+    fn parse_binary_segment_size(&mut self) -> Option<Box<Expression>> {
+        match self.current_kind() {
+            TokenKind::Integer(_) | TokenKind::Identifier(_) => {
+                Some(Box::new(self.parse_primary()))
+            }
+            _ => {
+                self.error("Expected size expression after ':' in binary segment");
+                None
+            }
+        }
+    }
+
     fn parse_binary_segment(&mut self) -> BinarySegment {
         let start = self.current_token().span();
-
-        // Parse the variable name (and optional size) from either:
-        //   Keyword("name:")  — `name:size` form (colon is part of the keyword token)
-        //   Identifier("_")   — wildcard
-        //   Identifier("name") — variable, possibly followed by `:size`
         let (value, size) = match self.current_kind() {
             // Wildcard: `_`
             TokenKind::Identifier(name) if name.as_str() == "_" => {
@@ -1015,25 +1022,15 @@ impl Parser {
                 let kw = kw.clone();
                 let token = self.advance();
                 let kw_span = token.span();
-                // Strip trailing `:` to recover the variable name
+                // Strip trailing `:` to recover variable name; adjust span to exclude `:`
                 let name: EcoString = kw.trim_end_matches(':').into();
-                // Adjust span to exclude the trailing `:` character (1 byte)
                 let var_span = Span::new(kw_span.start(), kw_span.end().saturating_sub(1));
                 let var = if name == "_" {
                     Pattern::Wildcard(var_span)
                 } else {
                     Pattern::Variable(Identifier::new(name, var_span))
                 };
-                // The size token follows immediately
-                let sz = match self.current_kind() {
-                    TokenKind::Integer(_) | TokenKind::Identifier(_) => {
-                        Some(Box::new(self.parse_primary()))
-                    }
-                    _ => {
-                        self.error("Expected size expression after ':' in binary segment");
-                        None
-                    }
-                };
+                let sz = self.parse_binary_segment_size();
                 (var, sz)
             }
 
@@ -1048,15 +1045,7 @@ impl Parser {
                 };
                 let sz = if matches!(self.current_kind(), TokenKind::Colon) {
                     self.advance(); // consume `:`
-                    match self.current_kind() {
-                        TokenKind::Integer(_) | TokenKind::Identifier(_) => {
-                            Some(Box::new(self.parse_primary()))
-                        }
-                        _ => {
-                            self.error("Expected size expression after ':' in binary segment");
-                            None
-                        }
-                    }
+                    self.parse_binary_segment_size()
                 } else {
                     None
                 };
