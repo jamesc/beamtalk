@@ -1,7 +1,7 @@
 # ADR 0046: VSCode Live Workspace Sidebar
 
 ## Status
-Accepted (2026-03-02)
+Accepted | Implemented (2026-03-02)
 
 ## Context
 

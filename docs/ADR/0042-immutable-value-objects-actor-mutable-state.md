@@ -1,7 +1,7 @@
 # ADR 0042: Immutable Value Objects and Actor-Only Mutable State
 
 ## Status
-Accepted (2026-02-26)
+Accepted | Implemented (2026-02-26)
 
 ## Context
 
