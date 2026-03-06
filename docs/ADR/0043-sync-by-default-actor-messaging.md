@@ -1,7 +1,7 @@
 # ADR 0043: Sync-by-Default Actor Messaging
 
 ## Status
-Accepted (2026-02-26)
+Accepted | Implemented (2026-02-26)
 
 ## Context
 

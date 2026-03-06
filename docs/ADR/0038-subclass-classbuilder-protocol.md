@@ -1,7 +1,7 @@
 # ADR 0038: `subclass:` Grammar Desugaring to ClassBuilder Protocol
 
 ## Status
-Accepted (2026-02-24) — Path 2 (dynamic/closure-based) removed (BT-873, 2026-02-25)
+Accepted | Implemented (2026-02-24) — Path 2 (dynamic/closure-based) removed (BT-873, 2026-02-25)
 
 ## Context
 

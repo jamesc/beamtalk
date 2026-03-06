@@ -64,20 +64,20 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0035](0035-field-based-reflection-api.md) | Rename Instance Variable Reflection API from instVar to field | Implemented | 2026-02-24 |
 | [0036](0036-full-metaclass-tower.md) | Full Metaclass Tower | Implemented | 2026-02-24 |
 | [0037](0037-collection-class-hierarchy.md) | Collection Class Hierarchy — Shallow Abstract Layer with Minimal Primitive Surface | Implemented | 2026-02-24 |
-| [0038](0038-subclass-classbuilder-protocol.md) | `subclass:` Grammar Desugaring to ClassBuilder Protocol | Accepted | 2026-02-24 |
+| [0038](0038-subclass-classbuilder-protocol.md) | `subclass:` Grammar Desugaring to ClassBuilder Protocol | Implemented | 2026-02-24 |
 | [0039](0039-syntax-pragmatism-vs-smalltalk.md) | Syntax Pragmatism vs Smalltalk | Implemented | 2026-02-24 |
-| [0040](0040-workspace-native-repl-commands.md) | Workspace-Native REPL Commands, Facade/Dictionary Split, and Class-Based Reload | Accepted | 2026-02-24 |
+| [0040](0040-workspace-native-repl-commands.md) | Workspace-Native REPL Commands, Facade/Dictionary Split, and Class-Based Reload | Implemented | 2026-02-24 |
 | [0041](0041-universal-state-threading-block-protocol.md) | Universal State-Threading Block Protocol | Accepted | 2026-02-24 |
-| [0042](0042-immutable-value-objects-actor-mutable-state.md) | Immutable Value Objects and Actor-Only Mutable State | Accepted | 2026-02-26 |
-| [0043](0043-sync-by-default-actor-messaging.md) | Sync-by-Default Actor Messaging | Accepted | 2026-02-26 |
-| [0044](0044-comments-as-first-class-ast-nodes.md) | Comments as First-Class AST Nodes | Accepted | 2026-02-28 |
-| [0045](0045-repl-expression-completion-type-inference.md) | REPL Expression-Level Completion via Gradual Type Inference | Accepted | 2026-03-01 |
-| [0046](0046-vscode-live-workspace-sidebar.md) | VSCode Live Workspace Sidebar | Accepted | 2026-03-02 |
+| [0042](0042-immutable-value-objects-actor-mutable-state.md) | Immutable Value Objects and Actor-Only Mutable State | Implemented | 2026-02-26 |
+| [0043](0043-sync-by-default-actor-messaging.md) | Sync-by-Default Actor Messaging | Implemented | 2026-02-26 |
+| [0044](0044-comments-as-first-class-ast-nodes.md) | Comments as First-Class AST Nodes | Implemented | 2026-02-28 |
+| [0045](0045-repl-expression-completion-type-inference.md) | REPL Expression-Level Completion via Gradual Type Inference | Implemented | 2026-03-01 |
+| [0046](0046-vscode-live-workspace-sidebar.md) | VSCode Live Workspace Sidebar | Implemented | 2026-03-02 |
 | [0047](0047-return-type-arrow-token-disambiguation.md) | Return Type Arrow Token Disambiguation | Accepted | 2026-03-02 |
 | [0048](0048-class-side-method-syntax.md) | Class-Side Method Syntax Redesign | Proposed | 2026-03-02 |
 | [0049](0049-remove-method-level-sealed.md) | Remove Method-Level `sealed` — Infer Protection from `@primitive`/`@intrinsic` | Proposed | 2026-03-02 |
-| [0050](0050-incremental-compiler-class-hierarchy.md) | Incremental Compiler ClassHierarchy via BEAM Metadata Streaming | Proposed | 2026-03-04 |
-| [0051](0051-subprocess-execution.md) | Subprocess Execution — System Commands and Interactive Subprocess Actor | Proposed | 2026-03-05 |
+| [0050](0050-incremental-compiler-class-hierarchy.md) | Incremental Compiler ClassHierarchy via BEAM Metadata Streaming | Implemented | 2026-03-04 |
+| [0051](0051-subprocess-execution.md) | Subprocess Execution — System Commands and Interactive Subprocess Actor | Accepted \| Implemented | 2026-03-05 |
 | [0052](0052-recursive-descent-pratt-parsing.md) | Recursive Descent Parser with Pratt Parsing for Binary Operators | Accepted \| Implemented | 2026-03-05 |
 | [0053](0053-double-colon-type-annotation-syntax.md) | Double-Colon Type Annotation Syntax | Accepted | 2026-03-05 |
 | [0054](0054-communication-protocols.md) | Communication Protocols | Accepted \| Implemented | 2026-03-05 |
