@@ -1011,10 +1011,16 @@ impl Parser {
     fn parse_binary_segment(&mut self) -> BinarySegment {
         let start = self.current_token().span();
         let (value, size) = match self.current_kind() {
-            // Wildcard: `_`
+            // Wildcard: `_` or `_:size` (fixed-width skip segment)
             TokenKind::Identifier(name) if name.as_str() == "_" => {
                 let span = self.advance().span();
-                (Pattern::Wildcard(span), None)
+                let sz = if matches!(self.current_kind(), TokenKind::Colon) {
+                    self.advance(); // consume `:`
+                    self.parse_binary_segment_size()
+                } else {
+                    None
+                };
+                (Pattern::Wildcard(span), sz)
             }
 
             // `name:size` — the `:` attached to the name lexes as Keyword("name:")
@@ -1066,6 +1072,9 @@ impl Parser {
 
         if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "/") {
             self.advance(); // consume `/`
+            if !matches!(self.current_kind(), TokenKind::Identifier(_)) {
+                self.error("Expected a binary segment specifier after '/'");
+            }
 
             // Parse identifiers separated by `-` (e.g. `signed-little`)
             while let TokenKind::Identifier(name) = self.current_kind() {

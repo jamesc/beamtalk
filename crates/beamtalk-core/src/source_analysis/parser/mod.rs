@@ -236,6 +236,7 @@ pub fn is_input_complete(source: &str) -> bool {
     let mut bracket_depth: i32 = 0; // [ ]
     let mut paren_depth: i32 = 0; // ( )
     let mut brace_depth: i32 = 0; // { }
+    let mut binary_depth: i32 = 0; // << >>
     let mut last_meaningful_kind: Option<&TokenKind> = None;
     let mut has_subclass_keyword = false;
     let mut has_method_arrow = false;
@@ -269,11 +270,13 @@ pub fn is_input_complete(source: &str) -> bool {
             TokenKind::LeftBracket | TokenKind::ArrayOpen => bracket_depth += 1,
             TokenKind::LeftParen | TokenKind::ListOpen => paren_depth += 1,
             TokenKind::LeftBrace | TokenKind::MapOpen => brace_depth += 1,
+            TokenKind::LtLt => binary_depth += 1,
 
             // Closing delimiters
             TokenKind::RightBracket => bracket_depth -= 1,
             TokenKind::RightParen => paren_depth -= 1,
             TokenKind::RightBrace => brace_depth -= 1,
+            TokenKind::GtGt if binary_depth > 0 => binary_depth -= 1,
 
             // Track class definition pattern
             TokenKind::Keyword(k) if k == "subclass:" => has_subclass_keyword = true,
@@ -293,7 +296,7 @@ pub fn is_input_complete(source: &str) -> bool {
     }
 
     // Unclosed delimiters
-    if bracket_depth > 0 || paren_depth > 0 || brace_depth > 0 {
+    if bracket_depth > 0 || paren_depth > 0 || brace_depth > 0 || binary_depth > 0 {
         return false;
     }
 
@@ -303,9 +306,10 @@ pub fn is_input_complete(source: &str) -> bool {
     }
 
     // Trailing binary operator missing its right operand (e.g., "1 +" or "3 *" or "x ->")
+    // GtGt trailing: "Counter >>" is incomplete (method lookup or binary op)
     if matches!(
         last_meaningful_kind,
-        Some(TokenKind::BinarySelector(_) | TokenKind::Arrow)
+        Some(TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt)
     ) {
         return false;
     }
@@ -5688,5 +5692,27 @@ Actor subclass: T
             module.method_definitions[0].class_name.name.as_str(),
             "Counter"
         );
+    }
+
+    #[test]
+    fn incomplete_trailing_gtgt() {
+        // "Counter >>" is incomplete — trailing binary op / method lookup
+        assert!(!is_input_complete("Counter >>"));
+        assert!(!is_input_complete("Counter class >>"));
+    }
+
+    #[test]
+    fn incomplete_unclosed_binary_pattern() {
+        // Unclosed `<<` should be detected as incomplete input
+        assert!(!is_input_complete("data match: [<<version:8]"));
+        assert!(!is_input_complete("<<version:8"));
+    }
+
+    #[test]
+    fn complete_closed_binary_pattern() {
+        // Fully closed binary pattern is complete
+        assert!(is_input_complete(
+            r"data match: [<<version:8, _/binary>> -> version]"
+        ));
     }
 }
