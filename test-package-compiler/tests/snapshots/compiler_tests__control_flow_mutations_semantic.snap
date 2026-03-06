@@ -2,7 +2,8 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: output
 ---
-Semantic errors (13):
+Semantic errors (14):
+  - Undefined variable: innerSum
   - self can only be used inside a method body
   - self can only be used inside a method body
   - self can only be used inside a method body
