@@ -230,6 +230,19 @@ mod tests {
     }
 
     #[test]
+    fn test_proto_object_dnu_raises_error() {
+        let result = doc_to_string(generate_primitive_bif(
+            "ProtoObject",
+            "doesNotUnderstand:args:",
+            &["Selector".to_string(), "Args".to_string()],
+        ));
+        let output = result.expect("ProtoObject DNU should produce code");
+        assert!(output.contains("'does_not_understand'"));
+        assert!(output.contains("beamtalk_error':'with_selector'"));
+        assert!(output.contains("beamtalk_error':'raise'"));
+    }
+
+    #[test]
     fn test_float_as_string() {
         let result = doc_to_string(generate_primitive_bif("Float", "asString", &[]));
         assert_eq!(
