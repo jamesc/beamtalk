@@ -71,10 +71,31 @@ ok(#{'$beamtalk_class' := 'HTTPResponse', status := Status}) ->
 %% @doc Parse the response body as JSON.
 %%
 %% Decodes via jsx. null becomes nil to match Beamtalk conventions.
+%% Raises parse_error if the body is not valid JSON.
 -spec 'bodyAsJson'(map()) -> term().
 'bodyAsJson'(#{'$beamtalk_class' := 'HTTPResponse', body := Body}) ->
-    Result = jsx:decode(Body, [return_maps]),
-    normalize_null(Result).
+    try jsx:decode(Body, [return_maps]) of
+        Result ->
+            normalize_null(Result)
+    catch
+        error:#{error := #beamtalk_error{}} = E:_ ->
+            error(E);
+        error:badarg ->
+            Error0 = beamtalk_error:new(parse_error, 'HTTPResponse'),
+            Error1 = beamtalk_error:with_selector(Error0, 'bodyAsJson'),
+            Error2 = beamtalk_error:with_hint(
+                Error1, <<"Check that the response body is valid JSON">>
+            ),
+            beamtalk_error:raise(Error2);
+        error:Reason ->
+            Error0 = beamtalk_error:new(parse_error, 'HTTPResponse'),
+            Error1 = beamtalk_error:with_selector(Error0, 'bodyAsJson'),
+            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
+            Error3 = beamtalk_error:with_hint(
+                Error2, <<"Check that the response body is valid JSON">>
+            ),
+            beamtalk_error:raise(Error3)
+    end.
 
 %% @private Convert jsx null atoms to Beamtalk nil.
 -spec normalize_null(term()) -> term().
