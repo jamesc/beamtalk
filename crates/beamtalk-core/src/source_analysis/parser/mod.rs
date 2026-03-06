@@ -2740,6 +2740,68 @@ mod tests {
     }
 
     #[test]
+    fn legacy_colon_state_annotation_produces_error_and_parses_type() {
+        // Legacy `state: name : String` (single colon) must NOT be silently dropped.
+        // The parser should consume the colon, emit a focused error, parse the type,
+        // and continue — so the next method is not lost.
+        let source = "Actor subclass: Person
+  state: name : String = \"unnamed\"
+  greet => \"hello\"";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            !errors.is_empty(),
+            "Expected a migration error for legacy `:` syntax"
+        );
+        assert!(
+            errors[0].message.contains("`::`"),
+            "Error should mention `::`, got: {}",
+            errors[0].message
+        );
+        // The class and following method must still be parsed
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(
+            module.classes[0].methods.len(),
+            1,
+            "method after legacy-typed state should not be dropped"
+        );
+    }
+
+    #[test]
+    fn legacy_colon_param_annotation_produces_error_and_parses_type() {
+        // Legacy `deposit: amount : Integer` (single colon after param name) must
+        // emit a focused error and continue so the next method is not dropped.
+        let source = "Actor subclass: BankAccount
+  deposit: amount : Integer => nil
+  withdraw: amount => nil";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            !errors.is_empty(),
+            "Expected a migration error for legacy `:` param syntax"
+        );
+        assert!(
+            errors[0].message.contains("`::`"),
+            "Error should mention `::`, got: {}",
+            errors[0].message
+        );
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(
+            module.classes[0].methods.len(),
+            2,
+            "method after legacy-typed param should not be dropped"
+        );
+    }
+
+    #[test]
     fn parse_binary_method() {
         let module = parse_ok(
             "Actor subclass: Number

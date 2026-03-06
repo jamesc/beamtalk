@@ -400,6 +400,14 @@ impl Parser {
             // Check for optional type annotation (:: TypeName)
             let type_ann = if self.match_token(&TokenKind::DoubleColon) {
                 Some(self.parse_type_annotation())
+            } else if matches!(self.current_kind(), TokenKind::Colon) {
+                let span = self.current_token().span();
+                self.diagnostics.push(
+                    Diagnostic::error("Use `::` for type annotations, not `:`", span)
+                        .with_hint("Replace `:` with `::`"),
+                );
+                self.advance(); // consume legacy `:`
+                Some(self.parse_type_annotation())
             } else {
                 None
             };
@@ -460,6 +468,14 @@ impl Parser {
         let (name, type_annotation) = if let TokenKind::Identifier(_) = self.current_kind() {
             let name_ident = self.parse_identifier("Expected variable name after 'classState:'");
             let type_ann = if self.match_token(&TokenKind::DoubleColon) {
+                Some(self.parse_type_annotation())
+            } else if matches!(self.current_kind(), TokenKind::Colon) {
+                let span = self.current_token().span();
+                self.diagnostics.push(
+                    Diagnostic::error("Use `::` for type annotations, not `:`", span)
+                        .with_hint("Replace `:` with `::`"),
+                );
+                self.advance(); // consume legacy `:`
                 Some(self.parse_type_annotation())
             } else {
                 None
@@ -695,8 +711,15 @@ impl Parser {
     /// Used for both binary (`+ other :: Number`) and keyword (`deposit: amount :: Integer`)
     /// method parameters.
     fn parse_optional_param_type(&mut self) -> Option<TypeAnnotation> {
-        if matches!(self.current_kind(), TokenKind::DoubleColon) {
-            self.advance(); // consume `::`
+        if self.match_token(&TokenKind::DoubleColon) {
+            Some(self.parse_type_annotation())
+        } else if matches!(self.current_kind(), TokenKind::Colon) {
+            let span = self.current_token().span();
+            self.diagnostics.push(
+                Diagnostic::error("Use `::` for type annotations, not `:`", span)
+                    .with_hint("Replace `:` with `::`"),
+            );
+            self.advance(); // consume legacy `:`
             Some(self.parse_type_annotation())
         } else {
             None
