@@ -191,7 +191,19 @@ error: @native actor 'Subprocess' cannot declare state fields — state is owned
 
 ### gen_server vs gen_statem
 
-Both `gen_server` and `gen_statem` expose the same `gen:call/4` API internally. `beamtalk_actor:sync_send/3` uses `gen_server:call/2` which routes through `gen:call/4` for both behaviour types. A backing module implemented with `gen_statem` works transparently, provided it handles `handle_call/3` (gen_server-compatible) or `handle_event({call, From}, ...)` mapped to the `{Selector, [Args]}` format.
+Both `gen_server` and `gen_statem` expose the same `gen:call/4` API internally. `beamtalk_actor:sync_send/3` uses `gen_server:call/2` which routes through `gen:call/4` for both behaviour types, so a `gen_statem`-backed module receives the call correctly.
+
+However, `gen_statem` does **not** have a `handle_call/3` callback — synchronous calls arrive as `{call, From}` events in state callbacks. A `gen_statem` backing module must pattern-match on `{call, From}` and reply via transition actions:
+
+```erlang
+%% gen_statem handle_event_function mode
+handle_event({call, From}, {'readLine', []}, State, Data) ->
+    {keep_state, Data, [{reply, From, read_line(Data)}]};
+handle_event({call, From}, {'exitCode', []}, State, Data) ->
+    {keep_state, Data, [{reply, From, maps:get(exit_code, Data, nil)}]}.
+```
+
+In `state_functions` mode, the same pattern applies per-state. The `{Selector, [Args]}` wire format is identical — only the callback shape differs from `gen_server`.
 
 ### Sync and Async Dispatch
 
