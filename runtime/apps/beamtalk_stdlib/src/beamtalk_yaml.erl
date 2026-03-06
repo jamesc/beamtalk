@@ -34,9 +34,8 @@
 
 -export(['parse:'/1, 'parseAll:'/1, 'generate:'/1, 'parseFile:'/1]).
 -export([parse/1, parseAll/1, generate/1, parseFile/1]).
--export([has_method/1]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================
@@ -138,14 +137,6 @@ generate(X) -> 'generate:'(X).
 %% @doc FFI alias for parseFile:/1 — called via (Erlang beamtalk_yaml) parseFile: path.
 -spec parseFile(binary()) -> term().
 parseFile(X) -> 'parseFile:'(X).
-
-%% @doc Check if Yaml responds to the given selector.
--spec has_method(atom()) -> boolean().
-has_method('parse:') -> true;
-has_method('parseAll:') -> true;
-has_method('generate:') -> true;
-has_method('parseFile:') -> true;
-has_method(_) -> false.
 
 %%% ============================================================================
 %%% Internal Functions — Parsing
