@@ -65,16 +65,17 @@ impl Analyser {
         for mutation in &mutations {
             match &mutation.kind {
                 MutationKind::Field { name } => {
-                    // Error: Field assignment in Stored or Passed blocks
-                    if matches!(context, BlockContext::Stored | BlockContext::Passed) {
-                        let context_str = match context {
-                            BlockContext::Stored => "stored",
-                            BlockContext::Passed => "passed",
-                            _ => "stored or passed",
-                        };
+                    // BT-1140: Field assignments in Passed blocks are now supported via
+                    // Tier 2 state threading — the actor State IS the StateAcc, so
+                    // field reads/writes inside the block propagate back to the caller.
+                    //
+                    // Error: Field assignment in Stored blocks remains unsupported because
+                    // the compiler cannot track the Tier 2 type of a block stored in a
+                    // variable (see BT-909 for future tracking of block variable types).
+                    if matches!(context, BlockContext::Stored) {
                         self.result.diagnostics.push(Diagnostic::error(
                             format!(
-                                "cannot assign to field '{name}' inside a {context_str} closure\n\
+                                "cannot assign to field '{name}' inside a stored closure\n\
                                  \n\
                                  = help: field assignments require immediate execution context\n\
                                  = help: use control flow directly: `items do: [:item | self.{name} := value]`"

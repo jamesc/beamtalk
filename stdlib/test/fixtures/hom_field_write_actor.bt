@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1140: Actor fixture for testing field-write blocks promoted to Tier 2 via
+// user-defined HOMs. Verifies that self.field := ... inside a block passed to a
+// user-defined HOM correctly threads field state back to the caller.
+
+Actor subclass: HomFieldWriteActor
+  state: sum = 0
+  state: count = 0
+
+  // User-defined HOM: calls aBlock for each element in #(1, 2, 3, 4, 5).
+  // The `last :=` write activates the stateful do: path so that
+  // aBlock value: each is called with Tier 2 StateAcc threading.
+  applyAll: aBlock =>
+    last := nil
+    #(1, 2, 3, 4, 5) do: [:each | last := aBlock value: each]
+    last
+
+  getSum => self.sum
+
+  getCount => self.count
+
+  // Test: field write via user-defined HOM — self.sum accumulates correctly
+  // [:x | self.sum := self.sum + x] over #(1,2,3,4,5) = 15
+  testFieldWriteViaHOM =>
+    self.sum := 0
+    self applyAll: [:x | self.sum := self.sum + x]
+    self.sum
+
+  // Test: TWO field writes in one block — both self.sum and self.count thread back.
+  // self.sum accumulates (1+2+3+4+5 = 15), self.count increments once per element (= 5).
+  testTwoFieldWritesViaHOM =>
+    self.sum := 0
+    self.count := 0
+    self
+      applyAll: [:x |
+        self.sum := self.sum + x
+        self.count := self.count + 1
+      ]
+    self.count
+
+  // Test: captured local mutation + field write in one block via user-defined HOM.
+  // running := 0 (local). Each step: running := running + x, self.sum := running.
+  // After #(1,2,3,4,5): running = 15, self.sum = 15.
+  testMixedCapturedLocalAndFieldWrite =>
+    self.sum := 0
+    running := 0
+    self
+      applyAll: [:x |
+        running := running + x
+        self.sum := running
+      ]
+    self.sum

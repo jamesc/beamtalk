@@ -509,7 +509,7 @@ impl CoreErlangGenerator {
     /// Captured mutations = variables written inside the block that were also
     /// read from the outer scope (i.e. `local_writes ∩ captured_reads`).
     /// Field writes (`self.x := ...`) and self-sends are handled separately:
-    /// - Field writes are threaded via `gen_server` State at the method level (BT-860 for Tier 2).
+    /// - Field writes are threaded via `gen_server` State at the method level (BT-1140 for Tier 2).
     /// - Self-sends are pre-scanned via `generate_tier2_self_send_open` (BT-851).
     ///
     /// Extracts a block literal from an expression, unwrapping parentheses.
@@ -547,10 +547,6 @@ impl CoreErlangGenerator {
         let captured_mutations = Self::captured_mutations_for_block(block);
 
         // BT-852: Blocks with captured local mutations use Tier 2 stateful calling convention.
-        // Field-write-only blocks (self.x := ...) are NOT yet promoted to Tier 2 here because
-        // the caller side (detect_tier2_self_send, HOM dispatch) does not yet detect them as
-        // Tier 2 — promoting them would emit {Result, NewState} tuples that callers unpack as
-        // plain values, causing a runtime crash. Field-write Tier 2 support is tracked in BT-1140.
         if !captured_mutations.is_empty() {
             return self.generate_block_stateful(block, &captured_mutations);
         }
@@ -709,7 +705,8 @@ impl CoreErlangGenerator {
             return Ok((self.generate_block(block)?, false));
         }
 
-        // Stateful block — generate Tier 2 block, then wrap it to strip the protocol.
+        // Stateful block (captured local mutations) — generate Tier 2 block,
+        // then wrap it to strip the protocol so Erlang can call it as a plain fun.
         let bt_block_var = self.fresh_temp_var("BtBlock");
 
         // Generate the Tier 2 block: fun(Params..., StateAcc) -> {Result, NewStateAcc}
