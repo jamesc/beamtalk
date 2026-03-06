@@ -31,7 +31,7 @@
     do/2
 ]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Set Representation

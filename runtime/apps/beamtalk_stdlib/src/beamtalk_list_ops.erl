@@ -27,7 +27,7 @@
     from_to/3
 ]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% @doc Access element at 1-based index with bounds checking.
 -spec at(list(), term()) -> term().
