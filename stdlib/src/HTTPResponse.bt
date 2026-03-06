@@ -16,30 +16,9 @@
 /// resp bodyAsJson  // => a Dictionary
 /// ```
 sealed Value subclass: HTTPResponse
-
-  /// HTTP status code (e.g. 200, 404, 500).
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// resp status   // => 200
-  /// ```
-  sealed status -> Integer => (Erlang beamtalk_http_response) status: self
-
-  /// Response headers as a List of [name, value] binary pairs.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// resp headers   // => #(#("content-type", "text/plain"), ...)
-  /// ```
-  sealed headers -> List => (Erlang beamtalk_http_response) headers: self
-
-  /// Response body as a String.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// resp body   // => "Hello, World!"
-  /// ```
-  sealed body -> String => (Erlang beamtalk_http_response) body: self
+  state: status :: Integer = 0
+  state: headers :: List = #()
+  state: body :: String = ""
 
   /// True if the status code is in the 2xx success range.
   ///
@@ -48,7 +27,7 @@ sealed Value subclass: HTTPResponse
   /// resp ok   // => true   (for status 200)
   /// resp ok   // => false  (for status 404)
   /// ```
-  sealed ok -> Boolean => (Erlang beamtalk_http_response) ok: self
+  sealed ok -> Boolean => (self.status >= 200) and: [self.status <= 299]
 
   /// Parse the response body as JSON and return the decoded value.
   ///
@@ -67,4 +46,4 @@ sealed Value subclass: HTTPResponse
   /// ```beamtalk
   /// resp printString   // => "an HTTPResponse(200)"
   /// ```
-  printString -> String => (Erlang beamtalk_http_response) printString: self
+  printString -> String => "an HTTPResponse(" ++ self.status printString ++ ")"
