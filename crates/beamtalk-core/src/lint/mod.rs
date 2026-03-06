@@ -19,7 +19,6 @@
 //! Each branch touches only its own new file plus two sorted lines here —
 //! merge conflicts are minimal and trivially resolved.
 
-mod boolean_literal_comparison;
 mod cascade_candidate;
 mod effect_free_statement;
 mod shadowed_block_param;
@@ -44,7 +43,6 @@ pub(crate) trait LintPass {
 /// alphabetical order. This is the only line that needs to change per lint.
 fn all_passes() -> Vec<Box<dyn LintPass>> {
     vec![
-        Box::new(boolean_literal_comparison::BooleanLiteralComparisonPass),
         Box::new(cascade_candidate::CascadeCandidatePass),
         Box::new(effect_free_statement::EffectFreeStatementPass),
         Box::new(shadowed_block_param::ShadowedBlockParamPass),
