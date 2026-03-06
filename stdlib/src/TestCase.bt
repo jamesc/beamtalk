@@ -105,7 +105,7 @@ Object subclass: TestCase
   /// ## Examples
   /// ```beamtalk
   /// testUnixOnlyFeature =>
-  ///   System osFamily = "unix" ifFalse: [^self skip: "Unix only"]
+  ///   System osFamily =:= "unix" ifFalse: [^self skip: "Unix only"]
   ///   // ... test body
   /// ```
   skip: reason :: String -> Nil => @primitive "skip:"

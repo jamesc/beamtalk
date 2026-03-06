@@ -72,6 +72,39 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
     }
 }
 
+/// `ProtoObject` primitive implementations (BT-1158).
+///
+/// `ProtoObject` is the root of the class hierarchy. Its `doesNotUnderstand:args:`
+/// method raises a `does_not_understand` error so that messages sent to objects
+/// that have no implementation propagate as errors rather than silently returning
+/// a falsy value.
+pub(crate) fn generate_proto_object_bif(
+    selector: &str,
+    params: &[String],
+) -> Option<Document<'static>> {
+    match selector {
+        "doesNotUnderstand:args:" => {
+            let selector_var = super::param(params, 0, "_Selector");
+            let hint = super::core_erlang_binary_string(
+                "Check spelling or use 'respondsTo:' to verify method exists",
+            );
+            Some(docvec![
+                "let <DnuClass0> = call 'beamtalk_primitive':'class_of'(Self) in\n",
+                "let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass0) in\n",
+                "let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, ",
+                selector_var.to_string(),
+                ") in\n",
+                "let <DnuHint> = ",
+                hint,
+                " in\n",
+                "let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, DnuHint) in\n",
+                "call 'beamtalk_error':'raise'(DnuErr2)",
+            ])
+        }
+        _ => None,
+    }
+}
+
 /// Object primitive implementations.
 ///
 /// Object is the root class — methods here are inherited by all objects.

@@ -63,6 +63,7 @@ pub fn generate_primitive_bif(
         "Tuple" => value_types::generate_tuple_bif(selector, params),
         "List" => list::generate_list_bif(selector, params),
         "Dictionary" => dictionary::generate_dictionary_bif(selector, params),
+        "ProtoObject" => value_types::generate_proto_object_bif(selector, params),
         "Object" => value_types::generate_object_bif(selector, params),
         "Set" => value_types::generate_set_bif(selector, params),
         "CompiledMethod" => reflection::generate_compiled_method_bif(selector, params),
@@ -226,6 +227,19 @@ mod tests {
     fn test_unknown_selector() {
         let result = doc_to_string(generate_primitive_bif("Integer", "unknownMethod", &[]));
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_proto_object_dnu_raises_error() {
+        let result = doc_to_string(generate_primitive_bif(
+            "ProtoObject",
+            "doesNotUnderstand:args:",
+            &["Selector".to_string(), "Args".to_string()],
+        ));
+        let output = result.expect("ProtoObject DNU should produce code");
+        assert!(output.contains("'does_not_understand'"));
+        assert!(output.contains("beamtalk_error':'with_selector'"));
+        assert!(output.contains("beamtalk_error':'raise'"));
     }
 
     #[test]
