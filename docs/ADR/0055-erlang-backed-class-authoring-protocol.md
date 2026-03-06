@@ -421,6 +421,7 @@ The Beamtalk API (message selectors) does not change. Callers of `resp status`, 
 
 - Related issues:
   - BT-1142, BT-1143, BT-1144, BT-1145, BT-1146, BT-1147
+  - BT-1154 (Epic), BT-1155, BT-1156
 - Related ADRs:
   - ADR 0005 (BEAM Object Model — Value vs Actor)
   - ADR 0007 (Compilable Stdlib with Primitive Injection — scope narrowed by this ADR)
