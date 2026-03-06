@@ -266,11 +266,28 @@ write_port_file(WorkspaceId, Port, Nonce) ->
                                     ok;
                                 {error, RenReason} ->
                                     ?LOG_WARNING(
-                                        "Failed to rename port tmp file ~s -> ~s: ~p",
+                                        "Failed to rename port tmp file ~s -> ~s: ~p; "
+                                        "falling back to direct write",
                                         [TmpPath, PortFilePath, RenReason]
                                     ),
                                     _ = file:delete(TmpPath),
-                                    ok
+                                    %% Fallback: write directly so the CLI can still
+                                    %% discover the port even if rename(2) fails (e.g.
+                                    %% cross-device move on unusual mount layouts).
+                                    case file:write_file(PortFilePath, Content) of
+                                        ok ->
+                                            ?LOG_DEBUG(
+                                                "Wrote port file (fallback): ~s (port ~p, nonce ~s)",
+                                                [PortFilePath, Port, Nonce]
+                                            ),
+                                            ok;
+                                        {error, FbReason} ->
+                                            ?LOG_WARNING(
+                                                "Fallback write of port file ~s failed: ~p",
+                                                [PortFilePath, FbReason]
+                                            ),
+                                            ok
+                                    end
                             end;
                         {error, Reason} ->
                             ?LOG_WARNING(

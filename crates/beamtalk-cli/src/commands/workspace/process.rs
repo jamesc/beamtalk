@@ -74,11 +74,11 @@ const READINESS_READ_TIMEOUT_MS: u64 = 10_000;
 /// scheduler jitter). Each attempt costs at most `READINESS_READ_TIMEOUT_MS`.
 const WS_HEALTH_RETRIES: usize = 5;
 
-/// Number of probe attempts between BEAM liveness checks.
+/// Number of TCP readiness probe attempts between BEAM liveness checks.
 ///
 /// At `READINESS_PROBE_DELAY_MS` = 200 ms, interval 25 → liveness checked
-/// every ~5 s. Applied to both the port-file discovery loop and the TCP
-/// readiness probe loop so a crashed node is detected quickly.
+/// every ~5 s during the TCP readiness probe loop. The port-file discovery
+/// loop uses its own fixed liveness-check interval.
 const LIVENESS_CHECK_INTERVAL: usize = 25;
 
 /// Start a detached BEAM node for a workspace.
@@ -413,7 +413,7 @@ fn wait_for_tcp_ready(
     // Phase 2: port is accepting — do the full WS auth + health check.
     // Retried a few times for transient auth failures (cowboy brief restart, jitter).
     let request = serde_json::json!({"op": "health"});
-    for _ in 0..WS_HEALTH_RETRIES {
+    for attempt in 0..WS_HEALTH_RETRIES {
         if let Ok(mut client) = ProtocolClient::connect(
             host,
             port,
@@ -423,6 +423,14 @@ fn wait_for_tcp_ready(
             if client.send_raw(&request).is_ok() {
                 return Ok(());
             }
+        }
+        // Check after the first attempt so we don't mask a quick crash with a
+        // misleading "port accepting" error variant.
+        if attempt > 0 && !is_process_alive(pid) {
+            return Err(miette!(
+                "BEAM node (PID {pid}) crashed while WebSocket health checks were \
+                 in progress on port {port}.{log_suffix}"
+            ));
         }
         std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
     }
