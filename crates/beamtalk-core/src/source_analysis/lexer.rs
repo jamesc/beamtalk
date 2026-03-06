@@ -355,6 +355,13 @@ impl<'src> Lexer<'src> {
             // Pragma directives
             '@' => self.lex_at_directive(start),
 
+            // Arrow: `->` return-type separator / binary method selector (ADR 0047)
+            '-' if self.peek_char_n(1) == Some('>') => {
+                self.advance(); // -
+                self.advance(); // >
+                TokenKind::Arrow
+            }
+
             // Binary operators
             '+' | '-' | '*' | '/' | '<' | '>' | '~' | '%' | '&' | '?' | ',' | '\\' => {
                 self.lex_binary_selector()
@@ -1966,5 +1973,42 @@ mod tests {
             .filter(|t| t.is_doc_comment())
             .collect();
         assert_eq!(doc_trivia.len(), 0);
+    }
+
+    #[test]
+    fn lex_arrow_token() {
+        // `->` is a dedicated Arrow token, not BinarySelector (ADR 0047)
+        assert_eq!(lex_kinds("->"), vec![TokenKind::Arrow]);
+    }
+
+    #[test]
+    fn lex_arrow_in_return_type_annotation() {
+        // The return type annotation `-> Integer` lexes as Arrow + Identifier
+        assert_eq!(
+            lex_kinds("-> Integer"),
+            vec![TokenKind::Arrow, TokenKind::Identifier("Integer".into()),]
+        );
+    }
+
+    #[test]
+    fn lex_minus_not_arrow() {
+        // Bare `-` (not followed by `>`) still lexes as BinarySelector
+        assert_eq!(
+            lex_kinds("x - y"),
+            vec![
+                TokenKind::Identifier("x".into()),
+                TokenKind::BinarySelector("-".into()),
+                TokenKind::Identifier("y".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_double_minus_is_binary_selector() {
+        // `--` greedily lexes as a single BinarySelector("--"), not Arrow
+        assert_eq!(
+            lex_kinds("--"),
+            vec![TokenKind::BinarySelector("--".into())]
+        );
     }
 }

@@ -1,7 +1,7 @@
 # ADR 0047: Return Type Arrow Token Disambiguation
 
 ## Status
-Accepted (2026-03-02)
+Implemented (2026-03-06) — `TokenKind::Arrow` added in PR #1190 (BT-1141)
 
 ## Context
 
