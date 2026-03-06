@@ -6,7 +6,8 @@
 ///
 /// Try it in the REPL:
 ///   $ beamtalk repl
-///   > :load examples/counter.bt
+///   > :load "examples/getting-started/src/counter.bt"
+///   nil
 ///   > c := Counter spawn
 ///   > c increment
 ///   > c increment
