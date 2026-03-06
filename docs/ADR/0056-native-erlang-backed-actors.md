@@ -14,17 +14,17 @@ However, some Actors require hand-written Erlang gen_server implementations:
 - **`Subprocess`** — manages an OS port, deferred gen_server replies, and line buffering across two I/O channels. This logic cannot be expressed in Beamtalk.
 - **`TranscriptStream`** — maintains a ring buffer with pub/sub subscriber management and dead-process monitoring via `handle_info/2`. These OTP patterns require direct gen_server control.
 
-Currently, these classes use `@primitive "selector"` for each instance method, which routes each call through a per-module `dispatch/3` function that the hand-written Erlang module is expected to provide. This approach:
+Currently, these classes use `@primitive "selector"` for each instance method. The backing gen_server implements `handle_call/3` with `{Selector, [Args]}` pattern matching directly; `TranscriptStream` additionally exports `has_method/1` for the dispatch system. This approach:
 
 - Lacks a declared relationship between the `.bt` file and its backing module — the compiler has no knowledge of which Erlang module backs the Actor
-- Requires hand-written `dispatch/3` and `has_method/1` boilerplate in each backing module
 - Does not validate that the declared selectors match the gen_server's `handle_call/3` clauses
 - Couples stdlib classes to the `@primitive` mechanism, which ADR 0055 narrowed to BIFs and structural intrinsics
+- Requires the backing module to be hardcoded in the Rust compiler's `generated_builtins.rs`
 
 ### Current State
 
 ```beamtalk
-%% Subprocess.bt today — works but uses @primitive for each method
+// Subprocess.bt today — works but uses @primitive for each method
 Actor subclass: Subprocess
   writeLine: data -> Nil => @primitive "writeLine:"
   readLine -> Object => @primitive "readLine"
@@ -37,11 +37,11 @@ The backing `beamtalk_subprocess.erl` implements the full `gen_server` behaviour
 Similarly for `TranscriptStream`:
 
 ```beamtalk
-%% TranscriptStream.bt today — @primitive methods with hand-written gen_server
+// TranscriptStream.bt today — @primitive methods with hand-written gen_server
 Actor subclass: TranscriptStream
-  show: text -> Self => @primitive "show:"
-  cr -> Self => @primitive "cr"
-  subscribe -> Self => @primitive "subscribe"
+  show: value: Object -> Nil => @primitive "show:"
+  cr -> Nil => @primitive "cr"
+  subscribe -> Nil => @primitive "subscribe"
   ...
 ```
 
@@ -62,7 +62,9 @@ Actor subclass: TranscriptStream
 gen_server:call(ActorPid, {Selector, Args})
 ```
 
-where `Selector` is an atom and `Args` is a list. The backing gen_server's `handle_call/3` must pattern-match this form and return `{reply, {ok, Result}, NewState}` or `{reply, {error, Error}, NewState}` for `sync_send` to unwrap correctly. (`sync_send` expects the `{ok, _}` | `{error, _}` envelope per BT-918.)
+where `Selector` is an atom and `Args` is a list. Generated actors wrap replies as `{ok, Result}` or `{error, Error}` per BT-918. However, `sync_send/3` also has a backward-compatibility `DirectValue` fallback (beamtalk_actor.erl:435) that passes through unwrapped values — this is how `beamtalk_subprocess.erl` and `beamtalk_transcript_stream.erl` work today. The ADR must decide whether `@native` gen_servers use the `{ok, _}` envelope or the `DirectValue` path (see Open Questions).
+
+For **async** methods, `beamtalk_actor:async_send/4` sends `gen_server:cast(Pid, {Selector, Args, FuturePid})`. Some backing gen_servers (e.g. TranscriptStream's `show:`, `cr`) use casts for non-blocking semantics. The `@native` protocol must support both call and cast dispatch.
 
 ## Decision
 
@@ -160,17 +162,24 @@ The hand-written gen_server module must implement:
 start_link(Config) -> gen_server:start_link(?MODULE, Config, []).
 
 %% handle_call/3 — uses {Selector, [Args]} wire format
-%% Replies must be wrapped as {ok, Result} for beamtalk_actor:sync_send/3
+%% Raw (unwrapped) values are supported via sync_send's DirectValue fallback
 handle_call({'writeLine:', [Data]}, _From, State) ->
-    {reply, {ok, handle_writeLine(Data, State)}, NewState};
+    NewState = do_writeLine(Data, State),
+    {reply, nil, NewState};
 handle_call({readLine, []}, From, State) ->
-    %% Deferred reply: gen_server:reply(From, {ok, Line}) called later
+    %% Deferred reply: gen_server:reply(From, Line) called later
     {noreply, register_waiter(stdout, From, State)};
 handle_call({exitCode, []}, _From, State) ->
-    {reply, {ok, maps:get(exit_code, State, nil)}, State};
+    {reply, maps:get(exit_code, State, nil), State};
 ```
 
-**Key requirement:** All `{reply, Result, State}` tuples must wrap `Result` as `{ok, Value}` (or `{error, Reason}`) so that `beamtalk_actor:sync_send/3` can unwrap them correctly (see BT-918). Deferred replies via `gen_server:reply/2` must also wrap: `gen_server:reply(From, {ok, Line})`.
+**Reply format:** `sync_send/3` prefers `{ok, Result}` / `{error, Error}` wrapped replies (per BT-918) but also supports a `DirectValue` fallback for backward compatibility. Existing hand-written gen_servers (`beamtalk_subprocess.erl`, `beamtalk_transcript_stream.erl`) return raw values today and work correctly via the fallback path. New `@native` gen_servers SHOULD use `{ok, Result}` wrapping for error detection, but this is not strictly required.
+
+**Cast methods:** Methods dispatched via `gen_server:cast` (e.g. TranscriptStream's `show:`, `cr`) are deferred to Phase 3. The initial `@native` protocol (Phase 1-2) supports sync dispatch only.
+
+**Other gen_server callbacks:** The facade does NOT intercept `handle_info/2`, `terminate/2`, or `code_change/3`. These callbacks are implemented directly by the backing gen_server. The facade only generates `spawn/1`, `spawnWith:`, `has_method/1`, and `dispatch/3`.
+
+**`start_link` arity:** The facade calls `BackingModule:start_link(Config)` where Config is the `spawnWith:` dictionary. Backing modules that need no config should accept `start_link(#{})`. Backing modules that need `start_link/0` should export both arities.
 
 ### State Exclusivity
 
@@ -184,12 +193,18 @@ error: @native actor 'Subprocess' cannot declare state fields — state is owned
 
 Both `gen_server` and `gen_statem` expose the same `gen:call/4` API internally. `beamtalk_actor:sync_send/3` uses `gen_server:call/2` which routes through `gen:call/4` for both behaviour types. A backing module implemented with `gen_statem` works transparently, provided it handles `handle_call/3` (gen_server-compatible) or `handle_event({call, From}, ...)` mapped to the `{Selector, [Args]}` format.
 
+### Self-Sends and `!` (Bang) Semantics
+
+**Self-sends:** A Beamtalk method body on an `@native` actor (e.g. a computed property that calls `self readLine`) would route through `sync_send/3` back to the same gen_server process, causing a deadlock. This is the same constraint as standard gen_server programming — gen_servers cannot call themselves synchronously. The ADR does not introduce new self-send mechanisms; `@native` actors with Beamtalk method bodies should only call their own `@native` methods via `self` if the backing gen_server handles re-entrant calls (which standard gen_server does not).
+
+**Bang `!` on `@native` actors:** Per ADR 0043, `agent writeLine: data!` sends via `cast_send/3` using `{cast, Selector, Args}` format. If the backing gen_server only implements `handle_call/3` for a given selector, the cast silently disappears. This is acceptable for Subprocess (all methods are call-based), but `@native` actors that support `!` must implement `handle_cast/2` clauses for the `{cast, Selector, Args}` format. The `.bt` file does not currently distinguish call vs cast methods — this is deferred to the async/cast protocol design (see Phase 3).
+
 ### Ports, NIFs, and Raw Processes
 
 `@native` is scoped to gen_server-compatible OTP processes. For actors backed by ports, NIFs, or raw processes, use per-method `(Erlang module)` FFI (ADR 0028) instead:
 
 ```beamtalk
-%% NIF-backed class — use FFI per method, not @native
+// NIF-backed class — use FFI per method, not @native
 sealed Object subclass: NativeAccelerator
   class compute: data -> Object =>
     (Erlang nif_accelerator) compute: data
@@ -203,14 +218,14 @@ line := agent readLine.   // => "hello"
 agent exitCode.           // => 0
 agent close.
 
-%% Streaming lines
+// Streaming lines
 (Subprocess open: "ls" args: #("-la")) lines do: [:line | Transcript show: line]
 ```
 
 ### Error Example
 
 ```beamtalk
-%% @native with state: raises a compile error
+// @native with state: raises a compile error
 @native beamtalk_subprocess
 Actor subclass: Subprocess
   state: count = 0   // => compile error
@@ -287,9 +302,9 @@ Standard Erlang practice is to write thin wrapper modules with `start_link/N`, `
 ### Steelman for keeping `@primitive` for all Actor methods (status quo)
 
 - **Newcomer:** "I don't need to know about `@native` — `@primitive` methods just work and the details are hidden."
-- **BEAM veteran:** "The current dispatch path is well-understood. Changing to `{ok, Result}` wrapping requires touching every hand-written gen_server."
+- **BEAM veteran:** "The current dispatch path is well-understood. `@native` adds a new codegen path for a small number of classes."
 - **Language designer:** "`@native` adds a new annotation, a new module naming convention, and new compiler codegen for one class of Actors. The cost is higher than the benefit."
-- **Tension:** The migration cost is real — every hand-written gen_server must add `{ok, Result}` wrapping to its `handle_call/3` replies. This is a genuine breaking change for Subprocess and TranscriptStream.
+- **Tension:** The implementation cost is real — a new codegen path for 2-3 classes. The `DirectValue` fallback means no breaking change to existing gen_servers, but the async/cast question (TranscriptStream) adds design complexity.
 
 ### Steelman for per-method `(Erlang module)` FFI (avoid `@native` entirely)
 
@@ -306,9 +321,9 @@ Standard Erlang practice is to write thin wrapper modules with `start_link/N`, `
 
 ### Tension Points
 
-- BEAM veterans and language designers are split: `@native` simplifies the `.bt` side but adds a migration burden to existing gen_servers
+- BEAM veterans and language designers are split: `@native` simplifies the `.bt` side but adds a new codegen path for a small number of classes
 - Newcomers prefer invisible delegation (status quo), but explicit `=> @native` is discoverable as "this has special implementation"
-- The `{ok, Result}` wrapping requirement is the highest-friction migration step; gen_server authors from an Erlang background will find it unfamiliar
+- The async/cast question is unresolved: TranscriptStream uses `gen_server:cast` for its most-used methods (`show:`, `cr`), but the ADR only specifies sync dispatch via `sync_send/3`
 
 ## Alternatives Considered
 
@@ -374,7 +389,7 @@ Rejected because it conflates two different mechanisms (BIF-level primitives and
 
 ### Negative
 
-- **Migration cost:** Every hand-written gen_server (`beamtalk_subprocess.erl`, `beamtalk_transcript_stream.erl`) must add `{ok, Result}` wrapping to all `handle_call/3` reply values, and update deferred `gen_server:reply/2` calls accordingly — this is a source-breaking change in the Erlang modules
+- **Migration cost:** Existing hand-written gen_servers return raw values via the `DirectValue` fallback path, so `{ok, Result}` wrapping is optional. The primary migration is replacing `@primitive` method bodies with `=> @native` and adding the class-level `@native BackingModule` annotation. TranscriptStream's cast-based methods (`show:`, `cr`, `subscribe`, `unsubscribe`) need additional design work to fit the `@native` dispatch model
 - **New codegen path:** The compiler needs a new code generation path for `@native` actor modules (facade generation instead of full gen_server codegen) — this is the most significant new work in this ADR
 - **`generated_builtins.rs` migration:** Subprocess (and any other hardcoded `@native` actors) must be moved from `generated_builtins.rs` to be parsed from their `.bt` files with the `@native` annotation
 - **Constraint on gen_server API:** Backing gen_servers are constrained to the `{Selector, [Args]}` wire protocol — Erlang authors accustomed to arbitrary message formats must adapt
@@ -389,11 +404,11 @@ Rejected because it conflates two different mechanisms (BIF-level primitives and
 
 ### Phase 0 — Wire Protocol Validation (Proof of Concept)
 
-Before building new codegen, validate the `{ok, Result}` wrapping requirement against one existing backing module:
+Before building new codegen, validate the facade approach against one existing backing module:
 
-- Update `beamtalk_subprocess.erl` handle_call replies from raw values to `{ok, Value}` / `{error, Reason}` form
-- Verify all existing tests pass
-- Document the required protocol in a comment block at the top of the module
+- Build a hand-written `bt@stdlib@subprocess` facade module (no compiler changes) that exports `spawn/1`, `has_method/1`, and `dispatch/3` delegating to `beamtalk_subprocess.erl`
+- Verify all existing Subprocess tests pass through the facade
+- Document the required `handle_call/3` wire protocol in a comment block
 
 **Issues:** BT-1155
 
@@ -408,17 +423,29 @@ Before building new codegen, validate the `{ok, Result}` wrapping requirement ag
 
 **Issues:** BT-1156, BT-1157
 
-### Phase 2 — Stdlib Migration
+### Phase 2 — Stdlib Migration (Subprocess Only)
 
 - Migrate `Subprocess.bt` from `@primitive` to `@native beamtalk_subprocess`
-- Migrate `TranscriptStream.bt` from `@primitive` to `@native beamtalk_transcript_stream`
-- Update `beamtalk_transcript_stream.erl` to use `{ok, Result}` wrapping
 - Add integration tests covering `@native` spawn, method dispatch, deferred replies, and error propagation
 
-**Issues:** BT-1158, BT-1159
+**Issues:** BT-1158
+
+### Phase 3 — TranscriptStream Migration (Deferred — Cast Protocol Required)
+
+TranscriptStream uses `async_send/4` format (`{Selector, Args, FuturePid}`) for its primary methods (`show:`, `cr`, `subscribe`, `unsubscribe`). Migrating to `@native` requires designing the cast dispatch path for `@native` actors, including:
+
+- A method-level marker to distinguish sync vs async methods (e.g. `=> @native async`)
+- A cast wire format compatible with the backing gen_server's `handle_cast/2`
+- Bang `!` semantics on `@native` actors (per ADR 0043)
+
+This phase is deferred until the sync-only `@native` protocol is validated via Subprocess migration in Phase 2.
+
+**Issues:** BT-1159
 
 ### Affected Components
 
+- `crates/beamtalk-core/src/source_analysis/lexer.rs` — lex `@native` as a new annotation token
+- `crates/beamtalk-core/src/source_analysis/parser/` — parse `@native BackingModule` as a class annotation and `=> @native` as a method body form
 - `crates/beamtalk-core/src/ast.rs` — new `@native` annotation variant on class definitions and method bodies
 - `crates/beamtalk-core/src/codegen/core_erlang/actor_codegen.rs` — detect `@native` annotation; branch to facade codegen instead of full gen_server codegen
 - `crates/beamtalk-core/src/codegen/core_erlang/gen_server/` — new `native_facade.rs` generating `spawn/1`, `has_method/1`, `dispatch/3` facade functions
@@ -432,26 +459,16 @@ Before building new codegen, validate the `{ok, Result}` wrapping requirement ag
 
 ### Existing Hand-Written Gen_Server Modules
 
-Update `handle_call/3` to wrap all return values:
+No changes required for `handle_call/3` reply format — `sync_send/3`'s `DirectValue` fallback handles raw values. Optionally, wrap replies as `{ok, Result}` for future-proofing:
 
 ```erlang
-%% Before:
-handle_call({exitCode, []}, _From, State) ->
-    {reply, maps:get(exit_code, State, nil), State};
-
-%% After:
+%% Optional — adds explicit error detection:
 handle_call({exitCode, []}, _From, State) ->
     {reply, {ok, maps:get(exit_code, State, nil)}, State};
-```
 
-Update deferred replies:
-
-```erlang
-%% Before:
-gen_server:reply(From, Line)
-
-%% After:
-gen_server:reply(From, {ok, Line})
+%% Existing raw form also works via DirectValue fallback:
+handle_call({exitCode, []}, _From, State) ->
+    {reply, maps:get(exit_code, State, nil), State};
 ```
 
 ### Existing `@primitive` Actor Classes
@@ -465,6 +482,6 @@ The Beamtalk API (message selectors and return types) does not change. Callers o
 ## References
 
 - Related issues: BT-1155, BT-1156, BT-1157, BT-1158, BT-1159
-- Related ADRs: ADR 0005 (BEAM Object Model — Actor vs Value distinction), ADR 0028 (BEAM Interop Strategy — FFI mechanism), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State), ADR 0043 (Sync-by-Default Actor Messaging — `sync_send/3` protocol), ADR 0051 (Subprocess Execution — Subprocess as proof-of-concept), ADR 0055 (Erlang-Backed Class Authoring Protocol — `state:` and FFI for Value classes)
+- Related ADRs: ADR 0005 (BEAM Object Model — Actor vs Value distinction), ADR 0028 (BEAM Interop Strategy — FFI mechanism), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State), ADR 0043 (Sync-by-Default Actor Messaging — `sync_send/3` and `cast_send/3` protocols, `!` bang semantics), ADR 0048 (Class-Side Method Syntax Redesign — Proposed; class factory method examples use current syntax pending this ADR's resolution), ADR 0051 (Subprocess Execution — Subprocess as proof-of-concept), ADR 0055 (Erlang-Backed Class Authoring Protocol — `state:` and FFI for Value classes)
 - gen_server protocol: https://www.erlang.org/doc/man/gen_server.html
 - gen_statem protocol: https://www.erlang.org/doc/man/gen_statem.html

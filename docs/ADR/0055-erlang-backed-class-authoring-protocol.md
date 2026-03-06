@@ -323,9 +323,9 @@ Field declarations make `inspect` useful — operators can see the structure of 
 
 ```beamtalk
 sealed Value subclass: HTTPResponse
-  field: status: Integer
-  field: headers: List
-  field: body: String
+  field: status :: Integer
+  field: headers :: List
+  field: body :: String
 ```
 
 Adds a distinct keyword to make clear that Value class fields are immutable. Rejected because `state:` already exists, the compiler already generates the correct immutable semantics for Value classes from `state:` declarations, and adding a new keyword increases vocabulary without changing the generated code. The distinction is already captured by the `Value` vs `Actor` superclass.
@@ -356,7 +356,7 @@ Generate the entire `beamtalk_foo.erl` from the `.bt` file, with stubs for compl
 - Any library author can create Erlang-backed classes without touching the Rust compiler
 - `state:` declarations on Value classes make object structure visible to `inspect`, the LSP, and gradual typing
 - The keyword constructor provides compile-time validation when field declarations change
-- `@primitive` scope is narrowed to BIFs and structural intrinsics — the list stops growing. Of ~442 `@primitive` entries across stdlib, approximately 33 (in HTTPResponse, JSON, Yaml, Regex, System) are targeted for immediate migration; the remainder are direct BIF calls or structural intrinsics that correctly remain `@primitive`
+- `@primitive` scope is narrowed to BIFs and structural intrinsics — the list stops growing. Of ~442 `@primitive` entries across stdlib, approximately 24 (in HTTPResponse, JSON, Yaml, Regex, System) are targeted for immediate migration to `state:` or FFI; an additional ~12 (Timer, Random) are candidates; the remainder are direct BIF calls or structural intrinsics that correctly remain `@primitive`
 - `dispatch/3` and `has_method/1` boilerplate can be removed from existing stdlib modules
 - `beamtalk_http_response.erl` can be **deleted entirely** — `state:` declarations + pure Beamtalk methods replace all its functionality
 - Extends generation pipeline that already exists in `value_type_codegen.rs` — minimal new work
@@ -413,7 +413,7 @@ The Beamtalk API (message selectors) does not change. Callers of `resp status`, 
 ## References
 
 - Related issues: BT-1142, BT-1143, BT-1144, BT-1145, BT-1146, BT-1147
-- Related ADRs: ADR 0005 (BEAM Object Model — Value vs Actor), ADR 0007 (Compilable Stdlib with Primitive Injection — scope narrowed by this ADR), ADR 0013 (Class Variables, Class-Side Methods, Instantiation — keyword constructor protocol), ADR 0028 (BEAM Interop Strategy — FFI mechanism), ADR 0034 (Stdlib Self-Hosting), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State — immutability guarantee for Value `state:`), ADR 0043 (Sync-by-Default Actor Messaging — messaging model for Erlang-backed Actor facades), ADR 0049 (Remove Method-Level `sealed`), ADR 0051 (Subprocess Execution — `@native` proof-of-concept), ADR 0053 (Double-Colon Type Annotation Syntax — `state:` type annotation form)
+- Related ADRs: ADR 0005 (BEAM Object Model — Value vs Actor), ADR 0007 (Compilable Stdlib with Primitive Injection — scope narrowed by this ADR), ADR 0013 (Class Variables, Class-Side Methods, Instantiation — keyword constructor protocol), ADR 0025 (Gradual Typing and Protocols — Phase 2 type annotations on `state:` use `: Type`; ADR 0053 supersedes with `:: Type`), ADR 0028 (BEAM Interop Strategy — FFI mechanism), ADR 0034 (Stdlib Self-Hosting), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State — immutability guarantee for Value `state:`), ADR 0043 (Sync-by-Default Actor Messaging — messaging model for Erlang-backed Actor facades), ADR 0049 (Remove Method-Level `sealed`), ADR 0051 (Subprocess Execution — `@native` proof-of-concept), ADR 0053 (Double-Colon Type Annotation Syntax — `state:` type annotation form; supersedes ADR 0025 `: Type` syntax)
 - Gleam external functions: https://gleam.run/documentation/externals/
 - Pharo UFFI: https://files.pharo.org/books-pdfs/booklet-uFFI/UFFIDRAFT.pdf
 - Newspeak Alien FFI: https://bracha.org/newspeak.pdf
