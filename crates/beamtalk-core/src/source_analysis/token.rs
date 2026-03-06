@@ -143,6 +143,12 @@ pub enum TokenKind {
     /// Fat arrow for method definitions: `=>`
     FatArrow,
 
+    /// Binary pattern open: `<<`
+    LtLt,
+
+    /// Binary pattern close: `>>`
+    GtGt,
+
     // === Pragmas ===
     /// The `@primitive` directive for primitive method injection (ADR 0007)
     AtPrimitive,
@@ -206,6 +212,8 @@ impl TokenKind {
                 | Self::MapOpen
                 | Self::ListOpen
                 | Self::ArrayOpen
+                | Self::LtLt
+                | Self::GtGt
         )
     }
 
@@ -260,6 +268,8 @@ impl TokenKind {
             | Self::AtPrimitive
             | Self::AtIntrinsic
             | Self::AtExpect
+            | Self::LtLt
+            | Self::GtGt
             | Self::Eof => None,
         }
     }
@@ -306,6 +316,8 @@ impl std::fmt::Display for TokenKind {
             Self::AtPrimitive => write!(f, "@primitive"),
             Self::AtIntrinsic => write!(f, "@intrinsic"),
             Self::AtExpect => write!(f, "@expect"),
+            Self::LtLt => write!(f, "<<"),
+            Self::GtGt => write!(f, ">>"),
             Self::Eof => write!(f, "<eof>"),
         }
     }

@@ -20,8 +20,8 @@
 use super::document::Document;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
-    Block, CascadeMessage, Expression, Identifier, Literal, MapPair, MatchArm, MessageSelector,
-    Pattern, StringSegment,
+    BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, CascadeMessage,
+    Expression, Identifier, Literal, MapPair, MatchArm, MessageSelector, Pattern, StringSegment,
 };
 use crate::docvec;
 
@@ -1374,7 +1374,7 @@ impl CoreErlangGenerator {
     }
 
     /// Generates a Core Erlang pattern from a Pattern AST node.
-    fn generate_pattern(&self, pattern: &Pattern) -> Result<Document<'static>> {
+    pub(super) fn generate_pattern(&mut self, pattern: &Pattern) -> Result<Document<'static>> {
         match pattern {
             Pattern::Wildcard(_) => Ok(Document::Str("_")),
             Pattern::Variable(id) => {
@@ -1411,11 +1411,89 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str("]"));
                 Ok(Document::Vec(parts))
             }
-            Pattern::Binary { .. } => Err(CodeGenError::UnsupportedFeature {
-                feature: "binary pattern matching".to_string(),
-                location: format!("{:?}", pattern.span()),
-            }),
+            Pattern::Binary { segments, .. } => {
+                let mut parts = vec![Document::Str("#{")];
+                for (i, seg) in segments.iter().enumerate() {
+                    if i > 0 {
+                        parts.push(Document::Str(","));
+                    }
+                    parts.push(self.generate_binary_segment(seg)?);
+                }
+                parts.push(Document::Str("}#"));
+                Ok(Document::Vec(parts))
+            }
         }
+    }
+
+    /// Generates a Core Erlang binary segment: `#<Value>(Size,Unit,Type,Flags)`.
+    ///
+    /// Core Erlang binary segment format:
+    /// ```text
+    /// #<VarName>(Size, Unit, Type, ['flag1'|['flag2']])
+    /// ```
+    ///
+    /// Defaults: type=integer, signedness=unsigned, endianness=big,
+    /// size=8 for integer/float, 'all' for binary, 'undefined' for utf8.
+    /// Unit=1 for integer/float, 8 for binary, 'undefined' for utf8.
+    pub(super) fn generate_binary_segment(
+        &mut self,
+        seg: &BinarySegment,
+    ) -> Result<Document<'static>> {
+        // Value: the variable or wildcard
+        let value_doc = self.generate_pattern(&seg.value)?;
+
+        // Resolve type (default: integer)
+        let seg_type = seg.segment_type.unwrap_or(BinarySegmentType::Integer);
+
+        // Size: explicit, or default based on type
+        let size_doc = if let Some(size_expr) = &seg.size {
+            self.expression_doc(size_expr)?
+        } else {
+            match seg_type {
+                BinarySegmentType::Binary => Document::Str("'all'"),
+                BinarySegmentType::Utf8 => Document::Str("'undefined'"),
+                BinarySegmentType::Integer => Document::Str("8"),
+                BinarySegmentType::Float => Document::Str("64"),
+            }
+        };
+
+        // Unit: 8 for binary, 'undefined' for utf8, 1 for integer/float
+        let unit_doc = match seg_type {
+            BinarySegmentType::Binary => Document::Str("8"),
+            BinarySegmentType::Utf8 => Document::Str("'undefined'"),
+            BinarySegmentType::Integer | BinarySegmentType::Float => Document::Str("1"),
+        };
+
+        // Type atom
+        let type_doc = match seg_type {
+            BinarySegmentType::Integer => Document::Str("'integer'"),
+            BinarySegmentType::Float => Document::Str("'float'"),
+            BinarySegmentType::Binary => Document::Str("'binary'"),
+            BinarySegmentType::Utf8 => Document::Str("'utf8'"),
+        };
+
+        // Flags: cons-cell list ['signedness'|['endianness']]
+        // Defaults: unsigned, big
+        let sign_str = match seg.signedness.unwrap_or(BinarySignedness::Unsigned) {
+            BinarySignedness::Signed => "'signed'",
+            BinarySignedness::Unsigned => "'unsigned'",
+        };
+        let end_str = match seg.endianness.unwrap_or(BinaryEndianness::Big) {
+            BinaryEndianness::Big => "'big'",
+            BinaryEndianness::Little => "'little'",
+            BinaryEndianness::Native => "'native'",
+        };
+        let flags_doc = docvec![
+            "[",
+            Document::Str(sign_str),
+            "|[",
+            Document::Str(end_str),
+            "]]"
+        ];
+
+        Ok(docvec![
+            "#<", value_doc, ">(", size_doc, ",", unit_doc, ",", type_doc, ",", flags_doc, ")"
+        ])
     }
 
     /// Generates a Core Erlang guard expression.
@@ -1503,7 +1581,12 @@ impl CoreErlangGenerator {
                     Self::collect_pattern_variables_inner(t, bind);
                 }
             }
-            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Binary { .. } => {}
+            Pattern::Binary { segments, .. } => {
+                for seg in segments {
+                    Self::collect_pattern_variables_inner(&seg.value, bind);
+                }
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
         }
     }
 }

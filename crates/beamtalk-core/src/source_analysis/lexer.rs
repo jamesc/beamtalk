@@ -362,6 +362,20 @@ impl<'src> Lexer<'src> {
                 TokenKind::Arrow
             }
 
+            // Binary open: `<<`
+            '<' if self.peek_char_n(1) == Some('<') => {
+                self.advance(); // first <
+                self.advance(); // second <
+                TokenKind::LtLt
+            }
+
+            // Binary close: `>>`
+            '>' if self.peek_char_n(1) == Some('>') => {
+                self.advance(); // first >
+                self.advance(); // second >
+                TokenKind::GtGt
+            }
+
             // Binary operators
             '+' | '-' | '*' | '/' | '<' | '>' | '~' | '%' | '&' | '?' | ',' | '\\' => {
                 self.lex_binary_selector()
