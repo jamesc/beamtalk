@@ -775,7 +775,11 @@ pub fn compile_source_with_bindings(
             ) {
                 continue;
             }
+            // Suppress warnings/hints only when suppress_warnings is set AND
+            // warnings_as_errors is not — if warnings_as_errors is on, the diagnostic
+            // caused a failure and must be shown regardless of suppress_warnings.
             if options.suppress_warnings
+                && !options.warnings_as_errors
                 && matches!(
                     diagnostic.severity,
                     beamtalk_core::source_analysis::Severity::Warning
@@ -1173,5 +1177,69 @@ end
         // Verify we got exactly 1000 unique values
         let final_set = values.lock().unwrap();
         assert_eq!(final_set.len(), 1000, "Expected 1000 unique counter values");
+    }
+
+    /// Source that triggers an actor-new Warning (using `new` on an Actor subclass).
+    const ACTOR_NEW_SOURCE: &str =
+        "Actor subclass: TestActorWarnings\n  doNothing => nil\n\nTestActorWarnings new";
+
+    #[test]
+    fn test_warnings_as_errors_off_allows_warning() {
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("actor_new.bt");
+        let core_file = temp_path.join("actor_new.core");
+        fs::write(&source_file, ACTOR_NEW_SOURCE).unwrap();
+
+        let options = beamtalk_core::CompilerOptions::default(); // warnings_as_errors: false
+        let result = compile_source(&source_file, "actor_new", &core_file, &options);
+
+        assert!(
+            result.is_ok(),
+            "Should compile despite actor-new warning when warnings_as_errors is off: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_warnings_as_errors_on_fails_on_warning() {
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("actor_new.bt");
+        let core_file = temp_path.join("actor_new.core");
+        fs::write(&source_file, ACTOR_NEW_SOURCE).unwrap();
+
+        let options = beamtalk_core::CompilerOptions {
+            warnings_as_errors: true,
+            ..Default::default()
+        };
+        let result = compile_source(&source_file, "actor_new", &core_file, &options);
+
+        assert!(
+            result.is_err(),
+            "Should fail when warnings_as_errors is on and a warning is emitted"
+        );
+    }
+
+    #[test]
+    fn test_warnings_as_errors_overrides_suppress_warnings() {
+        // suppress_warnings: true alone would suppress and allow compilation;
+        // combined with warnings_as_errors: true, the failure must still happen.
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("actor_new.bt");
+        let core_file = temp_path.join("actor_new.core");
+        fs::write(&source_file, ACTOR_NEW_SOURCE).unwrap();
+
+        let options = beamtalk_core::CompilerOptions {
+            warnings_as_errors: true,
+            suppress_warnings: true,
+            ..Default::default()
+        };
+        let result = compile_source(&source_file, "actor_new", &core_file, &options);
+
+        assert!(
+            result.is_err(),
+            "warnings_as_errors must override suppress_warnings: compilation should fail"
+        );
     }
 }
