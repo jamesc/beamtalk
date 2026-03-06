@@ -5,8 +5,8 @@
 
 TestCase subclass: SampleSkipTestCase
 
-  testSkipped => ^self skip: "this test is intentionally skipped"
+  testSkipped => self skip: "this test is intentionally skipped"
 
-  testSkippedNoReason => ^self skip
+  testSkippedNoReason => self skip
 
   testPassing => self assert: true
