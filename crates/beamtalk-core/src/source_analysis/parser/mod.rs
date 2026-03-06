@@ -62,6 +62,8 @@ use ecow::EcoString;
 mod declarations;
 mod expressions;
 
+use declarations::DoubleColonSkip;
+
 // Property-based tests (ADR 0011 Phase 2)
 #[cfg(test)]
 mod property_tests;
@@ -1041,9 +1043,10 @@ impl Parser {
                 if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
                     return false;
                 }
-                let after_param = self
-                    .skip_double_colon_type(offset + 2)
-                    .unwrap_or(offset + 2);
+                let after_param = match self.skip_double_colon_type(offset + 2) {
+                    DoubleColonSkip::Valid(o) | DoubleColonSkip::Malformed(o) => o,
+                    DoubleColonSkip::NotPresent => offset + 2,
+                };
                 self.is_fat_arrow_or_return_type(after_param)
             }
             // Keyword: `at: index put: value =>` or `at: index :: Type =>`
@@ -1065,7 +1068,9 @@ impl Parser {
             }
             offset += 1;
             // Optional `:: Type (| Type)*` annotation on this parameter
-            if let Some(after) = self.skip_double_colon_type(offset) {
+            if let DoubleColonSkip::Valid(after) | DoubleColonSkip::Malformed(after) =
+                self.skip_double_colon_type(offset)
+            {
                 offset = after;
             }
             match self.peek_at(offset) {

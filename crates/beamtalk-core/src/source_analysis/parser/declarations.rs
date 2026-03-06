@@ -17,6 +17,22 @@ use crate::source_analysis::TokenKind;
 
 use super::{Diagnostic, Parser};
 
+/// Tri-state result for `skip_double_colon_type` lookahead.
+///
+/// Distinguishes "no `::` present" from "malformed `::` annotation" so
+/// callers can treat malformed typed selectors as method-start candidates
+/// (allowing parse-time errors) rather than silently falling back to the
+/// "untyped parameter" interpretation.
+pub(super) enum DoubleColonSkip {
+    /// No `::` token at the tested offset.
+    NotPresent,
+    /// Valid `:: Type (| Type)*` annotation; contains the offset after the annotation.
+    Valid(usize),
+    /// `::` was present but the type name (or union element) was missing or invalid.
+    /// Contains the offset just after `::` for error-recovery lookahead.
+    Malformed(usize),
+}
+
 impl Parser {
     // ========================================================================
     // Class Definition Parsing
@@ -269,9 +285,12 @@ impl Parser {
                     return false;
                 }
                 // Typed via DoubleColon: `+ other :: Type (| Type)* =>` (or untyped)
-                let after_param = self
-                    .skip_double_colon_type(offset + 2)
-                    .unwrap_or(offset + 2);
+                let after_param = match self.skip_double_colon_type(offset + 2) {
+                    // Malformed `::` (missing type): use offset after `::` so the
+                    // method is still detected and parse-time errors are emitted.
+                    DoubleColonSkip::Valid(o) | DoubleColonSkip::Malformed(o) => o,
+                    DoubleColonSkip::NotPresent => offset + 2,
+                };
                 self.is_fat_arrow_or_return_type(after_param)
             }
             // Keyword method: `at: index =>` or `at: index put: value =>`
@@ -282,27 +301,30 @@ impl Parser {
 
     /// Advances past a `:: Type (| Type)*` annotation in lookahead context.
     ///
-    /// Returns `Some(offset_after)` if a valid `::` type annotation starts at
-    /// `offset`, or `None` if the token at `offset` is not `DoubleColon`.
-    /// Handles union types (`:: Integer | Nil`).
-    pub(super) fn skip_double_colon_type(&self, offset: usize) -> Option<usize> {
+    /// Returns [`DoubleColonSkip`]:
+    /// - `NotPresent` — no `::` at `offset`; caller should treat param as untyped.
+    /// - `Valid(o)` — full annotation consumed; `o` is the offset after the annotation.
+    /// - `Malformed(o)` — `::` was present but followed by an invalid token; `o` is
+    ///   the offset just past `::`. Callers should use `o` for further lookahead so the
+    ///   method is still detected and parse-time errors can be emitted.
+    pub(super) fn skip_double_colon_type(&self, offset: usize) -> DoubleColonSkip {
         if !matches!(self.peek_at(offset), Some(TokenKind::DoubleColon)) {
-            return None;
+            return DoubleColonSkip::NotPresent;
         }
         let mut o = offset + 1;
         if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
-            return None;
+            return DoubleColonSkip::Malformed(o);
         }
         o += 1;
         // Skip union types: `| Type`
         while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
             o += 1;
             if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
-                return None;
+                return DoubleColonSkip::Malformed(o);
             }
             o += 1;
         }
-        Some(o)
+        DoubleColonSkip::Valid(o)
     }
 
     /// Checks if the token at `offset` starts a `=>` or `-> Type =>` pattern.
@@ -378,10 +400,12 @@ impl Parser {
                 }
                 Some(TokenKind::DoubleColon) => {
                     // Typed parameter: `paramName :: Type (| Type)*`
-                    let Some(after) = self.skip_double_colon_type(offset) else {
-                        return false;
+                    // Malformed `::` still counts as a method — pass the offset
+                    // after `::` so the method is detected and errors emitted.
+                    offset = match self.skip_double_colon_type(offset) {
+                        DoubleColonSkip::Valid(o) | DoubleColonSkip::Malformed(o) => o,
+                        DoubleColonSkip::NotPresent => return false,
                     };
-                    offset = after;
                     match self.peek_at(offset) {
                         Some(TokenKind::FatArrow) => return true,
                         Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
