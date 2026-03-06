@@ -2801,6 +2801,99 @@ mod tests {
     }
 
     #[test]
+    fn legacy_colon_classvar_annotation_produces_error_and_parses_type() {
+        // Legacy `classState: count : Integer` (single colon) must NOT be silently dropped.
+        // The parser should consume the colon, emit a focused error, parse the type,
+        // and continue — so the next method is not lost.
+        let source = "Actor subclass: Counter
+  classState: count : Integer = 0
+  increment => count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            !errors.is_empty(),
+            "Expected a migration error for legacy `:` classState syntax"
+        );
+        assert!(
+            errors[0].message.contains("`::`"),
+            "Error should mention `::`, got: {}",
+            errors[0].message
+        );
+        // The class and following method must still be parsed
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(
+            class.methods.len(),
+            1,
+            "method after legacy-typed classState should not be dropped"
+        );
+        // The classState declaration itself must be recovered with its type and default value
+        assert_eq!(
+            class.class_variables.len(),
+            1,
+            "Expected exactly one classState variable to be parsed"
+        );
+        let cv = &class.class_variables[0];
+        assert!(
+            cv.type_annotation.is_some(),
+            "Legacy `classState:` should still have a parsed type_annotation after recovery"
+        );
+        assert!(
+            cv.default_value.is_some(),
+            "Legacy `classState:` default value (`= 0`) should still be present after recovery"
+        );
+    }
+
+    #[test]
+    fn double_colon_type_annotation_no_diagnostic() {
+        // Valid `::` syntax must not produce any diagnostics, and types must be in the AST.
+        let source = "Actor subclass: BankAccount
+  state: balance :: Integer = 0
+  classState: rate :: Integer = 5
+  deposit: amount :: Integer => nil";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for valid `::` syntax, got: {diagnostics:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "Expected exactly one class");
+        let class = &module.classes[0];
+        // `state: balance :: Integer = 0`
+        assert!(
+            !class.state.is_empty(),
+            "Expected at least one state variable"
+        );
+        assert!(
+            class.state[0].type_annotation.is_some(),
+            "Expected state variable to have a type annotation from `::`"
+        );
+        // `classState: rate :: Integer = 5`
+        assert!(
+            !class.class_variables.is_empty(),
+            "Expected at least one classState variable"
+        );
+        assert!(
+            class.class_variables[0].type_annotation.is_some(),
+            "Expected classState variable to have a type annotation from `::`"
+        );
+        // `deposit: amount :: Integer => nil`
+        assert!(!class.methods.is_empty(), "Expected at least one method");
+        assert!(
+            !class.methods[0].parameters.is_empty(),
+            "Expected deposit: to have a parameter"
+        );
+        assert!(
+            class.methods[0].parameters[0].type_annotation.is_some(),
+            "Expected deposit: parameter to have a type annotation from `::`"
+        );
+    }
+
+    #[test]
     fn parse_binary_method() {
         let module = parse_ok(
             "Actor subclass: Number
