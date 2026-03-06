@@ -392,6 +392,7 @@ impl MethodKindMeta {
 /// Parses the full class definition to extract the class name, superclass,
 /// flags, state declarations, and method signatures. Each stdlib file
 /// contains exactly one class definition.
+#[allow(clippy::too_many_lines)] // inherently long: parses state, methods, synthesizes auto-methods
 fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMeta> {
     let source = fs::read_to_string(path)
         .into_diagnostic()
@@ -412,7 +413,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         );
     }
 
-    let methods = class
+    let mut methods: Vec<MethodMeta> = class
         .methods
         .iter()
         .map(|m| MethodMeta {
@@ -433,7 +434,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         })
         .collect();
 
-    let class_methods = class
+    let mut class_methods: Vec<MethodMeta> = class
         .class_methods
         .iter()
         .map(|m| MethodMeta {
@@ -476,9 +477,94 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         .map(|cv| cv.name.name.to_string())
         .collect();
 
+    // For Value subclasses with state declarations, synthesize the auto-generated
+    // getter and functional-updater methods so that `generated_builtins.rs` includes
+    // them. This mirrors the logic in `add_value_auto_methods` in the semantic
+    // analyzer (class_hierarchy/mod.rs) and ensures the type checker can resolve
+    // state-based accessors without having to process the source .bt file first.
+    let class_name = class.name.name.to_string();
+    if class.class_kind == beamtalk_core::ast::ClassKind::Value && !class.state.is_empty() {
+        let user_selectors: std::collections::HashSet<String> =
+            methods.iter().map(|m| m.selector.clone()).collect();
+        let user_class_selectors: std::collections::HashSet<String> =
+            class_methods.iter().map(|m| m.selector.clone()).collect();
+
+        for slot in &class.state {
+            let slot_name = slot.name.name.as_str();
+
+            // Auto getter: `fieldName` → slot type (or Object if unannotated)
+            if !user_selectors.contains(slot_name) {
+                methods.push(MethodMeta {
+                    selector: slot_name.to_string(),
+                    arity: 0,
+                    kind: MethodKindMeta::Primary,
+                    is_sealed: false,
+                    return_type: slot
+                        .type_annotation
+                        .as_ref()
+                        .map(|t| t.type_name().to_string()),
+                    param_types: vec![],
+                });
+            }
+
+            // Auto functional updater: `withFieldName:` → Self type
+            let with_sel = {
+                let mut chars = slot_name.chars();
+                match chars.next() {
+                    None => "with:".to_string(),
+                    Some(first) => {
+                        let cap: String = first.to_uppercase().collect();
+                        format!("with{}{}:", cap, chars.as_str())
+                    }
+                }
+            };
+            if !user_selectors.contains(&with_sel) {
+                let param_type = slot
+                    .type_annotation
+                    .as_ref()
+                    .map(|t| t.type_name().to_string());
+                methods.push(MethodMeta {
+                    selector: with_sel,
+                    arity: 1,
+                    kind: MethodKindMeta::Primary,
+                    is_sealed: false,
+                    return_type: Some(class_name.clone()),
+                    param_types: vec![param_type],
+                });
+            }
+        }
+
+        // Auto keyword constructor on the class side: `field1:field2:...`
+        let kw_sel: String = class.state.iter().fold(String::new(), |mut acc, s| {
+            acc.push_str(s.name.name.as_str());
+            acc.push(':');
+            acc
+        });
+        if !user_class_selectors.contains(&kw_sel) {
+            let arity = class.state.len();
+            let param_types = class
+                .state
+                .iter()
+                .map(|s| {
+                    s.type_annotation
+                        .as_ref()
+                        .map(|t| t.type_name().to_string())
+                })
+                .collect();
+            class_methods.push(MethodMeta {
+                selector: kw_sel,
+                arity,
+                kind: MethodKindMeta::Primary,
+                is_sealed: false,
+                return_type: Some(class_name.clone()),
+                param_types,
+            });
+        }
+    }
+
     Ok(ClassMeta {
         module_name: module_name.to_string(),
-        class_name: class.name.name.to_string(),
+        class_name,
         superclass_name: class.superclass_name().to_string(),
         is_sealed: class.is_sealed,
         is_abstract: class.is_abstract,
