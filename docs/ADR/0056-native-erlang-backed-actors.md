@@ -210,7 +210,7 @@ In `state_functions` mode, the same pattern applies per-state. The `{Selector, [
 Per ADR 0043, the call site determines dispatch mode — the `.bt` file does not need to declare it:
 
 - `agent selector.` → `sync_send/3` → `gen_server:call(Pid, {Selector, [Args]})`
-- `agent selector!` → `cast_send/3` → `gen_server:cast(Pid, {cast, Selector, [Args]})`
+- `agent selector!` → `cast_send/3` → `gen_server:cast(Pid, {cast, Selector, Args})`
 
 The backing gen_server implements `handle_call/3` for selectors that must return values, `handle_cast/2` for fire-and-forget selectors, or both. This is standard OTP practice — the `@native` facade generates the same call/cast routing as generated actors. No method-level sync/async annotation is required.
 

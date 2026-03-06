@@ -357,7 +357,7 @@ Generate the entire `beamtalk_foo.erl` from the `.bt` file, with stubs for compl
 - Any library author can create Erlang-backed classes without touching the Rust compiler
 - `state:` declarations on Value classes make object structure visible to `inspect`, the LSP, and gradual typing
 - The keyword constructor provides compile-time validation when field declarations change
-- `@primitive` scope is narrowed to direct BIF calls only — the list stops growing. `@intrinsic` covers structural compiler intrinsics (`blockValue`, `actorSpawn`, etc.) and is already separate (ADR 0007 amendment). Of ~442 `@primitive` entries across stdlib, approximately 24 (in HTTPResponse, JSON, Yaml, Regex, System) are targeted for immediate migration to `state:` or FFI; an additional ~12 (Timer, Random) are candidates; the remainder are direct BIF calls that correctly remain `@primitive`
+- `@primitive` scope is narrowed to fixed Erlang/OTP function calls (BIFs or selected OTP standard library modules) only — the list stops growing. `@intrinsic` covers structural compiler intrinsics (`blockValue`, `actorSpawn`, etc.) and is already separate (ADR 0007 amendment). Of ~442 `@primitive` entries across stdlib, approximately 24 (in HTTPResponse, JSON, Yaml, Regex, System) are targeted for immediate migration to `state:` or FFI; an additional ~12 (Timer, Random) are candidates; the remainder are direct BIF or OTP stdlib calls that correctly remain `@primitive`
 - `dispatch/3` and `has_method/1` boilerplate can be removed from existing stdlib modules
 - `beamtalk_http_response.erl` can be **deleted entirely** — `state:` declarations + pure Beamtalk methods replace all its functionality
 - Extends generation pipeline that already exists in `value_type_codegen.rs` — minimal new work
