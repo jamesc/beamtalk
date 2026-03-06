@@ -3,7 +3,7 @@
     {vsn, "0.1.0"},
     {modules, []},
     {registered, [beamtalk_classes]},
-    {applications, [kernel, stdlib, ssl, gun, yamerl]},
+    {applications, [kernel, stdlib, ssl, gun]},
     {mod, {beamtalk_runtime_app, []}},
     {env, [
         {repl_port, 9000},

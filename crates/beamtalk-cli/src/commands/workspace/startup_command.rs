@@ -229,6 +229,7 @@ mod tests {
             ranch_ebin: beam_dir.clone(),
             gun_ebin: beam_dir.clone(),
             stdlib_ebin: beam_dir.clone(),
+            stdlib_erlang_ebin: beam_dir.clone(),
         };
         build_detached_node_command(
             "test_node@localhost",
