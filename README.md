@@ -222,7 +222,7 @@ a Hello
 
 ```text
 > :load "examples/getting-started/src/counter.bt"
-Loaded Counter
+nil
 ```
 
 ---
@@ -388,7 +388,7 @@ Automatically installed in devcontainer:
 - ✅ **REPL** — Interactive evaluation with variable persistence
 - ✅ **Lexer & Parser** — Full expression parsing with error recovery
 - ✅ **Core Erlang codegen** — Compiles to BEAM bytecode via `erlc`
-- ✅ **Actors** — Spawn actors with state, send async messages, futures with `await`
+- ✅ **Actors** — Spawn actors with state, send sync or async messages, futures with `await`
 - ✅ **Field assignments** — Actor state mutations via `:=`
 - ✅ **Method dispatch** — Full message routing (unary, binary, keyword)
 - ✅ **Pattern matching** — `match:` expressions with literal and variable patterns
@@ -441,7 +441,7 @@ Simple programs demonstrating language features:
 
 ```bash
 cargo run -- repl
-> :load examples/hello.bt
+> :load "examples/getting-started/src/hello.bt"
 ```
 
 ### Standard Library ([stdlib/src/](stdlib/src/))

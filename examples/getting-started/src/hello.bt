@@ -5,11 +5,11 @@
 ///
 /// Try it in the REPL:
 ///   $ beamtalk repl
-///   > :load examples/hello.bt
-///   Loaded Hello
+///   > :load "examples/getting-started/src/hello.bt"
+///   nil
 ///   > Hello new greeting
 ///   │ Hello, World!
-///   nil
+///   a Hello
 Object subclass: Hello
 
   greeting => self traceCr: "Hello, World!"
