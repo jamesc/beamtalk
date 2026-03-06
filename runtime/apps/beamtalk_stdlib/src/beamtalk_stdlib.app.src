@@ -3,7 +3,7 @@
     {vsn, "0.1.0"},
     {modules, []},
     {registered, []},
-    {applications, [kernel, stdlib, yamerl, beamtalk_runtime]},
+    {applications, [kernel, stdlib, beamtalk_runtime]},
     {env, [
         {classes, [
             {'bt@stdlib@actor', 'Actor', 'Object'},

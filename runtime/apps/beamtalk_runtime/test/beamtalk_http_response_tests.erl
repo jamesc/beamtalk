@@ -10,7 +10,7 @@
 %%% - headers/1 accessor
 %%% - body/1 accessor
 %%% - ok/1 for 2xx/non-2xx ranges
-%%% - bodyAsJson/1 delegating to beamtalk_json
+%%% - bodyAsJson/1 decoding JSON via jsx with null→nil normalization
 %%% - printString/1 human-readable representation
 
 -module(beamtalk_http_response_tests).
