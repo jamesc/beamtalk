@@ -181,6 +181,11 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
         _Other ->
             {noreply, State}
     end;
+handle_info({Port, {exit_status, _N}}, #{port := Port, port_closed := true} = State) ->
+    %% Port was already closed cleanly via the {exit} handler.  OTP delivers
+    %% {exit_status} even for ports closed by port_close/1, so this is normal
+    %% on the happy path — discard without logging.
+    {noreply, State};
 handle_info({Port, {exit_status, _N}}, #{port := Port} = State) ->
     %% beamtalk_exec binary itself exited unexpectedly — treat all channels as EOF.
     ?LOG_WARNING("Exec port exited unexpectedly"),

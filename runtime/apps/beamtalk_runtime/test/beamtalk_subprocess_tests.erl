@@ -326,7 +326,7 @@ lines_stream_yields_correct_sequence_test() ->
 fast_exit_stderr_data_not_lost_test_() ->
     case os:type() of
         {unix, _} ->
-            %% Run 20 times to catch any residual race.
+            %% Run 50 times: pre-fix failure rate was ~20%, giving (0.8)^50 < 0.001% false-pass chance.
             Tests = [
                 begin
                     {ok, Pid} = beamtalk_subprocess:start(#{
@@ -334,9 +334,10 @@ fast_exit_stderr_data_not_lost_test_() ->
                         args => [<<"-c">>, <<"echo err >&2">>]
                     }),
                     Line = gen_server:call(Pid, {readStderrLine, []}, 5000),
+                    gen_server:stop(Pid),
                     ?_assertEqual(<<"err">>, Line)
                 end
-             || _ <- lists:seq(1, 20)
+             || _ <- lists:seq(1, 50)
             ],
             Tests;
         _ ->
