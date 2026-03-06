@@ -4,15 +4,22 @@
 /// HTTPResponse — Sealed value class for HTTP response objects.
 ///
 /// Represents the result of an HTTP request: status code, headers, and body.
-/// HTTPResponse instances are returned by `Http` class methods and are
+/// HTTPResponse instances are returned by `HTTPClient` class methods and are
 /// immutable value objects (no actor process).
+///
+/// ## Fields
+///
+/// - `status`  — HTTP status code (integer, e.g. 200, 404, 500)
+/// - `headers` — Response headers as a List of [name, value] binary pairs
+/// - `body`    — Response body as a String
 ///
 /// ## Examples
 /// ```beamtalk
-/// resp := Http get: "https://httpbin.org/get"
+/// resp := HTTPClient get: "https://httpbin.org/get"
 /// resp status      // => 200
-/// resp ok          // => true
+/// resp headers     // => #(#("content-type", "application/json"), ...)
 /// resp body        // => "{...}"
+/// resp ok          // => true
 /// resp bodyAsJson  // => a Dictionary
 /// ```
 sealed Value subclass: HTTPResponse
