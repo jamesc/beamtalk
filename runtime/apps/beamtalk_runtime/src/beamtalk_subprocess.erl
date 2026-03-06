@@ -49,6 +49,7 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
+-include("beamtalk.hrl").
 
 %% Public API
 -export([start_link/1, start/1]).
@@ -217,12 +218,13 @@ terminate(_Reason, State) ->
 %%% ============================================================================
 
 %% @private Write Data + newline to subprocess stdin.
--spec handle_writeLine(iodata(), map()) -> {reply, nil | {error, port_closed}, map()}.
+-spec handle_writeLine(iodata(), map()) -> {reply, nil | {error, #beamtalk_error{}}, map()}.
 handle_writeLine(Data, State) ->
     #{port := Port, child_id := ChildId, port_closed := PortClosed} = State,
     case PortClosed of
         true ->
-            {reply, {error, port_closed}, State};
+            Err = beamtalk_error:new(port_closed, 'Subprocess', 'writeLine:'),
+            {reply, {error, Err}, State};
         false ->
             Bin = iolist_to_binary(Data),
             Line = <<Bin/binary, $\n>>,
