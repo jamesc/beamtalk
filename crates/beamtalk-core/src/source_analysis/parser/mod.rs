@@ -1036,12 +1036,21 @@ impl Parser {
         match self.peek_at(offset) {
             // Unary: `identifier =>` or `identifier -> Type =>`
             Some(TokenKind::Identifier(_)) => self.is_fat_arrow_or_return_type(offset + 1),
-            // Binary: `+ other =>` or `+ other -> Type =>`
+            // Binary: `+ other =>` or `+ other :: Type =>` or `+ other -> Type =>`
             Some(TokenKind::BinarySelector(_)) => {
-                matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
-                    && self.is_fat_arrow_or_return_type(offset + 2)
+                if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
+                    return false;
+                }
+                let after_param = if matches!(self.peek_at(offset + 2), Some(TokenKind::DoubleColon))
+                    && matches!(self.peek_at(offset + 3), Some(TokenKind::Identifier(_)))
+                {
+                    offset + 4
+                } else {
+                    offset + 2
+                };
+                self.is_fat_arrow_or_return_type(after_param)
             }
-            // Keyword: `at: index put: value =>` or `at: index -> Type =>`
+            // Keyword: `at: index put: value =>` or `at: index :: Type =>`
             Some(TokenKind::Keyword(_)) => self.is_keyword_method_selector_at(offset),
             _ => false,
         }
@@ -1059,6 +1068,12 @@ impl Parser {
                 return false;
             }
             offset += 1;
+            // Optional `:: Type` annotation on this parameter
+            if matches!(self.peek_at(offset), Some(TokenKind::DoubleColon))
+                && matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
+            {
+                offset += 2;
+            }
             match self.peek_at(offset) {
                 Some(TokenKind::FatArrow) => return true,
                 Some(TokenKind::Keyword(_)) => {}
@@ -2091,6 +2106,42 @@ mod tests {
             empty_body_warnings.is_empty(),
             "Should not warn about empty body, got: {empty_body_warnings:?}"
         );
+    }
+
+    #[test]
+    fn parse_standalone_method_with_typed_keyword_param() {
+        // BT-1136: is_keyword_method_selector_at must handle `:: Type` typed params
+        let source = "Counter >> deposit: amount :: Integer => self";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no parse errors, got: {diagnostics:?}"
+        );
+        assert_eq!(module.method_definitions.len(), 1);
+        let method = &module.method_definitions[0].method;
+        assert_eq!(method.selector.name(), "deposit:");
+        let param = &method.parameters[0];
+        assert_eq!(param.name.name, "amount");
+        assert!(param.type_annotation.is_some());
+    }
+
+    #[test]
+    fn parse_standalone_method_with_typed_binary_param() {
+        // BT-1136: is_method_selector_at must handle `:: Type` for binary methods
+        let source = "Number >> + other :: Number => self";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no parse errors, got: {diagnostics:?}"
+        );
+        assert_eq!(module.method_definitions.len(), 1);
+        let method = &module.method_definitions[0].method;
+        assert_eq!(method.selector.name(), "+");
+        let param = &method.parameters[0];
+        assert_eq!(param.name.name, "other");
+        assert!(param.type_annotation.is_some());
     }
 
     #[test]
