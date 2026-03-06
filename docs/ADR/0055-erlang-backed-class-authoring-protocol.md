@@ -1,7 +1,7 @@
 # ADR 0055: Erlang-Backed Class Authoring Protocol
 
 ## Status
-Proposed (2026-03-06)
+Accepted (2026-03-06)
 
 ## Context
 
