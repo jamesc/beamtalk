@@ -33,6 +33,14 @@ Object subclass: TestResult
   /// ```
   failed -> Integer => @primitive "failed"
 
+  /// Number of test methods that were skipped.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result skipped     // => 0
+  /// ```
+  skipped -> Integer => @primitive "skipped"
+
   /// Total number of test methods that were run.
   ///
   /// ## Examples
