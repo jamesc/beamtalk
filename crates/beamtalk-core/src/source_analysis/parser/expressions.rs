@@ -968,7 +968,10 @@ impl Parser {
         if !matches!(self.current_kind(), TokenKind::GtGt) {
             segments.push(self.parse_binary_segment());
             while self.match_binary_selector(",") {
-                // Trailing comma before `>>` is an error (no trailing-comma support in patterns)
+                if matches!(self.current_kind(), TokenKind::GtGt) {
+                    self.error("Trailing comma is not allowed before '>>' in binary pattern");
+                    break;
+                }
                 segments.push(self.parse_binary_segment());
             }
         }
@@ -999,7 +1002,18 @@ impl Parser {
     fn parse_binary_segment_size(&mut self) -> Option<Box<Expression>> {
         match self.current_kind() {
             TokenKind::Integer(_) | TokenKind::Identifier(_) => {
-                Some(Box::new(self.parse_primary()))
+                let expr = self.parse_primary();
+                match &expr {
+                    Expression::Literal(Literal::Integer(_), _) | Expression::Identifier(_) => {
+                        Some(Box::new(expr))
+                    }
+                    _ => {
+                        self.error(
+                            "Binary segment size must be an integer literal or variable name",
+                        );
+                        None
+                    }
+                }
             }
             _ => {
                 self.error("Expected size expression after ':' in binary segment");
@@ -1066,6 +1080,30 @@ impl Parser {
         };
 
         // Optional type/modifiers: `/type[-modifier]*`
+        let (segment_type, signedness, endianness) = self.parse_binary_segment_specifiers();
+
+        let end = self.tokens[self.current.saturating_sub(1)].span();
+        BinarySegment {
+            value,
+            size,
+            segment_type,
+            signedness,
+            endianness,
+            unit: None,
+            span: start.merge(end),
+        }
+    }
+
+    /// Parses optional `/type[-modifier]*` specifiers for a binary segment.
+    ///
+    /// Returns `(segment_type, signedness, endianness)`.
+    fn parse_binary_segment_specifiers(
+        &mut self,
+    ) -> (
+        Option<BinarySegmentType>,
+        Option<BinarySignedness>,
+        Option<BinaryEndianness>,
+    ) {
         let mut segment_type = None;
         let mut signedness = None;
         let mut endianness = None;
@@ -1102,22 +1140,17 @@ impl Parser {
                 if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "-")
                 {
                     self.advance(); // consume `-`
+                    if !matches!(self.current_kind(), TokenKind::Identifier(_)) {
+                        self.error("Expected a specifier name after '-' in binary segment type");
+                        break;
+                    }
                 } else {
                     break;
                 }
             }
         }
 
-        let end = self.tokens[self.current.saturating_sub(1)].span();
-        BinarySegment {
-            value,
-            size,
-            segment_type,
-            signedness,
-            endianness,
-            unit: None,
-            span: start.merge(end),
-        }
+        (segment_type, signedness, endianness)
     }
 
     /// Parses a `@primitive` or `@intrinsic` pragma: `@primitive "selector"` or `@intrinsic intrinsicName`.
