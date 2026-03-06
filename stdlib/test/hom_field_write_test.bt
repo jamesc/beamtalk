@@ -16,3 +16,15 @@ TestCase subclass: HomFieldWriteTest
   testFieldWriteViaHOM =>
     actor := HomFieldWriteActor spawn
     self assert: actor testFieldWriteViaHOM equals: 15
+
+  // BT-1140: Two field writes in one block — both self.sum and self.count thread back.
+  // The block writes two distinct actor fields on each iteration; count should be 5.
+  testTwoFieldWritesViaHOM =>
+    actor := HomFieldWriteActor spawn
+    self assert: actor testTwoFieldWritesViaHOM equals: 5
+
+  // BT-1140: Block with captured local mutation AND field write via user-defined HOM.
+  // The block captures 'running' (local var) and also writes self.sum. Both must propagate.
+  testMixedCapturedLocalAndFieldWrite =>
+    actor := HomFieldWriteActor spawn
+    self assert: actor testMixedCapturedLocalAndFieldWrite equals: 15
