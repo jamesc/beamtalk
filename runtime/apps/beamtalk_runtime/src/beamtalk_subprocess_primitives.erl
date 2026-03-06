@@ -65,10 +65,10 @@ dispatch(Selector, _Args, _Self) ->
 %%% Internal helpers
 %%% ============================================================================
 
-%% @private Start a beamtalk_subprocess gen_server and return a beamtalk_object.
+%% @private Start a supervised beamtalk_subprocess gen_server and return a beamtalk_object.
 -spec start_subprocess(map(), atom()) -> #beamtalk_object{}.
 start_subprocess(Config, Selector) ->
-    case beamtalk_subprocess:start_link(Config) of
+    case beamtalk_subprocess_sup:start_child(Config) of
         {ok, Pid} ->
             #beamtalk_object{
                 class = 'Subprocess',
