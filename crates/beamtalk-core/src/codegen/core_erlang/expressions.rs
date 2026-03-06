@@ -546,7 +546,7 @@ impl CoreErlangGenerator {
     /// BT-1140: Returns true if the block contains any field writes (`self.field := ...`).
     ///
     /// Used alongside `captured_mutations_for_block` to determine whether a block needs
-    /// the Tier 2 stateful calling convention (StateAcc threading) even when there are no
+    /// the Tier 2 stateful calling convention (`StateAcc` threading) even when there are no
     /// captured local variable mutations.
     pub(super) fn block_has_field_writes(block: &Block) -> bool {
         use crate::codegen::core_erlang::block_analysis::analyze_block;
