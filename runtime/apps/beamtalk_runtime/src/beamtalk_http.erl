@@ -25,11 +25,10 @@
 %%%
 %%% ## Response Format
 %%%
-%%% All requests return an `HTTPResponse` tagged map:
-%%% `#{'$beamtalk_class' => 'HTTPResponse', status => Status, headers => Headers, body => Body}`:
-%%% - `status` — integer HTTP status code (e.g., 200)
-%%% - `headers` — list of `[Name, Value]` binary pairs
-%%% - `body` — binary response body
+%%% All requests return an `HTTPResponse` value object constructed via the
+%%% generated keyword constructor `'bt@stdlib@httpresponse':'class_status:headers:body:'/5`.
+%%% Fields: `status` (integer), `headers` (list of [Name, Value] binary pairs),
+%%% `body` (String).
 %%%
 %%% ## Options map (for `request:url:options:`)
 %%%
@@ -359,11 +358,24 @@ collect_response(ConnPid, StreamRef, MRef, Deadline, Selector) ->
             http_error(Selector, #{reason => Reason}, <<"Request failed">>)
     end.
 
-%% @private Build a Beamtalk HTTPResponse tagged map.
+%% @private Build a Beamtalk HTTPResponse using the generated keyword constructor.
+%%
+%% Calls the constructor generated from `state:` declarations in `HTTPResponse.bt`.
+%% This provides compile-time arity safety: if a field is added or removed from
+%% HTTPResponse, the arity of this call changes and the compiler catches the mismatch.
+%%
+%% `bt@stdlib@httpresponse` lives in `beamtalk_stdlib`, which depends on
+%% `beamtalk_runtime` and is therefore absent from the runtime Dialyzer PLT.
+%% The suppression below silences the resulting "unknown function" warning;
+%% the call is safe because the module is always loaded before HTTP requests
+%% can be made (beamtalk_stdlib starts after beamtalk_runtime).
+-dialyzer({nowarn_function, make_response/3}).
 -spec make_response(non_neg_integer(), list(), binary()) -> map().
 make_response(Status, GunHeaders, Body) ->
     BtHeaders = from_gun_headers(GunHeaders),
-    #{'$beamtalk_class' => 'HTTPResponse', status => Status, headers => BtHeaders, body => Body}.
+    'bt@stdlib@httpresponse':'class_status:headers:body:'(
+        undefined, undefined, Status, BtHeaders, Body
+    ).
 
 %% @private Parse a URL binary into connection components.
 %%

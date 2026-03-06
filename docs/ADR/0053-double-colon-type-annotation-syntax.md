@@ -347,4 +347,4 @@ Type annotations were introduced recently (ADR 0025 Phase 2) and the language ha
 - [BT-1138](https://linear.app/beamtalk/issue/BT-1138) — Migrate stdlib `.bt` files to `::` type annotation syntax (M)
 - [BT-1139](https://linear.app/beamtalk/issue/BT-1139) — Update documentation for `::` type annotation syntax (S)
 
-**Status:** Planned
+**Status:** Implemented

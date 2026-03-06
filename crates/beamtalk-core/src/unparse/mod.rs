@@ -255,18 +255,19 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
 
     docs.push(header);
 
-    // State declarations
+    // State declarations — use nest(2, ...) so that leading comments and
+    // doc-comment lines inside the declaration are also indented at column 2,
+    // matching the `line()` inside nest() pattern used for instance methods.
     for state in &class.state {
-        docs.push(line());
-        docs.push(Document::Str("  "));
-        docs.push(unparse_state_declaration(state));
+        docs.push(nest(2, docvec![line(), unparse_state_declaration(state)]));
     }
 
     // Class variables
     for state in &class.class_variables {
-        docs.push(line());
-        docs.push(Document::Str("  "));
-        docs.push(unparse_class_state_declaration(state));
+        docs.push(nest(
+            2,
+            docvec![line(), unparse_class_state_declaration(state)],
+        ));
     }
 
     // Blank line before first method (always, regardless of whether state is present)
@@ -1340,7 +1341,7 @@ mod tests {
     use super::*;
     use crate::ast::{
         Expression, ExpressionStatement, Identifier, Literal, MessageSelector, MethodDefinition,
-        ParameterDefinition,
+        ParameterDefinition, StateDeclaration,
     };
     use crate::source_analysis::Span;
 
@@ -1494,6 +1495,25 @@ mod tests {
         method.doc_comment = Some("Returns the size.".into());
         let output = unparse_method_definition(&method).to_pretty_string();
         assert_eq!(output, "/// Returns the size.\nsize => n");
+    }
+
+    #[test]
+    fn state_declaration_with_doc_comment() {
+        let mut state = StateDeclaration::new(Identifier::new("count", span()), span());
+        state.doc_comment = Some("The current count.".into());
+        let output = unparse_state_declaration(&state).to_pretty_string();
+        assert_eq!(output, "/// The current count.\nstate: count");
+    }
+
+    #[test]
+    fn state_declaration_with_multiline_doc_comment() {
+        let mut state = StateDeclaration::new(Identifier::new("timeout", span()), span());
+        state.doc_comment = Some("Timeout in milliseconds.\n\nDefaults to 30000.".into());
+        let output = unparse_state_declaration(&state).to_pretty_string();
+        assert_eq!(
+            output,
+            "/// Timeout in milliseconds.\n///\n/// Defaults to 30000.\nstate: timeout"
+        );
     }
 
     #[test]
@@ -1826,6 +1846,18 @@ mod tests {
         assert!(
             output.contains("/// Doc for bar\n  class bar => 1"),
             "expected doc comment before 'class' keyword in: {output}"
+        );
+    }
+
+    #[test]
+    fn state_declaration_doc_comment_round_trips() {
+        // A `///` doc comment before `state:` must survive a parse → unparse round-trip.
+        let source = "Object subclass: Foo\n  /// The current count.\n  state: count = 0\n";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("  /// The current count.\n  state: count = 0"),
+            "expected indented doc comment before state: in: {output}"
         );
     }
 
