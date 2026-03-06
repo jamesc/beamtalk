@@ -421,14 +421,11 @@ Rejected because it conflates two different mechanisms (BIF-level primitives and
 
 ### Phase 0 — Hand-Written Facade (80% Solution, No Compiler Changes)
 
-The facade approach can be validated and shipped without any compiler work. A hand-written Erlang facade module for Subprocess provides the pattern for library authors immediately:
+**Status: complete.** `beamtalk_subprocess.erl` (hand-written gen_server), `Subprocess.bt` (`@primitive` stubs), and the `generated_builtins.rs` entry are already in place and all tests pass. This is Phase 0.
 
-- Write `bt@stdlib@subprocess` by hand: exports `spawn/1`, `has_method/1`, `dispatch/3` delegating to `beamtalk_subprocess.erl`
-- Remove `Subprocess` from `generated_builtins.rs` and point the compiler at the hand-written facade
-- Verify all Subprocess tests pass
-- Document the facade pattern as the library author protocol even before Phase 1
+The primary remaining Phase 0 deliverable is documentation: write and publish the facade shape (`spawn/1`, `has_method/1`, `dispatch/3`) as the library author protocol so external authors can hand-write their own facades today, before Phase 1 ships.
 
-This hand-written approach is sufficient for library authors and production use. Phase 1 (compiler codegen) automates away boilerplate but is not required for correctness.
+**Note:** The Phase 0 description originally included "remove `Subprocess` from `generated_builtins.rs` and point the compiler at the hand-written facade." This is not achievable without compiler changes — removing the `generated_builtins.rs` entry requires Phase 1's `@native` annotation so the compiler knows to generate a facade instead of a full gen_server and so the static analysis layer reads class metadata from the `.bt` file. The removal happens in Phase 1, not Phase 0.
 
 **Issues:** BT-1155
 
