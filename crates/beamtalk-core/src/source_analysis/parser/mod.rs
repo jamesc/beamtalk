@@ -1041,13 +1041,14 @@ impl Parser {
                 if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
                     return false;
                 }
-                let after_param = if matches!(self.peek_at(offset + 2), Some(TokenKind::DoubleColon))
-                    && matches!(self.peek_at(offset + 3), Some(TokenKind::Identifier(_)))
-                {
-                    offset + 4
-                } else {
-                    offset + 2
-                };
+                let after_param =
+                    if matches!(self.peek_at(offset + 2), Some(TokenKind::DoubleColon))
+                        && matches!(self.peek_at(offset + 3), Some(TokenKind::Identifier(_)))
+                    {
+                        offset + 4
+                    } else {
+                        offset + 2
+                    };
                 self.is_fat_arrow_or_return_type(after_param)
             }
             // Keyword: `at: index put: value =>` or `at: index :: Type =>`
