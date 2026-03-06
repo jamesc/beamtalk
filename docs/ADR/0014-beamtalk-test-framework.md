@@ -160,6 +160,7 @@ Object subclass: CounterTest
 - Methods starting with `test` are auto-discovered
 - `setUp`/`tearDown` lifecycle methods run before/after each test
 - Assertion methods: `assert:`, `assert:equals:`, `deny:`, `should:raise:`
+- Skip methods: `skip`, `skip:` — signal `{bunit_skip, Reason}` caught by the runner as a third outcome
 - Compiles to EUnit like Phase 1
 - `TestCase` is a stdlib class (written in Beamtalk with `@primitive` methods)
 
@@ -238,7 +239,7 @@ This is not a limitation — it's actually the right tool for each job. Stdlib t
 
 The original xUnit framework. Tests are classes inheriting from `TestCase` with methods prefixed `test`. Supports `setUp`/`tearDown`, `assert:equals:`, `should:raise:`.
 
-**What we adopt:** Class structure, naming conventions, assertion API.
+**What we adopt:** Class structure, naming conventions, assertion API, skip protocol (`skip`/`skip:`).
 **What we adapt:** No `poolDictionaries` or `classVariableNames`. BEAM process isolation replaces Smalltalk image-level isolation.
 
 ### EUnit (Erlang)
@@ -389,6 +390,28 @@ Focus on property-based testing (QuickCheck/PropEr style) instead of unit tests.
 | TestResult class | `stdlib/src/TestResult.bt` (optional) | Collect and report test results |
 
 **Depends on:** ADR 0013 (class instantiation protocol — `new` for value objects), method introspection.
+
+
+### Skip Protocol (BT-1149)
+
+TestCase provides `skip` and `skip:` for platform-conditional and environment-conditional tests.
+
+**API:**
+```beamtalk
+testUnixOnlyFeature =>
+  System osFamily = "unix" ifFalse: [^self skip: "Unix only"]
+  // ... test body
+```
+
+**Protocol:**
+1. `self skip: reason` calls the `skip:` primitive which executes `throw({bunit_skip, Reason})`
+2. `run_test_method/4` catches `throw:{bunit_skip, Reason}` and returns `{skip, MethodName, Reason}`
+3. `structure_results/3` and `format_results/2` count skips separately from passes and failures
+4. `TestResult` gains a `skipped` field accessible via `result skipped`
+5. `hasPassed` returns `true` when `failed = 0`, regardless of skip count
+6. Summary: `N tests, P passed, S skipped, F failed` — skipped only shown when S > 0
+
+**Follows SUnit:** `TestCase>>skip:` in Pharo signals `TestSkipped` exception, same mechanism.
 
 ### Phase 3: Future Enhancements (Out of Scope)
 

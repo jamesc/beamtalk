@@ -18,6 +18,7 @@
 -export([
     should_raise/2,
     fail/1,
+    skip/1,
     run_all/1,
     run_single/2,
     execute_tests/5,
@@ -112,6 +113,21 @@ fail(Message) ->
     MessageBin = iolist_to_binary(io_lib:format("~p", [Message])),
     fail(MessageBin).
 
+%% @doc Signal that the current test should be skipped.
+%%
+%% Throws {bunit_skip, Reason}, caught by run_test_method/4 as a {skip, ...}
+%% result. A skipped test is neither a pass nor a failure.
+%%
+%% Example:
+%%   skip(<<"Unix only">>)
+-spec skip(binary() | atom()) -> no_return().
+skip(Reason) when is_binary(Reason) ->
+    throw({bunit_skip, Reason});
+skip(Reason) when is_atom(Reason) ->
+    throw({bunit_skip, atom_to_binary(Reason, utf8)});
+skip(Reason) ->
+    throw({bunit_skip, iolist_to_binary(io_lib:format("~p", [Reason]))}).
+
 %% @doc Execute tests from class-side dispatch (BT-440).
 %%
 %% Called from beamtalk_object_class handle_call via spawned process.
@@ -204,8 +220,9 @@ run_single(ClassName, TestMethodName) when is_atom(TestMethodName) ->
         total := non_neg_integer(),
         passed := non_neg_integer(),
         failed := non_neg_integer(),
+        skipped := non_neg_integer(),
         duration := float(),
-        tests := [#{name := atom(), status := pass | fail, error => binary()}]
+        tests := [#{name := atom(), status := pass | fail | skip, error => binary()}]
     }.
 run_all_structured(ClassName) ->
     Module = resolve_module(ClassName),
@@ -217,6 +234,7 @@ run_all_structured(ClassName) ->
                 total => 0,
                 passed => 0,
                 failed => 0,
+                skipped => 0,
                 duration => 0.0,
                 tests => []
             };
@@ -240,8 +258,9 @@ run_all_structured(ClassName) ->
         total := non_neg_integer(),
         passed := non_neg_integer(),
         failed := non_neg_integer(),
+        skipped := non_neg_integer(),
         duration := float(),
-        tests := [#{name := atom(), status := pass | fail, error => binary()}]
+        tests := [#{name := atom(), status := pass | fail | skip, error => binary()}]
     }.
 run_single_structured(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     Module = resolve_module(ClassName),
@@ -507,7 +526,7 @@ class_name_to_snake([H | T], _PrevLower, Acc) ->
 %% Creates fresh instance, runs lifecycle, returns pass/fail.
 %% tearDown always runs, even if the test fails.
 -spec run_test_method(atom(), atom(), atom(), map() | none) ->
-    {pass, atom()} | {fail, atom(), binary()}.
+    {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
 run_test_method(_ClassName, Module, MethodName, FlatMethods) ->
     try
         Instance = Module:new(),
@@ -524,6 +543,8 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods) ->
                 Module:dispatch(MethodName, [], SetUpInstance),
                 {pass, MethodName}
             catch
+                throw:{bunit_skip, Reason} ->
+                    {skip, MethodName, Reason};
                 error:#beamtalk_error{kind = assertion_failed, message = AssertMsg} ->
                     {fail, MethodName, AssertMsg};
                 error:#beamtalk_error{message = ErrMsg} ->
@@ -555,6 +576,9 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods) ->
             end,
         TestResult
     catch
+        %% skip: called from setUp — propagate as skip, not failure
+        throw:{bunit_skip, SkipReason} ->
+            {skip, MethodName, SkipReason};
         %% setUp or new() itself failed
         error:#beamtalk_error{message = SetupErrMsg} ->
             Prefix = <<"setUp failed: ">>,
@@ -581,21 +605,39 @@ check_lifecycle_methods(Module, none) ->
     {lists:keymember(setUp, 1, Exports), lists:keymember(tearDown, 1, Exports)}.
 
 %% @doc Format test results for REPL display.
--spec format_results([{pass, atom()} | {fail, atom(), binary()}], float()) -> binary().
+-spec format_results(
+    [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}], float()
+) -> binary().
 format_results(Results, Duration) ->
     Total = length(Results),
     Passed = length([ok || {pass, _} <- Results]),
-    Failed = Total - Passed,
+    Skipped = length([ok || {skip, _, _} <- Results]),
+    Failed = Total - Passed - Skipped,
     IoList =
-        case Failed of
-            0 ->
+        case {Failed, Skipped} of
+            {0, 0} ->
                 io_lib:format(
                     "~p tests, ~p passed (~.1fs)", [Total, Passed, Duration]
                 );
-            _ ->
+            {0, _} ->
+                io_lib:format(
+                    "~p tests, ~p passed, ~p skipped (~.1fs)",
+                    [Total, Passed, Skipped, Duration]
+                );
+            {_, 0} ->
                 Summary = io_lib:format(
                     "~p tests, ~p passed, ~p failed (~.1fs)",
                     [Total, Passed, Failed, Duration]
+                ),
+                Failures = [
+                    io_lib:format("  FAIL: ~s\n    ~s\n", [M, Msg])
+                 || {fail, M, Msg} <- Results
+                ],
+                [Summary, "\n\n" | Failures];
+            _ ->
+                Summary = io_lib:format(
+                    "~p tests, ~p passed, ~p skipped, ~p failed (~.1fs)",
+                    [Total, Passed, Skipped, Failed, Duration]
                 ),
                 Failures = [
                     io_lib:format("  FAIL: ~s\n    ~s\n", [M, Msg])
@@ -606,23 +648,29 @@ format_results(Results, Duration) ->
     unicode:characters_to_binary(IoList).
 
 %% @doc Convert raw test results to structured map (BT-699).
--spec structure_results(atom(), [{pass, atom()} | {fail, atom(), binary()}], float()) ->
+-spec structure_results(
+    atom(), [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}], float()
+) ->
     #{
         class := atom(),
         total := non_neg_integer(),
         passed := non_neg_integer(),
         failed := non_neg_integer(),
+        skipped := non_neg_integer(),
         duration := float(),
-        tests := [#{name := atom(), status := pass | fail, error => binary()}]
+        tests := [#{name := atom(), status := pass | fail | skip, error => binary()}]
     }.
 structure_results(ClassName, Results, Duration) ->
     Total = length(Results),
     Passed = length([ok || {pass, _} <- Results]),
-    Failed = Total - Passed,
+    Skipped = length([ok || {skip, _, _} <- Results]),
+    Failed = Total - Passed - Skipped,
     Tests = lists:map(
         fun
             ({pass, Name}) ->
                 #{name => Name, status => pass};
+            ({skip, Name, Reason}) ->
+                #{name => Name, status => skip, error => Reason};
             ({fail, Name, Msg}) ->
                 #{name => Name, status => fail, error => Msg}
         end,
@@ -633,6 +681,7 @@ structure_results(ClassName, Results, Duration) ->
         total => Total,
         passed => Passed,
         failed => Failed,
+        skipped => Skipped,
         duration => Duration,
         tests => Tests
     }.
