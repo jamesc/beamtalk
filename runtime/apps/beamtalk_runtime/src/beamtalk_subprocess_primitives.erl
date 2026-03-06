@@ -3,7 +3,7 @@
 
 %%% @doc Primitive dispatch for the Subprocess actor class (ADR 0051, BT-1132).
 %%%
-%%% **DDD Context:** runtime
+%%% **DDD Context:** Actor System Context
 %%%
 %%% Implements class-side `@primitive` methods for `Subprocess`. The compiled
 %%% `bt@stdlib@subprocess:dispatch/3` delegates here for any selector that

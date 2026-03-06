@@ -3,7 +3,7 @@
 
 %%% @doc OTP gen_server for interactive subprocess management (ADR 0051, Phase 4a+4b).
 %%%
-%%% **DDD Context:** runtime
+%%% **DDD Context:** Actor System Context
 %%%
 %%% Each `beamtalk_subprocess` process owns one port to the `beamtalk_exec`
 %%% Rust helper binary and manages exactly one child subprocess (ChildId = 0).

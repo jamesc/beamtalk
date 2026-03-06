@@ -3,7 +3,7 @@
 
 %%% @doc simple_one_for_one supervisor for beamtalk_subprocess gen_servers (BT-1148).
 %%%
-%%% **DDD Context:** runtime
+%%% **DDD Context:** Actor System Context
 %%%
 %%% Each Subprocess actor starts one `beamtalk_subprocess` gen_server via
 %%% `start_child/1`.  The `temporary` restart strategy means a crashed subprocess
