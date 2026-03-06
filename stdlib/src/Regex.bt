@@ -30,7 +30,8 @@ sealed Value subclass: Regex
   /// ```beamtalk
   /// Regex from: "[0-9]+"                       // => Regex([0-9]+)
   /// ```
-  class from: pattern: String -> Regex => (Erlang beamtalk_regex) from: pattern
+  class sealed from: pattern :: String -> Regex =>
+    (Erlang beamtalk_regex) from: pattern
 
   /// Compile a regex pattern with PCRE options (class method).
   ///
@@ -40,7 +41,7 @@ sealed Value subclass: Regex
   /// ```beamtalk
   /// Regex from: "[a-z]+" options: #(#caseless)
   /// ```
-  class from: pattern: String options: opts: List -> Regex =>
+  class sealed from: pattern :: String options: opts :: List -> Regex =>
     (Erlang beamtalk_regex) from: pattern options: opts
 
   /// Return the original pattern source string.

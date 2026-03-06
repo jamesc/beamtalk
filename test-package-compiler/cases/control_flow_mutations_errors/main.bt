@@ -6,7 +6,7 @@
 
 // ERROR: Field Assignment in Stored Closure
 Counter := class [
-    state: value: Integer = 0.
+    state: value :: Integer = 0.
     
     // ERROR: Cannot store a block that assigns to fields
     badBlock =>

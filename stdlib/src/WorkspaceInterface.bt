@@ -24,7 +24,8 @@ sealed Object subclass: WorkspaceInterface
   class current -> WorkspaceInterface => self.current
 
   /// Set the current singleton instance.
-  class current: instance: WorkspaceInterface -> Nil => self.current := instance
+  class current: instance :: WorkspaceInterface -> Nil =>
+    self.current := instance
 
   /// Return a list of all live actors as object references.
   ///
@@ -40,7 +41,7 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorAt: "<0.132.0>"
   /// ```
-  actorAt: pidString: String -> Object =>
+  actorAt: pidString :: String -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) actorAt: pidString
 
   /// Return all actors of a given class.
@@ -49,7 +50,7 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorsOf: Counter
   /// ```
-  actorsOf: aClass: Object -> List =>
+  actorsOf: aClass :: Object -> List =>
     self actors select: [:a | a class includesBehaviour: aClass]
 
   /// Return a list of loaded user classes with source file info.
@@ -87,7 +88,7 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace load: "examples/counter.bt"
   /// ```
-  load: path: String -> Object =>
+  load: path :: String -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) load: path
 
   /// Run all loaded test classes and return a TestResult.
@@ -104,7 +105,7 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace test: CounterTest
   /// ```
-  test: testClass: Object -> TestResult => TestRunner run: testClass
+  test: testClass :: Object -> TestResult => TestRunner run: testClass
 
   /// Register a value in the workspace namespace under a given name.
   /// Subsequent REPL evals can reference the value by name.
@@ -115,7 +116,7 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace bind: myActor as: #MyTool
   /// ```
-  bind: value as: bindingName: Symbol -> Nil =>
+  bind: value as: bindingName :: Symbol -> Nil =>
     (Erlang beamtalk_workspace_interface_primitives) bind: value as: bindingName
 
   /// Remove a registered name from the workspace namespace.
@@ -125,5 +126,5 @@ sealed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace unbind: #MyTool
   /// ```
-  unbind: bindingName: Symbol -> Nil =>
+  unbind: bindingName :: Symbol -> Nil =>
     (Erlang beamtalk_workspace_interface_primitives) unbind: bindingName

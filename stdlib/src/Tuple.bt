@@ -29,7 +29,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// Tuple class withAll: #(1, 2, 3)   // => {1, 2, 3}
   /// ```
-  class withAll: list: List -> Tuple => @primitive "withAll:"
+  class withAll: list :: List -> Tuple => @primitive "withAll:"
 
   /// Create a Tuple from a list. Convenience alias for `withAll:`.
   ///
@@ -37,7 +37,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// Tuple new: #(1, 2, 3)            // => {1, 2, 3}
   /// ```
-  class new: elements: List -> Tuple => self withAll: elements
+  class new: elements :: List -> Tuple => self withAll: elements
 
   /// Number of elements in the tuple.
   ///
@@ -53,7 +53,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result at: 2   // => the value from an {ok, Value} tuple
   /// ```
-  at: index: Integer => @primitive "at:"
+  at: index :: Integer => @primitive "at:"
 
   /// Test if the tuple represents an `{'ok', _}` result.
   ///
@@ -92,7 +92,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result unwrapOr: 0   // => 0 when result is {error, _}
   /// ```
-  unwrapOr: default: Object -> Object =>
+  unwrapOr: default :: Object -> Object =>
     self isOk ifTrue: [self at: 2] ifFalse: [default]
 
   /// Extract the value from an `{'ok', Value}` tuple, or evaluate `block` on error.
@@ -101,7 +101,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result unwrapOrElse: [0]   // => 0 when result is {error, _}
   /// ```
-  unwrapOrElse: block: Block -> Object =>
+  unwrapOrElse: block :: Block -> Object =>
     self isOk ifTrue: [self at: 2] ifFalse: [block value]
 
   /// Convert the tuple to its string representation.
@@ -126,7 +126,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result do: [:x | Transcript show: x]
   /// ```
-  do: block: Block -> Nil => @primitive "do:"
+  do: block :: Block -> Nil => @primitive "do:"
 
   /// Return a random element from the tuple.
   ///

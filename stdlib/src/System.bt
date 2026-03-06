@@ -32,7 +32,7 @@ sealed Object subclass: System
   /// System getEnv: "NONEXISTENT_VAR_12345"
   /// // => nil
   /// ```
-  class sealed getEnv: name: String -> String | Nil => @primitive "getEnv:"
+  class sealed getEnv: name :: String -> String | Nil => @primitive "getEnv:"
 
   /// Read an environment variable with a default fallback.
   ///
@@ -43,7 +43,7 @@ sealed Object subclass: System
   /// System getEnv: "NONEXISTENT_VAR_12345" default: "8080"
   /// // => "8080"
   /// ```
-  class sealed getEnv: name: String default: fallback: String -> String =>
+  class sealed getEnv: name :: String default: fallback :: String -> String =>
     @primitive "getEnv:default:"
 
   /// Return the OS platform name: "linux", "darwin", or "win32".

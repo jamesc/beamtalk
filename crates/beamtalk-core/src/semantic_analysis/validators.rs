@@ -2452,7 +2452,7 @@ mod tests {
     /// Value instance method with a Block parameter and `-> Nil` is exempt (iteration pattern).
     #[test]
     fn value_block_param_nil_return_is_exempt() {
-        let src = "Value subclass: MyVal\n  each: block: Block -> Nil => nil";
+        let src = "Value subclass: MyVal\n  each: block :: Block -> Nil => nil";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");

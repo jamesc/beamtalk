@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 typed Actor subclass: TypedLedger
-  state: amount: Integer = 0
+  state: amount :: Integer = 0
 
   addOne -> Integer =>
     self.amount := self.amount + 1

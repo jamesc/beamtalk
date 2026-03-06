@@ -21,7 +21,8 @@ sealed Object subclass: BeamtalkInterface
   class current -> BeamtalkInterface => self.current
 
   /// Set the current singleton instance.
-  class current: instance: BeamtalkInterface -> Nil => self.current := instance
+  class current: instance :: BeamtalkInterface -> Nil =>
+    self.current := instance
 
   /// Return a list of all registered class names.
   ///
@@ -37,7 +38,7 @@ sealed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk classNamed: #Integer
   /// ```
-  classNamed: className: Symbol -> Object =>
+  classNamed: className :: Symbol -> Object =>
     (Erlang beamtalk_interface_primitives) findClass: className
 
   /// Return the global namespace as a Dictionary populated from the class registry.
@@ -54,7 +55,7 @@ sealed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk help: Counter
   /// ```
-  sealed help: aClass: Object -> String =>
+  sealed help: aClass :: Object -> String =>
     (Erlang beamtalk_interface_primitives) help: aClass
 
   /// Show detailed documentation for a specific method on a class.
@@ -63,7 +64,7 @@ sealed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk help: Counter selector: #increment
   /// ```
-  sealed help: aClass: Object selector: aSelector: Symbol -> String =>
+  sealed help: aClass :: Object selector: aSelector :: Symbol -> String =>
     (Erlang beamtalk_interface_primitives) help: aClass selector: aSelector
 
   /// Return the Beamtalk version string.

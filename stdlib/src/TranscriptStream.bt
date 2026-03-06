@@ -21,7 +21,7 @@ Actor subclass: TranscriptStream
   class current -> TranscriptStream => self.current
 
   /// Set the current singleton instance.
-  class current: instance: TranscriptStream -> Nil => self.current := instance
+  class current: instance :: TranscriptStream -> Nil => self.current := instance
 
   /// Clear the current singleton instance (reset to nil).
   class resetCurrent -> Nil => self.current := nil
@@ -33,7 +33,7 @@ Actor subclass: TranscriptStream
   /// Transcript show: "hello"
   /// Transcript show: 42
   /// ```
-  show: value: Object -> Nil => @primitive "show:"
+  show: value :: Object -> Nil => @primitive "show:"
 
   /// Write a newline to the transcript.
   ///

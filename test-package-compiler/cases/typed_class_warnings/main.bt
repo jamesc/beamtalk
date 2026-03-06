@@ -7,7 +7,7 @@
 // verify the type checker surfaces warnings for missing annotations.
 
 typed Actor subclass: TypedCounter
-  state: value: Integer = 0
+  state: value :: Integer = 0
 
   // Fully annotated — no warning expected
   getValue -> Integer => self.value

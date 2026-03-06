@@ -62,6 +62,8 @@ use ecow::EcoString;
 mod declarations;
 mod expressions;
 
+use declarations::DoubleColonSkip;
+
 // Property-based tests (ADR 0011 Phase 2)
 #[cfg(test)]
 mod property_tests;
@@ -1035,12 +1037,18 @@ impl Parser {
         match self.peek_at(offset) {
             // Unary: `identifier =>` or `identifier -> Type =>`
             Some(TokenKind::Identifier(_)) => self.is_fat_arrow_or_return_type(offset + 1),
-            // Binary: `+ other =>` or `+ other -> Type =>`
+            // Binary: `+ other =>` or `+ other :: Type (| Type)* =>` or `+ other -> Type =>`
             Some(TokenKind::BinarySelector(_)) => {
-                matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
-                    && self.is_fat_arrow_or_return_type(offset + 2)
+                if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
+                    return false;
+                }
+                let after_param = match self.skip_double_colon_type(offset + 2) {
+                    DoubleColonSkip::Valid(o) | DoubleColonSkip::Malformed(o) => o,
+                    DoubleColonSkip::NotPresent => offset + 2,
+                };
+                self.is_fat_arrow_or_return_type(after_param)
             }
-            // Keyword: `at: index put: value =>` or `at: index -> Type =>`
+            // Keyword: `at: index put: value =>` or `at: index :: Type =>`
             Some(TokenKind::Keyword(_)) => self.is_keyword_method_selector_at(offset),
             _ => false,
         }
@@ -1104,7 +1112,12 @@ impl Parser {
                 return false;
             }
             offset += 1;
-
+            // Optional `:: Type (| Type)*` annotation on this parameter
+            if let DoubleColonSkip::Valid(after) | DoubleColonSkip::Malformed(after) =
+                self.skip_double_colon_type(offset)
+            {
+                offset = after;
+            }
             match self.peek_at(offset) {
                 Some(TokenKind::FatArrow) => return true,
                 Some(TokenKind::Keyword(_)) => {} // More keyword parts, continue loop
@@ -2161,6 +2174,42 @@ mod tests {
     }
 
     #[test]
+    fn parse_standalone_method_with_typed_keyword_param() {
+        // BT-1136: is_keyword_method_selector_at must handle `:: Type` typed params
+        let source = "Counter >> deposit: amount :: Integer => self";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no parse errors, got: {diagnostics:?}"
+        );
+        assert_eq!(module.method_definitions.len(), 1);
+        let method = &module.method_definitions[0].method;
+        assert_eq!(method.selector.name(), "deposit:");
+        let param = &method.parameters[0];
+        assert_eq!(param.name.name, "amount");
+        assert!(param.type_annotation.is_some());
+    }
+
+    #[test]
+    fn parse_standalone_method_with_typed_binary_param() {
+        // BT-1136: is_method_selector_at must handle `:: Type` for binary methods
+        let source = "Number >> + other :: Number => self";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no parse errors, got: {diagnostics:?}"
+        );
+        assert_eq!(module.method_definitions.len(), 1);
+        let method = &module.method_definitions[0].method;
+        assert_eq!(method.selector.name(), "+");
+        let param = &method.parameters[0];
+        assert_eq!(param.name.name, "other");
+        assert!(param.type_annotation.is_some());
+    }
+
+    #[test]
     fn parse_combined_class_with_standalone_method_field_assign() {
         // Simulates what the REPL does: concatenates class source + standalone method
         let source = "Actor subclass: Counter\n  state: count = 0\n  increment => self.count := self.count + 1\nCounter >> foo => self.count := 5";
@@ -2676,7 +2725,7 @@ mod tests {
     fn parse_state_with_type_annotation() {
         let module = parse_ok(
             "Actor subclass: Person
-  state: name: String = \"unnamed\"",
+  state: name :: String = \"unnamed\"",
         );
 
         assert_eq!(module.classes.len(), 1);
@@ -2687,6 +2736,68 @@ mod tests {
         assert_eq!(state.name.name, "name");
         assert!(state.type_annotation.is_some());
         assert!(state.default_value.is_some());
+    }
+
+    #[test]
+    fn legacy_colon_state_annotation_produces_error_and_parses_type() {
+        // Legacy `state: name : String` (single colon) must NOT be silently dropped.
+        // The parser should consume the colon, emit a focused error, parse the type,
+        // and continue — so the next method is not lost.
+        let source = "Actor subclass: Person
+  state: name : String = \"unnamed\"
+  greet => \"hello\"";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            !errors.is_empty(),
+            "Expected a migration error for legacy `:` syntax"
+        );
+        assert!(
+            errors[0].message.contains("`::`"),
+            "Error should mention `::`, got: {}",
+            errors[0].message
+        );
+        // The class and following method must still be parsed
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(
+            module.classes[0].methods.len(),
+            1,
+            "method after legacy-typed state should not be dropped"
+        );
+    }
+
+    #[test]
+    fn legacy_colon_param_annotation_produces_error_and_parses_type() {
+        // Legacy `deposit: amount : Integer` (single colon after param name) must
+        // emit a focused error and continue so the next method is not dropped.
+        let source = "Actor subclass: BankAccount
+  deposit: amount : Integer => nil
+  withdraw: amount => nil";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            !errors.is_empty(),
+            "Expected a migration error for legacy `:` param syntax"
+        );
+        assert!(
+            errors[0].message.contains("`::`"),
+            "Error should mention `::`, got: {}",
+            errors[0].message
+        );
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(
+            module.classes[0].methods.len(),
+            2,
+            "method after legacy-typed param should not be dropped"
+        );
     }
 
     #[test]
@@ -2796,7 +2907,7 @@ mod tests {
     fn parse_typed_keyword_param() {
         let module = parse_ok(
             "Actor subclass: BankAccount
-  deposit: amount: Integer => self.balance := self.balance + amount",
+  deposit: amount :: Integer => self.balance := self.balance + amount",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2814,7 +2925,7 @@ mod tests {
     fn parse_typed_keyword_params_multiple() {
         let module = parse_ok(
             "Actor subclass: BankAccount
-  transfer: amount: Integer to: target: BankAccount => self",
+  transfer: amount :: Integer to: target :: BankAccount => self",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2830,7 +2941,7 @@ mod tests {
     fn parse_typed_param_with_return_type() {
         let module = parse_ok(
             "Actor subclass: BankAccount
-  deposit: amount: Integer -> Integer => self.balance := self.balance + amount",
+  deposit: amount :: Integer -> Integer => self.balance := self.balance + amount",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2860,7 +2971,7 @@ mod tests {
     fn parse_binary_typed_param() {
         let module = parse_ok(
             "Object subclass: Number
-  + other: Number -> Number => self",
+  + other :: Number -> Number => self",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2876,7 +2987,7 @@ mod tests {
         // First param typed, second untyped
         let module = parse_ok(
             "Actor subclass: BankAccount
-  transfer: amount: Integer to: target => self",
+  transfer: amount :: Integer to: target => self",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2890,10 +3001,10 @@ mod tests {
 
     #[test]
     fn parse_keyword_typed_param_with_space_colon() {
-        // Space around colon: `amount : Integer` instead of `amount: Integer`
+        // DoubleColon with spaces: `amount :: Integer`
         let module = parse_ok(
             "Actor subclass: BankAccount
-  deposit: amount : Integer => self",
+  deposit: amount :: Integer => self",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2905,10 +3016,10 @@ mod tests {
 
     #[test]
     fn parse_binary_typed_param_with_space_colon() {
-        // Space around colon: `other : Number` instead of `other: Number`
+        // DoubleColon with spaces: `other :: Number`
         let module = parse_ok(
             "Actor subclass: Adder
-  + other : Number => self",
+  + other :: Number => self",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2954,10 +3065,10 @@ mod tests {
 
     #[test]
     fn parse_arrow_method_with_keyword_typed_param() {
-        // ADR 0047: `-> value: Association =>` — typed param via Keyword token
+        // `-> value :: Association =>` — typed param via DoubleColon
         let module = parse_ok(
             "Object subclass: Pair
-  -> value: Association => @primitive \"->\"",
+  -> value :: Association => @primitive \"->\"",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2966,6 +3077,67 @@ mod tests {
         assert_eq!(method.parameters[0].name.name, "value");
         assert!(method.parameters[0].type_annotation.is_some());
         assert!(method.return_type.is_none());
+    }
+
+    #[test]
+    fn parse_binary_method_with_union_typed_param() {
+        // BT-1136/Copilot: `+ other :: Integer | Nil =>` — union type in binary param
+        let module = parse_ok(
+            "Object subclass: Number
+  + other :: Integer | Nil -> Integer => self",
+        );
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "+");
+        assert!(method.parameters[0].type_annotation.is_some());
+        assert!(method.return_type.is_some());
+    }
+
+    #[test]
+    fn parse_keyword_method_with_union_typed_param() {
+        // BT-1136/Copilot: `deposit: amount :: Integer | Float =>` — union type in keyword param
+        let module = parse_ok(
+            "Actor subclass: BankAccount
+  deposit: amount :: Integer | Float => self",
+        );
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "deposit:");
+        assert!(method.parameters[0].type_annotation.is_some());
+    }
+
+    #[test]
+    fn parse_standalone_method_with_union_typed_binary_param() {
+        // BT-1136/Copilot: standalone `+` method with union-typed param
+        let source = "Number >> + other :: Integer | Nil => self";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no parse errors, got: {diagnostics:?}"
+        );
+        assert_eq!(module.method_definitions.len(), 1);
+        assert!(
+            module.method_definitions[0].method.parameters[0]
+                .type_annotation
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn parse_standalone_method_with_union_typed_keyword_param() {
+        // BT-1136/Copilot: standalone keyword method with union-typed param
+        let source = "Counter >> deposit: amount :: Integer | Float => self";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no parse errors, got: {diagnostics:?}"
+        );
+        assert_eq!(module.method_definitions.len(), 1);
+        assert!(
+            module.method_definitions[0].method.parameters[0]
+                .type_annotation
+                .is_some()
+        );
     }
 
     #[test]
@@ -2993,7 +3165,7 @@ mod tests {
         let module = parse_ok(
             "Actor subclass: Counter
   state: value = 0
-  state: name: String
+  state: name :: String
 
   increment => self.value := self.value + 1
   decrement => self.value := self.value - 1",
@@ -4701,7 +4873,7 @@ Actor subclass: Counter
     fn standalone_method_definition_keyword_typed_param() {
         // Regression: BT-1151 — is_keyword_method_selector_at must handle typed params
         // just like is_keyword_method_at; without the shared helper this was missed.
-        let module = parse_ok("Counter >> setValue: v: Integer => self.value := v");
+        let module = parse_ok("Counter >> setValue: v :: Integer => self.value := v");
         assert_eq!(module.method_definitions.len(), 1);
         let method_def = &module.method_definitions[0];
         assert_eq!(method_def.class_name.name.as_str(), "Counter");
@@ -4844,7 +5016,7 @@ Actor subclass: Counter
     fn parse_typed_class() {
         let module = parse_ok(
             "typed Actor subclass: StrictCounter
-  state: value: Integer = 0
+  state: value :: Integer = 0
 
   increment -> Integer => self.value := self.value + 1",
         );
@@ -4864,8 +5036,8 @@ Actor subclass: Counter
     fn parse_typed_sealed_class() {
         let module = parse_ok(
             "typed sealed Actor subclass: ImmutablePoint
-  state: x: Integer = 0
-  state: y: Integer = 0",
+  state: x :: Integer = 0
+  state: y :: Integer = 0",
         );
 
         let class = &module.classes[0];
