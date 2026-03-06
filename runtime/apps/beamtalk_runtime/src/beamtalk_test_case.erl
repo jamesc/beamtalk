@@ -222,7 +222,9 @@ run_single(ClassName, TestMethodName) when is_atom(TestMethodName) ->
         failed := non_neg_integer(),
         skipped := non_neg_integer(),
         duration := float(),
-        tests := [#{name := atom(), status := pass | fail | skip, error => binary(), reason => binary()}]
+        tests := [
+            #{name := atom(), status := pass | fail | skip, error => binary(), reason => binary()}
+        ]
     }.
 run_all_structured(ClassName) ->
     Module = resolve_module(ClassName),
@@ -260,7 +262,9 @@ run_all_structured(ClassName) ->
         failed := non_neg_integer(),
         skipped := non_neg_integer(),
         duration := float(),
-        tests := [#{name := atom(), status := pass | fail | skip, error => binary(), reason => binary()}]
+        tests := [
+            #{name := atom(), status := pass | fail | skip, error => binary(), reason => binary()}
+        ]
     }.
 run_single_structured(ClassName, TestMethodName) when is_atom(TestMethodName) ->
     Module = resolve_module(ClassName),
@@ -658,7 +662,9 @@ format_results(Results, Duration) ->
         failed := non_neg_integer(),
         skipped := non_neg_integer(),
         duration := float(),
-        tests := [#{name := atom(), status := pass | fail | skip, error => binary(), reason => binary()}]
+        tests := [
+            #{name := atom(), status := pass | fail | skip, error => binary(), reason => binary()}
+        ]
     }.
 structure_results(ClassName, Results, Duration) ->
     Total = length(Results),
