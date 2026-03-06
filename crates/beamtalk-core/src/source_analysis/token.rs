@@ -127,6 +127,13 @@ pub enum TokenKind {
     /// Double colon for type annotations: `::`
     DoubleColon,
 
+    /// Arrow for return type annotations and binary `->` method: `->`
+    ///
+    /// Dedicated token (separate from [`BinarySelector`]) so that the parser can
+    /// unambiguously distinguish the return-type separator `->` from a binary method
+    /// selector named `->` (ADR 0047).
+    Arrow,
+
     /// Standalone hash character: `#`
     ///
     /// Note: complete symbol literals are represented by [`TokenKind::Symbol`],
@@ -179,7 +186,10 @@ impl TokenKind {
     /// Returns `true` if this token is a message selector component.
     #[must_use]
     pub const fn is_selector(&self) -> bool {
-        matches!(self, Self::Keyword(_) | Self::BinarySelector(_))
+        matches!(
+            self,
+            Self::Keyword(_) | Self::BinarySelector(_) | Self::Arrow
+        )
     }
 
     /// Returns `true` if this token is a delimiter.
@@ -244,6 +254,7 @@ impl TokenKind {
             | Self::Pipe
             | Self::Colon
             | Self::DoubleColon
+            | Self::Arrow
             | Self::Hash
             | Self::FatArrow
             | Self::AtPrimitive
@@ -289,6 +300,7 @@ impl std::fmt::Display for TokenKind {
             Self::Pipe => write!(f, "|"),
             Self::Colon => write!(f, ":"),
             Self::DoubleColon => write!(f, "::"),
+            Self::Arrow => write!(f, "->"),
             Self::Hash => write!(f, "#"),
             Self::FatArrow => write!(f, "=>"),
             Self::AtPrimitive => write!(f, "@primitive"),

@@ -355,6 +355,13 @@ impl<'src> Lexer<'src> {
             // Pragma directives
             '@' => self.lex_at_directive(start),
 
+            // Arrow: `->` return-type separator / binary method selector (ADR 0047)
+            '-' if self.peek_char_n(1) == Some('>') => {
+                self.advance(); // -
+                self.advance(); // >
+                TokenKind::Arrow
+            }
+
             // Binary operators
             '+' | '-' | '*' | '/' | '<' | '>' | '~' | '%' | '&' | '?' | ',' | '\\' => {
                 self.lex_binary_selector()

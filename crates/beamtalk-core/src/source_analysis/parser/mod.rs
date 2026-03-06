@@ -130,7 +130,10 @@ impl BindingPower {
 /// ```
 pub(super) fn binary_binding_power(op: &str) -> Option<BindingPower> {
     match op {
-        // Method lookup (lowest binary precedence)
+        // Association creation: `key -> value` (ADR 0047, lowest binary precedence)
+        "->" => Some(BindingPower::left_assoc(3)),
+
+        // Method lookup
         // `Counter >> #increment` returns CompiledMethod object
         ">>" => Some(BindingPower::left_assoc(5)),
 
