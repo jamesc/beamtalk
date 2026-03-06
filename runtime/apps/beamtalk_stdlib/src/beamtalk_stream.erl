@@ -43,7 +43,7 @@
     print_string/1
 ]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Internal Helpers

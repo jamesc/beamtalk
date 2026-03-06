@@ -56,7 +56,7 @@
 ]).
 -export([handle_lines/1, has_method/1, handle_has_method/1]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================

@@ -16,7 +16,7 @@
 
 -export([dispatch/3, has_method/1]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% @doc Dispatch a message to a FileHandle instance.
 %%

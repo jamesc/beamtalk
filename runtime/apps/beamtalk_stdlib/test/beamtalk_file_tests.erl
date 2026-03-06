@@ -15,7 +15,7 @@
 
 -module(beamtalk_file_tests).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 %%% ============================================================================
