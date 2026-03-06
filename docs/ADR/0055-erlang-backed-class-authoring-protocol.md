@@ -147,7 +147,7 @@ Response = 'bt@stdlib@httpresponse':'class_status:headers:body:'(
 - `new/0` — default constructor with `-spec`
 - `new/1` — init constructor merging caller map with defaults
 - Keyword class-side constructor (`class_status:headers:body:/5`) with `-spec` — callable from Erlang with Dialyzer validation
-- A `-type t()` opaque map type representing the value
+- A `-type t()` map type alias representing the value
 - Reflection metadata (`fieldNames` returns `#(#status #headers #body)`)
 
 **Computed properties** use pure Beamtalk expressions in the method body:
@@ -200,7 +200,7 @@ This mechanism is available to **all library authors** — no compiler changes r
 
 With this protocol, the two pragma forms are narrowed to one case each (per the ADR 0007 amendment that introduced `@intrinsic`):
 
-1. **`@primitive "selector"`** — Direct BEAM BIF calls — `erlang:'+'`, `erlang:integer_to_binary`, `string:length` — where the Erlang module name is fixed by the BEAM standard library and cannot follow the keyword convention
+1. **`@primitive "selector"`** — Fixed Erlang/OTP function calls (BIFs or selected OTP standard library modules) — `erlang:'+'`, `erlang:integer_to_binary`, `string:length` — where the Erlang module name is fixed by the BEAM/OTP standard library and cannot follow the keyword convention
 2. **`@intrinsic name`** — Structural intrinsics — compiler-generated patterns with no corresponding Erlang function: `timesRepeat:`, `blockValue`, `actorSpawn`
 
 **`@primitive` must not be used** for calls into `beamtalk_*` modules — those use `(Erlang module)` FFI.
@@ -357,7 +357,7 @@ Generate the entire `beamtalk_foo.erl` from the `.bt` file, with stubs for compl
 - Any library author can create Erlang-backed classes without touching the Rust compiler
 - `state:` declarations on Value classes make object structure visible to `inspect`, the LSP, and gradual typing
 - The keyword constructor provides compile-time validation when field declarations change
-- `@primitive` scope is narrowed to direct BIF calls only — the list stops growing. `@intrinsic` covers structural compiler intrinsics (`blockValue`, `actorSpawn`, etc.) and is already separate (ADR 0007 amendment). Of ~442 `@primitive` entries across stdlib, approximately 24 (in HTTPResponse, JSON, Yaml, Regex, System) are targeted for immediate migration to `state:` or FFI; an additional ~12 (Timer, Random) are candidates; the remainder are direct BIF calls that correctly remain `@primitive`
+- `@primitive` scope is narrowed to fixed Erlang/OTP function calls (BIFs or selected OTP standard library modules) only — the list stops growing. `@intrinsic` covers structural compiler intrinsics (`blockValue`, `actorSpawn`, etc.) and is already separate (ADR 0007 amendment). Of ~442 `@primitive` entries across stdlib, approximately 24 (in HTTPResponse, JSON, Yaml, Regex, System) are targeted for immediate migration to `state:` or FFI; an additional ~12 (Timer, Random) are candidates; the remainder are direct BIF or OTP stdlib calls that correctly remain `@primitive`
 - `dispatch/3` and `has_method/1` boilerplate can be removed from existing stdlib modules
 - `beamtalk_http_response.erl` can be **deleted entirely** — `state:` declarations + pure Beamtalk methods replace all its functionality
 - Extends generation pipeline that already exists in `value_type_codegen.rs` — minimal new work
@@ -388,7 +388,13 @@ The compiler already supports `state:` on Value classes and `(Erlang module)` FF
 - Remove `dispatch/3` and `has_method/1` from migrated modules
 - Move `beamtalk_json`, `beamtalk_yaml`, `beamtalk_regex` from `beamtalk_runtime` to `beamtalk_stdlib`
 
-**Issues:** BT-1142, BT-1143
+**Issues:**
+- BT-1142 ✅ Done — JSON/Yaml/Regex FFI conversion
+- BT-1143 — Move beamtalk_json/yaml/regex to beamtalk_stdlib (In Review)
+- BT-1155 — Migrate HTTPResponse.bt to `state:` declarations; delete `beamtalk_http_response.erl`
+- BT-1156 — Generate `-type t()` for Value classes with `state:` declarations (blocked by BT-1155)
+
+**Epic:** BT-1154
 
 ### Affected Components
 
@@ -415,6 +421,7 @@ The Beamtalk API (message selectors) does not change. Callers of `resp status`, 
 
 - Related issues:
   - BT-1142, BT-1143, BT-1144, BT-1145, BT-1146, BT-1147
+  - BT-1154 (Epic), BT-1155, BT-1156
 - Related ADRs:
   - ADR 0005 (BEAM Object Model — Value vs Actor)
   - ADR 0007 (Compilable Stdlib with Primitive Injection — scope narrowed by this ADR)
