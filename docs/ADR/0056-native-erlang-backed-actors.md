@@ -49,7 +49,7 @@ Actor subclass: TranscriptStream
 
 1. **Hand-written logic must stay in Erlang** — line buffering, deferred replies, port management, ring buffers, and pub/sub require direct OTP gen_server control
 2. **No `state:` declarations** — state lives entirely in the gen_server; the `.bt` file declares the Beamtalk API, not the internal state
-3. **Wire protocol compatibility** — the backing gen_server must implement `handle_call/3` with `{Selector, [Args]}` tuples matching `beamtalk_actor:sync_send/3`
+3. **Wire protocol compatibility** — sync requests use `{Selector, [Args]}` matching `beamtalk_actor:sync_send/3` via `gen:call/4`. For `gen_server` backing modules this means `handle_call/3`; for `gen_statem` backing modules this means `{call, From}` events in state callbacks
 4. **Works with gen_server and gen_statem** — both route through `gen:call/4`, so a single dispatch path covers both OTP behaviour types
 5. **Explicit module naming** — the `.bt` file must declare which Erlang module it is backed by; implicit discovery is not acceptable
 6. **Open to library authors** — any library author must be able to back an Actor with a hand-written gen_server without modifying the Rust compiler. `@native` is intended as a general-purpose pattern, not a stdlib-only mechanism
@@ -356,7 +356,7 @@ Actor subclass: Subprocess
     (Erlang beamtalk_subprocess) readLine: self
 ```
 
-Rejected because this requires per-method boilerplate, does not use the Actor message-passing protocol (`beamtalk_actor:sync_send/3`), bypasses dead actor detection and timeout handling, and would require each Erlang function to accept and extract `self` to get the pid — defeating the point of a gen_server backed actor.
+Rejected because this requires per-method boilerplate, does not use the Actor message-passing protocol (`beamtalk_actor:sync_send/3`), bypasses dead actor detection and timeout handling, and would require each Erlang function to accept and extract `self` to get the pid — defeating the point of a gen_server-backed actor.
 
 ### `@backed BackingModule` Class Annotation (no method-level marker)
 
