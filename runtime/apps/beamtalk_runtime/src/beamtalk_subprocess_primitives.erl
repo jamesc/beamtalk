@@ -90,7 +90,13 @@ start_subprocess(Config, Selector) ->
 %% Array values returned from collection operations are tagged maps.
 -spec bt_array_to_list(term()) -> list().
 bt_array_to_list(#{'$beamtalk_class' := 'Array', 'data' := Arr}) ->
-    array:to_list(Arr);
+    case array:is_array(Arr) of
+        true ->
+            array:to_list(Arr);
+        false ->
+            Err = beamtalk_error:new(type_error, 'Subprocess'),
+            beamtalk_error:raise(Err)
+    end;
 bt_array_to_list(List) when is_list(List) ->
     List;
 bt_array_to_list(_Other) ->

@@ -38,6 +38,7 @@ TestCase subclass: SubprocessTest
   testSeparateStderrChannel =>
     // sh writes only to stderr; stdout readLine returns nil, stderr returns the line
     agent := Subprocess open: "/bin/sh" args: #("-c", "echo err >&2")
+    self assert: agent readLine equals: nil
     self assert: agent readStderrLine equals: "err"
     self assert: agent readStderrLine equals: nil
     self assert: agent stop equals: #ok
@@ -58,7 +59,7 @@ TestCase subclass: SubprocessTest
   testExitCodeAfterExit =>
     // echo exits with code 0; after draining output exitCode is 0
     agent := Subprocess open: "/bin/echo" args: #("done")
-    agent readLine
+    self assert: agent readLine equals: "done"
     // Second readLine blocks until subprocess exits; when nil is returned
     // the exit event has been processed and exitCode is set
     self assert: agent readLine equals: nil
