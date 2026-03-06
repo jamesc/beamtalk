@@ -84,7 +84,7 @@ beamtalk_compiler:compile_expression(Expression, ModuleName, KnownVars).
 - Native support for Erlang maps, binaries, atoms — no lossy JSON round-trip
 - Port crash is isolated: the OTP supervisor restarts the compiler automatically without losing actor state or REPL sessions
 - stdin/stdout transport works on all platforms (Linux, macOS, Windows) — unlike the previous Unix socket daemon
-- ~2ms overhead per call, negligible vs 10-500ms compilation time
+- Per-call framing overhead is small relative to typical 10–500ms compilation time in local development workloads (exact figures vary by hardware and workload)
 
 **Evolution:** Originally the compiler ran as a separate daemon process communicating via JSON-RPC over Unix domain sockets. ADR 0022 replaced this with an embedded OTP Port, eliminating daemon lifecycle management, stale socket files, and JSON serialization overhead. The daemon code was fully removed in Phase 5.
 
@@ -162,7 +162,7 @@ The REPL protocol's `describe` operation enables dynamic capability discovery. T
 - **Operator**: "One protocol means one monitoring approach, one set of metrics, one failure mode to understand."
 - **Language designer**: "Protocol uniformity is an architectural virtue. Three protocols is three times the API surface to version, document, and maintain."
 
-**Response:** The schema/versioning argument is the strongest case here, but it conflates protocol format with contract enforcement. Beamtalk actors are not public APIs — they're generated `gen_server` processes where message format is controlled entirely by the compiler. The implicit contract is maintained by the code generator, not by runtime validation; adding a serialization boundary would shift the enforcement mechanism without strengthening it. The distributed Erlang point is valid as a future concern, but Beamtalk v0.1 is explicitly single-node (ADR 0031) and premature generalization is a real cost. If actors span nodes in future, the `gen_server` message format can be wrapped in a distribution layer at that point — and because the message format is compiler-generated rather than hand-written by users, adding schema validation or versioning is a codegen change, not a language change. For the compiler boundary, the response is similar: the Port boundary already provides crash isolation without needing JSON; ETF preserves Erlang term fidelity that JSON would lose. The complexity of three protocols is hidden behind clean APIs — callers use `beamtalk_compiler:compile/2` and `gen_server:call/2`, not raw frames.
+**Response:** The schema/versioning argument is the strongest case here, but it conflates protocol format with contract enforcement. Beamtalk actors are not public APIs — they're generated `gen_server` processes where message format is controlled entirely by the compiler. The implicit contract is maintained by the code generator, not by runtime validation; adding a serialization boundary would shift the enforcement mechanism without strengthening it. The distributed Erlang point is valid as a future concern, but Beamtalk v0.1 is explicitly single-node (ADR 0031) and premature generalization is a real cost. If actors span nodes in the future, the `gen_server` message format can be wrapped in a distribution layer at that point — and because the message format is compiler-generated rather than hand-written by users, adding schema validation or versioning is a codegen change, not a language change. For the compiler boundary, the response is similar: the Port boundary already provides crash isolation without needing JSON; ETF preserves Erlang term fidelity that JSON would lose. The complexity of three protocols is hidden behind clean APIs — callers use `beamtalk_compiler:compile/2` and `gen_server:call/2`, not raw frames.
 
 ### For Unix Sockets Instead of WebSocket (Rejected)
 
@@ -170,7 +170,7 @@ The REPL protocol's `describe` operation enables dynamic capability discovery. T
 - **BEAM veteran**: "Unix sockets are simpler than WebSocket. No HTTP upgrade, no framing, no Cowboy dependency."
 - **Operator**: "Unix sockets eliminate an entire class of network attacks. Loopback TCP is visible to any local process; socket files are protected by filesystem permissions."
 
-**Response:** Unix sockets don't work on Windows (ADR 0027), can't be accessed from browsers (ADR 0017), and are incompatible with standard HTTP reverse proxies for remote access (ADR 0020). The cookie handshake provides equivalent authentication to filesystem permissions on shared machines.
+**Response:** Unix sockets don't work on Windows (ADR 0027), can't be accessed from browsers (ADR 0017), and are incompatible with standard HTTP reverse proxies for remote access (ADR 0020). The cookie handshake provides comparable access control for Beamtalk's local/remote access model, with different operational tradeoffs than filesystem permissions.
 
 ### Tension Points
 - Security purists prefer Unix sockets for filesystem ACLs, but cross-platform and browser requirements rule them out
