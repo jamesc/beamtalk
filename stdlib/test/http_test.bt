@@ -76,11 +76,16 @@ TestCase subclass: HttpTest
   testResponseBodyAsJsonReturnsDictionary =>
     resp := HTTPClient get: self.baseUrl ++ "/json"
     json := resp bodyAsJson
+    // bodyAsJson is typed -> Object because JSON can be a Dictionary, List, or scalar.
+    // Both Dictionary and List implement at:, but Object does not expose it.
+    // This test knows the endpoint returns a JSON object, so the DNU is a false positive.
+    @expect dnu
     self assert: (json at: "type") equals: "json"
 
   testResponseBodyAsJsonReturnsInteger =>
     resp := HTTPClient get: self.baseUrl ++ "/json"
     json := resp bodyAsJson
+    @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     self assert: (json at: "value") equals: 42
 
   testResponseBodyAsJsonRaisesParseErrorForEmptyBody =>
@@ -96,6 +101,7 @@ TestCase subclass: HttpTest
   testClassGetBodyContainsMethod =>
     resp := HTTPClient get: self.baseUrl ++ "/get"
     json := resp bodyAsJson
+    @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     self assert: (json at: "method") equals: "GET"
 
   // ===== HTTPClient class-side — post:body: =====
@@ -105,6 +111,7 @@ TestCase subclass: HttpTest
 
   testClassPostBodyEchosRequestBody =>
     resp := HTTPClient post: self.baseUrl ++ "/post" body: "beamtalk"
+    @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     self assert: ((resp bodyAsJson) at: "body") equals: "beamtalk"
 
   // ===== HTTPClient class-side — put:body: =====
@@ -114,6 +121,7 @@ TestCase subclass: HttpTest
 
   testClassPutBodyEchosRequestBody =>
     resp := HTTPClient put: self.baseUrl ++ "/put" body: "updated-value"
+    @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     self assert: ((resp bodyAsJson) at: "body") equals: "updated-value"
 
   // ===== HTTPClient class-side — delete: =====
@@ -124,6 +132,7 @@ TestCase subclass: HttpTest
   testClassDeleteBodyContainsMethod =>
     resp := HTTPClient delete: self.baseUrl ++ "/delete"
     json := resp bodyAsJson
+    @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     self assert: (json at: "method") equals: "DELETE"
 
   // ===== HTTPClient class-side — request:url:options: =====
@@ -136,6 +145,7 @@ TestCase subclass: HttpTest
       #body => "payload"
     }
     self assert: resp status equals: 200
+    @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     self assert: ((resp bodyAsJson) at: "body") equals: "payload"
 
   // ===== HTTPClient instance — get: =====
@@ -149,6 +159,7 @@ TestCase subclass: HttpTest
     client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
     resp := client get: "/get"
     json := resp bodyAsJson
+    @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     self assert: (json at: "method") equals: "GET"
     self assert: client stop equals: #ok
 
@@ -162,6 +173,7 @@ TestCase subclass: HttpTest
   testInstancePostBodyEchosRequestBody =>
     client := HTTPClient spawnWith: #{#baseUrl => self.baseUrl}
     resp := client post: "/post" body: "data"
+    @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     self assert: ((resp bodyAsJson) at: "body") equals: "data"
     self assert: client stop equals: #ok
 
@@ -186,6 +198,7 @@ TestCase subclass: HttpTest
     }
     self assert: resp status equals: 200
     headers := resp bodyAsJson
+    @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     self assert: (headers at: "x-test-key") equals: "test-value"
 
   testInstanceCustomHeaderSentInRequest =>
@@ -196,6 +209,7 @@ TestCase subclass: HttpTest
     resp := client get: "/echo-headers"
     self assert: resp status equals: 200
     headers := resp bodyAsJson
+    @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     self assert: (headers at: "x-client-header") equals: "persistent"
     self assert: client stop equals: #ok
 
@@ -204,6 +218,7 @@ TestCase subclass: HttpTest
     // Generate a JSON body, POST it, verify the server echoed it correctly
     jsonBody := JSON generate: #{"message" => "hello"}
     resp := HTTPClient post: self.baseUrl ++ "/post" body: jsonBody
+    @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     echoed := (resp bodyAsJson) at: "body"
     parsed := JSON parse: echoed
     self assert: (parsed at: "message") equals: "hello"

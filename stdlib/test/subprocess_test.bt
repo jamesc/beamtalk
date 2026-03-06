@@ -14,7 +14,9 @@
 TestCase subclass: SubprocessTest
   state: isUnix = false
 
-  setUp => self.isUnix := System osFamily = "unix"
+  setUp =>
+    @expect dnu  // String understands = at runtime; type checker doesn't resolve it on Object
+    self.isUnix := System osFamily = "unix"
 
   testSpawnAndReadLine =>
     self.isUnix

@@ -373,6 +373,7 @@ fn compile_fixture(
         // paired with `// =>` comments. Skip the module-expression lint to avoid
         // false positives on intentional assertion expressions.
         skip_module_expression_lint: true,
+        warnings_as_errors: false,
     };
 
     crate::beam_compiler::compile_source(fixture_path, &module_name, &core_file, &options)

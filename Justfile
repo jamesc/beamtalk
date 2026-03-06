@@ -397,7 +397,7 @@ test-stdlib *ARGS: build-stdlib
 [working-directory: 'stdlib']
 test-bunit *ARGS: build-stdlib
     @echo "🧪 Running BUnit tests..."
-    @cargo run --bin beamtalk --quiet -- test {{ ARGS }}
+    @cargo run --bin beamtalk --quiet -- test --warnings-as-errors {{ ARGS }}
     @echo "✅ BUnit tests complete"
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.

@@ -219,6 +219,10 @@ enum Command {
         /// Test file or directory containing .bt test files
         #[arg(default_value = "test")]
         path: String,
+
+        /// Treat warnings and hints as errors — fail if any are emitted
+        #[arg(long)]
+        warnings_as_errors: bool,
     },
 
     /// Generate HTML API documentation from source files
@@ -434,7 +438,10 @@ fn run() -> Result<()> {
             quiet,
             show_output,
         } => commands::test_stdlib::run_tests(&path, no_warnings, quiet, show_output),
-        Command::Test { path } => commands::test::run_tests(&path),
+        Command::Test {
+            path,
+            warnings_as_errors,
+        } => commands::test::run_tests(&path, warnings_as_errors),
         Command::Doc {
             path,
             output,

@@ -64,6 +64,9 @@ pub struct CompilerOptions {
     /// Useful for test fixtures that intentionally trigger warnings.
     pub suppress_warnings: bool,
 
+    /// When true, treat warnings and hints as errors — compilation fails if any are emitted.
+    pub warnings_as_errors: bool,
+
     /// BT-979: When true, skip the effect-free lint check on `module.expressions`.
     ///
     /// Set this for bootstrap-test compilation, where top-level expressions are

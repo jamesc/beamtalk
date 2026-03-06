@@ -749,10 +749,16 @@ pub fn compile_source_with_bindings(
     // BT-782: Apply @expect directives to suppress matching diagnostics.
     beamtalk_core::queries::diagnostic_provider::apply_expect_directives(&module, &mut diagnostics);
 
-    // Check for errors
-    let has_errors = diagnostics
-        .iter()
-        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+    // Check for errors (and optionally treat warnings/hints as errors)
+    let has_errors = diagnostics.iter().any(|d| {
+        d.severity == beamtalk_core::source_analysis::Severity::Error
+            || (options.warnings_as_errors
+                && matches!(
+                    d.severity,
+                    beamtalk_core::source_analysis::Severity::Warning
+                        | beamtalk_core::source_analysis::Severity::Hint
+                ))
+    });
 
     if !diagnostics.is_empty() {
         debug!(
