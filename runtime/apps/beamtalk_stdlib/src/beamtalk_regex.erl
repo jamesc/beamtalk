@@ -24,7 +24,6 @@
 -export(['from:'/1, 'from:options:'/2]).
 -export([from/1, from/2]).
 -export([source/1, 'printString'/1]).
--export([has_method/1]).
 -export([
     matches_regex/2,
     matches_regex_options/3,
@@ -35,7 +34,7 @@
     split_regex/2
 ]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================
@@ -113,12 +112,6 @@ source(#{source := Src}) -> Src.
 -spec 'printString'(map()) -> binary().
 'printString'(#{source := Src}) ->
     iolist_to_binary([<<"Regex(">>, Src, <<")">>]).
-
-%% @doc Check if Regex responds to the given selector (instance methods).
--spec has_method(atom()) -> boolean().
-has_method('source') -> true;
-has_method('printString') -> true;
-has_method(_) -> false.
 
 %%% ============================================================================
 %%% String Helper Functions — called by String codegen

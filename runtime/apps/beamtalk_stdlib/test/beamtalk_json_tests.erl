@@ -11,7 +11,7 @@
 -module(beamtalk_json_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% parse:/1
@@ -81,19 +81,3 @@ generate_alias_test() ->
 pretty_print_alias_test() ->
     Result = beamtalk_json:prettyPrint(42),
     ?assert(is_binary(Result)).
-
-%%% ============================================================================
-%%% has_method/1
-%%% ============================================================================
-
-has_method_parse_test() ->
-    ?assert(beamtalk_json:has_method('parse:')).
-
-has_method_generate_test() ->
-    ?assert(beamtalk_json:has_method('generate:')).
-
-has_method_pretty_print_test() ->
-    ?assert(beamtalk_json:has_method('prettyPrint:')).
-
-has_method_unknown_test() ->
-    ?assertNot(beamtalk_json:has_method(unknownMethod)).

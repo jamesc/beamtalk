@@ -11,26 +11,7 @@
 -module(beamtalk_yaml_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("beamtalk.hrl").
-
-%%% ============================================================================
-%%% has_method/1
-%%% ============================================================================
-
-has_method_parse_test() ->
-    ?assertEqual(true, beamtalk_yaml:has_method('parse:')).
-
-has_method_parse_all_test() ->
-    ?assertEqual(true, beamtalk_yaml:has_method('parseAll:')).
-
-has_method_generate_test() ->
-    ?assertEqual(true, beamtalk_yaml:has_method('generate:')).
-
-has_method_parse_file_test() ->
-    ?assertEqual(true, beamtalk_yaml:has_method('parseFile:')).
-
-has_method_unknown_test() ->
-    ?assertEqual(false, beamtalk_yaml:has_method(unknownMethod)).
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% parse: — scalar types
