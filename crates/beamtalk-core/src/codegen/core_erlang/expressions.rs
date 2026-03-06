@@ -550,7 +550,7 @@ impl CoreErlangGenerator {
         // Field-write-only blocks (self.x := ...) are NOT yet promoted to Tier 2 here because
         // the caller side (detect_tier2_self_send, HOM dispatch) does not yet detect them as
         // Tier 2 — promoting them would emit {Result, NewState} tuples that callers unpack as
-        // plain values, causing a runtime crash. Field-write Tier 2 support is tracked in BT-860.
+        // plain values, causing a runtime crash. Field-write Tier 2 support is tracked in BT-1140.
         if !captured_mutations.is_empty() {
             return self.generate_block_stateful(block, &captured_mutations);
         }
