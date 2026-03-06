@@ -265,6 +265,59 @@ pub fn format_spec_attributes(specs: &[Document<'static>]) -> Option<Document<'s
     Some(join(specs.to_vec(), &Document::Str(",\n     ")))
 }
 
+/// Generates the `-type t()` module attribute for a Value class with `state:` fields.
+///
+/// Produces a map type that includes the `$beamtalk_class` tag field (as a required
+/// `:=` association) followed by each declared `state:` field with its Erlang type.
+///
+/// Returns `None` if the class has no `state:` declarations.
+///
+/// ## Generated Format
+///
+/// ```erlang
+/// 'type' =
+///         [{'t', {'type', 0, 'map', [
+///           {'type', 0, 'map_field_exact', [{'atom', 0, '$beamtalk_class'}, {'atom', 0, 'ClassName'}]},
+///           {'type', 0, 'map_field_exact', [{'atom', 0, 'field1'}, FieldType1]},
+///           ...]}, []}]
+/// ```
+pub fn generate_type_alias(class: &ClassDefinition, class_name: &str) -> Option<Document<'static>> {
+    if class.state.is_empty() {
+        return None;
+    }
+
+    let mut field_types: Vec<Document<'static>> = Vec::new();
+
+    // '$beamtalk_class' tag field: always present, value = the class atom
+    field_types.push(docvec![
+        "{'type', 0, 'map_field_exact', [{'atom', 0, '$beamtalk_class'}, {'atom', 0, '",
+        Document::String(class_name.to_string()),
+        "'}]}"
+    ]);
+
+    // One required field entry per declared state: field
+    for field in &class.state {
+        let fname = Document::String(field.name.name.to_string());
+        let ftype = field.type_annotation.as_ref().map_or(
+            Document::Str("{'type', 0, 'any', []}"),
+            type_annotation_to_spec,
+        );
+        field_types.push(docvec![
+            "{'type', 0, 'map_field_exact', [{'atom', 0, '",
+            fname,
+            "'}, ",
+            ftype,
+            "]}"
+        ]);
+    }
+
+    Some(docvec![
+        "'type' =\n        [{'t', {'type', 0, 'map', [",
+        join(field_types, &Document::Str(", ")),
+        "]}, []}]"
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -695,5 +748,125 @@ mod tests {
             span(),
         );
         assert!(generate_class_method_spec(&method).is_none());
+    }
+
+    // Tests for generate_type_alias
+
+    fn make_class_with_state(
+        class_name: &str,
+        fields: Vec<(&str, Option<TypeAnnotation>)>,
+    ) -> ClassDefinition {
+        use crate::ast::{ClassKind, CommentAttachment, StateDeclaration};
+        ClassDefinition {
+            name: Identifier::new(class_name, span()),
+            superclass: Some(Identifier::new("Value", span())),
+            class_kind: ClassKind::Value,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state: fields
+                .into_iter()
+                .map(|(name, ann)| match ann {
+                    Some(a) => {
+                        StateDeclaration::with_type(Identifier::new(name, span()), a, span())
+                    }
+                    None => StateDeclaration::new(Identifier::new(name, span()), span()),
+                })
+                .collect(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn type_alias_returns_none_for_empty_state() {
+        let class = make_class_with_state("Empty", vec![]);
+        assert!(generate_type_alias(&class, "Empty").is_none());
+    }
+
+    #[test]
+    fn type_alias_includes_beamtalk_class_tag_field() {
+        let class = make_class_with_state(
+            "Point",
+            vec![("x", Some(TypeAnnotation::simple("Integer", span())))],
+        );
+        let result = render(&generate_type_alias(&class, "Point").unwrap());
+        assert!(
+            result.contains("'$beamtalk_class'"),
+            "Should include $beamtalk_class tag field, got: {result}"
+        );
+        assert!(
+            result.contains("'Point'"),
+            "Should include class name atom, got: {result}"
+        );
+    }
+
+    #[test]
+    fn type_alias_maps_integer_field() {
+        let class = make_class_with_state(
+            "Counter",
+            vec![("count", Some(TypeAnnotation::simple("Integer", span())))],
+        );
+        let result = render(&generate_type_alias(&class, "Counter").unwrap());
+        assert!(
+            result.contains("'count'"),
+            "Should include field name, got: {result}"
+        );
+        assert!(
+            result.contains("'integer'"),
+            "Should include integer type, got: {result}"
+        );
+        assert!(
+            result.contains("'map_field_exact'"),
+            "Should use map_field_exact for required fields, got: {result}"
+        );
+    }
+
+    #[test]
+    fn type_alias_http_response_fields() {
+        let class = make_class_with_state(
+            "HTTPResponse",
+            vec![
+                ("status", Some(TypeAnnotation::simple("Integer", span()))),
+                ("headers", Some(TypeAnnotation::simple("List", span()))),
+                ("body", Some(TypeAnnotation::simple("String", span()))),
+            ],
+        );
+        let result = render(&generate_type_alias(&class, "HTTPResponse").unwrap());
+        assert!(
+            result.contains("'HTTPResponse'"),
+            "Should contain class name atom"
+        );
+        assert!(result.contains("'status'"), "Should contain status field");
+        assert!(result.contains("'headers'"), "Should contain headers field");
+        assert!(result.contains("'body'"), "Should contain body field");
+        assert!(result.contains("'integer'"), "status should be integer");
+        assert!(result.contains("'list'"), "headers should be list");
+        assert!(
+            result.contains("'binary'"),
+            "body (String) should be binary"
+        );
+        assert!(
+            result.starts_with("'type' ="),
+            "Should start with type attribute"
+        );
+        assert!(
+            result.contains("'map'"),
+            "Should use map type, got: {result}"
+        );
+    }
+
+    #[test]
+    fn type_alias_unannotated_field_uses_any() {
+        let class = make_class_with_state("Pair", vec![("value", None)]);
+        let result = render(&generate_type_alias(&class, "Pair").unwrap());
+        assert!(
+            result.contains("'any'"),
+            "Unannotated field should use any(), got: {result}"
+        );
     }
 }

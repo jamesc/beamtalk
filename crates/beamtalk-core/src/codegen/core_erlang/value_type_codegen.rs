@@ -279,6 +279,12 @@ impl CoreErlangGenerator {
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
+        // BT-1156: Generate -type t() alias for Value classes with state: declarations
+        let class_name_for_type = self.class_name();
+        let type_alias_suffix: Document<'static> =
+            spec_codegen::generate_type_alias(class, &class_name_for_type)
+                .map_or(Document::Nil, |s| docvec![",\n     ", s]);
+
         // BT-745: Build beamtalk_class attribute for dependency-ordered bootstrap
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
 
@@ -295,6 +301,7 @@ impl CoreErlangGenerator {
             beamtalk_class_attr,
             file_attr,
             source_path_attr,
+            type_alias_suffix,
             spec_suffix,
             "]\n",
             "\n",

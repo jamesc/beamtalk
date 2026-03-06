@@ -1,10 +1,13 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 76
 expression: core_erlang
 ---
 module 'stdlib_class_set' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'includes:'/2, 'add:'/2, 'remove:'/2, 'union:'/2, 'intersection:'/2, 'difference:'/2, 'isSubsetOf:'/2, 'asList'/1, 'fromList:'/2, 'do:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
   attributes ['on_load' = [{'register_class', 0}],
-     'beamtalk_class' = [{'Set', 'Object'}]]
+     'beamtalk_class' = [{'Set', 'Object'}],
+     'type' =
+        [{'t', {'type', 0, 'map', [{'type', 0, 'map_field_exact', [{'atom', 0, '$beamtalk_class'}, {'atom', 0, 'Set'}]}, {'type', 0, 'map_field_exact', [{'atom', 0, 'elements'}, {'type', 0, 'any', []}]}]}, []}]]
 
 'new'/0 = fun () ->
     ~{'$beamtalk_class' => 'Set', 'elements' => []}~

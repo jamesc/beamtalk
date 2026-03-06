@@ -2341,3 +2341,89 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
     );
     assert!(result.is_ok(), "generate_module should succeed: {result:?}");
 }
+
+#[test]
+fn test_value_subclass_typed_fields_emit_type_alias() {
+    // BT-1156: Value subclass with typed state: declarations emits '-type t()' attribute.
+    let class = ClassDefinition {
+        name: Identifier::new("Point", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Value", Span::new(0, 0))),
+        class_kind: ClassKind::Value,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        state: vec![
+            StateDeclaration {
+                name: Identifier::new("x", Span::new(0, 0)),
+                type_annotation: Some(TypeAnnotation::simple("Integer", Span::new(0, 0))),
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: Span::new(0, 0),
+            },
+            StateDeclaration {
+                name: Identifier::new("y", Span::new(0, 0)),
+                type_annotation: Some(TypeAnnotation::simple("Integer", Span::new(0, 0))),
+                default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: Span::new(0, 0),
+            },
+        ],
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: Span::new(0, 0),
+    };
+    let module = Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    assert!(result.is_ok(), "Codegen should succeed: {result:?}");
+    let code = result.unwrap();
+    assert!(
+        code.contains("'type' ="),
+        "Should emit 'type' attribute. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'map_field_exact'"),
+        "Type alias fields should use map_field_exact. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'$beamtalk_class'"),
+        "Type alias should include $beamtalk_class tag. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'Point'"),
+        "Type alias should include class name atom. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'integer'"),
+        "Typed Integer fields should map to integer(). Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_untyped_fields_still_emit_type_alias() {
+    // BT-1156: Value subclass with untyped state: declarations also emits '-type t()'
+    // using any() for untyped fields.
+    let module = make_value_subclass_point(); // x and y have no type annotations
+    let result = generate_module(&module, CodegenOptions::new("bt@point"));
+    assert!(result.is_ok(), "Codegen should succeed: {result:?}");
+    let code = result.unwrap();
+    assert!(
+        code.contains("'type' ="),
+        "Should emit 'type' attribute for untyped fields too. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'any'"),
+        "Untyped fields should use any(). Got:\n{code}"
+    );
+}
