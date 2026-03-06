@@ -1036,19 +1036,14 @@ impl Parser {
         match self.peek_at(offset) {
             // Unary: `identifier =>` or `identifier -> Type =>`
             Some(TokenKind::Identifier(_)) => self.is_fat_arrow_or_return_type(offset + 1),
-            // Binary: `+ other =>` or `+ other :: Type =>` or `+ other -> Type =>`
+            // Binary: `+ other =>` or `+ other :: Type (| Type)* =>` or `+ other -> Type =>`
             Some(TokenKind::BinarySelector(_)) => {
                 if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
                     return false;
                 }
-                let after_param =
-                    if matches!(self.peek_at(offset + 2), Some(TokenKind::DoubleColon))
-                        && matches!(self.peek_at(offset + 3), Some(TokenKind::Identifier(_)))
-                    {
-                        offset + 4
-                    } else {
-                        offset + 2
-                    };
+                let after_param = self
+                    .skip_double_colon_type(offset + 2)
+                    .unwrap_or(offset + 2);
                 self.is_fat_arrow_or_return_type(after_param)
             }
             // Keyword: `at: index put: value =>` or `at: index :: Type =>`
@@ -1069,11 +1064,9 @@ impl Parser {
                 return false;
             }
             offset += 1;
-            // Optional `:: Type` annotation on this parameter
-            if matches!(self.peek_at(offset), Some(TokenKind::DoubleColon))
-                && matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
-            {
-                offset += 2;
+            // Optional `:: Type (| Type)*` annotation on this parameter
+            if let Some(after) = self.skip_double_colon_type(offset) {
+                offset = after;
             }
             match self.peek_at(offset) {
                 Some(TokenKind::FatArrow) => return true,
@@ -2951,6 +2944,67 @@ mod tests {
         assert_eq!(method.parameters[0].name.name, "value");
         assert!(method.parameters[0].type_annotation.is_some());
         assert!(method.return_type.is_none());
+    }
+
+    #[test]
+    fn parse_binary_method_with_union_typed_param() {
+        // BT-1136/Copilot: `+ other :: Integer | Nil =>` — union type in binary param
+        let module = parse_ok(
+            "Object subclass: Number
+  + other :: Integer | Nil -> Integer => self",
+        );
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "+");
+        assert!(method.parameters[0].type_annotation.is_some());
+        assert!(method.return_type.is_some());
+    }
+
+    #[test]
+    fn parse_keyword_method_with_union_typed_param() {
+        // BT-1136/Copilot: `deposit: amount :: Integer | Float =>` — union type in keyword param
+        let module = parse_ok(
+            "Actor subclass: BankAccount
+  deposit: amount :: Integer | Float => self",
+        );
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "deposit:");
+        assert!(method.parameters[0].type_annotation.is_some());
+    }
+
+    #[test]
+    fn parse_standalone_method_with_union_typed_binary_param() {
+        // BT-1136/Copilot: standalone `+` method with union-typed param
+        let source = "Number >> + other :: Integer | Nil => self";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no parse errors, got: {diagnostics:?}"
+        );
+        assert_eq!(module.method_definitions.len(), 1);
+        assert!(
+            module.method_definitions[0].method.parameters[0]
+                .type_annotation
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn parse_standalone_method_with_union_typed_keyword_param() {
+        // BT-1136/Copilot: standalone keyword method with union-typed param
+        let source = "Counter >> deposit: amount :: Integer | Float => self";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no parse errors, got: {diagnostics:?}"
+        );
+        assert_eq!(module.method_definitions.len(), 1);
+        assert!(
+            module.method_definitions[0].method.parameters[0]
+                .type_annotation
+                .is_some()
+        );
     }
 
     #[test]

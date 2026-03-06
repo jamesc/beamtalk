@@ -265,19 +265,44 @@ impl Parser {
             // Binary method: `+ other =>` or `+ other -> Type =>` or `+ other :: Type =>`
             // Arrow (`->`) is also a valid binary method selector (ADR 0047).
             Some(TokenKind::BinarySelector(_) | TokenKind::Arrow) => {
-                matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
-                    && (matches!(self.peek_at(offset + 2), Some(TokenKind::FatArrow))
-                        || self.is_return_type_then_fat_arrow(offset + 2)
-                        // Typed via DoubleColon: `+ other :: Type =>`
-                        || (matches!(self.peek_at(offset + 2), Some(TokenKind::DoubleColon))
-                            && matches!(self.peek_at(offset + 3), Some(TokenKind::Identifier(_)))
-                            && (matches!(self.peek_at(offset + 4), Some(TokenKind::FatArrow))
-                                || self.is_return_type_then_fat_arrow(offset + 4))))
+                if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
+                    return false;
+                }
+                // Typed via DoubleColon: `+ other :: Type (| Type)* =>` (or untyped)
+                let after_param = self
+                    .skip_double_colon_type(offset + 2)
+                    .unwrap_or(offset + 2);
+                self.is_fat_arrow_or_return_type(after_param)
             }
             // Keyword method: `at: index =>` or `at: index put: value =>`
             Some(TokenKind::Keyword(_)) => self.is_keyword_method_at(offset),
             _ => false,
         }
+    }
+
+    /// Advances past a `:: Type (| Type)*` annotation in lookahead context.
+    ///
+    /// Returns `Some(offset_after)` if a valid `::` type annotation starts at
+    /// `offset`, or `None` if the token at `offset` is not `DoubleColon`.
+    /// Handles union types (`:: Integer | Nil`).
+    pub(super) fn skip_double_colon_type(&self, offset: usize) -> Option<usize> {
+        if !matches!(self.peek_at(offset), Some(TokenKind::DoubleColon)) {
+            return None;
+        }
+        let mut o = offset + 1;
+        if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+            return None;
+        }
+        o += 1;
+        // Skip union types: `| Type`
+        while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
+            o += 1;
+            if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+                return None;
+            }
+            o += 1;
+        }
+        Some(o)
     }
 
     /// Checks if the token at `offset` starts a `=>` or `-> Type =>` pattern.
@@ -352,11 +377,11 @@ impl Parser {
                     return self.is_return_type_then_fat_arrow(offset);
                 }
                 Some(TokenKind::DoubleColon) => {
-                    // Typed parameter: `paramName :: Type`
-                    if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
+                    // Typed parameter: `paramName :: Type (| Type)*`
+                    let Some(after) = self.skip_double_colon_type(offset) else {
                         return false;
-                    }
-                    offset += 2; // skip `::` and type
+                    };
+                    offset = after;
                     match self.peek_at(offset) {
                         Some(TokenKind::FatArrow) => return true,
                         Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
@@ -533,7 +558,7 @@ impl Parser {
             }
         } else {
             let span = self.current_token().span();
-            self.error("Expected type name after '::'");
+            self.error("Expected type name");
             TypeAnnotation::Simple(Identifier::new("Error", span))
         }
     }
