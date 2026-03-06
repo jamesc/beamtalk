@@ -1479,9 +1479,11 @@ mod tests {
     }
 
     #[test]
-    fn test_field_assignment_in_passed_block_emits_error() {
-        // Test: obj callWith: [:x | self.sum := 0] should emit error
-        // "callWith:" is not a control flow selector, so block is Passed
+    fn test_field_assignment_in_passed_block_no_error() {
+        // BT-1140: obj callWith: [:x | self.sum := 0] no longer emits an error.
+        // Field-write blocks are now promoted to Tier 2 (stateful) when passed to HOMs,
+        // so field mutations thread through StateAcc correctly.
+        // "callWith:" is not a control flow selector, so block is Passed context.
         let field_assignment = Expression::Assignment {
             target: Box::new(Expression::FieldAccess {
                 receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
@@ -1513,16 +1515,15 @@ mod tests {
         let module = Module::new(vec![bare(message_send)], test_span());
         let result = analyse(&module);
 
-        // Should have at least 1 error diagnostic for field assignment in passed block
-        // (may have additional errors for undefined variables, which is expected)
-        assert!(!result.diagnostics.is_empty());
-        let has_field_error = result.diagnostics.iter().any(|d| {
-            d.message.contains("cannot assign to field 'sum'")
-                && d.message.contains("passed closure")
-        });
+        // Should NOT have a field assignment error for passed blocks (BT-1140).
+        // (may have unrelated errors for undefined variables, which is expected)
+        let has_field_error = result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("cannot assign to field 'sum'"));
         assert!(
-            has_field_error,
-            "Expected field assignment error, got: {:?}",
+            !has_field_error,
+            "Should not have field-in-passed-block error (BT-1140), got: {:?}",
             result.diagnostics
         );
     }

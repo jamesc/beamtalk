@@ -790,6 +790,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "body".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "ok".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: true, return_type: Some("Boolean".into()), param_types: vec![] },
                 MethodInfo { selector: "bodyAsJson".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: true, return_type: Some("Object".into()), param_types: vec![] },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "HTTPResponse".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![] },
             ],
             class_methods: vec![],
             class_variables: vec![],

@@ -33,6 +33,7 @@
 -module(beamtalk_yaml).
 
 -export(['parse:'/1, 'parseAll:'/1, 'generate:'/1, 'parseFile:'/1]).
+-export([parse/1, parseAll/1, generate/1, parseFile/1]).
 -export([has_method/1]).
 
 -include("beamtalk.hrl").
@@ -117,6 +118,26 @@
     Error1 = beamtalk_error:with_selector(Error0, 'parseFile:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a String">>),
     beamtalk_error:raise(Error2).
+
+%%% ============================================================================
+%%% FFI aliases — no-colon names for Erlang FFI dispatch
+%%% ============================================================================
+
+%% @doc FFI alias for parse:/1 — called via (Erlang beamtalk_yaml) parse: str.
+-spec parse(binary()) -> term().
+parse(X) -> 'parse:'(X).
+
+%% @doc FFI alias for parseAll:/1 — called via (Erlang beamtalk_yaml) parseAll: str.
+-spec parseAll(binary()) -> list().
+parseAll(X) -> 'parseAll:'(X).
+
+%% @doc FFI alias for generate:/1 — called via (Erlang beamtalk_yaml) generate: val.
+-spec generate(term()) -> binary().
+generate(X) -> 'generate:'(X).
+
+%% @doc FFI alias for parseFile:/1 — called via (Erlang beamtalk_yaml) parseFile: path.
+-spec parseFile(binary()) -> term().
+parseFile(X) -> 'parseFile:'(X).
 
 %% @doc Check if Yaml responds to the given selector.
 -spec has_method(atom()) -> boolean().

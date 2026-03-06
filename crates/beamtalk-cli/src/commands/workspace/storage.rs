@@ -293,6 +293,9 @@ pub fn remove_stale_runtime_files(workspace_id: &str) -> Result<()> {
     let ws_dir = workspace_dir(workspace_id)?;
     remove_file_if_exists(&ws_dir.join("node.info"))?;
     remove_file_if_exists(&ws_dir.join("port"))?;
+    // Atomic port file write (beamtalk_repl_server) writes to port.tmp then
+    // renames to port.  A crash between those two steps leaves a stale tmp file.
+    remove_file_if_exists(&ws_dir.join("port.tmp"))?;
     remove_file_if_exists(&ws_dir.join("pid"))?;
     remove_file_if_exists(&ws_dir.join("starting"))?;
     Ok(())
@@ -384,13 +387,13 @@ mod tests {
         fs::create_dir_all(&ws_dir).unwrap();
 
         // Write all runtime files including the tombstone.
-        for name in &["node.info", "port", "pid", "starting"] {
+        for name in &["node.info", "port", "port.tmp", "pid", "starting"] {
             fs::write(ws_dir.join(name), b"dummy").unwrap();
         }
 
         remove_stale_runtime_files(&ws_id).expect("remove_stale_runtime_files should not fail");
 
-        for name in &["node.info", "port", "pid", "starting"] {
+        for name in &["node.info", "port", "port.tmp", "pid", "starting"] {
             assert!(
                 !ws_dir.join(name).exists(),
                 "{name} should have been removed by remove_stale_runtime_files"

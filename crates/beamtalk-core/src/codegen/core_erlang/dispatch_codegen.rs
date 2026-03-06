@@ -1574,7 +1574,9 @@ impl CoreErlangGenerator {
                                     .intersection(&analysis.captured_reads)
                                     .next()
                                     .is_some();
-                                if has_captured_mutations {
+                                // BT-1140: Also promote blocks with field writes to Tier 2.
+                                let has_field_writes = !analysis.field_writes.is_empty();
+                                if has_captured_mutations || has_field_writes {
                                     self.tier2_method_info
                                         .entry(sel_name.clone())
                                         .or_default()
@@ -1621,7 +1623,9 @@ impl CoreErlangGenerator {
                                         .intersection(&analysis.captured_reads)
                                         .next()
                                         .is_some();
-                                    if has_captured_mutations {
+                                    // BT-1140: Also promote blocks with field writes to Tier 2.
+                                    let has_field_writes = !analysis.field_writes.is_empty();
+                                    if has_captured_mutations || has_field_writes {
                                         self.tier2_method_info
                                             .entry(sel_name.clone())
                                             .or_default()
@@ -1698,6 +1702,11 @@ impl CoreErlangGenerator {
                                 .collect();
                             if !captured_mutations.is_empty() {
                                 tier2_args.push((i, captured_mutations));
+                            } else if !analysis.field_writes.is_empty() {
+                                // BT-1140: Field-write block — promote to Tier 2 with no local
+                                // vars. The actor State IS the StateAcc; field reads/writes
+                                // are threaded through it automatically inside the block body.
+                                tier2_args.push((i, vec![]));
                             } else if hom_positions.contains(&i) {
                                 // BT-870: Block has no mutations but this position is a known
                                 // Tier 2 HOM param. Promote to Tier 2 with empty captured vars
@@ -1705,8 +1714,6 @@ impl CoreErlangGenerator {
                                 // (StateAcc passthrough), matching the callee's arity expectation.
                                 tier2_args.push((i, vec![]));
                             }
-                            // Note: field_writes-only blocks are NOT yet supported
-                            // for Tier 2 (requires different key scheme). See BT-852.
                         } else if let Expression::Identifier(arg_id) = arg {
                             // BT-912: If the argument is an identifier that is a known Tier 2
                             // block parameter of the current method, treat it as a Tier 2 HOM

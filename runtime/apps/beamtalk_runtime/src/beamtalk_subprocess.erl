@@ -49,6 +49,7 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
+-include("beamtalk.hrl").
 
 %% Public API
 -export([start_link/1, start/1]).
@@ -117,7 +118,9 @@ init(Config) ->
         {stderr, pending} => <<>>,
         {stderr, waiting} => undefined,
         exit_code => nil,
-        port_closed => false
+        child_exited => false,
+        port_closed => false,
+        drain_timer => undefined
     },
     {ok, State}.
 
@@ -165,27 +168,48 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             buffer_and_maybe_reply(stderr, Data, State);
         {exit, _ChildId, Code} ->
             ?LOG_INFO("Subprocess exited", #{exit_code => Code}),
-            %% Flush any partial line that lacked a trailing newline — both channels
+            %% Flush any partial line that lacked a trailing newline — both channels.
             S0 = flush_pending(stdout, State),
             S1 = flush_pending(stderr, S0),
-            %% Close the exec port — child is gone, no more I/O possible
-            catch beamtalk_exec_port:close(Port),
-            NewState = S1#{exit_code => Code, port_closed => true},
-            S2 = maybe_reply_eof(stdout, NewState),
-            S3 = maybe_reply_eof(stderr, S2),
-            {noreply, S3};
+            %% Do NOT close the exec port here. The beamtalk-exec binary runs separate
+            %% reader threads for stdout and stderr that may still be delivering their
+            %% final reads when the reaper thread sends this exit event. Calling
+            %% port_close/1 now would discard any undelivered port data in flight.
+            %% Instead, schedule a short drain window (10 ms) to let those threads
+            %% finish, then close and signal EOF. See BT-1148 for the exec-binary fix.
+            TimerRef = erlang:send_after(10, self(), {port_drain_complete, Port}),
+            {noreply, S1#{exit_code => Code, child_exited => true, drain_timer => TimerRef}};
         _Other ->
             {noreply, State}
     end;
 handle_info({Port, {exit_status, _N}}, #{port := Port} = State) ->
-    %% beamtalk_exec binary itself exited — treat all channels as EOF
+    %% beamtalk_exec binary itself exited — treat all channels as EOF.
+    %% Cancel any pending drain timer since the port is already gone.
+    case maps:get(drain_timer, State, undefined) of
+        undefined -> ok;
+        TimerRef -> erlang:cancel_timer(TimerRef)
+    end,
     ?LOG_WARNING("Exec port exited unexpectedly"),
     S0 = flush_pending(stdout, State),
     S1 = flush_pending(stderr, S0),
-    NewState = S1#{port_closed => true},
+    NewState = S1#{port_closed => true, drain_timer => undefined},
     S2 = maybe_reply_eof(stdout, NewState),
     S3 = maybe_reply_eof(stderr, S2),
     {noreply, S3};
+handle_info({port_drain_complete, Port}, #{port := Port, port_closed := false} = State) ->
+    %% Drain window elapsed — any remaining stdout/stderr data from the exec binary's
+    %% reader threads has been delivered.  Now flush partial lines, close the port,
+    %% and signal EOF to any waiting callers.
+    S0 = flush_pending(stdout, State),
+    S1 = flush_pending(stderr, S0),
+    catch beamtalk_exec_port:close(Port),
+    NewState = S1#{port_closed => true, drain_timer => undefined},
+    S2 = maybe_reply_eof(stdout, NewState),
+    S3 = maybe_reply_eof(stderr, S2),
+    {noreply, S3};
+handle_info({port_drain_complete, _Port}, State) ->
+    %% Port already closed (by explicit close or {exit_status}) — ignore stale timer.
+    {noreply, State#{drain_timer => undefined}};
 handle_info({read_timeout, Channel}, State) ->
     WaitKey = {Channel, waiting},
     case maps:get(WaitKey, State, undefined) of
@@ -217,12 +241,14 @@ terminate(_Reason, State) ->
 %%% ============================================================================
 
 %% @private Write Data + newline to subprocess stdin.
--spec handle_writeLine(iodata(), map()) -> {reply, nil | {error, port_closed}, map()}.
+-spec handle_writeLine(iodata(), map()) -> {reply, nil | {error, #beamtalk_error{}}, map()}.
 handle_writeLine(Data, State) ->
-    #{port := Port, child_id := ChildId, port_closed := PortClosed} = State,
-    case PortClosed of
+    #{port := Port, child_id := ChildId, port_closed := PortClosed, child_exited := ChildExited} =
+        State,
+    case PortClosed orelse ChildExited of
         true ->
-            {reply, {error, port_closed}, State};
+            Err = beamtalk_error:new(port_closed, 'Subprocess', 'writeLine:'),
+            {reply, {error, Err}, State};
         false ->
             Bin = iolist_to_binary(Data),
             Line = <<Bin/binary, $\n>>,
@@ -238,9 +264,14 @@ handle_close(State) ->
             {reply, nil, State};
         false ->
             #{port := Port, child_id := ChildId} = State,
+            %% Cancel any pending drain timer — we are forcing an immediate close.
+            case maps:get(drain_timer, State, undefined) of
+                undefined -> ok;
+                TimerRef -> erlang:cancel_timer(TimerRef)
+            end,
             beamtalk_exec_port:kill_child(Port, ChildId),
             beamtalk_exec_port:close(Port),
-            NewState = State#{port_closed => true},
+            NewState = State#{port_closed => true, drain_timer => undefined},
             S1 = maybe_reply_eof(stdout, NewState),
             S2 = maybe_reply_eof(stderr, S1),
             {reply, nil, S2}
@@ -410,6 +441,10 @@ make_readline_gen(Pid, CallKey) ->
 %% @private Kill child and close the exec port during shutdown.
 -spec cleanup_port(map()) -> ok.
 cleanup_port(State) ->
+    case maps:get(drain_timer, State, undefined) of
+        undefined -> ok;
+        TimerRef -> erlang:cancel_timer(TimerRef)
+    end,
     case maps:get(port_closed, State, false) of
         true ->
             ok;
