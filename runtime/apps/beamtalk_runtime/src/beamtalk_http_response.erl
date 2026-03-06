@@ -68,10 +68,20 @@ body(#{'$beamtalk_class' := 'HTTPResponse', body := Body}) ->
 ok(#{'$beamtalk_class' := 'HTTPResponse', status := Status}) ->
     Status >= 200 andalso Status =< 299.
 
-%% @doc Parse the response body as JSON via beamtalk_json.
+%% @doc Parse the response body as JSON.
+%%
+%% Decodes via jsx. null becomes nil to match Beamtalk conventions.
 -spec 'bodyAsJson'(map()) -> term().
 'bodyAsJson'(#{'$beamtalk_class' := 'HTTPResponse', body := Body}) ->
-    beamtalk_json:'parse:'(Body).
+    Result = jsx:decode(Body, [return_maps]),
+    normalize_null(Result).
+
+%% @private Convert jsx null atoms to Beamtalk nil.
+-spec normalize_null(term()) -> term().
+normalize_null(null) -> nil;
+normalize_null(Map) when is_map(Map) -> maps:map(fun(_, V) -> normalize_null(V) end, Map);
+normalize_null(List) when is_list(List) -> lists:map(fun normalize_null/1, List);
+normalize_null(Other) -> Other.
 
 %% @doc Human-readable representation: "an HTTPResponse(200)".
 -spec 'printString'(map()) -> binary().
