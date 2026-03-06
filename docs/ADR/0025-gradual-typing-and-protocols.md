@@ -120,7 +120,7 @@ The key insight: **literal blocks at message-send sites can be typed from contex
 
 ### Phase 2: Optional Type Annotations
 
-> **Note:** The parameter type syntax described in this section (`: Type` separator) has been superseded by [ADR 0053](0053-double-colon-type-annotation-syntax.md), which adopted `::` as the type annotation delimiter. The correct syntax is `param :: Type`, not `param: Type`. The examples below are preserved for historical context; all current code and documentation use `::`.
+> **Note:** The state and parameter type syntax described in this section (using the `: Type` separator, e.g. `state: balance: Integer` and `amount: Integer`) has been superseded by [ADR 0053](0053-double-colon-type-annotation-syntax.md), which adopted `::` as the type annotation delimiter. The correct syntax is `field :: Type` for state declarations and `param :: Type` for parameters (for example, `state: balance :: Integer = 0` and `amount :: Integer`), not `field: Type` / `param: Type`. The examples below are preserved for historical context; all current code and documentation use `::`.
 
 Developers can annotate state fields, method parameters, and return types for extra precision.
 
@@ -141,7 +141,7 @@ Actor subclass: BankAccount
     target deposit: amount
 ```
 
-**Parameter type syntax:** Type follows the parameter name with `:` separator, matching state declaration syntax. Note: this syntax was later superseded by `::` (see [ADR 0053](0053-double-colon-type-annotation-syntax.md)) to avoid visual ambiguity with keyword selector colons.
+**Parameter type syntax (historical Phase 2 design):** Type followed the parameter name with a `:` separator, mirroring the state declaration syntax used at that time. This legacy syntax was later superseded by `::` (see [ADR 0053](0053-double-colon-type-annotation-syntax.md)) to avoid visual ambiguity with keyword selector colons.
 
 ```beamtalk
 // Phase 2 syntax (superseded — current syntax uses ::)
@@ -577,12 +577,14 @@ Union types, generic types, singleton types, type narrowing. Deferred to future 
 
 ## Migration Path
 
-No migration needed. This is purely additive — all existing code compiles and runs exactly as before. Type checking introduces new warnings only; no existing behavior changes.
+No migration needed for this ADR. This is purely additive — all existing code compiles and runs exactly as before. Type checking introduces new warnings only; no existing behavior changes.
 
 - **Phase 1:** Zero code changes required. New warnings may appear for existing code.
 - **Phase 2:** No code changes required. Annotations are opt-in.
 - **Phase 2b:** `typed` modifier is opt-in per class.
 - **Phase 3:** Protocol definitions are new syntax; no existing code affected.
+
+**Note on annotation syntax migration:** After this ADR was accepted, [ADR 0053](0053-double-colon-type-annotation-syntax.md) changed the type annotation delimiter from `:` to `::` (e.g. `amount: Integer` → `amount :: Integer`). That was a one-time syntax migration applied atomically across the stdlib and documentation (BT-1134). Code written before ADR 0053 using `: Type` syntax would need updating to `:: Type`.
 
 ## References
 
