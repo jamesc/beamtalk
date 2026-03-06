@@ -338,7 +338,9 @@ unknown_selector_raises_does_not_understand_test() ->
 %%====================================================================
 
 get_user_bindings_returns_empty_when_no_workspace_registered_test() ->
-    %% beamtalk_workspace_meta not registered → should return empty map
+    %% Ensure beamtalk_workspace_meta is not registered (defensive cleanup for
+    %% test suite ordering independence)
+    catch unregister(beamtalk_workspace_meta),
     ?assertEqual(undefined, whereis(beamtalk_workspace_meta)),
     Result = beamtalk_workspace_interface_primitives:get_user_bindings(),
     ?assertEqual(#{}, Result).
@@ -365,7 +367,9 @@ get_user_bindings_returns_bound_values_test() ->
 %%====================================================================
 
 get_session_bindings_returns_empty_when_no_workspace_registered_test() ->
-    %% beamtalk_workspace_meta not registered → should return empty map
+    %% Ensure beamtalk_workspace_meta is not registered (defensive cleanup for
+    %% test suite ordering independence)
+    catch unregister(beamtalk_workspace_meta),
     ?assertEqual(undefined, whereis(beamtalk_workspace_meta)),
     Result = beamtalk_workspace_interface_primitives:get_session_bindings(),
     ?assertEqual(#{}, Result).

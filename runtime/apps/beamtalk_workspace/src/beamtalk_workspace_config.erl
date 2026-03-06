@@ -33,6 +33,7 @@
 }.
 
 -type value_singleton_config() :: #{
+    binding_name := atom(),
     class_name := atom(),
     module := module()
 }.
@@ -64,16 +65,19 @@ singletons() ->
 %%
 %% Each entry defines a singleton that is a value type (tagged map, no gen_server).
 %% Bootstrapped by calling `Module:new()` and setting the class variable `current`.
+%% - binding_name: the REPL convenience name (e.g. 'Beamtalk')
 %% - class_name: the Beamtalk class name
 %% - module: the compiled Erlang module (provides new/0)
 -spec value_singletons() -> [value_singleton_config()].
 value_singletons() ->
     [
         #{
+            binding_name => 'Beamtalk',
             class_name => 'BeamtalkInterface',
             module => 'bt@stdlib@beamtalk_interface'
         },
         #{
+            binding_name => 'Workspace',
             class_name => 'WorkspaceInterface',
             module => 'bt@stdlib@workspace_interface'
         }
@@ -84,4 +88,5 @@ value_singletons() ->
 -spec binding_names() -> [atom()].
 binding_names() ->
     ActorNames = [maps:get(binding_name, S) || S <- singletons()],
-    ActorNames ++ ['Beamtalk', 'Workspace'].
+    ValueNames = [maps:get(binding_name, S) || S <- value_singletons()],
+    ActorNames ++ ValueNames.

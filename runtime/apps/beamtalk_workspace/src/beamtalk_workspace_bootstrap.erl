@@ -101,6 +101,14 @@ handle_info({rebootstrap, ClassName, RegName, _Retries}, State) ->
         class => ClassName, name => RegName
     }),
     {noreply, State};
+handle_info({rebootstrap_value, ClassName, Module, Retries}, State) when Retries < 5 ->
+    bootstrap_value_singleton(ClassName, Module, Retries),
+    {noreply, State};
+handle_info({rebootstrap_value, ClassName, _Module, _Retries}, State) ->
+    ?LOG_ERROR("Bootstrap: failed to wire value singleton after retries", #{
+        class => ClassName
+    }),
+    {noreply, State};
 handle_info(_Msg, State) ->
     {noreply, State}.
 
@@ -131,7 +139,7 @@ bootstrap_all(State) ->
     %% Create a value object instance and set the class variable `current`.
     lists:foreach(
         fun(#{class_name := ClassName, module := Module}) ->
-            bootstrap_value_singleton(ClassName, Module)
+            bootstrap_value_singleton(ClassName, Module, 0)
         end,
         beamtalk_workspace_config:value_singletons()
     ),
@@ -155,19 +163,22 @@ bootstrap_singleton(ClassName, RegName, State) ->
 %% @private Bootstrap a value singleton: create a tagged-map instance and set class var.
 %% Value singletons are sealed Object subclasses (no gen_server process). The
 %% instance is created by calling `Module:new()` and set as the `current` class var.
--spec bootstrap_value_singleton(atom(), module()) -> ok.
-bootstrap_value_singleton(ClassName, Module) ->
+%% Schedules a retry (via `rebootstrap_value`) if the class is not yet loaded.
+-spec bootstrap_value_singleton(atom(), module(), non_neg_integer()) -> ok.
+bootstrap_value_singleton(ClassName, Module, Retries) ->
     try
         Obj = Module:new(),
         set_class_variable(ClassName, Obj),
         ?LOG_DEBUG("Bootstrap: wired value singleton", #{class => ClassName})
     catch
         error:#beamtalk_error{kind = class_not_found} ->
-            ?LOG_WARNING("Bootstrap: value singleton class not loaded yet", #{class => ClassName});
+            ?LOG_WARNING("Bootstrap: value singleton class not loaded yet", #{class => ClassName}),
+            erlang:send_after(200, self(), {rebootstrap_value, ClassName, Module, Retries + 1});
         _:Reason ->
             ?LOG_WARNING("Bootstrap: failed to initialize value singleton", #{
                 class => ClassName, reason => Reason
-            })
+            }),
+            erlang:send_after(200, self(), {rebootstrap_value, ClassName, Module, Retries + 1})
     end.
 
 %% @private Build the beamtalk_object reference tuple for a singleton.

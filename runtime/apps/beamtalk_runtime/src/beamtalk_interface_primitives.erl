@@ -1,13 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Primitive implementations for the BeamtalkInterface singleton actor.
+%%% @doc Primitive implementations for the BeamtalkInterface sealed Object.
 %%%
 %%% **DDD Context:** Object System Context
 %%%
-%%% Implements the `@primitive` methods for the BeamtalkInterface class. The
-%%% compiled Beamtalk actor (`bt@stdlib@beamtalk_interface`) delegates all
-%%% `@primitive` method calls here via `dispatch/3`.
+%%% Implements methods for the BeamtalkInterface class. BeamtalkInterface is
+%%% a `sealed Object subclass:` (value type, no gen_server process). Methods
+%%% are called via Erlang FFI from the compiled Beamtalk module using the
+%%% ErlangModule proxy pattern: `(Erlang beamtalk_interface_primitives) fn: arg`.
+%%%
+%%% The legacy `dispatch/3` is retained for backward compatibility.
 %%%
 %%% All methods are stateless reads from the class registry; no process
 %%% dictionary or ETS state is required.

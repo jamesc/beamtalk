@@ -14,9 +14,13 @@
 %%% User-registered bindings (`bind:as:` / `unbind:`) are stored in a public
 %%% named ETS table `beamtalk_wi_user_bindings` keyed by `Name` (atom).
 %%% Since WorkspaceInterface is a singleton (one per workspace), no per-process
-%%% keying is needed. The ETS table is created lazily on the first bind call.
-%%% It is accessible from external processes via `get_user_bindings/0` and
-%%% `get_session_bindings/0`.
+%%% keying is needed. The ETS table is normally created during workspace startup
+%%% via `create_bindings_table/0` (called by `beamtalk_workspace_bootstrap`),
+%%% which ensures the long-lived bootstrap process owns it. A lazy fallback via
+%%% `ensure_bindings_table/0` is also available for cases where the table is
+%%% accessed before bootstrap completes. Both paths produce the same singleton
+%%% table. The table is accessible from external processes via
+%%% `get_user_bindings/0` and `get_session_bindings/0`.
 %%%
 %%% ## External API
 %%%
@@ -347,8 +351,6 @@ handle_globals(UserBindings) ->
 %% @private Return non-class session bindings: singletons + user bind:as: entries.
 -spec handle_session_bindings(map()) -> map().
 handle_session_bindings(UserBindings) ->
-    %% Build WorkspaceSelf as a sealed Object value instance
-    WorkspaceSelf = #{'$beamtalk_class' => 'WorkspaceInterface'},
     Base0 = UserBindings,
     Base1 =
         case resolve_singleton('TranscriptStream') of
@@ -360,7 +362,14 @@ handle_session_bindings(UserBindings) ->
             nil -> Base1;
             BeamtalkObj -> maps:put('Beamtalk', BeamtalkObj, Base1)
         end,
-    maps:put('Workspace', WorkspaceSelf, Base2).
+    %% Resolve Workspace from singleton state, same as Beamtalk/Transcript.
+    %% Falls back to a plain tagged-map if the class var hasn't been wired yet.
+    WorkspaceObj =
+        case resolve_singleton('WorkspaceInterface') of
+            nil -> #{'$beamtalk_class' => 'WorkspaceInterface'};
+            Obj -> Obj
+        end,
+    maps:put('Workspace', WorkspaceObj, Base2).
 
 %% @private Convert a name argument to an atom.
 -spec to_atom_name(term()) -> atom() | {error, #beamtalk_error{}}.

@@ -66,15 +66,11 @@ bootstrap_sets_beamtalk_class_var_test_() ->
         [
             ?_test(begin
                 {ok, _} = beamtalk_workspace_bootstrap:start_link(),
-                case beamtalk_class_registry:whereis_class('BeamtalkInterface') of
-                    undefined ->
-                        %% Class not loaded in this test environment — skip
-                        ok;
-                    ClassPid ->
-                        Current = gen_server:call(ClassPid, {get_class_var, current}, 5000),
-                        ?assertNotEqual(nil, Current),
-                        ?assert(is_map(Current))
-                end
+                ClassPid = beamtalk_class_registry:whereis_class('BeamtalkInterface'),
+                ?assertNotEqual(undefined, ClassPid),
+                Current = gen_server:call(ClassPid, {get_class_var, current}, 5000),
+                ?assertNotEqual(nil, Current),
+                ?assert(is_map(Current))
             end)
         ]
     end}.
@@ -87,15 +83,11 @@ bootstrap_sets_workspace_class_var_test_() ->
         [
             ?_test(begin
                 {ok, _} = beamtalk_workspace_bootstrap:start_link(),
-                case beamtalk_class_registry:whereis_class('WorkspaceInterface') of
-                    undefined ->
-                        %% Class not loaded in this test environment — skip
-                        ok;
-                    ClassPid ->
-                        Current = gen_server:call(ClassPid, {get_class_var, current}, 5000),
-                        ?assertNotEqual(nil, Current),
-                        ?assert(is_map(Current))
-                end
+                ClassPid = beamtalk_class_registry:whereis_class('WorkspaceInterface'),
+                ?assertNotEqual(undefined, ClassPid),
+                Current = gen_server:call(ClassPid, {get_class_var, current}, 5000),
+                ?assertNotEqual(nil, Current),
+                ?assert(is_map(Current))
             end)
         ]
     end}.
