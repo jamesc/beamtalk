@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture: a TestCase subclass with skip tests for BT-1149 skip mechanism tests
+
+TestCase subclass: SampleSkipTestCase
+
+  testSkipped => self skip: "this test is intentionally skipped"
+
+  testSkippedNoReason => self skip
+
+  testPassing => self assert: true

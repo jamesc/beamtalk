@@ -12,7 +12,7 @@
 %%% TestResult is a tagged map:
 %%% ```
 %%% #{'$beamtalk_class' => 'TestResult',
-%%%    passed => integer(), failed => integer(), total => integer(),
+%%%    passed => integer(), failed => integer(), skipped => integer(), total => integer(),
 %%%    duration => float(), tests => [#{name, status, error?}]}
 %%% ```
 
@@ -28,6 +28,7 @@
     %% TestResult instance primitives
     result_passed/1,
     result_failed/1,
+    result_skipped/1,
     result_total/1,
     result_duration/1,
     result_failures/1,
@@ -49,7 +50,7 @@ run_all() ->
     Classes = beamtalk_test_case:find_test_classes(),
     case Classes of
         [] ->
-            make_test_result(0, 0, 0, 0.0, []);
+            make_test_result(0, 0, 0, 0, 0.0, []);
         _ ->
             ClassResults = lists:map(
                 fun(ClassName) ->
@@ -90,6 +91,11 @@ result_passed(#{'$beamtalk_class' := 'TestResult', passed := Passed}) ->
 result_failed(#{'$beamtalk_class' := 'TestResult', failed := Failed}) ->
     Failed.
 
+%% @doc Number of skipped tests.
+-spec result_skipped(map()) -> non_neg_integer().
+result_skipped(#{'$beamtalk_class' := 'TestResult', skipped := Skipped}) ->
+    Skipped.
+
 %% @doc Total test count.
 -spec result_total(map()) -> non_neg_integer().
 result_total(#{'$beamtalk_class' := 'TestResult', total := Total}) ->
@@ -124,20 +130,35 @@ result_summary(#{
     total := Total,
     passed := Passed,
     failed := Failed,
+    skipped := Skipped,
     duration := Duration
 }) ->
-    case Failed of
-        0 ->
+    case {Failed, Skipped} of
+        {0, 0} ->
             iolist_to_binary(
                 io_lib:format(
                     "~p tests, ~p passed (~.1fs)", [Total, Passed, Duration]
                 )
             );
-        _ ->
+        {0, _} ->
+            iolist_to_binary(
+                io_lib:format(
+                    "~p tests, ~p passed, ~p skipped (~.1fs)",
+                    [Total, Passed, Skipped, Duration]
+                )
+            );
+        {_, 0} ->
             iolist_to_binary(
                 io_lib:format(
                     "~p tests, ~p passed, ~p failed (~.1fs)",
                     [Total, Passed, Failed, Duration]
+                )
+            );
+        _ ->
+            iolist_to_binary(
+                io_lib:format(
+                    "~p tests, ~p passed, ~p skipped, ~p failed (~.1fs)",
+                    [Total, Passed, Skipped, Failed, Duration]
                 )
             )
     end.
@@ -162,7 +183,7 @@ run_class_by_name(ClassName) ->
     {TestMethods, FlatMethods, Module} = discover_methods_via_registry(ClassName),
     case TestMethods of
         [] ->
-            make_test_result(0, 0, 0, 0.0, []);
+            make_test_result(0, 0, 0, 0, 0.0, []);
         _ ->
             StartTime = erlang:monotonic_time(millisecond),
             Results = lists:map(
@@ -232,10 +253,11 @@ structured_to_test_result(#{
     total := T,
     passed := P,
     failed := F,
+    skipped := S,
     duration := D,
     tests := Tests
 }) ->
-    make_test_result(T, P, F, D, Tests).
+    make_test_result(T, P, F, S, D, Tests).
 
 %% @doc Extract class name from a class reference tuple.
 %%
@@ -254,15 +276,17 @@ extract_class_name(ClassRef) when is_tuple(ClassRef) ->
     non_neg_integer(),
     non_neg_integer(),
     non_neg_integer(),
+    non_neg_integer(),
     float(),
     list()
 ) -> map().
-make_test_result(Total, Passed, Failed, Duration, Tests) ->
+make_test_result(Total, Passed, Failed, Skipped, Duration, Tests) ->
     #{
         '$beamtalk_class' => 'TestResult',
         total => Total,
         passed => Passed,
         failed => Failed,
+        skipped => Skipped,
         duration => Duration,
         tests => Tests
     }.
@@ -270,27 +294,29 @@ make_test_result(Total, Passed, Failed, Duration, Tests) ->
 %% @doc Aggregate results from multiple classes into a single TestResult.
 -spec aggregate_results([map()]) -> map().
 aggregate_results(ClassResults) ->
-    {TotalSum, PassedSum, FailedSum, DurationSum, RevTests} =
+    {TotalSum, PassedSum, FailedSum, SkippedSum, DurationSum, RevTests} =
         lists:foldl(
             fun(
                 #{
                     total := T,
                     passed := P,
                     failed := F,
+                    skipped := S,
                     duration := D,
                     tests := Tests
                 },
-                {TAcc, PAcc, FAcc, DAcc, TestsAcc}
+                {TAcc, PAcc, FAcc, SAcc, DAcc, TestsAcc}
             ) ->
-                {TAcc + T, PAcc + P, FAcc + F, DAcc + D, lists:reverse(Tests) ++ TestsAcc}
+                {TAcc + T, PAcc + P, FAcc + F, SAcc + S, DAcc + D, lists:reverse(Tests) ++ TestsAcc}
             end,
-            {0, 0, 0, 0.0, []},
+            {0, 0, 0, 0, 0.0, []},
             ClassResults
         ),
     make_test_result(
         TotalSum,
         PassedSum,
         FailedSum,
+        SkippedSum,
         DurationSum,
         lists:reverse(RevTests)
     ).
