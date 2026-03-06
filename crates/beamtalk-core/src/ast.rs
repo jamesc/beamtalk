@@ -443,8 +443,6 @@ pub struct StateDeclaration {
     /// Non-doc comments (`//` and `/* */`) appearing before this field.
     pub comments: CommentAttachment,
     /// Doc comment attached to this field (`///` lines).
-    ///
-    /// **Note:** Always `None` until parser support lands in BT-975.
     pub doc_comment: Option<String>,
     /// Source location.
     pub span: Span,
