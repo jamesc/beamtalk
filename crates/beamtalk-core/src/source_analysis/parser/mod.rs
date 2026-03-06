@@ -2801,6 +2801,53 @@ mod tests {
     }
 
     #[test]
+    fn legacy_colon_classvar_annotation_produces_error_and_parses_type() {
+        // Legacy `classState: count : Integer` (single colon) must NOT be silently dropped.
+        // The parser should consume the colon, emit a focused error, parse the type,
+        // and continue — so the next method is not lost.
+        let source = "Actor subclass: Counter
+  classState: count : Integer = 0
+  increment => count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            !errors.is_empty(),
+            "Expected a migration error for legacy `:` classState syntax"
+        );
+        assert!(
+            errors[0].message.contains("`::`"),
+            "Error should mention `::`, got: {}",
+            errors[0].message
+        );
+        // The class and following method must still be parsed
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(
+            module.classes[0].methods.len(),
+            1,
+            "method after legacy-typed classState should not be dropped"
+        );
+    }
+
+    #[test]
+    fn double_colon_type_annotation_no_diagnostic() {
+        // Valid `::` syntax must not produce any diagnostics.
+        let source = "Actor subclass: BankAccount
+  state: balance :: Integer = 0
+  classState: rate :: Integer = 5
+  deposit: amount :: Integer => nil";
+        let tokens = lex_with_eof(source);
+        let (_, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for valid `::` syntax, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
     fn parse_binary_method() {
         let module = parse_ok(
             "Actor subclass: Number
