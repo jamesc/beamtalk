@@ -22,6 +22,7 @@
 -module(beamtalk_regex).
 
 -export(['from:'/1, 'from:options:'/2]).
+-export([from/1, from/2]).
 -export([source/1, 'printString'/1]).
 -export([has_method/1]).
 -export([
@@ -87,6 +88,18 @@
     Error1 = beamtalk_error:with_selector(Error0, 'from:options:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Pattern must be a String and options a List">>),
     beamtalk_error:raise(Error2).
+
+%%% ============================================================================
+%%% FFI aliases — no-colon names for Erlang FFI dispatch
+%%% ============================================================================
+
+%% @doc FFI alias for from:/1 — called via (Erlang beamtalk_regex) from: pattern.
+-spec from(binary()) -> map().
+from(Pattern) -> 'from:'(Pattern).
+
+%% @doc FFI alias for from:options:/2 — called via (Erlang beamtalk_regex) from: p options: opts.
+-spec from(binary(), list()) -> map().
+from(Pattern, Opts) -> 'from:options:'(Pattern, Opts).
 
 %%% ============================================================================
 %%% Instance Methods — Inspection

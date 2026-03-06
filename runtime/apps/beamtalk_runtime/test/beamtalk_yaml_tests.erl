@@ -350,6 +350,33 @@ parse_file_type_error_test() ->
     ).
 
 %%% ============================================================================
+%%% FFI no-colon aliases (BT-1142)
+%%% ============================================================================
+
+parse_alias_test() ->
+    application:ensure_all_started(yamerl),
+    ?assertEqual(42, beamtalk_yaml:parse(<<"42">>)).
+
+parse_alias_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_yaml:parse(not_a_binary)
+    ).
+
+parse_all_alias_test() ->
+    application:ensure_all_started(yamerl),
+    ?assertEqual([42, 43], beamtalk_yaml:parseAll(<<"42\n---\n43">>)).
+
+generate_alias_test() ->
+    ?assertEqual(<<"42">>, beamtalk_yaml:generate(42)).
+
+parse_file_alias_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_yaml:parseFile(not_a_binary)
+    ).
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 

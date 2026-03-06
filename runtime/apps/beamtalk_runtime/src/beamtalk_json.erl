@@ -31,6 +31,7 @@
 -module(beamtalk_json).
 
 -export(['parse:'/1, 'generate:'/1, 'prettyPrint:'/1]).
+-export([parse/1, generate/1, prettyPrint/1]).
 -export([has_method/1]).
 
 -include("beamtalk.hrl").
@@ -119,6 +120,22 @@
             Error3 = beamtalk_error:with_hint(Error2, <<"Value cannot be converted to JSON">>),
             beamtalk_error:raise(Error3)
     end.
+
+%%% ============================================================================
+%%% FFI aliases — no-colon names for Erlang FFI dispatch
+%%% ============================================================================
+
+%% @doc FFI alias for parse:/1 — called via (Erlang beamtalk_json) parse: str.
+-spec parse(binary()) -> term().
+parse(X) -> 'parse:'(X).
+
+%% @doc FFI alias for generate:/1 — called via (Erlang beamtalk_json) generate: val.
+-spec generate(term()) -> binary().
+generate(X) -> 'generate:'(X).
+
+%% @doc FFI alias for prettyPrint:/1 — called via (Erlang beamtalk_json) prettyPrint: val.
+-spec prettyPrint(term()) -> binary().
+prettyPrint(X) -> 'prettyPrint:'(X).
 
 %% @doc Check if JSON responds to the given selector.
 -spec has_method(atom()) -> boolean().

@@ -71,6 +71,30 @@ from_options_type_error_test() ->
     ).
 
 %%% ============================================================================
+%%% FFI no-colon aliases (BT-1142)
+%%% ============================================================================
+
+from_alias_test() ->
+    R = beamtalk_regex:from(<<"[0-9]+">>),
+    ?assertEqual('Regex', maps:get('$beamtalk_class', R)).
+
+from_alias_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_regex:from(not_a_string)
+    ).
+
+from_two_alias_test() ->
+    R = beamtalk_regex:from(<<"[a-z]+">>, [caseless]),
+    ?assertEqual('Regex', maps:get('$beamtalk_class', R)).
+
+from_two_alias_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_regex:from(42, [caseless])
+    ).
+
+%%% ============================================================================
 %%% source/1 and printString/1
 %%% ============================================================================
 
