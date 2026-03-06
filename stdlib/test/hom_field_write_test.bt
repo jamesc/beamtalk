@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1140: Tests that self.field := ... blocks promoted to Tier 2 correctly
+// propagate field mutations when the block is passed through a user-defined HOM.
+//
+// Before this fix, field-write blocks were compiled as plain Tier 1 funs,
+// so field mutations inside the block were silently discarded. The HOM
+// received a fun(X) -> ... that never threaded state back to the caller.
+
+TestCase subclass: HomFieldWriteTest
+
+  // BT-1140: Field write block via user-defined HOM accumulates sum correctly.
+  // self.sum starts at 0; applyAll: calls [:x | self.sum := self.sum + x] for
+  // each of #(1, 2, 3, 4, 5); final self.sum should be 15.
+  testFieldWriteViaHOM =>
+    actor := HomFieldWriteActor spawn
+    self assert: actor testFieldWriteViaHOM equals: 15
