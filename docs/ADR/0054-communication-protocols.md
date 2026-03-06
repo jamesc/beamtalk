@@ -21,7 +21,7 @@ Each boundary has fundamentally different constraints:
 
 - **Client ↔ Workspace** crosses a network boundary (even on localhost) and must support browser clients that can only speak HTTP/WebSocket. JSON is the natural format for browser interop.
 - **Workspace ↔ Compiler** crosses a language boundary (Erlang ↔ Rust) within the same machine. Performance matters for REPL responsiveness. ETF (Erlang Term Format) is native on the Erlang side and avoids JSON serialization overhead.
-- **Actor ↔ Actor** stays entirely within the BEAM VM. Native Erlang process messages are zero-copy, and `gen_server` provides the supervision, timeout, and back-pressure semantics that actors need.
+- **Actor ↔ Actor** stays entirely within the BEAM VM. Native Erlang process messages avoid external serialization; small terms are copied between process heaps while large binaries are reference-counted and shared, and `gen_server` provides the supervision, timeout, and back-pressure semantics that actors need.
 
 A single protocol (e.g., JSON-RPC everywhere) would impose unnecessary overhead at the tighter boundaries and lose native guarantees at the loosest one.
 
@@ -98,11 +98,11 @@ Every Beamtalk actor is a BEAM process running a `gen_server`. Message sends com
 
 ```erlang
 %% Sync: blocks until result
-Result = gen_server:call(ActorPid, {increment, []})
+Result = gen_server:call(ActorPid, {increment, []}).
 
 %% Async: returns a future immediately
 FuturePid = beamtalk_future:new(),
-gen_server:cast(ActorPid, {increment, [], FuturePid})
+gen_server:cast(ActorPid, {increment, [], FuturePid}).
 ```
 
 **Message format:**
