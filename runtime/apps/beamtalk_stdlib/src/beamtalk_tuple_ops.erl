@@ -22,7 +22,7 @@
 -module(beamtalk_tuple_ops).
 -export([at/2, as_string/1, do/2]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Public API

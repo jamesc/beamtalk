@@ -70,7 +70,7 @@
     parse_url/1
 ]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -define(DEFAULT_TIMEOUT, 30000).

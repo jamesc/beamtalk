@@ -617,7 +617,7 @@ fn generate_app_file(
          \x20   {{vsn, \"0.1.0\"}},\n\
          \x20   {{modules, [{modules_list}]}},\n\
          \x20   {{registered, []}},\n\
-         \x20   {{applications, [kernel, stdlib, beamtalk_runtime]}},\n\
+         \x20   {{applications, [kernel, stdlib, ssl, gun, beamtalk_runtime]}},\n\
          \x20   {{env, [\n\
          \x20       {{classes, [{classes_list}]}}\n\
          \x20   ]}}\n\
@@ -657,7 +657,7 @@ fn generate_app_src_file(src_dir: &Utf8Path, class_metadata: &[ClassMeta]) -> Re
          \x20   {{vsn, \"0.1.0\"}},\n\
          \x20   {{modules, []}},\n\
          \x20   {{registered, []}},\n\
-         \x20   {{applications, [kernel, stdlib, beamtalk_runtime]}},\n\
+         \x20   {{applications, [kernel, stdlib, ssl, gun, beamtalk_runtime]}},\n\
          \x20   {{env, [\n\
          \x20       {{classes, [\n\
          \x20           {classes_list}\n\

@@ -5,7 +5,7 @@
 %% bt@stdlib@dictionary stdlib dispatch (BT-418).
 -module(beamtalk_map_ops_tests).
 -include_lib("eunit/include/eunit.hrl").
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% at_if_absent/3

@@ -17,10 +17,11 @@
 //! - Field access (`object.field`)
 
 use crate::ast::{
-    Block, BlockParameter, CascadeMessage, ExpectCategory, Expression, ExpressionStatement,
-    Identifier, KeywordPart, Literal, MapPair, MatchArm, MessageSelector, Pattern, StringSegment,
+    BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
+    CascadeMessage, ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart,
+    Literal, MapPair, MatchArm, MessageSelector, Pattern, StringSegment,
 };
-use crate::source_analysis::{Token, TokenKind};
+use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
 
 use super::{Diagnostic, Parser, binary_binding_power};
@@ -190,9 +191,11 @@ impl Parser {
         }
 
         // Try binary message (including Arrow `->` as binary selector, ADR 0047)
+        // and GtGt (`>>`) as the method lookup binary operator.
         let binary_op = match self.current_kind() {
             TokenKind::BinarySelector(op) => Some(op.clone()),
             TokenKind::Arrow => Some("->".into()),
+            TokenKind::GtGt => Some(">>".into()),
             _ => None,
         };
         if let Some(op) = binary_op {
@@ -309,11 +312,13 @@ impl Parser {
         // Parse the left-hand side (unary expression)
         let mut left = self.parse_unary_message();
 
-        // Extract binary operator string from BinarySelector or Arrow (ADR 0047).
+        // Extract binary operator string from BinarySelector, Arrow (ADR 0047), or GtGt.
         // Arrow (`->`) is treated as the binary operator `"->"`.
+        // GtGt (`>>`) is treated as the binary operator `">>"` (method lookup).
         while let Some(op) = match self.current_kind() {
             TokenKind::BinarySelector(op) => Some(op.clone()),
             TokenKind::Arrow => Some("->".into()),
+            TokenKind::GtGt => Some(">>".into()),
             _ => None,
         } {
             // BT-285: A binary selector on a new line that looks like a method definition
@@ -904,6 +909,9 @@ impl Parser {
             // Tuple pattern: {p1, p2, ...}
             TokenKind::LeftBrace => self.parse_tuple_pattern(),
 
+            // Binary pattern: <<seg, seg, ...>>
+            TokenKind::LtLt => self.parse_binary_pattern(),
+
             _ => {
                 let bad_token = self.advance();
                 let span = bad_token.span();
@@ -944,6 +952,245 @@ impl Parser {
 
         let span = start.merge(end);
         Pattern::Tuple { elements, span }
+    }
+
+    /// Parses a binary pattern: `<<seg, seg, ...>>`
+    ///
+    /// Segment syntax: `varname`, `varname:size`, `varname/type`, `varname:size/type-modifiers`
+    /// where type is one of `integer`, `float`, `binary`, `utf8`
+    /// and modifiers include `signed`/`unsigned`, `big`/`little`/`native`.
+    fn parse_binary_pattern(&mut self) -> Pattern {
+        let start = self.current_token().span();
+        self.advance(); // consume `<<`
+
+        let mut segments = Vec::new();
+
+        if !matches!(self.current_kind(), TokenKind::GtGt) {
+            segments.push(self.parse_binary_segment());
+            while self.match_binary_selector(",") {
+                if matches!(self.current_kind(), TokenKind::GtGt) {
+                    self.error("Trailing comma is not allowed before '>>' in binary pattern");
+                    break;
+                }
+                segments.push(self.parse_binary_segment());
+            }
+        }
+
+        let end = if matches!(self.current_kind(), TokenKind::GtGt) {
+            let t = self.advance(); // consume `>>`
+            t.span()
+        } else {
+            self.error("Expected '>>' to close binary pattern");
+            start
+        };
+
+        Pattern::Binary {
+            segments,
+            span: start.merge(end),
+        }
+    }
+
+    /// Parses one segment of a binary pattern.
+    ///
+    /// Two syntactic forms are supported:
+    /// - `name/type`: identifier followed by type specifiers — `rest/binary`
+    /// - `name:size/type`: identifier with size, optionally followed by type — `version:8, length:16/big`
+    ///
+    /// Note: `name:size` lexes as `Keyword("name:")` + size-token (no space needed between
+    /// the name and the colon). The `name / type` form (with space) lexes as
+    /// `Identifier("name")` + `BinarySelector("/")` + `Identifier("type")`.
+    fn parse_binary_segment_size(&mut self) -> Option<Box<Expression>> {
+        match self.current_kind() {
+            TokenKind::Integer(_) | TokenKind::Identifier(_) => {
+                let expr = self.parse_primary();
+                match &expr {
+                    Expression::Literal(Literal::Integer(_), _) | Expression::Identifier(_) => {
+                        Some(Box::new(expr))
+                    }
+                    _ => {
+                        self.error(
+                            "Binary segment size must be an integer literal or variable name",
+                        );
+                        None
+                    }
+                }
+            }
+            _ => {
+                self.error("Expected size expression after ':' in binary segment");
+                None
+            }
+        }
+    }
+
+    fn parse_binary_segment(&mut self) -> BinarySegment {
+        let start = self.current_token().span();
+        let (value, size) = match self.current_kind() {
+            // Wildcard: `_` or `_:size` (fixed-width skip segment)
+            TokenKind::Identifier(name) if name.as_str() == "_" => {
+                let span = self.advance().span();
+                let sz = if matches!(self.current_kind(), TokenKind::Colon) {
+                    self.advance(); // consume `:`
+                    self.parse_binary_segment_size()
+                } else {
+                    None
+                };
+                (Pattern::Wildcard(span), sz)
+            }
+
+            // `name:size` — the `:` attached to the name lexes as Keyword("name:")
+            TokenKind::Keyword(kw) => {
+                let kw = kw.clone();
+                let token = self.advance();
+                let kw_span = token.span();
+                // Strip trailing `:` to recover variable name; adjust span to exclude `:`
+                let name: EcoString = kw.trim_end_matches(':').into();
+                let var_span = Span::new(kw_span.start(), kw_span.end().saturating_sub(1));
+                let var = if name == "_" {
+                    Pattern::Wildcard(var_span)
+                } else {
+                    Pattern::Variable(Identifier::new(name, var_span))
+                };
+                let sz = self.parse_binary_segment_size();
+                (var, sz)
+            }
+
+            // `name` — variable, with optional explicit `:size` (Colon + size-token)
+            TokenKind::Identifier(_) => {
+                let token = self.advance();
+                let span = token.span();
+                let var = if let TokenKind::Identifier(name) = token.into_kind() {
+                    Pattern::Variable(Identifier::new(name, span))
+                } else {
+                    unreachable!()
+                };
+                let sz = if matches!(self.current_kind(), TokenKind::Colon) {
+                    self.advance(); // consume `:`
+                    self.parse_binary_segment_size()
+                } else {
+                    None
+                };
+                (var, sz)
+            }
+
+            _ => {
+                let span = self.current_token().span();
+                self.error("Expected variable name in binary segment");
+                (Pattern::Wildcard(span), None)
+            }
+        };
+
+        // Optional type/modifiers: `/type[-modifier]*`
+        let (segment_type, signedness, endianness) = self.parse_binary_segment_specifiers();
+
+        let end = self.tokens[self.current.saturating_sub(1)].span();
+        BinarySegment {
+            value,
+            size,
+            segment_type,
+            signedness,
+            endianness,
+            unit: None,
+            span: start.merge(end),
+        }
+    }
+
+    /// Parses optional `/type[-modifier]*` specifiers for a binary segment.
+    ///
+    /// Returns `(segment_type, signedness, endianness)`.
+    fn parse_binary_segment_specifiers(
+        &mut self,
+    ) -> (
+        Option<BinarySegmentType>,
+        Option<BinarySignedness>,
+        Option<BinaryEndianness>,
+    ) {
+        let mut segment_type = None;
+        let mut signedness = None;
+        let mut endianness = None;
+
+        if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "/") {
+            self.advance(); // consume `/`
+            if !matches!(self.current_kind(), TokenKind::Identifier(_)) {
+                self.error("Expected a binary segment specifier after '/'");
+            }
+
+            // Parse identifiers separated by `-` (e.g. `signed-little`)
+            while let TokenKind::Identifier(name) = self.current_kind() {
+                let name = name.clone();
+                self.advance();
+                let span = self.tokens[self.current - 1].span();
+                match name.as_str() {
+                    "integer" | "float" | "binary" | "bytes" | "utf8" => {
+                        if segment_type.is_some() {
+                            self.diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Conflicting binary segment type specifier '{name}': type already set"
+                                ),
+                                span,
+                            ));
+                        } else {
+                            segment_type = Some(match name.as_str() {
+                                "integer" => BinarySegmentType::Integer,
+                                "float" => BinarySegmentType::Float,
+                                "utf8" => BinarySegmentType::Utf8,
+                                _ => BinarySegmentType::Binary, // "binary" | "bytes"
+                            });
+                        }
+                    }
+                    "signed" | "unsigned" => {
+                        if signedness.is_some() {
+                            self.diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Conflicting binary segment signedness specifier '{name}': signedness already set"
+                                ),
+                                span,
+                            ));
+                        } else {
+                            signedness = Some(if name.as_str() == "signed" {
+                                BinarySignedness::Signed
+                            } else {
+                                BinarySignedness::Unsigned
+                            });
+                        }
+                    }
+                    "big" | "little" | "native" => {
+                        if endianness.is_some() {
+                            self.diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Conflicting binary segment endianness specifier '{name}': endianness already set"
+                                ),
+                                span,
+                            ));
+                        } else {
+                            endianness = Some(match name.as_str() {
+                                "big" => BinaryEndianness::Big,
+                                "little" => BinaryEndianness::Little,
+                                _ => BinaryEndianness::Native, // "native"
+                            });
+                        }
+                    }
+                    unknown => {
+                        self.diagnostics.push(Diagnostic::error(
+                            format!("Unknown binary segment specifier: '{unknown}'"),
+                            span,
+                        ));
+                    }
+                }
+                // Continue if next is `-` (chained modifiers like `signed-little`)
+                if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "-")
+                {
+                    self.advance(); // consume `-`
+                    if !matches!(self.current_kind(), TokenKind::Identifier(_)) {
+                        self.error("Expected a specifier name after '-' in binary segment type");
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+
+        (segment_type, signedness, endianness)
     }
 
     /// Parses a `@primitive` or `@intrinsic` pragma: `@primitive "selector"` or `@intrinsic intrinsicName`.

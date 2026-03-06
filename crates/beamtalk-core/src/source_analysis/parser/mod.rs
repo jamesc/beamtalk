@@ -236,6 +236,7 @@ pub fn is_input_complete(source: &str) -> bool {
     let mut bracket_depth: i32 = 0; // [ ]
     let mut paren_depth: i32 = 0; // ( )
     let mut brace_depth: i32 = 0; // { }
+    let mut binary_depth: i32 = 0; // << >>
     let mut last_meaningful_kind: Option<&TokenKind> = None;
     let mut has_subclass_keyword = false;
     let mut has_method_arrow = false;
@@ -269,11 +270,13 @@ pub fn is_input_complete(source: &str) -> bool {
             TokenKind::LeftBracket | TokenKind::ArrayOpen => bracket_depth += 1,
             TokenKind::LeftParen | TokenKind::ListOpen => paren_depth += 1,
             TokenKind::LeftBrace | TokenKind::MapOpen => brace_depth += 1,
+            TokenKind::LtLt => binary_depth += 1,
 
             // Closing delimiters
             TokenKind::RightBracket => bracket_depth -= 1,
             TokenKind::RightParen => paren_depth -= 1,
             TokenKind::RightBrace => brace_depth -= 1,
+            TokenKind::GtGt if binary_depth > 0 => binary_depth -= 1,
 
             // Track class definition pattern
             TokenKind::Keyword(k) if k == "subclass:" => has_subclass_keyword = true,
@@ -293,7 +296,7 @@ pub fn is_input_complete(source: &str) -> bool {
     }
 
     // Unclosed delimiters
-    if bracket_depth > 0 || paren_depth > 0 || brace_depth > 0 {
+    if bracket_depth > 0 || paren_depth > 0 || brace_depth > 0 || binary_depth > 0 {
         return false;
     }
 
@@ -303,9 +306,10 @@ pub fn is_input_complete(source: &str) -> bool {
     }
 
     // Trailing binary operator missing its right operand (e.g., "1 +" or "3 *" or "x ->")
+    // GtGt trailing: "Counter >>" is incomplete (method lookup or binary op)
     if matches!(
         last_meaningful_kind,
-        Some(TokenKind::BinarySelector(_) | TokenKind::Arrow)
+        Some(TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt)
     ) {
         return false;
     }
@@ -1022,8 +1026,8 @@ impl Parser {
             offset += 1;
         }
 
-        // Must have `>>` binary selector
-        if !matches!(self.peek_at(offset), Some(TokenKind::BinarySelector(s)) if s == ">>") {
+        // Must have `>>` token (GtGt since BT-663)
+        if !matches!(self.peek_at(offset), Some(TokenKind::GtGt)) {
             return false;
         }
         offset += 1;
@@ -2797,6 +2801,99 @@ mod tests {
             module.classes[0].methods.len(),
             2,
             "method after legacy-typed param should not be dropped"
+        );
+    }
+
+    #[test]
+    fn legacy_colon_classvar_annotation_produces_error_and_parses_type() {
+        // Legacy `classState: count : Integer` (single colon) must NOT be silently dropped.
+        // The parser should consume the colon, emit a focused error, parse the type,
+        // and continue — so the next method is not lost.
+        let source = "Actor subclass: Counter
+  classState: count : Integer = 0
+  increment => count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            !errors.is_empty(),
+            "Expected a migration error for legacy `:` classState syntax"
+        );
+        assert!(
+            errors[0].message.contains("`::`"),
+            "Error should mention `::`, got: {}",
+            errors[0].message
+        );
+        // The class and following method must still be parsed
+        assert_eq!(module.classes.len(), 1);
+        let class = &module.classes[0];
+        assert_eq!(
+            class.methods.len(),
+            1,
+            "method after legacy-typed classState should not be dropped"
+        );
+        // The classState declaration itself must be recovered with its type and default value
+        assert_eq!(
+            class.class_variables.len(),
+            1,
+            "Expected exactly one classState variable to be parsed"
+        );
+        let cv = &class.class_variables[0];
+        assert!(
+            cv.type_annotation.is_some(),
+            "Legacy `classState:` should still have a parsed type_annotation after recovery"
+        );
+        assert!(
+            cv.default_value.is_some(),
+            "Legacy `classState:` default value (`= 0`) should still be present after recovery"
+        );
+    }
+
+    #[test]
+    fn double_colon_type_annotation_no_diagnostic() {
+        // Valid `::` syntax must not produce any diagnostics, and types must be in the AST.
+        let source = "Actor subclass: BankAccount
+  state: balance :: Integer = 0
+  classState: rate :: Integer = 5
+  deposit: amount :: Integer => nil";
+        let tokens = lex_with_eof(source);
+        let (module, diagnostics) = parse(tokens);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for valid `::` syntax, got: {diagnostics:?}"
+        );
+        assert_eq!(module.classes.len(), 1, "Expected exactly one class");
+        let class = &module.classes[0];
+        // `state: balance :: Integer = 0`
+        assert!(
+            !class.state.is_empty(),
+            "Expected at least one state variable"
+        );
+        assert!(
+            class.state[0].type_annotation.is_some(),
+            "Expected state variable to have a type annotation from `::`"
+        );
+        // `classState: rate :: Integer = 5`
+        assert!(
+            !class.class_variables.is_empty(),
+            "Expected at least one classState variable"
+        );
+        assert!(
+            class.class_variables[0].type_annotation.is_some(),
+            "Expected classState variable to have a type annotation from `::`"
+        );
+        // `deposit: amount :: Integer => nil`
+        assert!(!class.methods.is_empty(), "Expected at least one method");
+        assert!(
+            !class.methods[0].parameters.is_empty(),
+            "Expected deposit: to have a parameter"
+        );
+        assert!(
+            class.methods[0].parameters[0].type_annotation.is_some(),
+            "Expected deposit: parameter to have a type annotation from `::`"
         );
     }
 
@@ -5582,5 +5679,181 @@ Actor subclass: Counter
             method.comments.leading[0].content
         );
         assert!(module.file_leading_comments.is_empty());
+    }
+
+    // ========================================================================
+    // Binary pattern tests (BT-663)
+    // ========================================================================
+
+    #[test]
+    fn parse_binary_pattern_simple() {
+        // <<version:8, rest/binary>> in a match expression
+        let source = r"
+Actor subclass: Parser
+  parse: data =>
+    data match: [
+      <<version:8, rest/binary>> -> version
+    ]";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        // No errors — pattern parsed successfully
+    }
+
+    #[test]
+    fn parse_binary_pattern_wildcard_segment() {
+        // <<_/binary>> — wildcard segment
+        let source = r"
+Actor subclass: T
+  test: data =>
+    data match: [
+      <<_/binary>> -> #ok
+    ]";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+    }
+
+    #[test]
+    fn parse_binary_pattern_multiple_modifiers() {
+        // <<val:16/signed-little>> — signed little-endian 16-bit integer
+        let source = r"
+Actor subclass: T
+  test: data =>
+    data match: [
+      <<val:16/signed-little>> -> val
+    ]";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+    }
+
+    #[test]
+    fn parse_binary_pattern_utf8() {
+        // <<codepoint/utf8, rest/binary>>
+        let source = r"
+Actor subclass: T
+  test: data =>
+    data match: [
+      <<codepoint/utf8, rest/binary>> -> codepoint
+    ]";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+    }
+
+    #[test]
+    fn parse_binary_pattern_empty() {
+        // <<>> — empty binary
+        let source = r"
+Actor subclass: T
+  test: data =>
+    data match: [
+      <<>> -> #empty
+    ]";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+    }
+
+    #[test]
+    fn lex_ltlt_gtgt_tokens() {
+        use crate::source_analysis::TokenKind;
+        let tokens = lex_with_eof("<<");
+        assert!(matches!(tokens[0].kind(), TokenKind::LtLt));
+        let tokens = lex_with_eof(">>");
+        assert!(matches!(tokens[0].kind(), TokenKind::GtGt));
+    }
+
+    #[test]
+    fn ltlt_not_a_binary_selector() {
+        // `<<` must NOT lex as BinarySelector("<<") any more
+        use crate::source_analysis::TokenKind;
+        let tokens = lex_with_eof("<<");
+        assert!(!matches!(tokens[0].kind(), TokenKind::BinarySelector(_)));
+    }
+
+    #[test]
+    fn gtgt_still_works_as_method_lookup() {
+        // `Counter >> #increment` is a binary message send (method lookup)
+        let module = parse_ok("Counter >> #increment");
+        assert!(module.method_definitions.is_empty());
+        assert_eq!(module.expressions.len(), 1);
+    }
+
+    #[test]
+    fn gtgt_still_works_in_standalone_method_definition() {
+        // `Counter >> increment =>` is a Tonel-style standalone method definition
+        let module = parse_ok("Counter >> increment => nil");
+        assert_eq!(module.method_definitions.len(), 1);
+        assert_eq!(
+            module.method_definitions[0].class_name.name.as_str(),
+            "Counter"
+        );
+    }
+
+    #[test]
+    fn incomplete_trailing_gtgt() {
+        // "Counter >>" is incomplete — trailing binary op / method lookup
+        assert!(!is_input_complete("Counter >>"));
+        assert!(!is_input_complete("Counter class >>"));
+    }
+
+    #[test]
+    fn incomplete_unclosed_binary_pattern() {
+        // Unclosed `<<` should be detected as incomplete input
+        assert!(!is_input_complete("data match: [<<version:8]"));
+        assert!(!is_input_complete("<<version:8"));
+    }
+
+    #[test]
+    fn complete_closed_binary_pattern() {
+        // Fully closed binary pattern is complete
+        assert!(is_input_complete(
+            r"data match: [<<version:8, _/binary>> -> version]"
+        ));
+    }
+
+    #[test]
+    fn binary_segment_conflicting_type_specifiers_error() {
+        // `/integer-binary` — two type specifiers: error on the second
+        let diagnostics = parse_err(
+            r"Actor subclass: T
+  test: data =>
+    data match: [<<x/integer-binary>> -> x]",
+        );
+        assert!(
+            diagnostics.iter().any(|d| d
+                .message
+                .contains("Conflicting binary segment type specifier")),
+            "Expected conflict diagnostic, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn binary_segment_conflicting_endianness_specifiers_error() {
+        // `/big-little` — two endianness specifiers: error on the second
+        let diagnostics = parse_err(
+            r"Actor subclass: T
+  test: data =>
+    data match: [<<x/big-little>> -> x]",
+        );
+        assert!(
+            diagnostics.iter().any(|d| d
+                .message
+                .contains("Conflicting binary segment endianness specifier")),
+            "Expected conflict diagnostic, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn binary_segment_conflicting_signedness_specifiers_error() {
+        // `/signed-unsigned` — two signedness specifiers: error on the second
+        let diagnostics = parse_err(
+            r"Actor subclass: T
+  test: data =>
+    data match: [<<x/signed-unsigned>> -> x]",
+        );
+        assert!(
+            diagnostics.iter().any(|d| d
+                .message
+                .contains("Conflicting binary segment signedness specifier")),
+            "Expected conflict diagnostic, got: {diagnostics:?}"
+        );
     }
 }

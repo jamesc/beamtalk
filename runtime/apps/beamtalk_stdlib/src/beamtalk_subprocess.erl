@@ -50,7 +50,7 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Public API
 -export([start_link/1, start/1]).

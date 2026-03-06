@@ -35,7 +35,7 @@
 -export(['atRandom'/1]).
 -export([has_method/1]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Class-side Methods (process dictionary seed)

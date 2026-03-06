@@ -873,8 +873,8 @@ impl Parser {
         // Check for optional `class` modifier
         let is_class_method = if matches!(self.current_kind(), TokenKind::Identifier(name) if name == "class")
         {
-            // Only treat as modifier if next token is `>>`
-            if matches!(self.peek_at(1), Some(TokenKind::BinarySelector(s)) if s == ">>") {
+            // Only treat as modifier if next token is `>>` (GtGt since BT-663)
+            if matches!(self.peek_at(1), Some(TokenKind::GtGt)) {
                 self.advance(); // consume `class`
                 true
             } else {
@@ -884,8 +884,8 @@ impl Parser {
             false
         };
 
-        // Consume `>>`
-        if !self.match_binary_selector(">>") {
+        // Consume `>>` (GtGt token since BT-663)
+        if !self.match_token(&TokenKind::GtGt) {
             self.error("Expected '>>' in standalone method definition");
         }
 
