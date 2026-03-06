@@ -249,12 +249,14 @@ handle_close(State) ->
             {reply, nil, State};
         false ->
             #{port := Port, child_id := ChildId} = State,
+            S0 = flush_pending(stdout, State),
+            S1 = flush_pending(stderr, S0),
             beamtalk_exec_port:kill_child(Port, ChildId),
             beamtalk_exec_port:close(Port),
-            NewState = State#{port_closed => true},
-            S1 = maybe_reply_eof(stdout, NewState),
-            S2 = maybe_reply_eof(stderr, S1),
-            {reply, nil, S2}
+            NewState = S1#{port_closed => true},
+            S2 = maybe_reply_eof(stdout, NewState),
+            S3 = maybe_reply_eof(stderr, S2),
+            {reply, nil, S3}
     end.
 
 %% @private Deferred-reply read for Channel (stdout or stderr).
