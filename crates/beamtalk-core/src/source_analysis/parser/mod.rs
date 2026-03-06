@@ -5808,4 +5808,52 @@ Actor subclass: T
             r"data match: [<<version:8, _/binary>> -> version]"
         ));
     }
+
+    #[test]
+    fn binary_segment_conflicting_type_specifiers_error() {
+        // `/integer-binary` — two type specifiers: error on the second
+        let diagnostics = parse_err(
+            r"Actor subclass: T
+  test: data =>
+    data match: [<<x/integer-binary>> -> x]",
+        );
+        assert!(
+            diagnostics.iter().any(|d| d
+                .message
+                .contains("Conflicting binary segment type specifier")),
+            "Expected conflict diagnostic, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn binary_segment_conflicting_endianness_specifiers_error() {
+        // `/big-little` — two endianness specifiers: error on the second
+        let diagnostics = parse_err(
+            r"Actor subclass: T
+  test: data =>
+    data match: [<<x/big-little>> -> x]",
+        );
+        assert!(
+            diagnostics.iter().any(|d| d
+                .message
+                .contains("Conflicting binary segment endianness specifier")),
+            "Expected conflict diagnostic, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn binary_segment_conflicting_signedness_specifiers_error() {
+        // `/signed-unsigned` — two signedness specifiers: error on the second
+        let diagnostics = parse_err(
+            r"Actor subclass: T
+  test: data =>
+    data match: [<<x/signed-unsigned>> -> x]",
+        );
+        assert!(
+            diagnostics.iter().any(|d| d
+                .message
+                .contains("Conflicting binary segment signedness specifier")),
+            "Expected conflict diagnostic, got: {diagnostics:?}"
+        );
+    }
 }

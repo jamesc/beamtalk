@@ -1118,18 +1118,58 @@ impl Parser {
             while let TokenKind::Identifier(name) = self.current_kind() {
                 let name = name.clone();
                 self.advance();
+                let span = self.tokens[self.current - 1].span();
                 match name.as_str() {
-                    "integer" => segment_type = Some(BinarySegmentType::Integer),
-                    "float" => segment_type = Some(BinarySegmentType::Float),
-                    "binary" | "bytes" => segment_type = Some(BinarySegmentType::Binary),
-                    "utf8" => segment_type = Some(BinarySegmentType::Utf8),
-                    "signed" => signedness = Some(BinarySignedness::Signed),
-                    "unsigned" => signedness = Some(BinarySignedness::Unsigned),
-                    "big" => endianness = Some(BinaryEndianness::Big),
-                    "little" => endianness = Some(BinaryEndianness::Little),
-                    "native" => endianness = Some(BinaryEndianness::Native),
+                    "integer" | "float" | "binary" | "bytes" | "utf8" => {
+                        if segment_type.is_some() {
+                            self.diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Conflicting binary segment type specifier '{name}': type already set"
+                                ),
+                                span,
+                            ));
+                        } else {
+                            segment_type = Some(match name.as_str() {
+                                "integer" => BinarySegmentType::Integer,
+                                "float" => BinarySegmentType::Float,
+                                "utf8" => BinarySegmentType::Utf8,
+                                _ => BinarySegmentType::Binary, // "binary" | "bytes"
+                            });
+                        }
+                    }
+                    "signed" | "unsigned" => {
+                        if signedness.is_some() {
+                            self.diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Conflicting binary segment signedness specifier '{name}': signedness already set"
+                                ),
+                                span,
+                            ));
+                        } else {
+                            signedness = Some(if name.as_str() == "signed" {
+                                BinarySignedness::Signed
+                            } else {
+                                BinarySignedness::Unsigned
+                            });
+                        }
+                    }
+                    "big" | "little" | "native" => {
+                        if endianness.is_some() {
+                            self.diagnostics.push(Diagnostic::error(
+                                format!(
+                                    "Conflicting binary segment endianness specifier '{name}': endianness already set"
+                                ),
+                                span,
+                            ));
+                        } else {
+                            endianness = Some(match name.as_str() {
+                                "big" => BinaryEndianness::Big,
+                                "little" => BinaryEndianness::Little,
+                                _ => BinaryEndianness::Native, // "native"
+                            });
+                        }
+                    }
                     unknown => {
-                        let span = self.tokens[self.current - 1].span();
                         self.diagnostics.push(Diagnostic::error(
                             format!("Unknown binary segment specifier: '{unknown}'"),
                             span,
