@@ -4812,7 +4812,7 @@ Actor subclass: Counter
     fn standalone_method_definition_keyword_typed_param() {
         // Regression: BT-1151 — is_keyword_method_selector_at must handle typed params
         // just like is_keyword_method_at; without the shared helper this was missed.
-        let module = parse_ok("Counter >> setValue: v: Integer => self.value := v");
+        let module = parse_ok("Counter >> setValue: v :: Integer => self.value := v");
         assert_eq!(module.method_definitions.len(), 1);
         let method_def = &module.method_definitions[0];
         assert_eq!(method_def.class_name.name.as_str(), "Counter");
