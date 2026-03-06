@@ -70,9 +70,12 @@ const READINESS_READ_TIMEOUT_MS: u64 = 10_000;
 
 /// Maximum Phase 2 WS auth+health retries after TCP port is confirmed open.
 ///
-/// Retries guard against transient connection drops (brief cowboy restart,
-/// scheduler jitter). Each attempt costs at most `READINESS_READ_TIMEOUT_MS`.
-const WS_HEALTH_RETRIES: usize = 5;
+/// After Phase 1 (TCP) succeeds the cowboy WS handler may still be initialising
+/// — TCP accepts immediately once the listener socket is bound, but the WS
+/// upgrade can fail until cowboy's request-handling pipeline is fully up.
+/// 30 retries × (up to `READINESS_READ_TIMEOUT_MS` + `READINESS_PROBE_DELAY_MS`)
+/// gives a generous window for the handler to become ready.
+const WS_HEALTH_RETRIES: usize = 30;
 
 /// Number of TCP readiness probe attempts between BEAM liveness checks.
 ///
@@ -353,8 +356,9 @@ pub fn start_detached_node(
 ///    and send `{"op":"health"}`. Retried up to `WS_HEALTH_RETRIES` times for
 ///    transient failures (brief cowboy restart, scheduler jitter).
 ///
-/// Both loops check `is_process_alive` every `LIVENESS_CHECK_INTERVAL` attempts
-/// so a crashed node is detected within ~5 s rather than after the full timeout.
+/// Phase 1 checks `is_process_alive` every `LIVENESS_CHECK_INTERVAL` attempts.
+/// Phase 2 checks after every attempt (every `READINESS_PROBE_DELAY_MS`) since
+/// each WS auth attempt can itself take up to `READINESS_READ_TIMEOUT_MS`.
 ///
 /// `log_path` is `Some(path)` only when the startup log file was successfully
 /// opened; it is included in timeout error messages to guide diagnosis.
