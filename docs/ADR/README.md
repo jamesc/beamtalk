@@ -82,6 +82,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0053](0053-double-colon-type-annotation-syntax.md) | Double-Colon Type Annotation Syntax | Accepted | 2026-03-05 |
 | [0054](0054-communication-protocols.md) | Communication Protocols | Accepted \| Implemented | 2026-03-05 |
 | [0055](0055-erlang-backed-class-authoring-protocol.md) | Erlang-Backed Class Authoring Protocol | Proposed | 2026-03-06 |
+| [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Proposed | 2026-03-06 |
 
 ## Creating New ADRs
 

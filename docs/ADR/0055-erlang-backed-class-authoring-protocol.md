@@ -17,19 +17,46 @@ Neither mechanism is designed as a general **authoring protocol** for Erlang-bac
 
 - Only stdlib authors can create primitive-backed classes (requires Rust compiler changes)
 - There is no convention for how a `.bt` class declares its Erlang backing
-- The Erlang backing module must hand-write `dispatch/3`, `has_method/1`, and getter functions that duplicate information already in the `.bt` file
 - Value object structure (map fields) is implicit — `inspect` cannot enumerate fields, the LSP cannot infer types, and there is no compile-time validation between the `.bt` declaration and its Erlang producer
-- There is no convention for Actors backed by hand-written OTP gen_servers
+- There is no declared relationship between Actor classes backed by hand-written OTP gen_servers and their Erlang module (addressed in ADR 0056)
 
 ### Current State
 
 A `sealed Value subclass: HTTPResponse` today requires:
 - `beamtalk_http_response.erl` with `dispatch/3`, `has_method/1`, and individual getter functions (`status/1`, `headers/1`, etc.)
 - No field declarations in `HTTPResponse.bt` — structure is implicit in the Erlang map
-- `@primitive "status"` in the `.bt` file routing through the Rust compiler
+- `@primitive "status"` etc. in the `.bt` file routing through the Rust compiler
 - No way for `inspect` to enumerate fields or for the LSP to offer completions on a response value
 
-For an Actor backed by a hand-written gen_server (`Subprocess`), there is no declared relationship between the `.bt` class and `beamtalk_subprocess.erl`.
+### What the Compiler Already Generates from `state:` Declarations
+
+`state:` declarations are used for both Actor mutable state and Value immutable fields. The compiler (`value_type_codegen.rs`) already generates the following from `state:` declarations on Value classes — this pipeline is implemented and tested (e.g. `stdlib/test/fixtures/tagged_value.bt`). Shown in Erlang source syntax for readability; actual output is Core Erlang:
+
+```erlang
+%% new/0 — default constructor (tagged map with declared defaults)
+new() ->
+    #{'$beamtalk_class' => 'ClassName', field1 => default1, field2 => default2}.
+
+%% new/1 — init constructor (merges caller-supplied map with defaults)
+new(Args) ->
+    maps:merge(DefaultMap, Args).
+
+%% fieldName/1 — getter (inline maps:get)
+fieldName(Self) ->
+    maps:get(fieldName, Self).
+
+%% withFieldName:/2 — functional updater (returns new map, never mutates)
+'withFieldName:'(Self, NewVal) ->
+    maps:put(fieldName, NewVal, Self).
+
+%% class_field1:field2:/N — keyword class-side constructor
+%% N = number of fields + 2 (ClassSelf, ClassVars, then one arg per field)
+'class_status:headers:body:'(_ClassSelf, _ClassVars, Arg0, Arg1, Arg2) ->
+    #{'$beamtalk_class' => 'HTTPResponse',
+      status => Arg0, headers => Arg1, body => Arg2}.
+```
+
+This generation pipeline already works for Value classes. The semantic analysis enforces immutability — `self.x := v` on a Value class is a compile error. What is missing is not the mechanism but the **convention and migration**: existing stdlib classes like `HTTPResponse` still use `@primitive` instead of `state:` declarations, and there is no declared protocol for Erlang-backed Actors.
 
 ### Constraints
 
@@ -38,137 +65,143 @@ For an Actor backed by a hand-written gen_server (`Subprocess`), there is no dec
 3. **Single source of truth** — field structure should be declared once, not duplicated between `.bt` and Erlang
 4. **Compile-time safety** — changes to the `.bt` declaration should produce Erlang compile errors at call sites if the contract breaks
 5. **Reflection works** — `inspect`, `fieldNames`, and LSP completions should work on Erlang-backed classes
-6. **Symmetric for Values and Actors** — the protocol should cover both kinds of object
+6. **Actor convention** — the (Erlang module) FFI pattern applies to Actors too, pending a dedicated `@native` ADR (ADR 0056) for gen_server-backed Actors
 
 ## Decision
 
-The Erlang-backed class authoring protocol consists of three complementary mechanisms:
+The Erlang-backed class authoring protocol consists of two complementary mechanisms. A third mechanism (`@native` for Actors backed by hand-written gen_servers) is specified in ADR 0056.
 
-### 1. `field:` Declarations for Sealed Value Subclasses
+### 1. `state:` Declarations on Value Subclasses
 
-Sealed Value subclasses may declare their map structure using `field:` declarations. The compiler auto-generates getter methods and an Erlang-callable constructor.
+Value subclasses may declare their map structure using `state:` declarations — the same keyword already used for Actor fields. The compiler generates getter methods, functional updaters, and keyword constructors from these declarations. The semantics are context-dependent: `state:` on a `Value` subclass declares **immutable fields** (the map is never mutated in place); `state:` on an `Actor` subclass declares **mutable state** (the gen_server can update it).
 
 ```beamtalk
 sealed Value subclass: HTTPResponse
-  field: status: Integer
-  field: headers: List
-  field: body: String
+  state: status :: Integer = 0
+  state: headers :: List = #()
+  state: body :: String = ""
 
-  /// True if the status code is in the 2xx range.
-  sealed ok -> Boolean => self status >= 200
+  /// True if the status code is in the 2xx success range.
+  sealed ok -> Boolean => (self status >= 200) and: [self status <= 299]
 
   /// Parse the response body as JSON.
   sealed bodyAsJson -> Object => JSON parse: self body
 
-  /// Delegate a complex operation to the Erlang backing module.
-  sealed retryWith: opts: Dictionary -> HTTPResponse =>
-    (Erlang beamtalk_http) retry: self options: opts
+  /// Human-readable description including the status code.
+  sealed printString -> String => "an HTTPResponse(" ++ self status printString ++ ")"
 ```
 
-The compiler generates in the compiled stdlib module (`bt@stdlib@httpresponse`):
+The compiler generates in the compiled stdlib module (`bt@stdlib@httpresponse`). The examples below use Erlang source syntax for readability — the actual compiler output is Core Erlang with abstract type attribute tuples (see `spec_codegen.rs`):
 
 ```erlang
-%% Auto-generated by Beamtalk compiler — do not edit
--export([make/3, 'status'/1, 'headers'/1, 'body'/1]).
+%% Auto-generated by Beamtalk compiler
+%% (shown in Erlang source syntax for clarity; actual output is Core Erlang)
 
-make(Status, Headers, Body) ->
-  #{'$beamtalk_class' => 'HTTPResponse',
-    status => Status,
-    headers => Headers,
-    body => Body}.
+-type t() :: #{'$beamtalk_class' := 'HTTPResponse',
+               'status' := integer(),
+               'headers' := list(),
+               'body' := binary()}.
 
-'status'(#{'$beamtalk_class' := 'HTTPResponse', status := V}) -> V.
-'headers'(#{'$beamtalk_class' := 'HTTPResponse', headers := V}) -> V.
-'body'(#{'$beamtalk_class' := 'HTTPResponse', body := V}) -> V.
+%% Default constructor
+-spec 'new'() -> t().
+new() ->
+    #{'$beamtalk_class' => 'HTTPResponse',
+      status => 0, headers => [], body => <<>>}.
+
+%% Keyword class-side constructor — called from Erlang producers
+-spec 'class_status:headers:body:'(term(), term(), integer(), list(), binary()) -> t().
+'class_status:headers:body:'(_ClassSelf, _ClassVars, Status, Headers, Body) ->
+    #{'$beamtalk_class' => 'HTTPResponse',
+      status => Status, headers => Headers, body => Body}.
+
+%% Getters
+-spec status(t()) -> integer().
+status(Self) -> maps:get(status, Self).
+-spec headers(t()) -> list().
+headers(Self) -> maps:get(headers, Self).
+-spec body(t()) -> binary().
+body(Self) -> maps:get(body, Self).
+
+%% Functional updaters
+-spec 'withStatus:'(t(), integer()) -> t().
+'withStatus:'(Self, V) -> maps:put(status, V, Self).
+-spec 'withHeaders:'(t(), list()) -> t().
+'withHeaders:'(Self, V) -> maps:put(headers, V, Self).
+-spec 'withBody:'(t(), binary()) -> t().
+'withBody:'(Self, V) -> maps:put(body, V, Self).
 ```
 
-The Erlang producer calls the generated constructor — no hand-written map construction:
+The Erlang HTTP implementation calls the generated keyword constructor instead of hand-writing tagged maps:
 
 ```erlang
 %% beamtalk_http.erl — calls generated constructor, no tagged map literal
-Response = 'bt@stdlib@httpresponse':make(Status, Headers, Body),
+Response = 'bt@stdlib@httpresponse':'class_status:headers:body:'(
+    undefined, undefined, Status, Headers, Body),
 ```
 
-**Compile-time safety:** If a `field:` declaration is removed or renamed, `make/N` changes arity and Erlang callers get a compile error. The `.bt` file is the single source of truth for both sides.
+**Compile-time safety:** If a `state:` declaration is removed or renamed, the keyword constructor arity changes and Erlang callers fail at compile time. If a type changes (e.g. `Integer` → `String`), the generated `-spec` changes and Dialyzer flags callers passing the old type. The `.bt` file is the single source of truth for both Beamtalk users and Erlang producers.
 
-**What is auto-generated from `field:` declarations:**
-- Getter methods (`status`, `headers`, `body`) — inline `maps:get` in the compiled class
-- `make/N` constructor exported from the compiled module
+**What is generated from `state:` on a Value class:**
+- Getter methods (`status`, `headers`, `body`) — inline `maps:get` with `-spec`
+- Functional updater methods (`withStatus:`, `withHeaders:`, `withBody:`) with `-spec`
+- `new/0` — default constructor with `-spec`
+- `new/1` — init constructor merging caller map with defaults
+- Keyword class-side constructor (`class_status:headers:body:/5`) with `-spec` — callable from Erlang with Dialyzer validation
+- A `-type t()` opaque map type representing the value
 - Reflection metadata (`fieldNames` returns `#(#status #headers #body)`)
-- `with*:` functional update methods (`withStatus:`, `withHeaders:`, `withBody:`)
 
-**Computed properties and complex delegation** use pure Beamtalk expressions or explicit `(Erlang module)` FFI in the method body — no `field:` involvement.
-
-### 2. `@module` Declaration for Erlang-Backed Actors
-
-When an Actor's gen_server is hand-written in Erlang (rather than compiler-generated from `state:` declarations), the class uses `@module` to name the backing module. The compiler generates a facade — not a gen_server — that delegates spawn and messages to the backing module.
+**Computed properties** use pure Beamtalk expressions in the method body:
 
 ```beamtalk
-Actor subclass: Subprocess
-  @module beamtalk_subprocess
-
-  /// Spawn a subprocess running the given command.
-  class spawn: command: String -> Subprocess
-
-  /// Write data to the subprocess stdin.
-  write: data: String
-
-  /// Read a line from the subprocess stdout.
-  read -> String
-
-  /// Stop the subprocess.
-  stop
+sealed ok -> Boolean => (self status >= 200) and: [self status <= 299]
+sealed bodyAsJson -> Object => JSON parse: self body
+sealed printString -> String => "an HTTPResponse(" ++ self status printString ++ ")"
 ```
 
-The compiler generates:
+No backing Erlang module is needed for `HTTPResponse` at all — the hand-written `beamtalk_http_response.erl` can be **deleted entirely** once `state:` declarations are in place.
 
-```erlang
-%% Auto-generated facade for Subprocess — delegates to beamtalk_subprocess
-spawn(Command) ->
-  beamtalk_subprocess:start_link(Command).
+### 2. `(Erlang module)` FFI for All Other Cases
 
-'write:'(Pid, Data) ->
-  gen_server:call(Pid, {'write:', Data}).
+For operations that don't fit `state:` getters (or `@native` gen_server delegation — see ADR 0056), any method (in any class, stdlib or user-defined) may delegate to an Erlang module using the `(Erlang module)` FFI from ADR 0028.
 
-'read'(Pid) ->
-  gen_server:call(Pid, 'read').
-
-'stop'(Pid) ->
-  gen_server:call(Pid, 'stop').
-```
-
-The hand-written `beamtalk_subprocess.erl` implements `start_link/1` and the `handle_call/3` clauses for each message. The Beamtalk class declares the interface; the Erlang module owns the implementation.
-
-**When to use `@module` vs `state:`:**
-- `state:` — the actor's logic is expressible in Beamtalk; the compiler generates the gen_server
-- `@module` — the actor wraps an OTP behavior, port, NIF, or other Erlang-native construct that requires a hand-written gen_server
-
-### 3. `(Erlang module)` FFI for Complex Instance Methods
-
-For complex operations that don't fit `field:` or `@module` delegation, any method (in any class, stdlib or user-defined) may delegate to an Erlang module using the `(Erlang module)` FFI from ADR 0028. Pass `self` explicitly to call instance-level Erlang functions:
+**Instance methods** pass `self` explicitly:
 
 ```beamtalk
 sealed retryWith: opts: Dictionary -> HTTPResponse =>
   (Erlang beamtalk_http) retry: self options: opts
 ```
 
-The Erlang function follows the keyword naming convention — `'retry:options:'/2`:
+**Class-side-only utility objects** (e.g. `System`, `JSON`, `Yaml`, `Random`, `Timer`) are `sealed Object subclass:` — neither Actor nor Value, no instances. They have no `self` to pass; each class method body delegates directly:
 
-```erlang
-%% beamtalk_http.erl
-'retry:options:'(Response, Opts) ->
-  %% complex retry logic here
-  ...
+```beamtalk
+sealed Object subclass: System
+
+  class getEnv: name: String -> String | Nil =>
+    (Erlang beamtalk_system) getEnv: name
+
+  class osPlatform -> String =>
+    (Erlang beamtalk_system) osPlatform
 ```
 
-This mechanism is available to **all library authors** — no compiler changes required. It is the recommended approach for any operation that requires Erlang logic beyond field access.
+The Erlang module uses the keyword naming convention throughout:
+
+```erlang
+%% beamtalk_system.erl
+'getEnv:'(Name) -> ...
+'osPlatform'() -> ...
+
+%% beamtalk_http.erl
+'retry:options:'(Response, Opts) -> ...
+```
+
+This mechanism is available to **all library authors** — no compiler changes required. It is the recommended approach for any operation that cannot be expressed in pure Beamtalk.
 
 ### Scope of `@primitive`
 
 With this protocol, `@primitive` is narrowed to two cases only:
 
 1. **Direct BEAM BIF calls** — `erlang:'+'`, `erlang:integer_to_binary`, `string:length` — where the Erlang module name is fixed by the BEAM standard library and cannot follow the keyword convention
-2. **Structural intrinsics** — compiler-generated patterns with no corresponding Erlang function: `timesRepeat`, `blockValue`, `actorSpawn`, and (future) `@field` for inline `maps:get`
+2. **Structural intrinsics** — compiler-generated patterns with no corresponding Erlang function: `timesRepeat:`, `blockValue`, `actorSpawn`
 
 **`@primitive` must not be used** for calls into `beamtalk_*` modules — those use `(Erlang module)` FFI.
 
@@ -176,45 +209,53 @@ With this protocol, `@primitive` is narrowed to two cases only:
 
 | Situation | Mechanism |
 |-----------|-----------|
-| Value class field reads | `field:` declaration → auto-generated getter |
-| Value class construction (Erlang side) | Call `Module:make/N` from generated module |
+| Value class field reads/writes | `state:` declarations → auto-generated getter + updater |
+| Value class construction (Erlang side) | Call `Module:'class_f1:f2:'/N` from generated module |
 | Value class computed property | Pure Beamtalk expression in method body |
 | Value class complex Erlang op | `(Erlang module) selector: self` |
 | Actor with Beamtalk logic | `state:` declarations + method bodies (existing) |
-| Actor backed by Erlang gen_server | `@module erlang_module` class annotation |
+| Actor backed by Erlang gen_server | See ADR 0056 (`@native`) |
+| Utility/namespace Object subclass (class-side only) | `(Erlang module) selector: arg` in each class method body |
 | Direct BIF or Erlang stdlib call | `@primitive` (narrowed scope) |
 
 ## Prior Art
 
 ### Gleam — `@external`
 
-Gleam annotates individual functions with `@external(erlang, "module", "function")`. The binding is per-function, explicit, and statically known. External types are opaque by design.
+Gleam annotates individual functions with `@external(erlang, "module", "function")` to bind a Gleam function signature to a specific Erlang MFA. For example:
 
-**What we adopted:** Per-method explicitness for complex operations (our `(Erlang module)` FFI). The idea that the Beamtalk method signature is the source of truth for the public API.
+```gleam
+@external(erlang, "lists", "reverse")
+pub fn reverse(list: List(a)) -> List(a)
+```
 
-**What we improved:** Gleam requires `@external` on every delegating function. Our `field:` declaration auto-generates multiple getters from one declaration. Our `@module` similarly avoids per-method repetition for Actor facades.
+This is a **per-function, per-MFA** binding — the direct analogue of our `(Erlang module) selector: arg` FFI. Gleam also has external types (opaque foreign values), but provides no mechanism to declare their field structure or auto-generate constructors.
 
-### Pharo — `<primitive: N>` and UFFI
+**What we adopted:** Per-method explicitness for complex operations (our `(Erlang module)` FFI mirrors Gleam's `@external` in purpose and granularity). The idea that the Beamtalk method signature is the source of truth for the public API.
+
+**What we improved:** Gleam's `@external` requires one annotation per delegating function with an explicit module and function name. Our `state:` declarations generate multiple getters, constructors, and updaters from a single declaration. A separate `@native` class annotation for Actors (ADR 0056) names a backing OTP gen_server module — a concept with no Gleam equivalent.
+
+### Pharo — `<primitive: N>` and ExternalStructure
 
 Pharo VM primitives use numbered pragmas. UFFI lets any author call C libraries by declaring `ffiCall:` in method bodies. `ExternalStructure` subclasses declare C struct fields with `fieldsDesc`, auto-generating typed accessors.
 
-**What we adopted:** The `ExternalStructure` pattern directly inspired `field:` declarations — declare the struct shape once, get typed accessors for free. The co-location of declaration (in the class) with the generated accessor is the same insight.
+**What we adopted:** The `ExternalStructure` pattern directly inspired `state:` on Value classes — declare the struct shape once, get typed accessors for free. The co-location of declaration (in the class) with the generated accessor is the same insight.
 
-**What we improved:** Pharo's numbered primitives are opaque. Our `field:` declarations are named, typed, and visible to reflection. The generated `make/N` provides compile-time validation that Pharo's primitive system does not.
+**What we improved:** Pharo's `fieldsDesc` and Smalltalk instance variable declarations are separate from the generated accessors. Our `state:` declarations are the authoritative definition for both the Beamtalk API and the Erlang-facing constructor. The keyword constructor provides compile-time validation that Pharo's primitive system does not.
 
 ### Elixir — `defdelegate` and Module Wrapping
 
-Elixir wraps Erlang modules with thin Elixir modules using `defdelegate`. The Elixir standard library (Enum, Map, String) is largely thin wrappers over Erlang `:lists`, `:maps`, `:binary`. There is no struct field declaration convention for foreign-backed types.
+Elixir wraps Erlang modules with thin Elixir modules using `defdelegate`. The Elixir standard library (Enum, Map, String) is largely thin wrappers over Erlang `:lists`, `:maps`, `:binary`. There is no struct field declaration convention for foreign-backed types; Elixir `defstruct` is separate from FFI.
 
 **What we adopted:** The "thin wrapper" philosophy — the `.bt` file defines the Beamtalk-idiomatic API, the Erlang module provides the implementation. This is the same motivation as Elixir's stdlib wrappers.
 
-**What we improved:** `defdelegate` is per-function and generates no constructor or reflection metadata. Our `field:` declarations provide a richer contract. Our `@module` for Actors provides explicit gen_server integration rather than leaving it implicit.
+**What we improved:** `defdelegate` is per-function and generates no constructor or reflection metadata. Our `state:` declarations on Value classes provide a richer contract. The `@native` annotation for Actors (ADR 0056) provides explicit gen_server integration rather than leaving it implicit.
 
 ### Newspeak — Platform Objects and Aliens
 
 Newspeak accesses foreign code through capability-injected "Alien" objects. Libraries are never globally accessible — they must be injected via constructor parameters. All foreign calls are message sends on alien objects.
 
-**What we adopted:** The "DLL/module as object" metaphor — our `(Erlang module)` proxy (ADR 0028) is the same concept adapted for BEAM. The capability insight: any class can call `(Erlang any_module)`, so there is no capability restriction. This is a known limitation noted in Consequences.
+**What we adopted:** The "DLL/module as object" metaphor — our `(Erlang module)` proxy (ADR 0028) is the same concept adapted for BEAM.
 
 **What we rejected:** Dependency injection for Erlang modules. Beamtalk uses a global `Erlang` object (ADR 0028) for pragmatic interactive-first reasons. Newspeak's purity is valuable but incompatible with REPL-first design.
 
@@ -230,15 +271,15 @@ Swift auto-generates Swift-compatible APIs from Objective-C headers. `NS_SWIFT_N
 
 ### Newcomer (coming from Python/JS)
 
-The `field:` syntax is immediately readable: "this class has these fields with these types." The auto-generated getters mean `resp status` just works without hunting for where `status` is defined. The `@module` annotation on Actors is a clear signal that "this class is backed by Erlang code" without requiring understanding of gen_server internals. Error messages when calling a removed field hit at the Erlang compile step before deployment.
+The `state:` syntax is already familiar from Actor classes they may have seen. On a Value class, it reads as "these are the fields of this value object." The auto-generated getters mean `resp status` just works without hunting for where `status` is defined. A future `@native` annotation (ADR 0056) on an Actor will be a clear signal that "this class is backed by hand-written Erlang code" without requiring understanding of gen_server internals.
 
 ### Smalltalk Developer
 
-`field:` declarations are recognizable as instance variable declarations — the concept maps directly to `instanceVariableNames:` in Smalltalk class definitions, with the addition of types for gradual typing. The auto-generated accessors follow Smalltalk convention (accessor name = field name). The fact that the backing module is not named in the class definition respects encapsulation — the class declares its interface, not its implementation details.
+`state:` declarations on Value classes map directly to `instanceVariableNames:` in Smalltalk class definitions — a familiar concept. The auto-generated accessors follow Smalltalk convention (accessor name = field name). The fact that the backing module is not named in a Value class definition respects encapsulation — the class declares its interface, not its implementation details.
 
 ### Erlang/BEAM Developer
 
-The generated `make/N` constructor replaces error-prone hand-written tagged maps. The arity-based compile-time safety is idiomatic Erlang — changing a function arity breaks callers loudly. The `@module` declaration for Actors maps cleanly to the OTP `start_link/N` + `handle_call/3` pattern they already know. The `'selector:'/N` keyword naming convention is mechanical and easy to follow.
+The generated keyword constructor replaces error-prone hand-written tagged maps. The arity-based compile-time safety is idiomatic Erlang — changing a `state:` declaration changes constructor arity and breaks callers loudly. The `@native` annotation for Actors (ADR 0056) maps cleanly to the OTP `start_link/N` + `handle_call/3` pattern they already know. The `'selector:'/N` keyword naming convention is mechanical and easy to follow.
 
 ### Production Operator
 
@@ -246,7 +287,7 @@ Field declarations make `inspect` useful — operators can see the structure of 
 
 ### Tooling Developer (LSP/IDE)
 
-`field:` declarations give the LSP statically-known field names and types for completion on value objects. After `resp := HTTPClient get: url`, the LSP knows `resp` has `status`, `headers`, `body` as completable fields and their return types. The `@module` annotation lets the LSP know that Subprocess method bodies are facades, not implementations, and can link to the Erlang source.
+`state:` declarations give the LSP statically-known field names and types for completion on value objects. After `resp := HTTPClient get: url`, the LSP knows `resp` has `status`, `headers`, `body` as completable fields and their return types. The `@native` annotation (ADR 0056) will let the LSP know that Actor method bodies are facades, not implementations, and can link to the Erlang source.
 
 ## Steelman Analysis
 
@@ -254,30 +295,40 @@ Field declarations make `inspect` useful — operators can see the structure of 
 
 - **Newcomer:** "I never need to think about whether something is FFI or primitive — it's all `@primitive` and the compiler handles it."
 - **BEAM veteran:** "The Rust compiler validates primitive bindings at compile time. FFI calls are just function calls — no validation."
-- **Language designer:** "A uniform `@primitive` mechanism is simpler than three mechanisms (`field:`, `@module`, FFI) with different rules."
-- **Tension:** The validation argument is real. `field:` + `make/N` provides Erlang-side compile-time safety, but there is no Beamtalk-side validation that the Erlang module exports the right functions.
+- **Language designer:** "A uniform `@primitive` mechanism is simpler than two mechanisms (`state:`, `(Erlang module)` FFI) with different rules — plus `@native` for Actors coming in ADR 0056."
+- **Tension:** The validation argument is real. `state:` + keyword constructors provides Erlang-side compile-time safety, but there is no Beamtalk-side validation that the Erlang module exports the right functions.
 
-### Steelman for `@backing module` class annotation (Option B)
+### Steelman for a separate `field:` keyword distinct from `state:`
+
+- **Newcomer:** "A distinct `field:` keyword makes it obvious at a glance that this is a Value class with immutable fields, not an Actor with mutable state — even without knowing the class hierarchy."
+- **Language designer:** "Reusing `state:` conflates two different things — the word 'state' implies mutability and process-owned data, not immutable value fields."
+- **Smalltalk purist:** "Smalltalk calls them `instanceVariableNames:`, not state. `field:` is closer to the right abstraction for a value object."
+- **Tension:** The distinction is real — `state:` on an Actor is mutable, `state:` on a Value is immutable. However, the compiler already generates the correct semantics based on the superclass, and adding a new keyword adds parser/semantic complexity for a distinction that is already captured by the superclass declaration. We decided to reuse `state:` because any experienced user reading the code knows whether they're looking at a `Value` or `Actor` subclass.
+
+### Steelman for class-level `@backing module` annotation (auto-dispatch to Erlang)
 
 - **Newcomer:** "One annotation at the top of the class names the Erlang module — I don't need to repeat the module name in every method."
 - **Language designer:** "A class-level declaration is more declarative. The module relationship is visible at a glance, not scattered across method bodies."
-- **Tension:** `@backing` would reduce repetition when many methods delegate to the same Erlang module. The decision to use per-method FFI instead was made because it is more explicit, grep-able, and does not require the compiler to infer which methods delegate vs which are pure Beamtalk. `@backing` can be added as sugar later if repetition becomes painful in practice.
+- **Tension:** `@backing` would reduce repetition when many methods delegate to the same Erlang module. The decision to use per-method FFI was made because it is more explicit, grep-able, and does not require the compiler to infer which methods are delegated vs pure Beamtalk. `@backing` can be added as sugar later if repetition becomes painful in practice.
 
 ### Tension Points
 
-- Newcomers and language designers lean toward less repetition (`@backing`); BEAM veterans and operators prefer explicitness (per-method FFI)
-- The `field:` auto-generated `make/N` provides Erlang-side safety but not Beamtalk-side safety — a mismatch is only caught when the Erlang code is compiled, not when the `.bt` file is compiled
-- Capability restriction (any class can call any Erlang module) is a known gap; this ADR does not address it
+- Language designers and Smalltalk purists lean toward a distinct `field:` keyword; BEAM veterans and tooling developers prefer reusing `state:` (less vocabulary to learn)
+- Newcomers and language designers lean toward less repetition (`@backing`); BEAM veterans and operators prefer per-method explicitness
+- The keyword constructor provides arity safety at Erlang compile time and type safety via Dialyzer — but neither fires when the `.bt` file is compiled; a mismatch is only caught when the Erlang producer is built or analysed
 
 ## Alternatives Considered
 
-### Per-Method `@backing` Annotation
+### Separate `field:` Keyword for Value Class Fields
 
 ```beamtalk
-status -> Integer => @backing beamtalk_http_response
+sealed Value subclass: HTTPResponse
+  field: status: Integer
+  field: headers: List
+  field: body: String
 ```
 
-Per-method, explicitly naming the module and delegating the selector. Rejected because it is more verbose than `field:` for the common case of pure field reads, and does not provide reflection metadata or generate `make/N`.
+Adds a distinct keyword to make clear that Value class fields are immutable. Rejected because `state:` already exists, the compiler already generates the correct immutable semantics for Value classes from `state:` declarations, and adding a new keyword increases vocabulary without changing the generated code. The distinction is already captured by the `Value` vs `Actor` superclass.
 
 ### Class-Level `@backing module` with Auto-Dispatch
 
@@ -288,7 +339,7 @@ sealed Value subclass: HTTPResponse
   sealed ok -> Boolean
 ```
 
-The class annotation names one Erlang module; all methods without bodies auto-dispatch to it. Rejected because it hides which methods are delegated vs pure Beamtalk, makes it harder to delegate different methods to different modules, and adds a new concept when the existing `(Erlang module)` FFI already handles it explicitly. May be revisited as syntactic sugar if repetition proves painful.
+The class annotation names one Erlang module; all methods without bodies auto-dispatch to it. Rejected because it hides which methods are delegated vs pure Beamtalk, makes it harder to delegate different methods to different modules, and adds a new concept when the existing `(Erlang module)` FFI already handles it explicitly. Also superseded by `state:` auto-generation: for Value classes, there is no logic to back at all — `state:` declarations generate everything.
 
 ### Keep `dispatch/3` and `has_method/1` Pattern
 
@@ -303,70 +354,57 @@ Generate the entire `beamtalk_foo.erl` from the `.bt` file, with stubs for compl
 ### Positive
 
 - Any library author can create Erlang-backed classes without touching the Rust compiler
-- `field:` declarations make Value object structure visible to `inspect`, the LSP, and gradual typing
-- `make/N` constructor provides compile-time validation when field declarations change
-- `@module` eliminates the undefined relationship between Actor classes and their Erlang gen_servers
-- `@primitive` scope is narrowed to BIFs and structural intrinsics — the list stops growing
+- `state:` declarations on Value classes make object structure visible to `inspect`, the LSP, and gradual typing
+- The keyword constructor provides compile-time validation when field declarations change
+- `@primitive` scope is narrowed to BIFs and structural intrinsics — the list stops growing. Of ~442 `@primitive` entries across stdlib, approximately 33 (in HTTPResponse, JSON, Yaml, Regex, System) are targeted for immediate migration; the remainder are direct BIF calls or structural intrinsics that correctly remain `@primitive`
 - `dispatch/3` and `has_method/1` boilerplate can be removed from existing stdlib modules
+- `beamtalk_http_response.erl` can be **deleted entirely** — `state:` declarations + pure Beamtalk methods replace all its functionality
+- Extends generation pipeline that already exists in `value_type_codegen.rs` — minimal new work
 
 ### Negative
 
-- `field:` declarations require a parser addition and codegen changes (new work)
-- `@module` for Actors requires compiler support for generating delegation facades (new work)
-- No Beamtalk-side validation that the Erlang module exports the right functions — mismatch surfaces at Erlang compile time, not `.bt` compile time
+- `state:` on Value subclasses already works in the compiler but is not yet used by any stdlib class — migration effort is needed to convert existing `@primitive`-backed classes
+- No Beamtalk-side validation that the Erlang module exports the right functions — arity mismatches surface at Erlang compile time, type mismatches surface via Dialyzer; neither is caught when the `.bt` file is compiled
 - Library authors must follow the keyword naming convention (`'selector:'/N`) — unfamiliar to Erlang authors who use snake_case
+- Reusing `state:` for both mutable Actor state and immutable Value fields requires documentation to clarify the context-dependent semantics
+- Hot code reload: if a `state:` declaration is added or removed, the keyword constructor arity changes. In-flight Erlang callers using the old arity get a `function_clause` crash during reload — there is no `code_change/3` equivalent for Value class constructors
 
 ### Neutral
 
 - `(Erlang module)` FFI already exists (ADR 0028); this ADR formalises its use as a class authoring tool, not just a REPL escape hatch
 - Existing stdlib classes using `@primitive` for module-backed operations will be migrated incrementally (see Migration Path)
-- Capability restriction (any class can call any Erlang module) remains unchanged; a future ADR may address this via a module permission system
+- Capability restriction (any class can call any Erlang module) remains unchanged; a future ADR may address this
 
 ## Implementation
 
-### Phase 1 — FFI Convention (No compiler changes)
+### Phase 1 — Migrate Stdlib from `@primitive` to FFI and `state:` (No compiler changes)
 
-Establish the `(Erlang module) selector: self` convention for existing stdlib classes. Migrate `JSON`, `Yaml`, `Regex` from `@primitive` to `(Erlang module)` FFI. Remove `dispatch/3` and `has_method/1` from migrated modules. Move `beamtalk_json`, `beamtalk_yaml`, `beamtalk_regex` to `beamtalk_stdlib`.
+The compiler already supports `state:` on Value classes and `(Erlang module)` FFI. This phase is purely migration work:
+
+- Migrate `JSON`, `Yaml`, `Regex` from `@primitive` to `(Erlang module)` FFI in method bodies
+- Migrate `HTTPResponse.bt` from `@primitive` accessors to `state:` declarations with pure Beamtalk computed properties (`ok`, `bodyAsJson`, `printString`); delete `beamtalk_http_response.erl`
+- Update `beamtalk_http.erl` to call the generated keyword constructor instead of hand-writing tagged maps
+- Remove `dispatch/3` and `has_method/1` from migrated modules
+- Move `beamtalk_json`, `beamtalk_yaml`, `beamtalk_regex` from `beamtalk_runtime` to `beamtalk_stdlib`
 
 **Issues:** BT-1142, BT-1143
 
-### Phase 2 — `field:` Declarations for Value Classes
-
-- Parser: add `field: name: Type` as a class body declaration (distinct from `state:` which is Actor-only)
-- Semantic analysis: validate `field:` only appears in `sealed Value` subclasses; collect field names and types
-- Codegen: generate inline `maps:get` for getter methods; generate `make/N` exported from compiled module; emit reflection metadata (`fieldNames`, `fieldAt:`)
-- Migrate `HTTPResponse.bt` as proof-of-concept; remove `beamtalk_http_response:dispatch/3`
-
-### Phase 3 — `@module` for Erlang-Backed Actors
-
-- Parser: add `@module erlang_module_name` as a class-level annotation on `Actor subclass:` declarations
-- Semantic analysis: validate `@module` only appears on Actor subclasses without `state:` declarations
-- Codegen: generate delegation facade instead of gen_server; `spawn` calls `module:start_link`; instance messages call `gen_server:call(Pid, {selector, Args})`
-- Migrate `Subprocess.bt` as proof-of-concept
-
-### Phase 4 — `@field` Structural Intrinsic (Future)
-
-Add `@field fieldname` as a structural intrinsic for cases where a single method needs inline `maps:get` without a full `field:` class declaration. Intended for edge cases; `field:` class declarations are preferred.
-
-**Issue:** BT-1144
-
 ### Affected Components
 
-- `crates/beamtalk-core/src/source_analysis/` — parser and lexer for `field:` and `@module`
-- `crates/beamtalk-core/src/semantic_analysis/` — validation of new declarations
+- `crates/beamtalk-core/src/codegen/core_erlang/value_type_codegen.rs` — already supports `state:` on Value classes; needs new `-type t()` generation for the class map type (currently only `-spec` is generated by `spec_codegen.rs`)
 - `crates/beamtalk-core/src/codegen/core_erlang/primitives/` — remove JSON/Yaml/Regex/HTTPResponse primitive codegen
-- `runtime/apps/beamtalk_runtime/src/` — remove `dispatch/3`/`has_method/1` from migrated modules
-- `stdlib/src/*.bt` — migrate from `@primitive` to `field:` and `(Erlang module)` FFI
+- `runtime/apps/beamtalk_runtime/src/` — remove `dispatch/3`/`has_method/1` from migrated modules; delete `beamtalk_http_response.erl`
+- `stdlib/src/*.bt` — migrate from `@primitive` to `state:` and `(Erlang module)` FFI
 
 ## Migration Path
 
 ### Existing `@primitive` Module-Backed Methods
 
-Replace `@primitive "selector"` with `(Erlang beamtalk_module) selector: self` (for instance methods) or `(Erlang beamtalk_module) selector: arg` (for class methods). Remove `sealed` modifier where it was required only because `@primitive` was used. Remove `dispatch/3`, `has_method/1`, and individual getter functions from the Erlang module.
+Replace `@primitive "selector"` with `(Erlang beamtalk_module) selector: self` (for instance methods) or `(Erlang beamtalk_module) selector: arg` (for class methods). Remove `dispatch/3`, `has_method/1`, and individual getter functions from the Erlang module.
 
 ### Existing Sealed Value Classes with `@primitive` Field Accessors
 
-Replace individual `@primitive` accessor methods with a single `field:` block. The Erlang producer switches from hand-written tagged map literals to calling `Module:make/N`. Existing tagged maps already in flight remain valid — the generated getter functions accept the same map structure.
+Replace individual `@primitive` accessor methods with `state:` declarations. Replace the computed properties (`ok`, `bodyAsJson`) with pure Beamtalk method bodies. Delete the hand-written Erlang module (e.g. `beamtalk_http_response.erl`). Update the Erlang producer (`beamtalk_http.erl`) to call the generated keyword constructor.
 
 ### No Breaking Changes for Callers
 
@@ -375,7 +413,7 @@ The Beamtalk API (message selectors) does not change. Callers of `resp status`, 
 ## References
 
 - Related issues: BT-1142, BT-1143, BT-1144, BT-1145, BT-1146, BT-1147
-- Related ADRs: ADR 0007 (Compilable Stdlib with Primitive Injection), ADR 0028 (BEAM Interop Strategy), ADR 0034 (Stdlib Self-Hosting), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State), ADR 0049 (Remove Method-Level `sealed`)
+- Related ADRs: ADR 0005 (BEAM Object Model — Value vs Actor), ADR 0007 (Compilable Stdlib with Primitive Injection — scope narrowed by this ADR), ADR 0013 (Class Variables, Class-Side Methods, Instantiation — keyword constructor protocol), ADR 0028 (BEAM Interop Strategy — FFI mechanism), ADR 0034 (Stdlib Self-Hosting), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State — immutability guarantee for Value `state:`), ADR 0043 (Sync-by-Default Actor Messaging — messaging model for Erlang-backed Actor facades), ADR 0049 (Remove Method-Level `sealed`), ADR 0051 (Subprocess Execution — `@native` proof-of-concept), ADR 0053 (Double-Colon Type Annotation Syntax — `state:` type annotation form)
 - Gleam external functions: https://gleam.run/documentation/externals/
 - Pharo UFFI: https://files.pharo.org/books-pdfs/booklet-uFFI/UFFIDRAFT.pdf
 - Newspeak Alien FFI: https://bracha.org/newspeak.pdf
