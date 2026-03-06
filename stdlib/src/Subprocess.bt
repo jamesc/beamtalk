@@ -33,14 +33,14 @@ Actor subclass: Subprocess
 
   /// Convenience factory — open a subprocess with command and args.
   ///
-  /// Desugars to `spawnWith:` with a config dictionary.
+  /// Backed by `beamtalk_subprocess_primitives` which starts a
+  /// `beamtalk_subprocess` gen_server and returns the actor reference.
   ///
   /// ## Examples
   /// ```beamtalk
   /// agent := Subprocess open: "ls" args: #("-la")
   /// ```
-  class open: command args: args =>
-    self spawnWith: #{"command" => command, "args" => args}
+  class open: command args: args => @primitive "open:args:"
 
   /// Convenience factory — open a subprocess with command, args, environment, and working directory.
   ///
@@ -49,12 +49,7 @@ Actor subclass: Subprocess
   /// agent := Subprocess open: "make" args: #("test") env: #{#"CI" => #"true"} dir: #"/tmp"
   /// ```
   class open: command args: args env: env dir: dir =>
-    self spawnWith: #{
-      "command" => command,
-      "args" => args,
-      "env" => env,
-      "dir" => dir
-    }
+    @primitive "open:args:env:dir:"
 
   /// Write a line to the subprocess's stdin (appends newline).
   ///
