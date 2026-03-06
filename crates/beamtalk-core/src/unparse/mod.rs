@@ -1856,8 +1856,8 @@ mod tests {
         let module = parse_source(source);
         let output = unparse_module(&module);
         assert!(
-            output.contains("/// The current count.\n  state: count = 0"),
-            "expected doc comment before state: in: {output}"
+            output.contains("  /// The current count.\n  state: count = 0"),
+            "expected indented doc comment before state: in: {output}"
         );
     }
 
