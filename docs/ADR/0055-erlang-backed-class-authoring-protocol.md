@@ -388,7 +388,13 @@ The compiler already supports `state:` on Value classes and `(Erlang module)` FF
 - Remove `dispatch/3` and `has_method/1` from migrated modules
 - Move `beamtalk_json`, `beamtalk_yaml`, `beamtalk_regex` from `beamtalk_runtime` to `beamtalk_stdlib`
 
-**Issues:** BT-1142, BT-1143
+**Issues:**
+- BT-1142 ✅ Done — JSON/Yaml/Regex FFI conversion
+- BT-1143 — Move beamtalk_json/yaml/regex to beamtalk_stdlib (In Review)
+- BT-1155 — Migrate HTTPResponse.bt to `state:` declarations; delete `beamtalk_http_response.erl`
+- BT-1156 — Generate `-type t()` for Value classes with `state:` declarations (blocked by BT-1155)
+
+**Epic:** BT-1154
 
 ### Affected Components
 
