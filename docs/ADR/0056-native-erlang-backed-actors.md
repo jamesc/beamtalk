@@ -185,7 +185,7 @@ handle_call({exitCode, []}, _From, State) ->
 
 **`@native` Actors MUST NOT declare `state:` fields.** The gen_server owns all state — it is opaque to the Beamtalk compiler. If a `state:` declaration is found on an `@native` Actor, the compiler raises an error:
 
-```
+```text
 error: @native actor 'Subprocess' cannot declare state fields — state is owned by the backing gen_server 'beamtalk_subprocess'
 ```
 
@@ -236,7 +236,7 @@ Actor subclass: Subprocess
   state: count = 0   // => compile error
 ```
 
-```
+```text
 error: @native actor 'Subprocess' cannot declare state fields — state is owned by the backing gen_server 'beamtalk_subprocess'
   --> Subprocess.bt:3
   |
