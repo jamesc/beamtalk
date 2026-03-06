@@ -28,7 +28,7 @@
 %%% All requests return an `HTTPResponse` value object constructed via the
 %%% generated keyword constructor `'bt@stdlib@httpresponse':'class_status:headers:body:'/5`.
 %%% Fields: `status` (integer), `headers` (list of [Name, Value] binary pairs),
-%%% `body` (binary response body).
+%%% `body` (String).
 %%%
 %%% ## Options map (for `request:url:options:`)
 %%%

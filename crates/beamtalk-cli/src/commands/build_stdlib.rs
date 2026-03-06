@@ -492,7 +492,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         for slot in &class.state {
             let slot_name = slot.name.name.as_str();
 
-            // Auto getter: `fieldName` → class name type
+            // Auto getter: `fieldName` → slot type (or Object if unannotated)
             if !user_selectors.contains(slot_name) {
                 methods.push(MethodMeta {
                     selector: slot_name.to_string(),
@@ -507,7 +507,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                 });
             }
 
-            // Auto functional updater: `withFieldName:` → class name type
+            // Auto functional updater: `withFieldName:` → Self type
             let with_sel = {
                 let mut chars = slot_name.chars();
                 match chars.next() {
