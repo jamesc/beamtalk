@@ -13,6 +13,21 @@ TestCase subclass: ProtoobjectManualTest
     self assert: (nil /= false)
     self deny: (nil /= nil)
 
+  testDoesNotUnderstandRaisesError =>
+    // ProtoObject doesNotUnderstand:args: raises does_not_understand (BT-1158)
+    @expect dnu
+    self should: [42 noSuchMessage] raise: #does_not_understand
+    @expect dnu
+    self should: ["hello" noSuchMessage] raise: #does_not_understand
+    @expect dnu
+    self should: [nil noSuchMessage] raise: #does_not_understand
+
+  testDoesNotUnderstandCarriesSelector =>
+    // The error payload includes the unknown selector name
+    @expect dnu
+    result := [42 noSuchMessage] on: Exception do: [:e | e selector]
+    self assert: result equals: #noSuchMessage
+
   testPerformWithargumentsDynamicDispatch =>
     self assert: (42 perform: #'+' withArguments: #(3)) equals: 45
     self assert: (42 perform: #asString withArguments: #()) equals: "42"

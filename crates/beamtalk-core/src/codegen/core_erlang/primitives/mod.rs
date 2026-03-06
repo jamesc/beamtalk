@@ -63,6 +63,7 @@ pub fn generate_primitive_bif(
         "Tuple" => value_types::generate_tuple_bif(selector, params),
         "List" => list::generate_list_bif(selector, params),
         "Dictionary" => dictionary::generate_dictionary_bif(selector, params),
+        "ProtoObject" => value_types::generate_proto_object_bif(selector, params),
         "Object" => value_types::generate_object_bif(selector, params),
         "Set" => value_types::generate_set_bif(selector, params),
         "CompiledMethod" => reflection::generate_compiled_method_bif(selector, params),
