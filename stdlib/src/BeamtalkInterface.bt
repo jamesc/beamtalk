@@ -14,7 +14,7 @@
 /// Beamtalk allClasses
 /// Beamtalk classNamed: #Integer
 /// ```
-Actor subclass: BeamtalkInterface
+sealed Object subclass: BeamtalkInterface
   classState: current = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
@@ -30,7 +30,7 @@ Actor subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk allClasses
   /// ```
-  allClasses -> List => @primitive "allClasses"
+  allClasses -> List => (Erlang beamtalk_interface_primitives) allClasses
 
   /// Look up a class by name (symbol).
   ///
@@ -38,7 +38,8 @@ Actor subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk classNamed: #Integer
   /// ```
-  classNamed: className :: Symbol -> Object => @primitive "classNamed:"
+  classNamed: className :: Symbol -> Object =>
+    (Erlang beamtalk_interface_primitives) findClass: className
 
   /// Return the global namespace as a Dictionary populated from the class registry.
   ///
@@ -46,7 +47,7 @@ Actor subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk globals
   /// ```
-  globals -> Dictionary => @primitive "globals"
+  globals -> Dictionary => (Erlang beamtalk_interface_primitives) globals
 
   /// Show class documentation: name, superclass, and method signatures.
   ///
@@ -54,7 +55,8 @@ Actor subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk help: Counter
   /// ```
-  sealed help: aClass :: Object -> String => @primitive "help:"
+  sealed help: aClass :: Object -> String =>
+    (Erlang beamtalk_interface_primitives) help: aClass
 
   /// Show detailed documentation for a specific method on a class.
   ///
@@ -63,7 +65,7 @@ Actor subclass: BeamtalkInterface
   /// Beamtalk help: Counter selector: #increment
   /// ```
   sealed help: aClass :: Object selector: aSelector :: Symbol -> String =>
-    @primitive "help:selector:"
+    (Erlang beamtalk_interface_primitives) help: aClass selector: aSelector
 
   /// Return the Beamtalk version string.
   ///
@@ -71,4 +73,4 @@ Actor subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk version
   /// ```
-  version -> String => @primitive "version"
+  version -> String => (Erlang beamtalk_interface_primitives) version

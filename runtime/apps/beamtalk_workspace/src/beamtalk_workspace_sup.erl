@@ -17,11 +17,10 @@
 %%% ```
 %%% beamtalk_workspace_sup
 %%%   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
-%%%   ├─ bt@stdlib@transcript_stream   % Transcript singleton (ADR 0010)
-%%%   ├─ bt@stdlib@beamtalk_interface  % Beamtalk singleton (ADR 0010)
+%%%   ├─ bt@stdlib@transcript_stream   % Transcript singleton (ADR 0010, Actor)
 %%%   ├─ beamtalk_actor_registry       % Workspace-wide actor registry
-%%%   ├─ bt@stdlib@workspace_interface % Workspace singleton (BT-423)
 %%%   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
+%%%   │     (also initialises sealed Object singletons: BeamtalkInterface, WorkspaceInterface)
 %%%   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
 %%%   ├─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
 %%%   ├─ beamtalk_actor_sup           % Supervises user actors
@@ -101,13 +100,12 @@ init(Config) ->
                 modules => [beamtalk_workspace_meta]
             }
 
-            %% Singleton actors — workspace singletons (ADR 0010 Phase 2, ADR 0019 Phase 4)
+            %% Actor singleton — workspace singletons (ADR 0010 Phase 2, ADR 0019 Phase 4)
             %% These assume beamtalk_stdlib has already been started elsewhere in the system.
             %% Each registers via gen_server name registration ({local, Name}).
             %% Specs derived from beamtalk_workspace_config:singletons/0.
-            %%
-            %% Note: actor registry is interleaved between singletons because
-            %% WorkspaceInterface's methods query the registry.
+            %% (BeamtalkInterface and WorkspaceInterface are value singletons, bootstrapped
+            %% by beamtalk_workspace_bootstrap after the actor registry is started.)
         ] ++ singleton_child_specs() ++
             [
                 %% Class-loaded event pub/sub (BT-1020)
@@ -206,16 +204,13 @@ init(Config) ->
 
 %%% Singleton Child Specs
 
-%% @private Generate supervisor child specs for workspace singletons.
-%% Interleaves the actor registry before WorkspaceInterface, which
-%% depends on it.
+%% @private Generate supervisor child specs for actor workspace singletons.
+%% Starts actor singletons from beamtalk_workspace_config:singletons/0, then
+%% the actor registry. Value singletons (BeamtalkInterface, WorkspaceInterface)
+%% are not started here — they are bootstrapped by beamtalk_workspace_bootstrap.
 singleton_child_specs() ->
     Singletons = beamtalk_workspace_config:singletons(),
-    {Before, After} = lists:partition(
-        fun(#{binding_name := N}) -> N =/= 'Workspace' end,
-        Singletons
-    ),
-    lists:map(fun singleton_to_child_spec/1, Before) ++
+    lists:map(fun singleton_to_child_spec/1, Singletons) ++
         [
             #{
                 id => beamtalk_actor_registry,
@@ -225,8 +220,7 @@ singleton_child_specs() ->
                 type => worker,
                 modules => [beamtalk_repl_actors]
             }
-        ] ++
-        lists:map(fun singleton_to_child_spec/1, After).
+        ].
 
 %% @private Convert a singleton config to a supervisor child spec.
 singleton_to_child_spec(#{binding_name := BindingName, module := Module, start_args := Args}) ->

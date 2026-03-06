@@ -53,6 +53,17 @@ start_link(ProjectPath) ->
 
 %% @private
 init([ProjectPath]) ->
+    %% Create the user-bindings ETS table here so that this long-lived process
+    %% owns it. If created inside a short-lived eval worker instead, the table
+    %% would be deleted when that worker exits (ETS tables are deleted on owner
+    %% process exit unless an heir is specified).
+    beamtalk_workspace_interface_primitives:create_bindings_table(),
+    %% Ensure beamtalk_interface_primitives is loaded so that all its exported
+    %% function names (e.g. findClass, allClasses) are in the atom table.
+    %% The sealed-Object BeamtalkInterface dispatches via beamtalk_message_dispatch
+    %% which uses list_to_existing_atom to resolve selector→function name; if
+    %% the module is not yet loaded, the atom won't exist and dispatch fails.
+    _ = code:ensure_loaded(beamtalk_interface_primitives),
     State = bootstrap_all(#state{}),
     %% Activate project modules synchronously before returning so that
     %% beamtalk_repl_server (the next child) does not write the port file
@@ -90,6 +101,14 @@ handle_info({rebootstrap, ClassName, RegName, _Retries}, State) ->
         class => ClassName, name => RegName
     }),
     {noreply, State};
+handle_info({rebootstrap_value, ClassName, Module, Retries}, State) when Retries < 5 ->
+    bootstrap_value_singleton(ClassName, Module, Retries),
+    {noreply, State};
+handle_info({rebootstrap_value, ClassName, _Module, _Retries}, State) ->
+    ?LOG_ERROR("Bootstrap: failed to wire value singleton after retries", #{
+        class => ClassName
+    }),
+    {noreply, State};
 handle_info(_Msg, State) ->
     {noreply, State}.
 
@@ -109,13 +128,22 @@ terminate(_Reason, _State) ->
 
 %% @private Bootstrap all singletons.
 bootstrap_all(State) ->
-    lists:foldl(
+    ActorState = lists:foldl(
         fun(#{class_name := ClassName, binding_name := RegName}, AccState) ->
             bootstrap_singleton(ClassName, RegName, AccState)
         end,
         State,
         beamtalk_workspace_config:singletons()
-    ).
+    ),
+    %% Bootstrap value singletons (sealed Object subclass:, no gen_server process).
+    %% Create a value object instance and set the class variable `current`.
+    lists:foreach(
+        fun(#{class_name := ClassName, module := Module}) ->
+            bootstrap_value_singleton(ClassName, Module, 0)
+        end,
+        beamtalk_workspace_config:value_singletons()
+    ),
+    ActorState.
 
 %% @private Bootstrap a single singleton: set class var and monitor.
 bootstrap_singleton(ClassName, RegName, State) ->
@@ -125,11 +153,39 @@ bootstrap_singleton(ClassName, RegName, State) ->
             State;
         Pid ->
             Obj = build_object_ref(ClassName, Pid),
-            set_class_variable(ClassName, Obj),
+            _ = set_class_variable(ClassName, Obj),
             MonRef = erlang:monitor(process, Pid),
             ?LOG_DEBUG("Bootstrap: wired singleton", #{class => ClassName, pid => Pid}),
             Monitors = maps:put(MonRef, {ClassName, RegName}, State#state.monitors),
             State#state{monitors = Monitors}
+    end.
+
+%% @private Bootstrap a value singleton: create a tagged-map instance and set class var.
+%% Value singletons are sealed Object subclasses (no gen_server process). The
+%% instance is created by calling `Module:new()` and set as the `current` class var.
+%% Schedules a retry (via `rebootstrap_value`) if the class is not yet loaded.
+-spec bootstrap_value_singleton(atom(), module(), non_neg_integer()) -> ok.
+bootstrap_value_singleton(ClassName, Module, Retries) ->
+    try
+        Obj = Module:new(),
+        case set_class_variable(ClassName, Obj) of
+            ok ->
+                ?LOG_DEBUG("Bootstrap: wired value singleton", #{class => ClassName});
+            {error, class_not_found} ->
+                ?LOG_WARNING("Bootstrap: value singleton class not loaded yet", #{
+                    class => ClassName
+                }),
+                erlang:send_after(200, self(), {rebootstrap_value, ClassName, Module, Retries + 1})
+        end
+    catch
+        error:#beamtalk_error{kind = class_not_found} ->
+            ?LOG_WARNING("Bootstrap: value singleton class not loaded yet", #{class => ClassName}),
+            erlang:send_after(200, self(), {rebootstrap_value, ClassName, Module, Retries + 1});
+        _:Reason ->
+            ?LOG_WARNING("Bootstrap: failed to initialize value singleton", #{
+                class => ClassName, reason => Reason
+            }),
+            erlang:send_after(200, self(), {rebootstrap_value, ClassName, Module, Retries + 1})
     end.
 
 %% @private Build the beamtalk_object reference tuple for a singleton.
@@ -152,12 +208,15 @@ class_module(ClassName) ->
     end.
 
 %% @private Set the `current` class variable on the class.
+%% Returns `ok` on success or `{error, class_not_found}` if the class is not
+%% yet registered (so callers can detect failure and schedule a retry).
+-spec set_class_variable(atom(), term()) -> ok | {error, class_not_found}.
 set_class_variable(ClassName, Obj) ->
     try
         beamtalk_runtime_api:set_class_var(ClassName, current, Obj)
     catch
         error:#beamtalk_error{kind = class_not_found} ->
-            ?LOG_WARNING("Bootstrap: class not loaded yet", #{class => ClassName})
+            {error, class_not_found}
     end.
 
 %% @private Activate compiled project modules from _build/dev/ebin/ (BT-739).

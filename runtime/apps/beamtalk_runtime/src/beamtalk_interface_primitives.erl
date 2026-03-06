@@ -1,13 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Primitive implementations for the BeamtalkInterface singleton actor.
+%%% @doc Primitive implementations for the BeamtalkInterface sealed Object.
 %%%
 %%% **DDD Context:** Object System Context
 %%%
-%%% Implements the `@primitive` methods for the BeamtalkInterface class. The
-%%% compiled Beamtalk actor (`bt@stdlib@beamtalk_interface`) delegates all
-%%% `@primitive` method calls here via `dispatch/3`.
+%%% Implements methods for the BeamtalkInterface class. BeamtalkInterface is
+%%% a `sealed Object subclass:` (value type, no gen_server process). Methods
+%%% are called via Erlang FFI from the compiled Beamtalk module using the
+%%% ErlangModule proxy pattern: `(Erlang beamtalk_interface_primitives) fn: arg`.
+%%%
+%%% The legacy `dispatch/3` is retained for backward compatibility.
 %%%
 %%% All methods are stateless reads from the class registry; no process
 %%% dictionary or ETS state is required.
@@ -29,6 +32,8 @@
 -include_lib("kernel/include/logger.hrl").
 
 -export([dispatch/3]).
+%% Direct exports for Erlang FFI calls from sealed Object BeamtalkInterface
+-export([allClasses/0, classNamed/1, findClass/1, globals/0, help/1, help/2, version/0]).
 
 %%% ============================================================================
 %%% dispatch/3 — called from compiled bt@stdlib@beamtalk_interface for @primitives
@@ -63,6 +68,67 @@ dispatch(Selector, _Args, _Self) ->
     Err0 = beamtalk_error:new(does_not_understand, 'BeamtalkInterface'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
     beamtalk_error:raise(Err1).
+
+%%% ============================================================================
+%%% Direct exports for Erlang FFI (called via ErlangModule proxy from sealed Object)
+%%% ============================================================================
+
+%% @doc Return list of all registered class names.
+%% Called via `(Erlang beamtalk_interface_primitives) allClasses`.
+-spec allClasses() -> [atom()].
+allClasses() ->
+    [Name || {Name, _Mod, _Pid} <- beamtalk_class_registry:live_class_entries()].
+
+%% @doc Look up a class by name (atom or binary).
+%% Called via `(Erlang beamtalk_interface_primitives) classNamed: className`.
+-spec classNamed(binary() | atom() | term()) -> tuple() | 'nil'.
+classNamed(ClassName) ->
+    case handle_class_named(ClassName) of
+        {error, Err} -> beamtalk_error:raise(Err);
+        Result -> Result
+    end.
+
+%% @doc Look up a class by name (atom or binary). Called via findClass: FFI.
+%% Alias for classNamed/1 — used because classNamed: selector triggers compile-time validation.
+-spec findClass(binary() | atom() | term()) -> tuple() | 'nil'.
+findClass(ClassName) ->
+    case handle_class_named(ClassName) of
+        {error, Err} -> beamtalk_error:raise(Err);
+        Result -> Result
+    end.
+
+%% @doc Return class registry snapshot as a map from class name to class object.
+%% Called via `(Erlang beamtalk_interface_primitives) globals`.
+-spec globals() -> map().
+globals() ->
+    handle_globals().
+
+%% @doc Format class documentation (help: aClass).
+%% Called via `(Erlang beamtalk_interface_primitives) help: aClass`.
+-spec help(term()) -> binary().
+help(ClassArg) ->
+    case handle_help(ClassArg) of
+        {error, Err} -> beamtalk_error:raise(Err);
+        Result -> Result
+    end.
+
+%% @doc Format method documentation (help: aClass selector: aSelector).
+%% Called via `(Erlang beamtalk_interface_primitives) help: aClass selector: aSelector`.
+-spec help(term(), atom()) -> binary().
+help(ClassArg, SelectorArg) ->
+    case handle_help_selector(ClassArg, SelectorArg) of
+        {error, Err} -> beamtalk_error:raise(Err);
+        Result -> Result
+    end.
+
+%% @doc Return the Beamtalk runtime version string.
+%% Called via `(Erlang beamtalk_interface_primitives) version`.
+-spec version() -> binary().
+version() ->
+    case application:get_key(beamtalk_runtime, vsn) of
+        {ok, Vsn} -> list_to_binary(Vsn);
+        _ -> <<"unknown">>
+    end.
 
 %%% ============================================================================
 %%% Internal method implementations

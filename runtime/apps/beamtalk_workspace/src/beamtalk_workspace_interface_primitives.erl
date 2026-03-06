@@ -1,27 +1,33 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Primitive implementations for the WorkspaceInterface singleton actor.
+%%% @doc Primitive implementations for the WorkspaceInterface sealed Object.
 %%%
 %%% **DDD Context:** Workspace Context
 %%%
-%%% Implements the `@primitive` methods for the WorkspaceInterface class. The
-%%% compiled Beamtalk actor (`bt@stdlib@workspace_interface`) delegates all
-%%% `@primitive` method calls here via `dispatch/3`.
+%%% Implements methods for the WorkspaceInterface class. WorkspaceInterface is
+%%% a `sealed Object subclass:` (value type, no gen_server process). Methods
+%%% are called via Erlang FFI from the compiled Beamtalk module.
 %%%
 %%% ## State management
 %%%
 %%% User-registered bindings (`bind:as:` / `unbind:`) are stored in a public
-%%% named ETS table `beamtalk_wi_user_bindings` keyed by `{GenServerPid, Name}`.
-%%% The ETS table is created lazily on the first dispatch/3 call. It is
-%%% accessible from external processes (`get_user_bindings/0`, `get_session_bindings/0`).
+%%% named ETS table `beamtalk_wi_user_bindings` keyed by `Name` (atom).
+%%% Since WorkspaceInterface is a singleton (one per workspace), no per-process
+%%% keying is needed. The ETS table is normally created during workspace startup
+%%% via `create_bindings_table/0` (called by `beamtalk_workspace_bootstrap`),
+%%% which ensures the long-lived bootstrap process owns it. A lazy fallback via
+%%% `ensure_bindings_table/0` is also available for cases where the table is
+%%% accessed before bootstrap completes. Both paths produce the same singleton
+%%% table. The table is accessible from external processes via
+%%% `get_user_bindings/0` and `get_session_bindings/0`.
 %%%
 %%% ## External API
 %%%
 %%% `get_user_bindings/0` and `get_session_bindings/0` are called by
 %%% `beamtalk_repl_eval` and `beamtalk_repl_shell` to inject workspace bindings
-%%% into REPL session state. They read from ETS for the registered `'Workspace'`
-%%% gen_server pid.
+%%% into REPL session state. Workspace readiness is detected via
+%%% `whereis(beamtalk_workspace_meta)`.
 %%%
 %%% ## Methods
 %%%
@@ -43,62 +49,114 @@
 -export([dispatch/3]).
 %% Stable external API (called by repl_eval and repl_shell)
 -export([get_user_bindings/0, get_session_bindings/0]).
+%% Called by beamtalk_workspace_bootstrap to create the ETS table under a
+%% long-lived process (prevents table from being deleted when eval workers exit)
+-export([create_bindings_table/0]).
+%% Direct exports for Erlang FFI calls from sealed Object WorkspaceInterface
+-export([actors/0, actorAt/1, classes/0, load/1, globals/0, bind/2, unbind/1]).
 
 %% ETS table name for user workspace bindings
 -define(WI_BINDINGS_TABLE, beamtalk_wi_user_bindings).
 
 %%% ============================================================================
-%%% dispatch/3 — called from compiled bt@stdlib@workspace_interface for @primitives
+%%% dispatch/3 — kept for backward compatibility; delegates to direct functions
 %%% ============================================================================
 
 %% @doc Dispatch a primitive method call for WorkspaceInterface.
 %%
-%% Called by the compiled `bt@stdlib@workspace_interface:dispatch/3`.
-%% All mutable state is stored in a public named ETS table keyed by the
-%% gen_server PID so external callers can access user bindings without
-%% re-entering the gen_server.
+%% Retained for backward compatibility. The compiled sealed Object module
+%% uses Erlang FFI calls to the direct exports instead of this dispatch/3.
 -spec dispatch(atom(), list(), term()) -> term().
 dispatch(actors, [], _Self) ->
-    handle_actors();
+    actors();
 dispatch('actorAt:', [PidStr], _Self) ->
-    handle_actor_at(PidStr);
+    actorAt(PidStr);
 dispatch(classes, [], _Self) ->
-    handle_classes();
+    classes();
 dispatch('load:', [Path], _Self) ->
+    load(Path);
+dispatch(globals, [], _Self) ->
+    globals();
+dispatch('bind:as:', [Value, Name], _Self) ->
+    bind(Value, Name);
+dispatch('unbind:', [Name], _Self) ->
+    unbind(Name);
+dispatch(Selector, _Args, _Self) ->
+    Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, Selector),
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            Err1, <<"To list available selectors, use: Workspace methods">>
+        )
+    ).
+
+%%% ============================================================================
+%%% Direct exports for Erlang FFI (called via ErlangModule proxy)
+%%% ============================================================================
+
+%% @doc Return a list of all live actors as beamtalk_object references.
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) actors`.
+-spec actors() -> [tuple()].
+actors() ->
+    handle_actors().
+
+%% @doc Look up a specific actor by pid string.
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) actorAt: pidString`.
+-spec actorAt(binary() | list() | term()) -> tuple() | 'nil'.
+actorAt(PidStr) ->
+    handle_actor_at(PidStr).
+
+%% @doc Return all loaded user classes.
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) classes`.
+-spec classes() -> [tuple()].
+classes() ->
+    handle_classes().
+
+%% @doc Compile and load a .bt file.
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) load: path`.
+-spec load(term()) -> 'nil'.
+load(Path) ->
     case handle_load(Path) of
         {error, Err} -> beamtalk_error:raise(Err);
         Result -> Result
-    end;
-dispatch(globals, [], Self) ->
-    GsPid = erlang:element(4, Self),
-    ModuleName = erlang:element(3, Self),
+    end.
+
+%% @doc Return the full workspace namespace snapshot.
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) globals`.
+-spec globals() -> map().
+globals() ->
+    UserBindings = all_user_bindings(),
+    handle_globals(UserBindings).
+
+%% @doc Register a value in the workspace namespace under a given atom name.
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) bind: value as: name`.
+-spec bind(term(), atom() | term()) -> 'nil'.
+bind(Value, Name) ->
     ensure_bindings_table(),
-    UserBindings = user_bindings_for(GsPid),
-    handle_globals(GsPid, ModuleName, UserBindings);
-dispatch('bind:as:', [Value, Name], Self) ->
-    ensure_bindings_table(),
-    GsPid = erlang:element(4, Self),
     case to_atom_name(Name) of
         {error, Err} ->
             beamtalk_error:raise(Err);
         AtomName ->
             case check_bind_conflicts(AtomName) of
                 ok ->
-                    ets:insert(?WI_BINDINGS_TABLE, {{GsPid, AtomName}, Value}),
+                    ets:insert(?WI_BINDINGS_TABLE, {AtomName, Value}),
                     spawn(fun() -> maybe_warn_loaded_class(AtomName) end),
                     nil;
                 {error, Err} ->
                     beamtalk_error:raise(Err)
             end
-    end;
-dispatch('unbind:', [Name], Self) ->
+    end.
+
+%% @doc Remove a registered name from the workspace namespace.
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) unbind: name`.
+-spec unbind(atom() | term()) -> 'nil'.
+unbind(Name) ->
     ensure_bindings_table(),
-    GsPid = erlang:element(4, Self),
     case to_atom_name(Name) of
         {error, Err} ->
             beamtalk_error:raise(Err);
         AtomName ->
-            case ets:lookup(?WI_BINDINGS_TABLE, {GsPid, AtomName}) of
+            case ets:lookup(?WI_BINDINGS_TABLE, AtomName) of
                 [] ->
                     Err0 = beamtalk_error:new(name_not_found, 'WorkspaceInterface'),
                     Err1 = beamtalk_error:with_selector(Err0, 'unbind:'),
@@ -112,18 +170,10 @@ dispatch('unbind:', [Name], Self) ->
                         )
                     );
                 _ ->
-                    ets:delete(?WI_BINDINGS_TABLE, {GsPid, AtomName}),
+                    ets:delete(?WI_BINDINGS_TABLE, AtomName),
                     nil
             end
-    end;
-dispatch(Selector, _Args, _Self) ->
-    Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
-    Err1 = beamtalk_error:with_selector(Err0, Selector),
-    beamtalk_error:raise(
-        beamtalk_error:with_hint(
-            Err1, <<"To list available selectors, use: Workspace methods">>
-        )
-    ).
+    end.
 
 %%% ============================================================================
 %%% Stable external API
@@ -131,16 +181,14 @@ dispatch(Selector, _Args, _Self) ->
 
 %% @doc Return workspace-level user bindings (for REPL session injection).
 %% Called before each eval to merge workspace bindings into session bindings.
+%% Returns #{} when the workspace meta process is not running (workspace down).
 -spec get_user_bindings() -> #{atom() => term()}.
 get_user_bindings() ->
-    case whereis('Workspace') of
+    case whereis(beamtalk_workspace_meta) of
         undefined ->
             #{};
-        Pid ->
-            case ets:info(?WI_BINDINGS_TABLE, id) of
-                undefined -> #{};
-                _ -> user_bindings_for(Pid)
-            end
+        _ ->
+            all_user_bindings()
     end.
 
 %% @doc Return non-class workspace globals for session binding injection.
@@ -148,21 +196,30 @@ get_user_bindings() ->
 %% bind:as: names. Class objects are excluded.
 -spec get_session_bindings() -> #{atom() => term()}.
 get_session_bindings() ->
-    case whereis('Workspace') of
+    case whereis(beamtalk_workspace_meta) of
         undefined ->
             #{};
-        Pid ->
-            UserBindings =
-                case ets:info(?WI_BINDINGS_TABLE, id) of
-                    undefined -> #{};
-                    _ -> user_bindings_for(Pid)
-                end,
-            handle_session_bindings(Pid, undefined, UserBindings)
+        _ ->
+            UserBindings = all_user_bindings(),
+            handle_session_bindings(UserBindings)
     end.
 
 %%% ============================================================================
 %%% Internal helpers — ETS management
 %%% ============================================================================
+
+%% @doc Create the bindings ETS table owned by the calling process.
+%% Must be called from a long-lived process (beamtalk_workspace_bootstrap) so that
+%% the table is not deleted when short-lived eval worker processes exit.
+-spec create_bindings_table() -> ok.
+create_bindings_table() ->
+    case ets:info(?WI_BINDINGS_TABLE, id) of
+        undefined ->
+            ets:new(?WI_BINDINGS_TABLE, [set, public, named_table]),
+            ok;
+        _ ->
+            ok
+    end.
 
 %% @private Ensure the bindings ETS table exists.
 %% Creates it on first call; safe to call repeatedly.
@@ -182,14 +239,15 @@ ensure_bindings_table() ->
             ok
     end.
 
-%% @private Read all user bindings for a given gen_server PID as a map.
--spec user_bindings_for(pid()) -> #{atom() => term()}.
-user_bindings_for(Pid) ->
-    Entries = ets:select(
-        ?WI_BINDINGS_TABLE,
-        [{{{Pid, '$1'}, '$2'}, [], [{{'$1', '$2'}}]}]
-    ),
-    maps:from_list(Entries).
+%% @private Read all user bindings as a map.
+-spec all_user_bindings() -> #{atom() => term()}.
+all_user_bindings() ->
+    case ets:info(?WI_BINDINGS_TABLE, id) of
+        undefined ->
+            #{};
+        _ ->
+            maps:from_list(ets:tab2list(?WI_BINDINGS_TABLE))
+    end.
 
 %%% ============================================================================
 %%% Internal method implementations
@@ -274,9 +332,9 @@ handle_load(Other) ->
         )}.
 
 %% @private Return the full workspace globals snapshot.
--spec handle_globals(pid(), atom(), map()) -> map().
-handle_globals(GsPid, ModuleName, UserBindings) ->
-    Base = handle_session_bindings(GsPid, ModuleName, UserBindings),
+-spec handle_globals(map()) -> map().
+handle_globals(UserBindings) ->
+    Base = handle_session_bindings(UserBindings),
     Classes = handle_classes(),
     lists:foldl(
         fun
@@ -291,15 +349,8 @@ handle_globals(GsPid, ModuleName, UserBindings) ->
     ).
 
 %% @private Return non-class session bindings: singletons + user bind:as: entries.
--spec handle_session_bindings(pid(), atom() | undefined, map()) -> map().
-handle_session_bindings(GsPid, ModuleName, UserBindings) ->
-    %% Build WorkspaceSelf reference using the module name from Self
-    WsMod =
-        case ModuleName of
-            undefined -> 'bt@stdlib@workspace_interface';
-            M -> M
-        end,
-    WorkspaceSelf = {beamtalk_object, 'WorkspaceInterface', WsMod, GsPid},
+-spec handle_session_bindings(map()) -> map().
+handle_session_bindings(UserBindings) ->
     Base0 = UserBindings,
     Base1 =
         case resolve_singleton('TranscriptStream') of
@@ -311,7 +362,14 @@ handle_session_bindings(GsPid, ModuleName, UserBindings) ->
             nil -> Base1;
             BeamtalkObj -> maps:put('Beamtalk', BeamtalkObj, Base1)
         end,
-    maps:put('Workspace', WorkspaceSelf, Base2).
+    %% Resolve Workspace from singleton state, same as Beamtalk/Transcript.
+    %% Falls back to a plain tagged-map if the class var hasn't been wired yet.
+    WorkspaceObj =
+        case resolve_singleton('WorkspaceInterface') of
+            nil -> #{'$beamtalk_class' => 'WorkspaceInterface'};
+            Obj -> Obj
+        end,
+    maps:put('Workspace', WorkspaceObj, Base2).
 
 %% @private Convert a name argument to an atom.
 -spec to_atom_name(term()) -> atom() | {error, #beamtalk_error{}}.

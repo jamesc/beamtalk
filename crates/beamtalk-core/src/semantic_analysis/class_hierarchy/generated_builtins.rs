@@ -166,8 +166,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "BeamtalkInterface".into(),
         ClassInfo {
             name: "BeamtalkInterface".into(),
-            superclass: Some("Actor".into()),
-            is_sealed: false,
+            superclass: Some("Object".into()),
+            is_sealed: true,
             is_abstract: false,
             is_typed: false,
             is_value: false,
@@ -1747,8 +1747,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         "WorkspaceInterface".into(),
         ClassInfo {
             name: "WorkspaceInterface".into(),
-            superclass: Some("Actor".into()),
-            is_sealed: false,
+            superclass: Some("Object".into()),
+            is_sealed: true,
             is_abstract: false,
             is_typed: false,
             is_value: false,
