@@ -1517,10 +1517,10 @@ mod tests {
 
         // Should NOT have a field assignment error for passed blocks (BT-1140).
         // (may have unrelated errors for undefined variables, which is expected)
-        let has_field_error = result.diagnostics.iter().any(|d| {
-            d.message.contains("cannot assign to field 'sum'")
-                && d.message.contains("passed closure")
-        });
+        let has_field_error = result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("cannot assign to field 'sum'"));
         assert!(
             !has_field_error,
             "Should not have field-in-passed-block error (BT-1140), got: {:?}",
