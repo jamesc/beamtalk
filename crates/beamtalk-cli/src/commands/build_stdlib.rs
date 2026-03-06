@@ -519,13 +519,17 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                 }
             };
             if !user_selectors.contains(&with_sel) {
+                let param_type = slot
+                    .type_annotation
+                    .as_ref()
+                    .map(|t| t.type_name().to_string());
                 methods.push(MethodMeta {
                     selector: with_sel,
                     arity: 1,
                     kind: MethodKindMeta::Primary,
                     is_sealed: false,
                     return_type: Some(class_name.clone()),
-                    param_types: vec![None],
+                    param_types: vec![param_type],
                 });
             }
         }
@@ -538,13 +542,22 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         });
         if !user_class_selectors.contains(&kw_sel) {
             let arity = class.state.len();
+            let param_types = class
+                .state
+                .iter()
+                .map(|s| {
+                    s.type_annotation
+                        .as_ref()
+                        .map(|t| t.type_name().to_string())
+                })
+                .collect();
             class_methods.push(MethodMeta {
                 selector: kw_sel,
                 arity,
                 kind: MethodKindMeta::Primary,
                 is_sealed: false,
                 return_type: Some(class_name.clone()),
-                param_types: vec![None; arity],
+                param_types,
             });
         }
     }
