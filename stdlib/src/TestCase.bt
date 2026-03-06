@@ -111,4 +111,7 @@ Object subclass: TestCase
   skip: reason: String -> Nil => @primitive "skip:"
 
   /// Skip the current test with no reason.
+  ///
+  /// Equivalent to `self skip: ""`. The test is counted as skipped, not
+  /// failed. Use `^` to exit the test method early after calling this.
   skip -> Nil => self skip: ""

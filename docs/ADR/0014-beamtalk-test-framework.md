@@ -404,7 +404,7 @@ testUnixOnlyFeature =>
 ```
 
 **Protocol:**
-1. `self skip: reason` calls the `skip:` primitive which executes `throw({bunit_skip, Reason})`
+1. `self skip: reason` calls the `skip:` primitive which throws `{bunit_skip, Reason}`
 2. `run_test_method/4` catches `throw:{bunit_skip, Reason}` and returns `{skip, MethodName, Reason}`
 3. `structure_results/3` and `format_results/2` count skips separately from passes and failures
 4. `TestResult` gains a `skipped` field accessible via `result skipped`
