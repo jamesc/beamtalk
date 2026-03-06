@@ -21,7 +21,7 @@ use crate::ast::{
     CascadeMessage, ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart,
     Literal, MapPair, MatchArm, MessageSelector, Pattern, StringSegment,
 };
-use crate::source_analysis::{Token, TokenKind};
+use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
 
 use super::{Diagnostic, Parser, binary_binding_power};
@@ -968,9 +968,7 @@ impl Parser {
         if !matches!(self.current_kind(), TokenKind::GtGt) {
             segments.push(self.parse_binary_segment());
             while self.match_binary_selector(",") {
-                if matches!(self.current_kind(), TokenKind::GtGt) {
-                    break;
-                }
+                // Trailing comma before `>>` is an error (no trailing-comma support in patterns)
                 segments.push(self.parse_binary_segment());
             }
         }
@@ -1016,10 +1014,16 @@ impl Parser {
             TokenKind::Keyword(kw) => {
                 let kw = kw.clone();
                 let token = self.advance();
-                let span = token.span();
+                let kw_span = token.span();
                 // Strip trailing `:` to recover the variable name
                 let name: EcoString = kw.trim_end_matches(':').into();
-                let var = Pattern::Variable(Identifier::new(name, span));
+                // Adjust span to exclude the trailing `:` character (1 byte)
+                let var_span = Span::new(kw_span.start(), kw_span.end().saturating_sub(1));
+                let var = if name == "_" {
+                    Pattern::Wildcard(var_span)
+                } else {
+                    Pattern::Variable(Identifier::new(name, var_span))
+                };
                 // The size token follows immediately
                 let sz = match self.current_kind() {
                     TokenKind::Integer(_) | TokenKind::Identifier(_) => {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-663: Tests for binary pattern matching in match: expressions.
-// Covers integer segments, binary segments, utf8 segments, and modifiers.
+// Covers integer segments, binary segments, and guards.
 
 TestCase subclass: BinaryPatternsTest
 
