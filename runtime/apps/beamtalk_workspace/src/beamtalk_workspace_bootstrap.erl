@@ -20,7 +20,7 @@
 -behaviour(gen_server).
 
 -export([start_link/0, start_link/1]).
--export([init/1, handle_continue/2, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
+-export([init/1, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
 -export([find_bt_modules_in_dir/1, activate_project_modules/1]).
 -export([sort_modules_by_dependency/2]).
 -ifdef(TEST).
@@ -54,14 +54,14 @@ start_link(ProjectPath) ->
 %% @private
 init([ProjectPath]) ->
     State = bootstrap_all(#state{}),
-    %% Defer project module activation to handle_continue so init/1 returns
-    %% promptly and the gen_server is registered before doing I/O.
-    {ok, State, {continue, {activate_project_modules, ProjectPath}}}.
-
-%% @private
-handle_continue({activate_project_modules, ProjectPath}, State) ->
+    %% Activate project modules synchronously before returning so that
+    %% beamtalk_repl_server (the next child) does not write the port file
+    %% until all compiled project classes are registered and visible.
+    %% The gen_server name is registered by OTP before init/1 is called, so
+    %% any DOWN signals from monitored singletons that arrive during activation
+    %% safely queue in the mailbox and are handled immediately after we return.
     activate_project_modules(ProjectPath),
-    {noreply, State}.
+    {ok, State}.
 
 %% @private
 handle_info({'DOWN', MonRef, process, _Pid, _Reason}, State) ->

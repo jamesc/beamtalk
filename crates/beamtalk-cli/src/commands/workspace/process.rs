@@ -10,7 +10,7 @@
 //!
 //! **DDD Context:** CLI
 
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -40,36 +40,46 @@ const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 3600 * 4;
 const PORT_DISCOVERY_DELAY_MS: u64 = 500;
 
 /// Maximum number of port file discovery attempts.
-const PORT_DISCOVERY_MAX_RETRIES: usize = 20;
+/// 40 × 500 ms = 20 s budget — enough for slow BEAM VM startup on loaded CI runners.
+const PORT_DISCOVERY_MAX_RETRIES: usize = 40;
 
 /// Delay between TCP readiness probe retries in milliseconds.
 const READINESS_PROBE_DELAY_MS: u64 = 200;
 
 /// Maximum number of TCP readiness probe attempts.
 ///
-/// Two failure modes drive this constant:
-///
-/// 1. **ECONNREFUSED window**: rarely, a brief window exists where the port file
-///    has been written but TCP connections still fail (e.g. during supervisor
-///    restart or OS scheduler jitter on a loaded CI runner). Each ECONNREFUSED
-///    returns immediately, costing only the 200 ms sleep per retry.
-///    100 × 200 ms = 20 s budget for this window.
-///
-/// 2. **Slow auth**: once connected, `ProtocolClient::connect` performs a full
-///    WebSocket auth exchange. This is covered by `READINESS_READ_TIMEOUT_MS`
-///    below; with a 10 s per-attempt timeout, auth succeeds on the first attempt
-///    and these retries are not consumed.
-const READINESS_PROBE_MAX_RETRIES: usize = 100;
+/// Phase 1 of readiness probing is a cheap TCP-only connect: ECONNREFUSED on
+/// loopback returns in < 1 ms, so each retry costs only `READINESS_PROBE_DELAY_MS`.
+/// 300 × 200 ms = 60 s budget — generous for heavily loaded CI runners where
+/// BEAM VM startup can take 30+ seconds.
+const READINESS_PROBE_MAX_RETRIES: usize = 300;
 
-/// TCP read timeout for the WebSocket auth handshake during readiness probing.
+/// TCP connect timeout for the cheap Phase 1 TCP-only probe in milliseconds.
 ///
-/// `ProtocolClient::connect` performs a full WebSocket auth exchange before
-/// returning. On a heavily-loaded CI runner (12 sequential BEAM nodes), the
-/// BEAM VM can take > 500ms to respond to the HTTP upgrade or send the
-/// `auth-required` message — causing every probe attempt to time out even
-/// though the port IS open. 10 s gives ample headroom; once the port is open
-/// auth completes on the first attempt and the retry budget is not consumed.
+/// On loopback ECONNREFUSED is instant; this cap prevents indefinite hangs on
+/// non-loopback addresses (e.g. custom bind-addr). 200 ms is enough to detect
+/// a genuinely-listening port without slowing the probe loop.
+const TCP_PROBE_TIMEOUT_MS: u64 = 200;
+
+/// TCP read timeout for the Phase 2 WebSocket auth handshake during readiness probing.
+///
+/// Phase 2 runs only after the TCP probe confirms the port is accepting
+/// connections, so cowboy is up. 10 s gives ample headroom for auth on a
+/// heavily-loaded CI runner.
 const READINESS_READ_TIMEOUT_MS: u64 = 10_000;
+
+/// Maximum Phase 2 WS auth+health retries after TCP port is confirmed open.
+///
+/// Retries guard against transient connection drops (brief cowboy restart,
+/// scheduler jitter). Each attempt costs at most `READINESS_READ_TIMEOUT_MS`.
+const WS_HEALTH_RETRIES: usize = 5;
+
+/// Number of probe attempts between BEAM liveness checks.
+///
+/// At `READINESS_PROBE_DELAY_MS` = 200 ms, interval 25 → liveness checked
+/// every ~5 s. Applied to both the port-file discovery loop and the TCP
+/// readiness probe loop so a crashed node is detected quickly.
+const LIVENESS_CHECK_INTERVAL: usize = 25;
 
 /// Start a detached BEAM node for a workspace.
 /// Returns the `NodeInfo` for the started node.
@@ -263,10 +273,25 @@ pub fn start_detached_node(
     // Retry a few times since the BEAM node may still be initializing.
     let (actual_port, nonce) = if port == 0 {
         let mut discovered = None;
-        for _ in 0..PORT_DISCOVERY_MAX_RETRIES {
+        for attempt in 0..PORT_DISCOVERY_MAX_RETRIES {
             if let Some(port_nonce) = read_port_file(workspace_id)? {
                 discovered = Some(port_nonce);
                 break;
+            }
+            // Bail early if the BEAM process already exited — avoids burning the
+            // full discovery budget when the node crashed during OTP app startup
+            // (after writing the PID file but before cowboy bound its port).
+            // Check every 10 attempts (5 s at PORT_DISCOVERY_DELAY_MS = 500 ms).
+            if attempt > 0 && attempt % 10 == 0 && !is_process_alive(pid) {
+                let hint = if startup_log_enabled {
+                    format!(" Check {} for startup logs.", startup_log_path.display())
+                } else {
+                    String::new()
+                };
+                return Err(miette!(
+                    "BEAM node (PID {pid}) exited before writing its port file. \
+                     The node likely crashed during OTP application startup.{hint}"
+                ));
             }
             std::thread::sleep(Duration::from_millis(PORT_DISCOVERY_DELAY_MS));
         }
@@ -317,7 +342,20 @@ pub fn start_detached_node(
 
 /// Poll until the WebSocket health endpoint responds on the given port.
 ///
-/// Uses short per-attempt timeouts to keep the worst-case total bounded.
+/// **Two-phase approach:**
+///
+/// 1. **TCP probe** — cheap `connect_timeout` loop until the port accepts.
+///    On loopback, ECONNREFUSED returns in < 1 ms, so each retry only costs
+///    `READINESS_PROBE_DELAY_MS`. This avoids burning the 10 s WS auth timeout
+///    on every probe attempt while the socket is not yet listening.
+///
+/// 2. **WS health check** — once TCP accepts, perform the full auth handshake
+///    and send `{"op":"health"}`. Retried up to `WS_HEALTH_RETRIES` times for
+///    transient failures (brief cowboy restart, scheduler jitter).
+///
+/// Both loops check `is_process_alive` every `LIVENESS_CHECK_INTERVAL` attempts
+/// so a crashed node is detected within ~5 s rather than after the full timeout.
+///
 /// `log_path` is `Some(path)` only when the startup log file was successfully
 /// opened; it is included in timeout error messages to guide diagnosis.
 fn wait_for_tcp_ready(
@@ -327,14 +365,61 @@ fn wait_for_tcp_ready(
     cookie: &str,
     log_path: Option<&std::path::Path>,
 ) -> Result<()> {
-    for _ in 0..READINESS_PROBE_MAX_RETRIES {
+    let log_suffix = log_path
+        .map(|p| format!(" Check {} for startup logs.", p.display()))
+        .unwrap_or_default();
+
+    let addr: std::net::SocketAddr = format!("{host}:{port}")
+        .parse()
+        .map_err(|e| miette!("Invalid workspace address {host}:{port}: {e}"))?;
+
+    // Phase 1: cheap TCP-only probe — wait until the port accepts connections.
+    // ECONNREFUSED on loopback is instant, so this loop costs only the sleep
+    // per iteration and doesn't consume the expensive WS auth budget.
+    let port_ready = 'tcp: {
+        for attempt in 0..READINESS_PROBE_MAX_RETRIES {
+            if TcpStream::connect_timeout(&addr, Duration::from_millis(TCP_PROBE_TIMEOUT_MS))
+                .is_ok()
+            {
+                break 'tcp true;
+            }
+            if attempt > 0 && attempt % LIVENESS_CHECK_INTERVAL == 0 && !is_process_alive(pid) {
+                return Err(miette!(
+                    "BEAM node (PID {pid}) exited before WebSocket endpoint on port \
+                     {port} became ready. The node crashed during startup.{log_suffix}"
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
+        }
+        false
+    };
+
+    if !port_ready {
+        return Err(if is_process_alive(pid) {
+            miette!(
+                "BEAM node started (PID {pid}) but WebSocket health endpoint on port {port} \
+                 did not become ready within the timeout. The workspace may be initializing \
+                 slowly — try again.{log_suffix}"
+            )
+        } else {
+            miette!(
+                "BEAM node (PID {pid}) crashed during startup before WebSocket endpoint \
+                 on port {port} became ready. Ensure Erlang/OTP is installed \
+                 correctly.{log_suffix}"
+            )
+        });
+    }
+
+    // Phase 2: port is accepting — do the full WS auth + health check.
+    // Retried a few times for transient auth failures (cowboy brief restart, jitter).
+    let request = serde_json::json!({"op": "health"});
+    for _ in 0..WS_HEALTH_RETRIES {
         if let Ok(mut client) = ProtocolClient::connect(
             host,
             port,
             cookie,
             Some(Duration::from_millis(READINESS_READ_TIMEOUT_MS)),
         ) {
-            let request = serde_json::json!({"op": "health"});
             if client.send_raw(&request).is_ok() {
                 return Ok(());
             }
@@ -342,28 +427,18 @@ fn wait_for_tcp_ready(
         std::thread::sleep(Duration::from_millis(READINESS_PROBE_DELAY_MS));
     }
 
-    // Check whether the BEAM node is still alive to give a more actionable error.
-    // If the process is gone it crashed during startup; if it's still running
-    // it is either stuck initializing or the WebSocket stack failed to come up.
-    let node_alive = is_process_alive(pid);
-
-    // Only mention the log file if we actually opened it (log_path is Some).
-    let log_suffix = log_path
-        .map(|p| format!(" Check {} for startup logs.", p.display()))
-        .unwrap_or_default();
-
-    if node_alive {
-        Err(miette!(
-            "BEAM node started (PID {pid}) but WebSocket health endpoint on port {port} \
-             did not become ready within the timeout. The workspace may be initializing \
-             slowly — try again.{log_suffix}"
-        ))
+    Err(if is_process_alive(pid) {
+        miette!(
+            "BEAM node started (PID {pid}) and port {port} is accepting TCP connections, \
+             but the WebSocket health check failed. The workspace may be in a degraded \
+             state — try again.{log_suffix}"
+        )
     } else {
-        Err(miette!(
-            "BEAM node (PID {pid}) crashed during startup before WebSocket endpoint \
-             on port {port} became ready. Ensure Erlang/OTP is installed correctly.{log_suffix}"
-        ))
-    }
+        miette!(
+            "BEAM node (PID {pid}) crashed after WebSocket port {port} started accepting. \
+             Ensure Erlang/OTP is installed correctly.{log_suffix}"
+        )
+    })
 }
 
 /// Read the PID written by the BEAM node to its workspace PID file.
