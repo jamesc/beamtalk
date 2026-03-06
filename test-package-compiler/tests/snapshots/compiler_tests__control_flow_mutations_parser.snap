@@ -1,6 +1,5 @@
 ---
 source: test-package-compiler/tests/compiler_tests.rs
-assertion_line: 70
 expression: output
 ---
 AST:
@@ -305,55 +304,62 @@ Module {
                 leading: [],
                 trailing: None,
             },
-            expression: MessageSend {
-                receiver: Block(
-                    Block {
-                        parameters: [],
-                        body: [
-                            ExpressionStatement {
-                                comments: CommentAttachment {
-                                    leading: [],
-                                    trailing: None,
-                                },
-                                expression: MessageSend {
-                                    receiver: Identifier(
-                                        Identifier {
-                                            name: "count2",
-                                            span: Span {
-                                                start: 500,
-                                                end: 506,
-                                            },
-                                        },
-                                    ),
-                                    selector: Binary(
-                                        "=",
-                                    ),
-                                    arguments: [
-                                        Literal(
-                                            Integer(
-                                                0,
-                                            ),
-                                            Span {
-                                                start: 509,
-                                                end: 510,
-                                            },
-                                        ),
-                                    ],
-                                    is_cast: false,
+            expression: Block(
+                Block {
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Identifier(
+                                Identifier {
+                                    name: "count2",
                                     span: Span {
                                         start: 500,
-                                        end: 510,
+                                        end: 506,
                                     },
                                 },
-                                preceding_blank_line: false,
-                            },
-                        ],
-                        span: Span {
-                            start: 499,
-                            end: 511,
+                            ),
+                            preceding_blank_line: false,
                         },
+                    ],
+                    span: Span {
+                        start: 499,
+                        end: 500,
                     },
-                ),
+                },
+            ),
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found =",
+                span: Span {
+                    start: 507,
+                    end: 508,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Error {
+                    message: "Unexpected token: expected expression, found ]",
+                    span: Span {
+                        start: 510,
+                        end: 511,
+                    },
+                },
                 selector: Keyword(
                     [
                         KeywordPart {
@@ -432,7 +438,7 @@ Module {
                 ],
                 is_cast: false,
                 span: Span {
-                    start: 499,
+                    start: 510,
                     end: 546,
                 },
             },
@@ -1530,189 +1536,50 @@ Module {
                                                 arguments: [
                                                     Parenthesized {
                                                         expression: MessageSend {
-                                                            receiver: MessageSend {
-                                                                receiver: MessageSend {
-                                                                    receiver: Identifier(
-                                                                        Identifier {
-                                                                            name: "n",
-                                                                            span: Span {
-                                                                                start: 1571,
-                                                                                end: 1572,
-                                                                            },
-                                                                        },
-                                                                    ),
-                                                                    selector: Binary(
-                                                                        "%",
-                                                                    ),
-                                                                    arguments: [
-                                                                        Literal(
-                                                                            Integer(
-                                                                                2,
-                                                                            ),
-                                                                            Span {
-                                                                                start: 1575,
-                                                                                end: 1576,
-                                                                            },
-                                                                        ),
-                                                                    ],
-                                                                    is_cast: false,
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
                                                                     span: Span {
                                                                         start: 1571,
-                                                                        end: 1576,
+                                                                        end: 1572,
                                                                     },
                                                                 },
-                                                                selector: Binary(
-                                                                    "=",
-                                                                ),
-                                                                arguments: [
-                                                                    Literal(
-                                                                        Integer(
-                                                                            0,
-                                                                        ),
-                                                                        Span {
-                                                                            start: 1579,
-                                                                            end: 1580,
-                                                                        },
-                                                                    ),
-                                                                ],
-                                                                is_cast: false,
-                                                                span: Span {
-                                                                    start: 1571,
-                                                                    end: 1580,
-                                                                },
-                                                            },
-                                                            selector: Keyword(
-                                                                [
-                                                                    KeywordPart {
-                                                                        keyword: "ifTrue:",
-                                                                        span: Span {
-                                                                            start: 1581,
-                                                                            end: 1588,
-                                                                        },
-                                                                    },
-                                                                    KeywordPart {
-                                                                        keyword: "ifFalse:",
-                                                                        span: Span {
-                                                                            start: 1593,
-                                                                            end: 1601,
-                                                                        },
-                                                                    },
-                                                                ],
+                                                            ),
+                                                            selector: Binary(
+                                                                "%",
                                                             ),
                                                             arguments: [
-                                                                Block(
-                                                                    Block {
-                                                                        parameters: [],
-                                                                        body: [
-                                                                            ExpressionStatement {
-                                                                                comments: CommentAttachment {
-                                                                                    leading: [],
-                                                                                    trailing: None,
-                                                                                },
-                                                                                expression: Literal(
-                                                                                    Integer(
-                                                                                        1,
-                                                                                    ),
-                                                                                    Span {
-                                                                                        start: 1590,
-                                                                                        end: 1591,
-                                                                                    },
-                                                                                ),
-                                                                                preceding_blank_line: false,
-                                                                            },
-                                                                        ],
-                                                                        span: Span {
-                                                                            start: 1589,
-                                                                            end: 1592,
-                                                                        },
-                                                                    },
-                                                                ),
-                                                                Block(
-                                                                    Block {
-                                                                        parameters: [],
-                                                                        body: [
-                                                                            ExpressionStatement {
-                                                                                comments: CommentAttachment {
-                                                                                    leading: [],
-                                                                                    trailing: None,
-                                                                                },
-                                                                                expression: Literal(
-                                                                                    Integer(
-                                                                                        0,
-                                                                                    ),
-                                                                                    Span {
-                                                                                        start: 1603,
-                                                                                        end: 1604,
-                                                                                    },
-                                                                                ),
-                                                                                preceding_blank_line: false,
-                                                                            },
-                                                                        ],
-                                                                        span: Span {
-                                                                            start: 1602,
-                                                                            end: 1605,
-                                                                        },
+                                                                Literal(
+                                                                    Integer(
+                                                                        2,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 1575,
+                                                                        end: 1576,
                                                                     },
                                                                 ),
                                                             ],
                                                             is_cast: false,
                                                             span: Span {
                                                                 start: 1571,
-                                                                end: 1605,
+                                                                end: 1576,
                                                             },
                                                         },
                                                         span: Span {
                                                             start: 1570,
-                                                            end: 1606,
+                                                            end: 1571,
                                                         },
                                                     },
                                                 ],
                                                 is_cast: false,
                                                 span: Span {
                                                     start: 1558,
-                                                    end: 1606,
+                                                    end: 1571,
                                                 },
                                             },
                                             span: Span {
                                                 start: 1545,
-                                                end: 1606,
-                                            },
-                                        },
-                                        preceding_blank_line: false,
-                                    },
-                                    ExpressionStatement {
-                                        comments: CommentAttachment {
-                                            leading: [],
-                                            trailing: None,
-                                        },
-                                        expression: MessageSend {
-                                            receiver: Identifier(
-                                                Identifier {
-                                                    name: "n",
-                                                    span: Span {
-                                                        start: 1612,
-                                                        end: 1613,
-                                                    },
-                                                },
-                                            ),
-                                            selector: Binary(
-                                                "*",
-                                            ),
-                                            arguments: [
-                                                Literal(
-                                                    Integer(
-                                                        2,
-                                                    ),
-                                                    Span {
-                                                        start: 1616,
-                                                        end: 1617,
-                                                    },
-                                                ),
-                                            ],
-                                            is_cast: false,
-                                            span: Span {
-                                                start: 1612,
-                                                end: 1617,
+                                                end: 1571,
                                             },
                                         },
                                         preceding_blank_line: false,
@@ -1720,7 +1587,7 @@ Module {
                                 ],
                                 span: Span {
                                     start: 1535,
-                                    end: 1619,
+                                    end: 1536,
                                 },
                             },
                         ),
@@ -1728,62 +1595,12 @@ Module {
                     is_cast: false,
                     span: Span {
                         start: 1518,
-                        end: 1619,
+                        end: 1536,
                     },
                 },
                 span: Span {
                     start: 1507,
-                    end: 1619,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [
-                    Comment {
-                        content: "Expected: evenCount = 2, doubled = #[2,4,6,8,10]",
-                        span: Span {
-                            start: 1703,
-                            end: 1713,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "select: with side effects",
-                        span: Span {
-                            start: 1703,
-                            end: 1713,
-                        },
-                        kind: Line,
-                        preceding_blank_line: true,
-                    },
-                ],
-                trailing: None,
-            },
-            expression: Assignment {
-                target: Identifier(
-                    Identifier {
-                        name: "matchCount",
-                        span: Span {
-                            start: 1703,
-                            end: 1713,
-                        },
-                    },
-                ),
-                value: Literal(
-                    Integer(
-                        0,
-                    ),
-                    Span {
-                        start: 1717,
-                        end: 1718,
-                    },
-                ),
-                span: Span {
-                    start: 1703,
-                    end: 1718,
+                    end: 1536,
                 },
             },
             preceding_blank_line: false,
@@ -1793,595 +1610,11 @@ Module {
                 leading: [],
                 trailing: None,
             },
-            expression: Assignment {
-                target: Identifier(
-                    Identifier {
-                        name: "evens",
-                        span: Span {
-                            start: 1720,
-                            end: 1725,
-                        },
-                    },
-                ),
-                value: MessageSend {
-                    receiver: Identifier(
-                        Identifier {
-                            name: "numbers",
-                            span: Span {
-                                start: 1729,
-                                end: 1736,
-                            },
-                        },
-                    ),
-                    selector: Keyword(
-                        [
-                            KeywordPart {
-                                keyword: "select:",
-                                span: Span {
-                                    start: 1737,
-                                    end: 1744,
-                                },
-                            },
-                        ],
-                    ),
-                    arguments: [
-                        Block(
-                            Block {
-                                parameters: [
-                                    BlockParameter {
-                                        name: "n",
-                                        span: Span {
-                                            start: 1747,
-                                            end: 1748,
-                                        },
-                                    },
-                                ],
-                                body: [
-                                    ExpressionStatement {
-                                        comments: CommentAttachment {
-                                            leading: [],
-                                            trailing: None,
-                                        },
-                                        expression: Assignment {
-                                            target: Identifier(
-                                                Identifier {
-                                                    name: "matchCount",
-                                                    span: Span {
-                                                        start: 1755,
-                                                        end: 1765,
-                                                    },
-                                                },
-                                            ),
-                                            value: MessageSend {
-                                                receiver: Identifier(
-                                                    Identifier {
-                                                        name: "matchCount",
-                                                        span: Span {
-                                                            start: 1769,
-                                                            end: 1779,
-                                                        },
-                                                    },
-                                                ),
-                                                selector: Binary(
-                                                    "+",
-                                                ),
-                                                arguments: [
-                                                    Literal(
-                                                        Integer(
-                                                            1,
-                                                        ),
-                                                        Span {
-                                                            start: 1782,
-                                                            end: 1783,
-                                                        },
-                                                    ),
-                                                ],
-                                                is_cast: false,
-                                                span: Span {
-                                                    start: 1769,
-                                                    end: 1783,
-                                                },
-                                            },
-                                            span: Span {
-                                                start: 1755,
-                                                end: 1783,
-                                            },
-                                        },
-                                        preceding_blank_line: false,
-                                    },
-                                    ExpressionStatement {
-                                        comments: CommentAttachment {
-                                            leading: [],
-                                            trailing: None,
-                                        },
-                                        expression: MessageSend {
-                                            receiver: MessageSend {
-                                                receiver: Identifier(
-                                                    Identifier {
-                                                        name: "n",
-                                                        span: Span {
-                                                            start: 1789,
-                                                            end: 1790,
-                                                        },
-                                                    },
-                                                ),
-                                                selector: Binary(
-                                                    "%",
-                                                ),
-                                                arguments: [
-                                                    Literal(
-                                                        Integer(
-                                                            2,
-                                                        ),
-                                                        Span {
-                                                            start: 1793,
-                                                            end: 1794,
-                                                        },
-                                                    ),
-                                                ],
-                                                is_cast: false,
-                                                span: Span {
-                                                    start: 1789,
-                                                    end: 1794,
-                                                },
-                                            },
-                                            selector: Binary(
-                                                "=:=",
-                                            ),
-                                            arguments: [
-                                                Literal(
-                                                    Integer(
-                                                        0,
-                                                    ),
-                                                    Span {
-                                                        start: 1799,
-                                                        end: 1800,
-                                                    },
-                                                ),
-                                            ],
-                                            is_cast: false,
-                                            span: Span {
-                                                start: 1789,
-                                                end: 1800,
-                                            },
-                                        },
-                                        preceding_blank_line: false,
-                                    },
-                                ],
-                                span: Span {
-                                    start: 1745,
-                                    end: 1802,
-                                },
-                            },
-                        ),
-                    ],
-                    is_cast: false,
-                    span: Span {
-                        start: 1729,
-                        end: 1802,
-                    },
-                },
+            expression: Error {
+                message: "Unexpected token: expected expression, found =",
                 span: Span {
-                    start: 1720,
-                    end: 1802,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [
-                    Comment {
-                        content: "Expected: matchCount = 5, evens = #[2,4]",
-                        span: Span {
-                            start: 1888,
-                            end: 1895,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "inject:into: with external mutation",
-                        span: Span {
-                            start: 1888,
-                            end: 1895,
-                        },
-                        kind: Line,
-                        preceding_blank_line: true,
-                    },
-                ],
-                trailing: None,
-            },
-            expression: Assignment {
-                target: Identifier(
-                    Identifier {
-                        name: "maxSeen",
-                        span: Span {
-                            start: 1888,
-                            end: 1895,
-                        },
-                    },
-                ),
-                value: Literal(
-                    Integer(
-                        0,
-                    ),
-                    Span {
-                        start: 1899,
-                        end: 1900,
-                    },
-                ),
-                span: Span {
-                    start: 1888,
-                    end: 1900,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Assignment {
-                target: Identifier(
-                    Identifier {
-                        name: "finalSum",
-                        span: Span {
-                            start: 1902,
-                            end: 1910,
-                        },
-                    },
-                ),
-                value: MessageSend {
-                    receiver: Identifier(
-                        Identifier {
-                            name: "numbers",
-                            span: Span {
-                                start: 1914,
-                                end: 1921,
-                            },
-                        },
-                    ),
-                    selector: Keyword(
-                        [
-                            KeywordPart {
-                                keyword: "inject:",
-                                span: Span {
-                                    start: 1922,
-                                    end: 1929,
-                                },
-                            },
-                            KeywordPart {
-                                keyword: "into:",
-                                span: Span {
-                                    start: 1932,
-                                    end: 1937,
-                                },
-                            },
-                        ],
-                    ),
-                    arguments: [
-                        Literal(
-                            Integer(
-                                0,
-                            ),
-                            Span {
-                                start: 1930,
-                                end: 1931,
-                            },
-                        ),
-                        Block(
-                            Block {
-                                parameters: [
-                                    BlockParameter {
-                                        name: "acc",
-                                        span: Span {
-                                            start: 1940,
-                                            end: 1943,
-                                        },
-                                    },
-                                    BlockParameter {
-                                        name: "n",
-                                        span: Span {
-                                            start: 1945,
-                                            end: 1946,
-                                        },
-                                    },
-                                ],
-                                body: [
-                                    ExpressionStatement {
-                                        comments: CommentAttachment {
-                                            leading: [],
-                                            trailing: None,
-                                        },
-                                        expression: MessageSend {
-                                            receiver: MessageSend {
-                                                receiver: Identifier(
-                                                    Identifier {
-                                                        name: "n",
-                                                        span: Span {
-                                                            start: 1953,
-                                                            end: 1954,
-                                                        },
-                                                    },
-                                                ),
-                                                selector: Binary(
-                                                    ">",
-                                                ),
-                                                arguments: [
-                                                    Identifier(
-                                                        Identifier {
-                                                            name: "maxSeen",
-                                                            span: Span {
-                                                                start: 1957,
-                                                                end: 1964,
-                                                            },
-                                                        },
-                                                    ),
-                                                ],
-                                                is_cast: false,
-                                                span: Span {
-                                                    start: 1953,
-                                                    end: 1964,
-                                                },
-                                            },
-                                            selector: Keyword(
-                                                [
-                                                    KeywordPart {
-                                                        keyword: "ifTrue:",
-                                                        span: Span {
-                                                            start: 1965,
-                                                            end: 1972,
-                                                        },
-                                                    },
-                                                ],
-                                            ),
-                                            arguments: [
-                                                Block(
-                                                    Block {
-                                                        parameters: [],
-                                                        body: [
-                                                            ExpressionStatement {
-                                                                comments: CommentAttachment {
-                                                                    leading: [],
-                                                                    trailing: None,
-                                                                },
-                                                                expression: Assignment {
-                                                                    target: Identifier(
-                                                                        Identifier {
-                                                                            name: "maxSeen",
-                                                                            span: Span {
-                                                                                start: 1974,
-                                                                                end: 1981,
-                                                                            },
-                                                                        },
-                                                                    ),
-                                                                    value: Identifier(
-                                                                        Identifier {
-                                                                            name: "n",
-                                                                            span: Span {
-                                                                                start: 1985,
-                                                                                end: 1986,
-                                                                            },
-                                                                        },
-                                                                    ),
-                                                                    span: Span {
-                                                                        start: 1974,
-                                                                        end: 1986,
-                                                                    },
-                                                                },
-                                                                preceding_blank_line: false,
-                                                            },
-                                                        ],
-                                                        span: Span {
-                                                            start: 1973,
-                                                            end: 1987,
-                                                        },
-                                                    },
-                                                ),
-                                            ],
-                                            is_cast: false,
-                                            span: Span {
-                                                start: 1953,
-                                                end: 1987,
-                                            },
-                                        },
-                                        preceding_blank_line: false,
-                                    },
-                                    ExpressionStatement {
-                                        comments: CommentAttachment {
-                                            leading: [],
-                                            trailing: None,
-                                        },
-                                        expression: MessageSend {
-                                            receiver: Identifier(
-                                                Identifier {
-                                                    name: "acc",
-                                                    span: Span {
-                                                        start: 1993,
-                                                        end: 1996,
-                                                    },
-                                                },
-                                            ),
-                                            selector: Binary(
-                                                "+",
-                                            ),
-                                            arguments: [
-                                                Identifier(
-                                                    Identifier {
-                                                        name: "n",
-                                                        span: Span {
-                                                            start: 1999,
-                                                            end: 2000,
-                                                        },
-                                                    },
-                                                ),
-                                            ],
-                                            is_cast: false,
-                                            span: Span {
-                                                start: 1993,
-                                                end: 2000,
-                                            },
-                                        },
-                                        preceding_blank_line: false,
-                                    },
-                                ],
-                                span: Span {
-                                    start: 1938,
-                                    end: 2002,
-                                },
-                            },
-                        ),
-                    ],
-                    is_cast: false,
-                    span: Span {
-                        start: 1914,
-                        end: 2002,
-                    },
-                },
-                span: Span {
-                    start: 1902,
-                    end: 2002,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [
-                    Comment {
-                        content: "Expected: maxSeen = 5, finalSum = 15",
-                        span: Span {
-                            start: 2197,
-                            end: 2205,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "========================================",
-                        span: Span {
-                            start: 2197,
-                            end: 2205,
-                        },
-                        kind: Line,
-                        preceding_blank_line: true,
-                    },
-                    Comment {
-                        content: "Nested Control Flow",
-                        span: Span {
-                            start: 2197,
-                            end: 2205,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "========================================",
-                        span: Span {
-                            start: 2197,
-                            end: 2205,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "Nested loops with multiple mutations",
-                        span: Span {
-                            start: 2197,
-                            end: 2205,
-                        },
-                        kind: Line,
-                        preceding_blank_line: true,
-                    },
-                ],
-                trailing: None,
-            },
-            expression: Assignment {
-                target: Identifier(
-                    Identifier {
-                        name: "outerSum",
-                        span: Span {
-                            start: 2197,
-                            end: 2205,
-                        },
-                    },
-                ),
-                value: Literal(
-                    Integer(
-                        0,
-                    ),
-                    Span {
-                        start: 2209,
-                        end: 2210,
-                    },
-                ),
-                span: Span {
-                    start: 2197,
-                    end: 2210,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Assignment {
-                target: Identifier(
-                    Identifier {
-                        name: "innerSum",
-                        span: Span {
-                            start: 2212,
-                            end: 2220,
-                        },
-                    },
-                ),
-                value: Literal(
-                    Integer(
-                        0,
-                    ),
-                    Span {
-                        start: 2224,
-                        end: 2225,
-                    },
-                ),
-                span: Span {
-                    start: 2212,
-                    end: 2225,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Assignment {
-                target: Identifier(
-                    Identifier {
-                        name: "x",
-                        span: Span {
-                            start: 2227,
-                            end: 2228,
-                        },
-                    },
-                ),
-                value: Literal(
-                    Integer(
-                        1,
-                    ),
-                    Span {
-                        start: 2232,
-                        end: 2233,
-                    },
-                ),
-                span: Span {
-                    start: 2227,
-                    end: 2233,
+                    start: 1577,
+                    end: 1578,
                 },
             },
             preceding_blank_line: false,
@@ -2392,54 +1625,228 @@ Module {
                 trailing: None,
             },
             expression: MessageSend {
-                receiver: Block(
-                    Block {
-                        parameters: [],
-                        body: [
-                            ExpressionStatement {
-                                comments: CommentAttachment {
-                                    leading: [],
-                                    trailing: None,
-                                },
-                                expression: MessageSend {
-                                    receiver: Identifier(
-                                        Identifier {
-                                            name: "x",
-                                            span: Span {
-                                                start: 2236,
-                                                end: 2237,
-                                            },
+                receiver: Error {
+                    message: "Unexpected token: expected expression, found ]",
+                    span: Span {
+                        start: 1591,
+                        end: 1592,
+                    },
+                },
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "ifFalse:",
+                            span: Span {
+                                start: 1593,
+                                end: 1601,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [],
+                            body: [
+                                ExpressionStatement {
+                                    comments: CommentAttachment {
+                                        leading: [],
+                                        trailing: None,
+                                    },
+                                    expression: Literal(
+                                        Integer(
+                                            0,
+                                        ),
+                                        Span {
+                                            start: 1603,
+                                            end: 1604,
                                         },
                                     ),
-                                    selector: Binary(
-                                        "<=",
-                                    ),
-                                    arguments: [
-                                        Literal(
-                                            Integer(
-                                                3,
-                                            ),
-                                            Span {
-                                                start: 2241,
-                                                end: 2242,
-                                            },
-                                        ),
-                                    ],
-                                    is_cast: false,
-                                    span: Span {
-                                        start: 2236,
-                                        end: 2242,
-                                    },
+                                    preceding_blank_line: false,
                                 },
-                                preceding_blank_line: false,
+                            ],
+                            span: Span {
+                                start: 1602,
+                                end: 1605,
                             },
-                        ],
-                        span: Span {
-                            start: 2235,
-                            end: 2243,
                         },
+                    ),
+                ],
+                is_cast: false,
+                span: Span {
+                    start: 1591,
+                    end: 1605,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found )",
+                span: Span {
+                    start: 1605,
+                    end: 1606,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 1618,
+                    end: 1619,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found .",
+                span: Span {
+                    start: 1718,
+                    end: 1719,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found .",
+                span: Span {
+                    start: 1783,
+                    end: 1784,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 1801,
+                    end: 1802,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found .",
+                span: Span {
+                    start: 1900,
+                    end: 1901,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 1986,
+                    end: 1987,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 2001,
+                    end: 2002,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found .",
+                span: Span {
+                    start: 2210,
+                    end: 2211,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found .",
+                span: Span {
+                    start: 2225,
+                    end: 2226,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found .",
+                span: Span {
+                    start: 2233,
+                    end: 2234,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: MessageSend {
+                receiver: Error {
+                    message: "Unexpected token: expected expression, found ]",
+                    span: Span {
+                        start: 2242,
+                        end: 2243,
                     },
-                ),
+                },
                 selector: Keyword(
                     [
                         KeywordPart {
@@ -2791,7 +2198,7 @@ Module {
                 ],
                 is_cast: false,
                 span: Span {
-                    start: 2235,
+                    start: 2242,
                     end: 2408,
                 },
             },
@@ -3757,45 +3164,24 @@ Module {
                     ],
                 ),
                 arguments: [
-                    MessageSend {
-                        receiver: ClassReference {
-                            name: Identifier {
-                                name: "Integer",
-                                span: Span {
-                                    start: 3347,
-                                    end: 3354,
-                                },
-                            },
+                    ClassReference {
+                        name: Identifier {
+                            name: "Integer",
                             span: Span {
                                 start: 3347,
                                 end: 3354,
                             },
                         },
-                        selector: Binary(
-                            "=",
-                        ),
-                        arguments: [
-                            Literal(
-                                Integer(
-                                    0,
-                                ),
-                                Span {
-                                    start: 3357,
-                                    end: 3358,
-                                },
-                            ),
-                        ],
-                        is_cast: false,
                         span: Span {
                             start: 3347,
-                            end: 3358,
+                            end: 3354,
                         },
                     },
                 ],
                 is_cast: false,
                 span: Span {
                     start: 3332,
-                    end: 3358,
+                    end: 3354,
                 },
             },
             preceding_blank_line: true,
@@ -3806,10 +3192,38 @@ Module {
                 trailing: None,
             },
             expression: Error {
-                message: "Unexpected token: expected expression, found ]",
+                message: "Unexpected token: expected expression, found =",
                 span: Span {
-                    start: 3360,
-                    end: 3361,
+                    start: 3355,
+                    end: 3356,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found .",
+                span: Span {
+                    start: 3358,
+                    end: 3359,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found .",
+                span: Span {
+                    start: 3361,
+                    end: 3362,
                 },
             },
             preceding_blank_line: false,
@@ -4039,11 +3453,27 @@ Module {
 }
 
 Diagnostics:
+Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 507, end: 508 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 507, end: 508 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 510, end: 511 }, hint: None, category: None }
 Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 687, end: 688 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
 Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 715, end: 716 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
-Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 1606, end: 1607 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
-Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 1783, end: 1784 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
-Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 1987, end: 1988 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
+Diagnostic { severity: Error, message: "Expected ')' to close parentheses", span: Span { start: 1577, end: 1578 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 1577, end: 1578 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 1577, end: 1578 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1591, end: 1592 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found )", span: Span { start: 1605, end: 1606 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1618, end: 1619 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1718, end: 1719 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1783, end: 1784 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1801, end: 1802 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 1900, end: 1901 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1986, end: 1987 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2001, end: 2002 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2210, end: 2211 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2225, end: 2226 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 2233, end: 2234 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 2242, end: 2243 }, hint: None, category: None }
 Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 2267, end: 2268 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
 Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 2327, end: 2328 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
 Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 2353, end: 2354 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
@@ -4067,7 +3497,9 @@ Diagnostic { severity: Error, message: "Unexpected token: expected expression, f
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3202, end: 3203 }, hint: None, category: None }
 Diagnostic { severity: Lint, message: "unnecessary `.` — the following newline already separates statements", span: Span { start: 3257, end: 3258 }, hint: Some("Remove the `.` and rely on the newline"), category: Some(Lint) }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found state:", span: Span { start: 3332, end: 3338 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3360, end: 3361 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 3355, end: 3356 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3358, end: 3359 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3361, end: 3362 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3547, end: 3548 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 3591, end: 3592 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found .", span: Span { start: 3678, end: 3679 }, hint: None, category: None }

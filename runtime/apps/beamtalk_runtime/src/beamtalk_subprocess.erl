@@ -3,7 +3,7 @@
 
 %%% @doc OTP gen_server for interactive subprocess management (ADR 0051, Phase 4a+4b).
 %%%
-%%% **DDD Context:** runtime
+%%% **DDD Context:** Actor System Context
 %%%
 %%% Each `beamtalk_subprocess` process owns one port to the `beamtalk_exec`
 %%% Rust helper binary and manages exactly one child subprocess (ChildId = 0).
@@ -23,7 +23,8 @@
 %%%   {stderr, pending} => binary(),              % partial line fragment
 %%%   {stderr, waiting} => From | {timer, From, TimerRef} | undefined,
 %%%   exit_code     => nil | non_neg_integer(),
-%%%   port_closed   => boolean()
+%%%   port_closed   => boolean(),
+%%%   child_exited  => boolean()
 %%% }
 %%% ```
 %%%
@@ -49,6 +50,7 @@
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
+-include("beamtalk.hrl").
 
 %% Public API
 -export([start_link/1, start/1]).
@@ -117,6 +119,7 @@ init(Config) ->
         {stderr, pending} => <<>>,
         {stderr, waiting} => undefined,
         exit_code => nil,
+        child_exited => false,
         port_closed => false
     },
     {ok, State}.
@@ -165,20 +168,26 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             buffer_and_maybe_reply(stderr, Data, State);
         {exit, _ChildId, Code} ->
             ?LOG_INFO("Subprocess exited", #{exit_code => Code}),
-            %% Flush any partial line that lacked a trailing newline — both channels
+            %% The beamtalk-exec binary joins its reader threads before sending
+            %% this exit event (BT-1148), so all stdout/stderr data is guaranteed
+            %% to have arrived.  Flush any partial line and close the port now.
             S0 = flush_pending(stdout, State),
             S1 = flush_pending(stderr, S0),
-            %% Close the exec port — child is gone, no more I/O possible
             catch beamtalk_exec_port:close(Port),
-            NewState = S1#{exit_code => Code, port_closed => true},
+            NewState = S1#{exit_code => Code, child_exited => true, port_closed => true},
             S2 = maybe_reply_eof(stdout, NewState),
             S3 = maybe_reply_eof(stderr, S2),
             {noreply, S3};
         _Other ->
             {noreply, State}
     end;
+handle_info({Port, {exit_status, _N}}, #{port := Port, port_closed := true} = State) ->
+    %% Port was already closed cleanly via the {exit} handler.  OTP delivers
+    %% {exit_status} even for ports closed by port_close/1, so this is normal
+    %% on the happy path — discard without logging.
+    {noreply, State};
 handle_info({Port, {exit_status, _N}}, #{port := Port} = State) ->
-    %% beamtalk_exec binary itself exited — treat all channels as EOF
+    %% beamtalk_exec binary itself exited unexpectedly — treat all channels as EOF.
     ?LOG_WARNING("Exec port exited unexpectedly"),
     S0 = flush_pending(stdout, State),
     S1 = flush_pending(stderr, S0),
@@ -217,12 +226,14 @@ terminate(_Reason, State) ->
 %%% ============================================================================
 
 %% @private Write Data + newline to subprocess stdin.
--spec handle_writeLine(iodata(), map()) -> {reply, nil | {error, port_closed}, map()}.
+-spec handle_writeLine(iodata(), map()) -> {reply, nil | {error, #beamtalk_error{}}, map()}.
 handle_writeLine(Data, State) ->
-    #{port := Port, child_id := ChildId, port_closed := PortClosed} = State,
-    case PortClosed of
+    #{port := Port, child_id := ChildId, port_closed := PortClosed, child_exited := ChildExited} =
+        State,
+    case PortClosed orelse ChildExited of
         true ->
-            {reply, {error, port_closed}, State};
+            Err = beamtalk_error:new(port_closed, 'Subprocess', 'writeLine:'),
+            {reply, {error, Err}, State};
         false ->
             Bin = iolist_to_binary(Data),
             Line = <<Bin/binary, $\n>>,
@@ -238,12 +249,14 @@ handle_close(State) ->
             {reply, nil, State};
         false ->
             #{port := Port, child_id := ChildId} = State,
+            S0 = flush_pending(stdout, State),
+            S1 = flush_pending(stderr, S0),
             beamtalk_exec_port:kill_child(Port, ChildId),
             beamtalk_exec_port:close(Port),
-            NewState = State#{port_closed => true},
-            S1 = maybe_reply_eof(stdout, NewState),
-            S2 = maybe_reply_eof(stderr, S1),
-            {reply, nil, S2}
+            NewState = S1#{port_closed => true},
+            S2 = maybe_reply_eof(stdout, NewState),
+            S3 = maybe_reply_eof(stderr, S2),
+            {reply, nil, S3}
     end.
 
 %% @private Deferred-reply read for Channel (stdout or stderr).

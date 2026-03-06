@@ -31,9 +31,9 @@
 -module(beamtalk_json).
 
 -export(['parse:'/1, 'generate:'/1, 'prettyPrint:'/1]).
--export([has_method/1]).
+-export([parse/1, generate/1, prettyPrint/1]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================
@@ -120,12 +120,21 @@
             beamtalk_error:raise(Error3)
     end.
 
-%% @doc Check if JSON responds to the given selector.
--spec has_method(atom()) -> boolean().
-has_method('parse:') -> true;
-has_method('generate:') -> true;
-has_method('prettyPrint:') -> true;
-has_method(_) -> false.
+%%% ============================================================================
+%%% FFI aliases — no-colon names for Erlang FFI dispatch
+%%% ============================================================================
+
+%% @doc FFI alias for parse:/1 — called via (Erlang beamtalk_json) parse: str.
+-spec parse(binary()) -> term().
+parse(X) -> 'parse:'(X).
+
+%% @doc FFI alias for generate:/1 — called via (Erlang beamtalk_json) generate: val.
+-spec generate(term()) -> binary().
+generate(X) -> 'generate:'(X).
+
+%% @doc FFI alias for prettyPrint:/1 — called via (Erlang beamtalk_json) prettyPrint: val.
+-spec prettyPrint(term()) -> binary().
+prettyPrint(X) -> 'prettyPrint:'(X).
 
 %%% ============================================================================
 %%% Internal Functions

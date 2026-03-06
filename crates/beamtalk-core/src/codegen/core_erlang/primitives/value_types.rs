@@ -201,6 +201,14 @@ pub(crate) fn generate_test_case_bif(
                 ")"
             ])
         }
+        "skip:" => {
+            let p0 = param(params, 0, "_Reason");
+            Some(docvec![
+                "call 'beamtalk_test_case':'skip'(",
+                p0.to_string(),
+                ")"
+            ])
+        }
         // BT-440: Class-side methods for REPL test execution
         // These are always called from class method context where self = ClassSelf
         // Pass class name by extracting from ClassSelf tag ('ClassName class')
@@ -283,6 +291,9 @@ pub(crate) fn generate_test_result_bif(
         )),
         "failed" => Some(Document::Str(
             "call 'beamtalk_test_runner':'result_failed'(Self)",
+        )),
+        "skipped" => Some(Document::Str(
+            "call 'beamtalk_test_runner':'result_skipped'(Self)",
         )),
         "total" => Some(Document::Str(
             "call 'beamtalk_test_runner':'result_total'(Self)",

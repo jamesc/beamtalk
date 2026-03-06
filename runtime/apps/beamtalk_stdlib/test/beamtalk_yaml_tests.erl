@@ -5,32 +5,13 @@
 %%%
 %%% **DDD Context:** Object System Context
 %%%
-%%% Tests parse:, parseAll:, generate:, parseFile:, has_method/1,
+%%% Tests parse:, parseAll:, generate:, parseFile:,
 %%% type conversion, error paths, and round-trip correctness.
 
 -module(beamtalk_yaml_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("beamtalk.hrl").
-
-%%% ============================================================================
-%%% has_method/1
-%%% ============================================================================
-
-has_method_parse_test() ->
-    ?assertEqual(true, beamtalk_yaml:has_method('parse:')).
-
-has_method_parse_all_test() ->
-    ?assertEqual(true, beamtalk_yaml:has_method('parseAll:')).
-
-has_method_generate_test() ->
-    ?assertEqual(true, beamtalk_yaml:has_method('generate:')).
-
-has_method_parse_file_test() ->
-    ?assertEqual(true, beamtalk_yaml:has_method('parseFile:')).
-
-has_method_unknown_test() ->
-    ?assertEqual(false, beamtalk_yaml:has_method(unknownMethod)).
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% parse: — scalar types
@@ -347,6 +328,33 @@ parse_file_type_error_test() ->
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
         beamtalk_yaml:'parseFile:'(not_a_binary)
+    ).
+
+%%% ============================================================================
+%%% FFI no-colon aliases (BT-1142)
+%%% ============================================================================
+
+parse_alias_test() ->
+    application:ensure_all_started(yamerl),
+    ?assertEqual(42, beamtalk_yaml:parse(<<"42">>)).
+
+parse_alias_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_yaml:parse(not_a_binary)
+    ).
+
+parse_all_alias_test() ->
+    application:ensure_all_started(yamerl),
+    ?assertEqual([42, 43], beamtalk_yaml:parseAll(<<"42\n---\n43">>)).
+
+generate_alias_test() ->
+    ?assertEqual(<<"42">>, beamtalk_yaml:generate(42)).
+
+parse_file_alias_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_yaml:parseFile(not_a_binary)
     ).
 
 %%% ============================================================================

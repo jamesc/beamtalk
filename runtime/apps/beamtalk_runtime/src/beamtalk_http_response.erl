@@ -1,13 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc HTTPResponse instance dispatch — sealed value class for HTTP responses.
+%%% @doc HTTPResponse accessors — sealed value class for HTTP responses.
 %%%
 %%% **DDD Context:** Object System Context
 %%%
 %%% HTTPResponse instances are tagged maps produced by `beamtalk_http` request
-%%% functions. This module handles instance-method dispatch for the
-%%% `HTTPResponse` class.
+%%% functions. This module exposes direct accessor functions called via the
+%%% Erlang FFI layer from `HTTPResponse.bt`.
 %%%
 %%% ## Internal Representation
 %%%
@@ -20,75 +20,29 @@
 %%% }
 %%% ```
 %%%
-%%% ## Selectors
+%%% ## Exported Accessors
 %%%
-%%% | Selector      | Description                                    |
+%%% | Function      | Description                                    |
 %%% |---------------|------------------------------------------------|
-%%% | `status`      | HTTP status code (integer)                     |
-%%% | `headers`     | List of [name, value] binary pairs             |
-%%% | `body`        | Response body (binary / String)                |
-%%% | `ok`          | True for 2xx status codes                      |
-%%% | `bodyAsJson`  | Parse body via beamtalk_json                   |
+%%% | `status/1`    | HTTP status code (integer)                     |
+%%% | `headers/1`   | List of [name, value] binary pairs             |
+%%% | `body/1`      | Response body (binary / String)                |
+%%% | `ok/1`        | True for 2xx status codes                      |
+%%% | `bodyAsJson/1`  | Parse body as JSON (jsx), null → nil           |
+%%% | `printString/1` | Human-readable representation                  |
 
 -module(beamtalk_http_response).
 
--export([dispatch/3, has_method/1]).
 -export([
     status/1,
     headers/1,
     body/1,
     ok/1,
-    'bodyAsJson'/1
+    'bodyAsJson'/1,
+    'printString'/1
 ]).
 
 -include("beamtalk.hrl").
-
-%%% ============================================================================
-%%% dispatch/3 + has_method/1 (compiled stdlib interface)
-%%% ============================================================================
-
-%% @doc Dispatch an instance message to an HTTPResponse tagged map.
--spec dispatch(atom(), list(), map()) -> term().
-dispatch('status', [], Self) ->
-    status(Self);
-dispatch('headers', [], Self) ->
-    headers(Self);
-dispatch('body', [], Self) ->
-    body(Self);
-dispatch('ok', [], Self) ->
-    ok(Self);
-dispatch('bodyAsJson', [], Self) ->
-    'bodyAsJson'(Self);
-dispatch('class', _Args, _Self) ->
-    'HTTPResponse';
-dispatch('printString', _Args, Self) ->
-    print_string(Self);
-dispatch(Selector, Args, Self) ->
-    case beamtalk_object_ops:has_method(Selector) of
-        true ->
-            case beamtalk_object_ops:dispatch(Selector, Args, Self, Self) of
-                {reply, Result, _State} -> Result;
-                {error, Error, _State} -> beamtalk_error:raise(Error)
-            end;
-        false ->
-            beamtalk_error:raise(
-                beamtalk_error:new(
-                    does_not_understand,
-                    'HTTPResponse',
-                    Selector,
-                    <<"HTTPResponse does not understand this message">>
-                )
-            )
-    end.
-
-%% @doc Check if HTTPResponse responds to the given selector.
--spec has_method(atom()) -> boolean().
-has_method('status') -> true;
-has_method('headers') -> true;
-has_method('body') -> true;
-has_method('ok') -> true;
-has_method('bodyAsJson') -> true;
-has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
 
 %%% ============================================================================
 %%% Instance methods
@@ -114,16 +68,43 @@ body(#{'$beamtalk_class' := 'HTTPResponse', body := Body}) ->
 ok(#{'$beamtalk_class' := 'HTTPResponse', status := Status}) ->
     Status >= 200 andalso Status =< 299.
 
-%% @doc Parse the response body as JSON via beamtalk_json.
+%% @doc Parse the response body as JSON.
+%%
+%% Decodes via jsx. null becomes nil to match Beamtalk conventions.
+%% Raises parse_error if the body is not valid JSON.
 -spec 'bodyAsJson'(map()) -> term().
 'bodyAsJson'(#{'$beamtalk_class' := 'HTTPResponse', body := Body}) ->
-    beamtalk_json:'parse:'(Body).
+    try jsx:decode(Body, [return_maps]) of
+        Result ->
+            normalize_null(Result)
+    catch
+        error:#{error := #beamtalk_error{}} = E:_ ->
+            error(E);
+        error:badarg ->
+            Error0 = beamtalk_error:new(parse_error, 'HTTPResponse'),
+            Error1 = beamtalk_error:with_selector(Error0, 'bodyAsJson'),
+            Error2 = beamtalk_error:with_hint(
+                Error1, <<"Check that the response body is valid JSON">>
+            ),
+            beamtalk_error:raise(Error2);
+        error:Reason ->
+            Error0 = beamtalk_error:new(parse_error, 'HTTPResponse'),
+            Error1 = beamtalk_error:with_selector(Error0, 'bodyAsJson'),
+            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
+            Error3 = beamtalk_error:with_hint(
+                Error2, <<"Check that the response body is valid JSON">>
+            ),
+            beamtalk_error:raise(Error3)
+    end.
 
-%%% ============================================================================
-%%% Internal helpers
-%%% ============================================================================
+%% @private Convert jsx null atoms to Beamtalk nil.
+-spec normalize_null(term()) -> term().
+normalize_null(null) -> nil;
+normalize_null(Map) when is_map(Map) -> maps:map(fun(_, V) -> normalize_null(V) end, Map);
+normalize_null(List) when is_list(List) -> lists:map(fun normalize_null/1, List);
+normalize_null(Other) -> Other.
 
-%% @private Human-readable representation.
--spec print_string(map()) -> binary().
-print_string(#{'$beamtalk_class' := 'HTTPResponse', status := Status}) ->
+%% @doc Human-readable representation: "an HTTPResponse(200)".
+-spec 'printString'(map()) -> binary().
+'printString'(#{'$beamtalk_class' := 'HTTPResponse', status := Status}) ->
     iolist_to_binary([<<"an HTTPResponse(">>, integer_to_binary(Status), <<")">>]).

@@ -188,6 +188,8 @@ fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> Stri
                 erl,
                 "            '{bt_module}':dispatch('{method_name}', [], {instance_var})"
             );
+            let _ = writeln!(erl, "        catch");
+            let _ = writeln!(erl, "            throw:{{bunit_skip, _}} -> ok");
             let _ = writeln!(erl, "        after");
             let _ = writeln!(
                 erl,
@@ -195,10 +197,14 @@ fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> Stri
             );
             let _ = writeln!(erl, "        end");
         } else {
+            let _ = writeln!(erl, "        try");
             let _ = writeln!(
                 erl,
-                "        '{bt_module}':dispatch('{method_name}', [], {instance_var})"
+                "            '{bt_module}':dispatch('{method_name}', [], {instance_var})"
             );
+            let _ = writeln!(erl, "        catch");
+            let _ = writeln!(erl, "            throw:{{bunit_skip, _}} -> ok");
+            let _ = writeln!(erl, "        end");
         }
 
         let _ = writeln!(erl, "    end}}.");
@@ -475,6 +481,7 @@ fn run_eunit_tests(
         "beamtalk_extensions:init(), \
          pg:start_link(), \
          beamtalk_bootstrap:start_link(), \
+         beamtalk_subprocess_sup:start_link(), \
          beamtalk_stdlib:init(), \
          {package_load_cmd}\
          {fixture_load_cmd}\
@@ -1452,10 +1459,10 @@ mod tests {
         assert!(wrapper.contains("{timeout, 30, fun() ->"));
         assert!(wrapper.contains("'bt@counter_test':new()"));
         assert!(wrapper.contains("'bt@counter_test':dispatch('testIncrement', [], Instance)"));
-        // No setUp/tearDown
+        // No setUp/tearDown, but skip handling wraps dispatch in try/catch
         assert!(!wrapper.contains("setUp"));
         assert!(!wrapper.contains("tearDown"));
-        assert!(!wrapper.contains("try"));
+        assert!(wrapper.contains("bunit_skip"));
     }
 
     #[test]

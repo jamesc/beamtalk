@@ -300,7 +300,7 @@ impl Parser {
     ///
     /// Also accepts `-> =>` (missing type) for error recovery — lets `parse_type_annotation`
     /// emit the specific error rather than failing to detect the method definition.
-    fn is_return_type_then_fat_arrow(&self, offset: usize) -> bool {
+    pub(super) fn is_return_type_then_fat_arrow(&self, offset: usize) -> bool {
         if !matches!(self.peek_at(offset), Some(TokenKind::Arrow)) {
             return false;
         }
@@ -328,75 +328,10 @@ impl Parser {
 
     /// Checks if there's a keyword method definition starting at the given offset.
     ///
-    /// Pattern: `keyword: param keyword: param ... =>` or with typed params/return type
+    /// Pattern: `keyword: param keyword: param ... =>` or with typed params/return type.
+    /// Delegates to the shared helper in `mod.rs`.
     fn is_keyword_method_at(&self, start_offset: usize) -> bool {
-        let mut offset = start_offset;
-
-        // Must have at least one keyword-parameter pair
-        loop {
-            // Expect keyword
-            if !matches!(self.peek_at(offset), Some(TokenKind::Keyword(_))) {
-                return false;
-            }
-            offset += 1;
-
-            // Check for typed parameter: `keyword: paramName: Type`
-            // where paramName: is a Keyword token followed by Identifier (type)
-            if let Some(TokenKind::Keyword(_)) = self.peek_at(offset) {
-                // Could be typed param: paramName: followed by Type (Identifier)
-                if matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
-                    // Skip paramName: and Type
-                    offset += 2;
-                    // Check for => or more keywords or return type
-                    match self.peek_at(offset) {
-                        Some(TokenKind::FatArrow) => return true,
-                        Some(TokenKind::Keyword(_)) => continue,
-                        Some(TokenKind::Arrow) => {
-                            return self.is_return_type_then_fat_arrow(offset);
-                        }
-                        _ => return false,
-                    }
-                }
-                // Not a typed param — could be next keyword selector part
-                // but that would need an identifier first, so this is invalid
-                return false;
-            }
-
-            // Expect parameter (identifier) for untyped case
-            if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
-                return false;
-            }
-            offset += 1;
-
-            // After the parameter name, we may see:
-            // - a fat arrow (end of selector)
-            // - another keyword (more selector parts)
-            // - a return type introducer "->"
-            // - or a colon-type pair `: Type` (when param is written as `name : Type`)
-            match self.peek_at(offset) {
-                Some(TokenKind::FatArrow) => return true,
-                Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
-                Some(TokenKind::Arrow) => {
-                    return self.is_return_type_then_fat_arrow(offset);
-                }
-                Some(TokenKind::Colon) => {
-                    // Typed parameter: `paramName : Type`
-                    if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
-                        return false;
-                    }
-                    offset += 2; // skip `:` and type
-                    match self.peek_at(offset) {
-                        Some(TokenKind::FatArrow) => return true,
-                        Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
-                        Some(TokenKind::Arrow) => {
-                            return self.is_return_type_then_fat_arrow(offset);
-                        }
-                        _ => return false,
-                    }
-                }
-                _ => return false,
-            }
-        }
+        self.is_keyword_method_params_at(start_offset)
     }
 
     /// Parses a state declaration.

@@ -6,12 +6,12 @@
 %%% **DDD Context:** Object System Context
 %%%
 %%% Tests constructors, instance methods, string helper functions,
-%%% has_method/1, and error paths.
+%%% and error paths.
 
 -module(beamtalk_regex_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Helpers
@@ -71,6 +71,30 @@ from_options_type_error_test() ->
     ).
 
 %%% ============================================================================
+%%% FFI no-colon aliases (BT-1142)
+%%% ============================================================================
+
+from_alias_test() ->
+    R = beamtalk_regex:from(<<"[0-9]+">>),
+    ?assertEqual('Regex', maps:get('$beamtalk_class', R)).
+
+from_alias_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_regex:from(not_a_string)
+    ).
+
+from_two_alias_test() ->
+    R = beamtalk_regex:from(<<"[a-z]+">>, [caseless]),
+    ?assertEqual('Regex', maps:get('$beamtalk_class', R)).
+
+from_two_alias_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_regex:from(42, [caseless])
+    ).
+
+%%% ============================================================================
 %%% source/1 and printString/1
 %%% ============================================================================
 
@@ -81,18 +105,6 @@ source_test() ->
 print_string_test() ->
     R = make_regex(<<"[a-z]+">>),
     ?assertEqual(<<"Regex([a-z]+)">>, beamtalk_regex:'printString'(R)).
-
-%%% ============================================================================
-%%% has_method/1
-%%% ============================================================================
-
-has_method_known_test() ->
-    ?assert(beamtalk_regex:has_method(source)),
-    ?assert(beamtalk_regex:has_method('printString')).
-
-has_method_unknown_test() ->
-    ?assertNot(beamtalk_regex:has_method(foobar)),
-    ?assertNot(beamtalk_regex:has_method(new)).
 
 %%% ============================================================================
 %%% matches_regex/2 — String + Pattern or Compiled Regex
