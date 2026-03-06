@@ -1048,27 +1048,75 @@ impl Parser {
     }
 
     /// Checks if there's a keyword method selector followed by `=>` (or `-> Type =>`) at the given offset.
+    /// Delegates to the shared helper.
     fn is_keyword_method_selector_at(&self, start_offset: usize) -> bool {
+        self.is_keyword_method_params_at(start_offset)
+    }
+
+    /// Shared lookahead helper for keyword method definitions.
+    ///
+    /// Handles all keyword param forms:
+    /// - `keyword: param =>` (untyped)
+    /// - `keyword: paramName: Type =>` (typed via `Keyword` token, i.e. `name:`)
+    /// - `keyword: param : Type =>` (typed via separate `Colon` token)
+    /// - Any of the above followed by `-> ReturnType =>`
+    pub(super) fn is_keyword_method_params_at(&self, start_offset: usize) -> bool {
         let mut offset = start_offset;
+
         loop {
+            // Expect keyword selector part
             if !matches!(self.peek_at(offset), Some(TokenKind::Keyword(_))) {
                 return false;
             }
             offset += 1;
+
+            // Check for typed parameter written as `paramName: Type`
+            // where `paramName:` is lexed as a Keyword token followed by an Identifier (the type)
+            if let Some(TokenKind::Keyword(_)) = self.peek_at(offset) {
+                if matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
+                    // Skip paramName: and Type
+                    offset += 2;
+                    match self.peek_at(offset) {
+                        Some(TokenKind::FatArrow) => return true,
+                        Some(TokenKind::Keyword(_)) => continue,
+                        Some(TokenKind::Arrow) => {
+                            return self.is_return_type_then_fat_arrow(offset);
+                        }
+                        _ => return false,
+                    }
+                }
+                // Keyword not followed by Identifier — not a valid typed param
+                return false;
+            }
+
+            // Expect parameter name (untyped or `param : Type` form)
             if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
                 return false;
             }
             offset += 1;
+
             match self.peek_at(offset) {
                 Some(TokenKind::FatArrow) => return true,
-                Some(TokenKind::Keyword(_)) => {}
-                _ => {
-                    // Could be `-> Type =>` after the last param
-                    if self.is_fat_arrow_or_return_type(offset) {
-                        return true;
-                    }
-                    return false;
+                Some(TokenKind::Keyword(_)) => {} // More keyword parts, continue loop
+                Some(TokenKind::Arrow) => {
+                    return self.is_return_type_then_fat_arrow(offset);
                 }
+                Some(TokenKind::Colon) => {
+                    // Typed parameter: `paramName : Type`
+                    if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
+                        return false;
+                    }
+                    offset += 2; // skip `:` and type name
+                    match self.peek_at(offset) {
+                        Some(TokenKind::FatArrow) => return true,
+                        Some(TokenKind::Keyword(_)) => {} // More keyword parts, continue loop
+                        Some(TokenKind::Arrow) => {
+                            return self.is_return_type_then_fat_arrow(offset);
+                        }
+                        _ => return false,
+                    }
+                }
+                _ => return false,
             }
         }
     }
