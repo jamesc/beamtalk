@@ -252,16 +252,47 @@ write_port_file(WorkspaceId, Port, Nonce) ->
                 ok ->
                     %% Format: PORT\nNONCE (two lines for stale detection, BT-611)
                     Content = [integer_to_list(Port), "\n", binary_to_list(Nonce)],
-                    case file:write_file(PortFilePath, Content) of
+                    %% Write atomically via tmp + rename(2) so the Rust CLI never
+                    %% reads a partially-written port file (file:write_file/2 is
+                    %% open→write→close, not atomic on its own).
+                    TmpPath = PortFilePath ++ ".tmp",
+                    case file:write_file(TmpPath, Content) of
                         ok ->
-                            ?LOG_DEBUG("Wrote port file: ~s (port ~p, nonce ~s)", [
-                                PortFilePath, Port, Nonce
-                            ]),
-                            ok;
+                            case file:rename(TmpPath, PortFilePath) of
+                                ok ->
+                                    ?LOG_DEBUG("Wrote port file: ~s (port ~p, nonce ~s)", [
+                                        PortFilePath, Port, Nonce
+                                    ]),
+                                    ok;
+                                {error, RenReason} ->
+                                    ?LOG_WARNING(
+                                        "Failed to rename port tmp file ~s -> ~s: ~p; "
+                                        "falling back to direct write",
+                                        [TmpPath, PortFilePath, RenReason]
+                                    ),
+                                    _ = file:delete(TmpPath),
+                                    %% Fallback: write directly so the CLI can still
+                                    %% discover the port even if rename(2) fails (e.g.
+                                    %% cross-device move on unusual mount layouts).
+                                    case file:write_file(PortFilePath, Content) of
+                                        ok ->
+                                            ?LOG_DEBUG(
+                                                "Wrote port file (fallback): ~s (port ~p, nonce ~s)",
+                                                [PortFilePath, Port, Nonce]
+                                            ),
+                                            ok;
+                                        {error, FbReason} ->
+                                            ?LOG_WARNING(
+                                                "Fallback write of port file ~s failed: ~p",
+                                                [PortFilePath, FbReason]
+                                            ),
+                                            ok
+                                    end
+                            end;
                         {error, Reason} ->
                             ?LOG_WARNING(
                                 "Failed to write port file ~s: ~p",
-                                [PortFilePath, Reason]
+                                [TmpPath, Reason]
                             ),
                             ok
                     end;

@@ -189,9 +189,14 @@ impl Parser {
             return CascadeMessage::new(MessageSelector::Keyword(keywords), arguments, span);
         }
 
-        // Try binary message
-        if let TokenKind::BinarySelector(op) = self.current_kind() {
-            let selector = MessageSelector::Binary(op.clone());
+        // Try binary message (including Arrow `->` as binary selector, ADR 0047)
+        let binary_op = match self.current_kind() {
+            TokenKind::BinarySelector(op) => Some(op.clone()),
+            TokenKind::Arrow => Some("->".into()),
+            _ => None,
+        };
+        if let Some(op) = binary_op {
+            let selector = MessageSelector::Binary(op);
             self.advance();
             let arg = self.parse_unary_message();
             let span = start_span.merge(arg.span());
@@ -304,9 +309,13 @@ impl Parser {
         // Parse the left-hand side (unary expression)
         let mut left = self.parse_unary_message();
 
-        while let TokenKind::BinarySelector(op) = self.current_kind() {
-            let op = op.clone();
-
+        // Extract binary operator string from BinarySelector or Arrow (ADR 0047).
+        // Arrow (`->`) is treated as the binary operator `"->"`.
+        while let Some(op) = match self.current_kind() {
+            TokenKind::BinarySelector(op) => Some(op.clone()),
+            TokenKind::Arrow => Some("->".into()),
+            _ => None,
+        } {
             // BT-285: A binary selector on a new line that looks like a method definition
             // (e.g., `- other =>`) should not be consumed as a binary operator.
             // This mirrors the newline check in parse_unary_message.
@@ -793,8 +802,8 @@ impl Parser {
             None
         };
 
-        // Expect -> separator
-        if !self.match_binary_selector("->") {
+        // Expect -> separator (Arrow token, ADR 0047)
+        if !self.match_token(&TokenKind::Arrow) {
             self.error("Expected '->' after pattern in match arm");
         }
 

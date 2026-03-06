@@ -263,7 +263,8 @@ impl Parser {
                     || self.is_return_type_then_fat_arrow(offset + 1)
             }
             // Binary method: `+ other =>` or `+ other -> Type =>` or `+ other: Type =>`
-            Some(TokenKind::BinarySelector(_)) => {
+            // Arrow (`->`) is also a valid binary method selector (ADR 0047).
+            Some(TokenKind::BinarySelector(_) | TokenKind::Arrow) => {
                 // Untyped: `+ other =>` or `+ other -> Type =>`
                 (matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_)))
                     && (matches!(self.peek_at(offset + 2), Some(TokenKind::FatArrow))
@@ -300,10 +301,7 @@ impl Parser {
     /// Also accepts `-> =>` (missing type) for error recovery — lets `parse_type_annotation`
     /// emit the specific error rather than failing to detect the method definition.
     fn is_return_type_then_fat_arrow(&self, offset: usize) -> bool {
-        if !matches!(
-            self.peek_at(offset),
-            Some(TokenKind::BinarySelector(s)) if s.as_str() == "->"
-        ) {
+        if !matches!(self.peek_at(offset), Some(TokenKind::Arrow)) {
             return false;
         }
         // Skip -> Type (and possible | Type unions)
@@ -353,7 +351,7 @@ impl Parser {
                     match self.peek_at(offset) {
                         Some(TokenKind::FatArrow) => return true,
                         Some(TokenKind::Keyword(_)) => continue,
-                        Some(TokenKind::BinarySelector(s)) if s.as_str() == "->" => {
+                        Some(TokenKind::Arrow) => {
                             return self.is_return_type_then_fat_arrow(offset);
                         }
                         _ => return false,
@@ -378,7 +376,7 @@ impl Parser {
             match self.peek_at(offset) {
                 Some(TokenKind::FatArrow) => return true,
                 Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
-                Some(TokenKind::BinarySelector(s)) if s.as_str() == "->" => {
+                Some(TokenKind::Arrow) => {
                     return self.is_return_type_then_fat_arrow(offset);
                 }
                 Some(TokenKind::Colon) => {
@@ -390,7 +388,7 @@ impl Parser {
                     match self.peek_at(offset) {
                         Some(TokenKind::FatArrow) => return true,
                         Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
-                        Some(TokenKind::BinarySelector(s)) if s.as_str() == "->" => {
+                        Some(TokenKind::Arrow) => {
                             return self.is_return_type_then_fat_arrow(offset);
                         }
                         _ => return false,
@@ -601,7 +599,7 @@ impl Parser {
 
     /// Parses an optional `-> ReturnType` annotation before `=>`.
     fn parse_optional_return_type(&mut self) -> Option<TypeAnnotation> {
-        if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "->") {
+        if matches!(self.current_kind(), TokenKind::Arrow) {
             self.advance(); // consume `->`
             Some(self.parse_type_annotation())
         } else {
@@ -690,6 +688,33 @@ impl Parser {
                 Some((selector, Vec::new()))
             }
             // Binary method: `+ other` or `+ other: Type`
+            // Arrow (`->`) is a valid binary method selector (ADR 0047).
+            TokenKind::Arrow => {
+                let selector = MessageSelector::Binary("->".into());
+                self.advance();
+
+                // If parameter is lexed as Keyword (e.g., `-> value: Association`),
+                // treat it as a typed parameter: name is `value`, type follows.
+                if let TokenKind::Keyword(kw) = self.current_kind() {
+                    let param_name_str = kw.trim_end_matches(':');
+                    let full_span = self.current_token().span();
+                    let param_span = Self::span_without_trailing_colon(full_span);
+                    let param_name = Identifier::new(param_name_str, param_span);
+                    self.advance(); // consume `paramName:`
+                    let type_ann = self.parse_type_annotation();
+                    let param = ParameterDefinition::with_type(param_name, type_ann);
+                    return Some((selector, vec![param]));
+                }
+
+                let param_name =
+                    self.parse_identifier("Expected parameter name after binary selector");
+                let type_annotation = self.parse_optional_param_type();
+                let param = match type_annotation {
+                    Some(ta) => ParameterDefinition::with_type(param_name, ta),
+                    None => ParameterDefinition::new(param_name),
+                };
+                Some((selector, vec![param]))
+            }
             TokenKind::BinarySelector(op) => {
                 let selector = MessageSelector::Binary(op.clone());
                 self.advance();
@@ -742,6 +767,7 @@ impl Parser {
                                     TokenKind::FatArrow
                                         | TokenKind::Keyword(_)
                                         | TokenKind::BinarySelector(_)
+                                        | TokenKind::Arrow
                                 )
                             );
                             if is_typed {
