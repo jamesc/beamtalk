@@ -64,7 +64,7 @@ gen_server:call(ActorPid, {Selector, Args})
 
 where `Selector` is an atom and `Args` is a list. Generated actors wrap replies as `{ok, Result}` or `{error, Error}` per BT-918. However, `sync_send/3` also has a backward-compatibility `DirectValue` fallback (beamtalk_actor.erl:435) that passes through unwrapped values — this is how `beamtalk_subprocess.erl` and `beamtalk_transcript_stream.erl` work today. The ADR must decide whether `@native` gen_servers use the `{ok, _}` envelope or the `DirectValue` path (see Open Questions).
 
-For **async** methods, `beamtalk_actor:async_send/4` sends `gen_server:cast(Pid, {Selector, Args, FuturePid})`. Some backing gen_servers (e.g. TranscriptStream's `show:`, `cr`) use casts for non-blocking semantics. The `@native` protocol must support both call and cast dispatch.
+For **async** methods, `beamtalk_actor:cast_send/3` sends `gen_server:cast(Pid, {cast, Selector, [Args]})`. Some backing gen_servers (e.g. TranscriptStream's `show:`, `cr`) use casts for non-blocking semantics. The `@native` protocol must support both call and cast dispatch.
 
 ## Decision
 
@@ -292,7 +292,7 @@ Standard Erlang practice is to write thin wrapper modules with `start_link/N`, `
 
 ### Erlang/BEAM Developer
 
-`@native` maps directly to the standard Erlang gen_server wrapper pattern they already know. The requirement that `handle_call/3` returns `{reply, {ok, Result}, State}` (the `{ok, _}` envelope) is the only unfamiliar constraint. The `{Selector, [Args]}` wire format is documented and consistent across all Beamtalk Actor messaging. `gen_statem` compatibility means existing state machines can be wrapped without behavioural changes.
+`@native` maps directly to the standard Erlang gen_server wrapper pattern they already know. The `{Selector, [Args]}` wire format is documented and consistent across all Beamtalk Actor messaging — that is the main unfamiliar constraint. Wrapping replies as `{reply, {ok, Result}, State}` is recommended for explicit error detection, but raw `{reply, Result, State}` is also accepted via `sync_send/3`'s DirectValue fallback. `gen_statem` compatibility means existing state machines can be wrapped without behavioural changes.
 
 ### Production Operator
 
@@ -447,8 +447,8 @@ This hand-written approach is sufficient for library authors and production use.
 - `crates/beamtalk-core/src/codegen/core_erlang/actor_codegen.rs` — detect `@native` annotation; branch to facade codegen instead of full gen_server codegen
 - `crates/beamtalk-core/src/codegen/core_erlang/gen_server/` — new `native_facade.rs` generating `spawn/1`, `has_method/1`, `dispatch/3` facade functions
 - `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs` — remove hardcoded `Subprocess`, `TranscriptStream` (they will be parsed from `.bt` files)
-- `runtime/apps/beamtalk_runtime/src/beamtalk_subprocess.erl` — add `{ok, Result}` wrapping to all `handle_call` replies
-- `runtime/apps/beamtalk_runtime/src/beamtalk_transcript_stream.erl` — add `{ok, Result}` wrapping
+- `runtime/apps/beamtalk_runtime/src/beamtalk_subprocess.erl` — no reply format changes required (DirectValue fallback handles existing raw replies); optionally add `{ok, Result}` wrapping for explicit error detection
+- `runtime/apps/beamtalk_runtime/src/beamtalk_transcript_stream.erl` — no reply format changes required; same optional wrapping applies
 - `stdlib/src/Subprocess.bt` — replace `@primitive` with `@native beamtalk_subprocess`
 - `stdlib/src/TranscriptStream.bt` — replace `@primitive` with `@native beamtalk_transcript_stream`
 
