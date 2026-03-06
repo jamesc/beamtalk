@@ -431,10 +431,10 @@ Beamtalk supports **optional type annotations** and **typed classes**. Type chec
 
 ```beamtalk
 typed Actor subclass: TypedAccount
-  state: balance: Integer = 0
-  state: owner: String = ""
+  state: balance :: Integer = 0
+  state: owner :: String = ""
 
-  deposit: amount: Integer -> Integer =>
+  deposit: amount :: Integer -> Integer =>
     self.balance := self.balance + amount
     ^self.balance
 
@@ -448,24 +448,21 @@ typed Actor subclass: TypedAccount
 getBalance -> Integer => self.balance
 
 // Keyword parameter annotation
-deposit: amount: Integer => self.balance := self.balance + amount
-
-// Keyword parameter annotation (space before colon also supported)
-deposit: amount : Integer => self.balance := self.balance + amount
+deposit: amount :: Integer => self.balance := self.balance + amount
 
 // Binary parameter + return annotation
-+ other : Number -> Number => other
++ other :: Number -> Number => other
 
 // Multiple keyword parameters with annotations
-sum: left: Integer with: right: Integer -> Integer => left + right
+sum: left :: Integer with: right :: Integer -> Integer => left + right
 
 // Union type annotations parse (full checking is phased in)
-maybeName: flag: Boolean -> Integer | String =>
+maybeName: flag :: Boolean -> Integer | String =>
   ^flag ifTrue: [1] ifFalse: ["none"]
 
 // Self return type — resolves to the static receiver class at call sites
 // (only valid in return position, not parameters)
-collect: block: Block -> Self =>
+collect: block :: Block -> Self =>
   self species withAll: (self inject: #() into: [:acc :each |
     acc addFirst: (block value: each)
   ]) reversed
@@ -480,7 +477,7 @@ collect: block: Block -> Self =>
 - Type mismatch diagnostics are warnings, never compile-stopping errors.
 - Invalid annotation forms (e.g., `Self` in parameter position) are errors.
 - `typed` classes require parameter/return annotations on non-primitive methods.
-- State annotations (`state: value: Integer = 0`) are checked for defaults and `self.field := ...` assignments.
+- State annotations (`state: value :: Integer = 0`) are checked for defaults and `self.field := ...` assignments.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 

@@ -85,4 +85,4 @@ Object subclass: Exception
   /// ```beamtalk
   /// Exception signal: "something went wrong"
   /// ```
-  signal: msg: String -> Nil => @primitive "signal:"
+  signal: msg :: String -> Nil => @primitive "signal:"

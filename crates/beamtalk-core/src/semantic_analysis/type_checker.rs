@@ -3964,7 +3964,7 @@ mod tests {
     #[test]
     fn test_self_in_param_position_emits_error() {
         // `clone: other: Self` — Self in param position is an error
-        let source = "Object subclass: Foo\n  mergeWith: other: Self => self";
+        let source = "Object subclass: Foo\n  mergeWith: other :: Self => self";
         let tokens = crate::source_analysis::lex_with_eof(source);
         let (module, parse_diags) = crate::source_analysis::parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");

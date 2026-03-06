@@ -18,14 +18,14 @@ abstract Value subclass: Boolean
   // === Abstract protocol (subclasses must implement) ===
 
   /// Conditional evaluation: evaluate `trueBlock` if true, `falseBlock` if false.
-  ifTrue: _trueBlock: Block ifFalse: _falseBlock: Block =>
+  ifTrue: _trueBlock :: Block ifFalse: _falseBlock :: Block =>
     self subclassResponsibility
 
   /// If true, evaluate `trueBlock`.
-  ifTrue: _trueBlock: Block => self subclassResponsibility
+  ifTrue: _trueBlock :: Block => self subclassResponsibility
 
   /// If false, evaluate `falseBlock`.
-  ifFalse: _falseBlock: Block => self subclassResponsibility
+  ifFalse: _falseBlock :: Block => self subclassResponsibility
 
   /// Logical negation.
   not -> Boolean => self subclassResponsibility
@@ -48,7 +48,7 @@ abstract Value subclass: Boolean
   /// true and: [false]      // => false
   /// false and: [true]      // => false
   /// ```
-  and: aBlock: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]
+  and: aBlock :: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]
 
   /// Logical OR with lazy evaluation. Evaluates `aBlock` only if receiver is false.
   ///
@@ -57,7 +57,7 @@ abstract Value subclass: Boolean
   /// true or: [false]       // => true
   /// false or: [true]       // => true
   /// ```
-  or: aBlock: Block -> Boolean => self ifTrue: [true] ifFalse: aBlock
+  or: aBlock :: Block -> Boolean => self ifTrue: [true] ifFalse: aBlock
 
   /// Logical XOR. Returns true if exactly one of receiver and `other` is true.
   ///
@@ -66,4 +66,4 @@ abstract Value subclass: Boolean
   /// true xor: false        // => true
   /// false xor: false       // => false
   /// ```
-  xor: other: Boolean -> Boolean => self ifTrue: [other not] ifFalse: [other]
+  xor: other :: Boolean -> Boolean => self ifTrue: [other not] ifFalse: [other]

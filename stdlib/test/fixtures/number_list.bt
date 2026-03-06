@@ -12,7 +12,7 @@ Collection subclass: NumberList
   size -> Integer => self.items size
 
   // Iterate over each element, evaluating block with each one
-  do: block: Block -> Nil => self.items do: block
+  do: block :: Block -> Nil => self.items do: block
 
   // Return a developer-readable string representation
   printString -> String => "NumberList"

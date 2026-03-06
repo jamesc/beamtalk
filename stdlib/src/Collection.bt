@@ -29,7 +29,7 @@ abstract typed Object subclass: Collection
   /// List withAll: #(1, 2, 3)         // => #(1, 2, 3)
   /// Array withAll: #(1, 2, 3)        // => #[1, 2, 3]
   /// ```
-  class withAll: list: List -> Self => list
+  class withAll: list :: List -> Self => list
 
   // === Abstract protocol (subclasses must implement) ===
 
@@ -37,7 +37,7 @@ abstract typed Object subclass: Collection
   size -> Integer => self subclassResponsibility
 
   /// Iterate over each element, evaluating `block` with each one.
-  do: _block: Block -> Nil => self subclassResponsibility
+  do: _block :: Block -> Nil => self subclassResponsibility
 
   /// Return a developer-readable string representation.
   printString -> String => self subclassResponsibility
@@ -86,7 +86,7 @@ abstract typed Object subclass: Collection
   /// #(1, 2, 3) includes: 2      // => true
   /// #(1, 2, 3) includes: 9      // => false
   /// ```
-  includes: element: Object -> Boolean =>
+  includes: element :: Object -> Boolean =>
     self do: [:each | each =:= element ifTrue: [^true]]
     false
 
@@ -106,7 +106,7 @@ abstract typed Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3) inject: 0 into: [:sum :x | sum + x]  // => 6
   /// ```
-  inject: initial into: block: Block => @primitive "inject:into:"
+  inject: initial into: block :: Block => @primitive "inject:into:"
 
   /// Collect results of evaluating `block` on each element.
   ///
@@ -117,7 +117,7 @@ abstract typed Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)
   /// ```
-  collect: block: Block -> Self =>
+  collect: block :: Block -> Self =>
     result := (self inject: #() into: [:acc :each |
       acc addFirst: (block value: each)
     ]) reversed
@@ -135,7 +135,7 @@ abstract typed Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3, 4) select: [:x | x > 2]  // => #(3, 4)
   /// ```
-  select: block: Block -> Self =>
+  select: block :: Block -> Self =>
     result := (self inject: #() into: [:acc :each |
       (block value: each) ifTrue: [acc addFirst: each] ifFalse: [acc]
     ]) reversed
@@ -149,7 +149,8 @@ abstract typed Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3, 4) reject: [:x | x > 2]  // => #(1, 2)
   /// ```
-  reject: block: Block -> Self => self select: [:each | (block value: each) not]
+  reject: block :: Block -> Self =>
+    self select: [:each | (block value: each) not]
 
   /// Find the first element for which `block` returns true.
   ///
@@ -160,7 +161,7 @@ abstract typed Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3) detect: [:x | x > 1]     // => 2
   /// ```
-  detect: block: Block -> Object | Nil =>
+  detect: block :: Block -> Object | Nil =>
     self do: [:each | (block value: each) ifTrue: [^each]]
     nil
 
@@ -172,7 +173,7 @@ abstract typed Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]  // => 0
   /// ```
-  detect: block: Block ifNone: noneBlock: Block -> Object =>
+  detect: block :: Block ifNone: noneBlock :: Block -> Object =>
     self do: [:each | (block value: each) ifTrue: [^each]]
     noneBlock value
 
@@ -184,7 +185,7 @@ abstract typed Object subclass: Collection
   /// ```beamtalk
   /// #(1, 2, 3) anySatisfy: [:x | x > 2]  // => true
   /// ```
-  anySatisfy: block: Block -> Boolean =>
+  anySatisfy: block :: Block -> Boolean =>
     self do: [:each | (block value: each) ifTrue: [^true]]
     false
 
@@ -196,7 +197,7 @@ abstract typed Object subclass: Collection
   /// ```beamtalk
   /// #(2, 4, 6) allSatisfy: [:x | x isEven]  // => true
   /// ```
-  allSatisfy: block: Block -> Boolean =>
+  allSatisfy: block :: Block -> Boolean =>
     self do: [:each | (block value: each) ifFalse: [^false]]
     true
 

@@ -17,19 +17,19 @@ abstract typed Value subclass: Number
   // === Abstract protocol (subclasses must implement) ===
 
   /// Equality comparison.
-  =:= _other: Number -> Boolean => self subclassResponsibility
+  =:= _other :: Number -> Boolean => self subclassResponsibility
 
   /// Less than.
-  < _other: Number -> Boolean => self subclassResponsibility
+  < _other :: Number -> Boolean => self subclassResponsibility
 
   /// Greater than.
-  > _other: Number -> Boolean => self subclassResponsibility
+  > _other :: Number -> Boolean => self subclassResponsibility
 
   /// Less than or equal.
-  <= _other: Number -> Boolean => self subclassResponsibility
+  <= _other :: Number -> Boolean => self subclassResponsibility
 
   /// Greater than or equal.
-  >= _other: Number -> Boolean => self subclassResponsibility
+  >= _other :: Number -> Boolean => self subclassResponsibility
 
   // === Shared protocol (implemented in terms of abstract methods) ===
 
@@ -83,5 +83,5 @@ abstract typed Value subclass: Number
   /// 5 between: 1 and: 10   // => true
   /// 15 between: 1 and: 10  // => false
   /// ```
-  between: min: Number and: max: Number -> Boolean =>
+  between: min :: Number and: max :: Number -> Boolean =>
     (self >= min) and: [self <= max]

@@ -24,7 +24,8 @@ Actor subclass: WorkspaceInterface
   class current -> WorkspaceInterface => self.current
 
   /// Set the current singleton instance.
-  class current: instance: WorkspaceInterface -> Nil => self.current := instance
+  class current: instance :: WorkspaceInterface -> Nil =>
+    self.current := instance
 
   /// Return a list of all live actors as object references.
   ///
@@ -40,7 +41,7 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorAt: "<0.132.0>"
   /// ```
-  actorAt: pidString: String -> Object => @primitive "actorAt:"
+  actorAt: pidString :: String -> Object => @primitive "actorAt:"
 
   /// Return all actors of a given class.
   ///
@@ -48,7 +49,7 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorsOf: Counter
   /// ```
-  actorsOf: aClass: Object -> List =>
+  actorsOf: aClass :: Object -> List =>
     self actors select: [:a | a class includesBehaviour: aClass]
 
   /// Return a list of loaded user classes with source file info.
@@ -85,7 +86,7 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace load: "examples/counter.bt"
   /// ```
-  load: path: String -> Object => @primitive "load:"
+  load: path :: String -> Object => @primitive "load:"
 
   /// Run all loaded test classes and return a TestResult.
   ///
@@ -101,7 +102,7 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace test: CounterTest
   /// ```
-  test: testClass: Object -> TestResult => TestRunner run: testClass
+  test: testClass :: Object -> TestResult => TestRunner run: testClass
 
   /// Register a value in the workspace namespace under a given name.
   /// Subsequent REPL evals can reference the value by name.
@@ -112,7 +113,7 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace bind: myActor as: #MyTool
   /// ```
-  bind: value as: bindingName: Symbol -> Nil => @primitive "bind:as:"
+  bind: value as: bindingName :: Symbol -> Nil => @primitive "bind:as:"
 
   /// Remove a registered name from the workspace namespace.
   /// Raises an error if name is not found.
@@ -121,4 +122,4 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace unbind: #MyTool
   /// ```
-  unbind: bindingName: Symbol -> Nil => @primitive "unbind:"
+  unbind: bindingName :: Symbol -> Nil => @primitive "unbind:"

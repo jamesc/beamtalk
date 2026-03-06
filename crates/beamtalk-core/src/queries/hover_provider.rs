@@ -1439,12 +1439,12 @@ mod tests {
 
     #[test]
     fn hover_on_method_declaration_typed_parameter_name_with_colon() {
-        let source = "Object subclass: Boolean\n  and: aBlock: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]";
+        let source = "Object subclass: Boolean\n  and: aBlock :: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-        let param_offset = source.find("aBlock:").unwrap();
+        let param_offset = source.find("aBlock ::").unwrap();
         let pos = Position::from_offset(source, param_offset).unwrap();
         let hover = compute_hover(&module, source, pos, &hierarchy);
 
@@ -1459,7 +1459,7 @@ mod tests {
 
     #[test]
     fn hover_on_method_declaration_parameter_type_and_return_type() {
-        let source = "Object subclass: Boolean\n  and: aBlock: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]";
+        let source = "Object subclass: Boolean\n  and: aBlock :: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();

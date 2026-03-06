@@ -23,7 +23,7 @@ sealed Object subclass: Timer
   /// t := Timer after: 100 do: ['fired' printNl]
   /// t class    // => Timer
   /// ```
-  class sealed after: ms: Integer do: block: Block -> Timer =>
+  class sealed after: ms :: Integer do: block :: Block -> Timer =>
     @primitive "after:do:"
 
   /// Evaluate `block` every `ms` milliseconds. Returns a cancellable Timer.
@@ -34,7 +34,7 @@ sealed Object subclass: Timer
   /// t class    // => Timer
   /// t cancel   // => true
   /// ```
-  class sealed every: ms: Integer do: block: Block -> Timer =>
+  class sealed every: ms :: Integer do: block :: Block -> Timer =>
     @primitive "every:do:"
 
   /// Block the current process for `ms` milliseconds.
@@ -43,7 +43,7 @@ sealed Object subclass: Timer
   /// ```beamtalk
   /// Timer sleep: 10    // => nil
   /// ```
-  class sealed sleep: ms: Integer -> Nil => @primitive "sleep:"
+  class sealed sleep: ms :: Integer -> Nil => @primitive "sleep:"
 
   // ===== Instance Methods =====
 

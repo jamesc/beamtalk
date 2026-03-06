@@ -26,7 +26,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// String class withAll: #("h", "e", "l", "l", "o")  // => "hello"
   /// ```
-  class withAll: list: List -> String => @primitive "withAll:"
+  class withAll: list :: List -> String => @primitive "withAll:"
 
   /// Test strict equality with another string.
   ///
@@ -89,7 +89,7 @@ sealed typed Collection subclass: String
   /// "hello" ++ " world"  // => "hello world"
   /// "a" ++ "b"           // => "ab"
   /// ```
-  ++ other: String -> String => @primitive "++"
+  ++ other :: String -> String => @primitive "++"
 
   /// Concatenate the receiver with another string (Smalltalk-style comma operator).
   ///
@@ -100,7 +100,7 @@ sealed typed Collection subclass: String
   /// "foo" , "bar"   // => "foobar"
   /// "hello" , " world"  // => "hello world"
   /// ```
-  , other: String -> String => @primitive ","
+  , other :: String -> String => @primitive ","
 
   /// Number of grapheme clusters in the string.
   ///
@@ -126,7 +126,7 @@ sealed typed Collection subclass: String
   /// "hello" at: 1        // => "h"
   /// "hello" at: 5        // => "o"
   /// ```
-  at: index: Integer -> String => @primitive "at:"
+  at: index :: Integer -> String => @primitive "at:"
 
   /// Convert all characters to uppercase.
   ///
@@ -191,7 +191,7 @@ sealed typed Collection subclass: String
   /// "hello world" includesSubstring: "world"  // => true
   /// "hello" includesSubstring: "xyz"          // => false
   /// ```
-  includesSubstring: substring: String -> Boolean => @primitive "includes:"
+  includesSubstring: substring :: String -> Boolean => @primitive "includes:"
 
   /// Test if the receiver starts with the given prefix.
   ///
@@ -200,7 +200,7 @@ sealed typed Collection subclass: String
   /// "hello" startsWith: "hel"   // => true
   /// "hello" startsWith: "xyz"   // => false
   /// ```
-  startsWith: prefix: String -> Boolean => @primitive "startsWith:"
+  startsWith: prefix :: String -> Boolean => @primitive "startsWith:"
 
   /// Test if the receiver ends with the given suffix.
   ///
@@ -209,7 +209,7 @@ sealed typed Collection subclass: String
   /// "hello" endsWith: "llo"     // => true
   /// "hello" endsWith: "xyz"     // => false
   /// ```
-  endsWith: suffix: String -> Boolean => @primitive "endsWith:"
+  endsWith: suffix :: String -> Boolean => @primitive "endsWith:"
 
   /// Return the 1-based index of the first occurrence of a substring, or `nil` if not found.
   ///
@@ -218,7 +218,7 @@ sealed typed Collection subclass: String
   /// "hello" indexOf: "ell"      // => 2
   /// "hello" indexOf: "xyz"      // => nil
   /// ```
-  indexOf: substring: String -> Integer | Nil => @primitive "indexOf:"
+  indexOf: substring :: String -> Integer | Nil => @primitive "indexOf:"
 
   /// Split the string by a separator.
   ///
@@ -226,7 +226,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "a,b,c" split: ","          // => #("a", "b", "c")
   /// ```
-  split: separator: String -> List => @primitive "split:"
+  split: separator :: String -> List => @primitive "split:"
 
   /// Split the string by a pattern.
   ///
@@ -234,7 +234,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "a::b::c" splitOn: "::"     // => #("a", "b", "c")
   /// ```
-  splitOn: pattern: String -> List => @primitive "splitOn:"
+  splitOn: pattern :: String -> List => @primitive "splitOn:"
 
   /// Repeat the string `n` times.
   ///
@@ -242,7 +242,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "ab" repeat: 3              // => "ababab"
   /// ```
-  repeat: n: Integer -> String => @primitive "repeat:"
+  repeat: n :: Integer -> String => @primitive "repeat:"
 
   /// Split the string into lines.
   ///
@@ -266,7 +266,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "aabaa" replaceAll: "a" with: "x"     // => "xxbxx"
   /// ```
-  replaceAll: old: String with: new: String -> String =>
+  replaceAll: old :: String with: new :: String -> String =>
     @primitive "replaceAll:with:"
 
   /// Replace the first occurrence of `old` with `new`.
@@ -275,7 +275,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "aabaa" replaceFirst: "a" with: "x"   // => "xabaa"
   /// ```
-  replaceFirst: old: String with: new: String -> String =>
+  replaceFirst: old :: String with: new :: String -> String =>
     @primitive "replaceFirst:with:"
 
   /// Take the first `n` grapheme clusters.
@@ -284,7 +284,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hello" take: 3             // => "hel"
   /// ```
-  take: n: Integer -> String => @primitive "take:"
+  take: n :: Integer -> String => @primitive "take:"
 
   /// Drop the first `n` grapheme clusters.
   ///
@@ -292,7 +292,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hello" drop: 2             // => "llo"
   /// ```
-  drop: n: Integer -> String => @primitive "drop:"
+  drop: n :: Integer -> String => @primitive "drop:"
 
   /// Left-pad the string to the given width with spaces.
   ///
@@ -300,7 +300,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hi" padLeft: 5             // => "   hi"
   /// ```
-  padLeft: width: Integer -> String => @primitive "padLeft:"
+  padLeft: width :: Integer -> String => @primitive "padLeft:"
 
   /// Right-pad the string to the given width with spaces.
   ///
@@ -308,7 +308,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hi" padRight: 5            // => "hi   "
   /// ```
-  padRight: width: Integer -> String => @primitive "padRight:"
+  padRight: width :: Integer -> String => @primitive "padRight:"
 
   /// Left-pad the string to the given width with the specified character.
   ///
@@ -316,7 +316,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hi" padLeft: 5 with: "0"  // => "000hi"
   /// ```
-  padLeft: width: Integer with: char: String -> String =>
+  padLeft: width :: Integer with: char :: String -> String =>
     @primitive "padLeft:with:"
 
   /// Right-pad the string to the given width with the specified character.
@@ -325,7 +325,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hi" padRight: 5 with: "0"  // => "hi000"
   /// ```
-  padRight: width: Integer with: char: String -> String =>
+  padRight: width :: Integer with: char :: String -> String =>
     @primitive "padRight:with:"
 
   /// Test if the string is empty.
@@ -411,7 +411,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "abc" do: [:c | Transcript show: c]
   /// ```
-  do: block: Block -> Nil => @primitive "each:"
+  do: block :: Block -> Nil => @primitive "each:"
 
   /// Collect results of evaluating `block` on each grapheme cluster.
   ///
@@ -419,7 +419,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "abc" collect: [:c | c uppercase]  // => #("A", "B", "C")
   /// ```
-  collect: block: Block -> List => @primitive "collect:"
+  collect: block :: Block -> List => @primitive "collect:"
 
   /// Select grapheme clusters for which `block` returns true.
   ///
@@ -430,7 +430,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "a1b2" select: [:c | c isAlpha]    // => "ab"
   /// ```
-  select: block: Block -> String => @primitive "select:"
+  select: block :: Block -> String => @primitive "select:"
 
   /// Return a lazy Stream over the characters (grapheme clusters).
   ///
@@ -456,7 +456,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "Hello" matchesRegex: "[a-z]+" options: #(#caseless)  // => true
   /// ```
-  matchesRegex: pattern options: opts: List -> Boolean =>
+  matchesRegex: pattern options: opts :: List -> Boolean =>
     @primitive "matchesRegex:options:"
 
   /// Find the first regex match, returning matched String or nil.
@@ -482,7 +482,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hello world" replaceRegex: "[aeiou]" with: "*"      // => "h*llo world"
   /// ```
-  replaceRegex: pattern with: replacement: String -> String =>
+  replaceRegex: pattern with: replacement :: String -> String =>
     @primitive "replaceRegex:with:"
 
   /// Replace all regex matches with a replacement string.
@@ -491,7 +491,7 @@ sealed typed Collection subclass: String
   /// ```beamtalk
   /// "hello world" replaceAllRegex: "[aeiou]" with: "*"   // => "h*ll* w*rld"
   /// ```
-  replaceAllRegex: pattern with: replacement: String -> String =>
+  replaceAllRegex: pattern with: replacement :: String -> String =>
     @primitive "replaceAllRegex:with:"
 
   /// Split the string by a regex pattern.

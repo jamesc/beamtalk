@@ -47,8 +47,8 @@
 
 // :help with a user-defined class method should show typed signature
 :help HelpTestWidget create:
-// => == HelpTestWidget >> create: ==_create: name: String -> HelpTestWidget_
+// => == HelpTestWidget >> create: ==_create: name :: String -> HelpTestWidget_
 
 // :help with an inherited class method should show signature and inheritance
 :help HelpTestSubWidget create:
-// => == HelpTestSubWidget >> create: ==_(inherited from HelpTestWidget)_create: name: String -> HelpTestWidget_
+// => == HelpTestSubWidget >> create: ==_(inherited from HelpTestWidget)_create: name :: String -> HelpTestWidget_

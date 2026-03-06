@@ -54,7 +54,8 @@ sealed Object subclass: Random
   /// Random nextInteger: 6        // => 1..6
   /// Random nextInteger: 100      // => 1..100
   /// ```
-  class sealed nextInteger: max: Integer -> Integer => @primitive "nextInteger:"
+  class sealed nextInteger: max :: Integer -> Integer =>
+    @primitive "nextInteger:"
 
   /// Create a new Random instance with an auto-generated seed.
   ///
@@ -77,7 +78,7 @@ sealed Object subclass: Random
   /// rng := Random seed: 42
   /// rng next                     // => deterministic value
   /// ```
-  class sealed seed: seed: Integer -> Random => @primitive "seed:"
+  class sealed seed: seed :: Integer -> Random => @primitive "seed:"
 
   /// Return a random float from the instance state.
   ///
@@ -103,4 +104,4 @@ sealed Object subclass: Random
   /// rng := Random new
   /// rng nextInteger: 6           // => 1..6
   /// ```
-  nextInteger: max: Integer -> Integer => @primitive "instanceNextInteger:"
+  nextInteger: max :: Integer -> Integer => @primitive "instanceNextInteger:"
