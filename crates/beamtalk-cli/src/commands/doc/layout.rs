@@ -25,9 +25,9 @@ pub(super) fn page_header(title: &str, css: &str, nav_prefix: &str) -> String {
         String::new()
     } else {
         format!(
-            "<a href=\"{nav_prefix}docs/\">Language</a>\n\
-             <a href=\"{nav_prefix}docs/architecture.html\">Architecture</a>\n\
-             <a href=\"{nav_prefix}apidocs/\">API</a>\n"
+            "<a href=\"{nav_prefix}docs/installation.html\">Getting Started</a>\n\
+             <a href=\"{nav_prefix}docs/\">Documentation</a>\n\
+             <a href=\"{nav_prefix}apidocs/\">Standard Library</a>\n"
         )
     };
     let logo_href = if nav_prefix.is_empty() {

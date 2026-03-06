@@ -490,7 +490,7 @@ fn render_adr_index(adrs: &[AdrInfo], adr_output: &Utf8Path) -> Result<()> {
     for adr in adrs {
         let _ = writeln!(
             html,
-            "<tr><td>{num}</td><td><a href=\"{file}\">{title}</a></td><td>{status}</td></tr>",
+            "<tr><td class=\"adr-num\">{num}</td><td><a href=\"{file}\">{title}</a></td><td>{status}</td></tr>",
             file = adr.output_file,
             num = html_escape(&adr.number),
             title = html_escape(&adr.title),
