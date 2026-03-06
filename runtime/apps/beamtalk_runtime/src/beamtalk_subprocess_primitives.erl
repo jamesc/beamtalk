@@ -45,7 +45,7 @@ dispatch('open:args:', [_Command, _Args], _ClassSelf) ->
     Err = beamtalk_error:new(type_error, 'Subprocess', 'open:args:'),
     beamtalk_error:raise(Err);
 dispatch('open:args:env:dir:', [Command, Args, Env, Dir], _ClassSelf) when
-    is_binary(Command), is_binary(Dir)
+    is_binary(Command), is_binary(Dir), is_map(Env)
 ->
     ArgsList = bt_array_to_list(Args),
     EnvMap = maps:without(['$beamtalk_class'], Env),
