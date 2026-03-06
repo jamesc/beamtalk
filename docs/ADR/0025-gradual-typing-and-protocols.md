@@ -13,7 +13,7 @@ However, the compiler already knows substantial type information at compile time
 - **Built-in types** (Integer, String, Float, Boolean, List, etc.) have fully known method tables
 - **State declarations** specify field names and default values
 - **AST TypeAnnotation** enum already supports simple, union, generic, and singleton types
-- **Parser** already parses state type annotations (`state: value: Integer = 0`)
+- **Parser** already parses state type annotations (`state: value :: Integer = 0`)
 - **MethodDefinition** has a `return_type: Option<TypeAnnotation>` field (currently always `None`)
 - **TypeChecker** stub exists in semantic analysis with the right DDD positioning
 
@@ -120,9 +120,12 @@ The key insight: **literal blocks at message-send sites can be typed from contex
 
 ### Phase 2: Optional Type Annotations
 
+> **Note:** The parameter type syntax described in this section (`: Type` separator) has been superseded by [ADR 0053](0053-double-colon-type-annotation-syntax.md), which adopted `::` as the type annotation delimiter. The correct syntax is `param :: Type`, not `param: Type`. The examples below are preserved for historical context; all current code and documentation use `::`.
+
 Developers can annotate state fields, method parameters, and return types for extra precision.
 
 ```beamtalk
+// Phase 2 syntax (superseded — see ADR 0053 for current :: syntax)
 Actor subclass: BankAccount
   state: balance: Integer = 0           // State type annotation
   state: owner: String                  // Required — no default
@@ -138,16 +141,17 @@ Actor subclass: BankAccount
     target deposit: amount
 ```
 
-**Parameter type syntax:** Type follows the parameter name with `:` separator, matching state declaration syntax. Note: this requires a parser change — currently `amount:` tokenizes as a keyword selector part. The parser must distinguish `keyword: paramName: Type` (three-part pattern) from `keyword: paramName` (two-part). This is a Phase 2 parser change, not yet implemented.
+**Parameter type syntax:** Type follows the parameter name with `:` separator, matching state declaration syntax. Note: this syntax was later superseded by `::` (see [ADR 0053](0053-double-colon-type-annotation-syntax.md)) to avoid visual ambiguity with keyword selector colons.
 
 ```beamtalk
+// Phase 2 syntax (superseded — current syntax uses ::)
 // Keyword message with typed parameters
 deposit: amount: Integer =>  ...
 
 // Multiple keywords, each typed
 transfer: amount: Integer to: target: BankAccount => ...
 
-// Unary — no parameters, just return type  
+// Unary — no parameters, just return type
 getBalance -> Integer => ...
 
 // Binary — type on operand
@@ -181,10 +185,10 @@ Actor subclass: Counter
 
 // Typed class — compiler checks everything
 typed Actor subclass: BankAccount
-  state: balance: Integer = 0
-  state: owner: String
+  state: balance :: Integer = 0
+  state: owner :: String
 
-  deposit: amount: Integer -> Integer =>
+  deposit: amount :: Integer -> Integer =>
     self.balance := self.balance + amount
 
   withdraw: amount =>                    // ⚠️ Warning: untyped parameter in typed class
@@ -211,12 +215,12 @@ typed Actor subclass: BankAccount
 
 ```beamtalk
 typed Actor subclass: BankAccount
-  state: balance: Integer = 0
+  state: balance :: Integer = 0
   ...
 
 // SavingsAccount is automatically typed (inherits from typed class)
 BankAccount subclass: SavingsAccount
-  state: interestRate: Float = 0.05     // ✅ Typed — compiler checks
+  state: interestRate :: Float = 0.05   // ✅ Typed — compiler checks
 
   accrue => ...                          // ⚠️ Warning: missing return type in typed class
 ```
@@ -229,7 +233,7 @@ When the type checker is wrong — and it will be — developers need a way to s
 
 ```beamtalk
 typed Actor subclass: MessageRouter
-  state: handlers: Dictionary = Dictionary new
+  state: handlers :: Dictionary = Dictionary new
 
   dispatch: message =>
     handler := (self.handlers at: message class) asType: Handler  // "I know this is a Handler"
@@ -281,11 +285,11 @@ Protocol define: Collection
 // No "implements" declaration needed
 
 // Use protocol type constraint (angle brackets = structural type)
-printAll: items: <Printable> =>
+printAll: items :: <Printable> =>
   items do: [:each | Transcript show: each asString]
 
 // Concrete type constraint (no brackets = nominal type)
-deposit: amount: Integer => ...
+deposit: amount :: Integer => ...
 
 // Error when shape doesn't match
 printAll: #(1, 2, 3)          // ✅ Integer conforms to Printable
@@ -307,13 +311,13 @@ printAll: someOpaqueValue      // ⚠️ Warning: cannot verify Printable confor
 
 ```beamtalk
 // Union types
-state: result: Integer | Error
+state: result :: Integer | Error
 
 // Singleton/enum types
-state: direction: #north | #south | #east | #west
+state: direction :: #north | #south | #east | #west
 
 // False-or pattern (Option/Maybe)
-state: cache: Integer | False = false
+state: cache :: Integer | False = false
 
 // Generic types (parametric polymorphism)
 Protocol define: Stack<T>
@@ -337,7 +341,7 @@ x class = Integer ifTrue: [
 - Subtyping ≠ subclassing
 
 **Key decisions we adapt:**
-- Strongtalk uses `<Type>` annotations on parameters — we use `param: Type` to match our state declaration syntax
+- Strongtalk uses `<Type>` annotations on parameters — we use `param :: Type` (see [ADR 0053](0053-double-colon-type-annotation-syntax.md))
 - Strongtalk has explicit `implements:` — we use automatic structural conformance (more TypeScript-like)
 
 ### TypeScript (Structural Inference Model)
@@ -456,7 +460,7 @@ Full Hindley-Milner type system with no dynamic escape.
 ```beamtalk
 // Every binding must be typed
 Actor subclass: Counter
-  state: value: Integer = 0
+  state: value :: Integer = 0
   increment -> Integer => self.value := self.value + 1
 
 c := Counter spawn      // Error if Counter.spawn return type unknown
@@ -567,7 +571,7 @@ Union types, generic types, singleton types, type narrowing. Deferred to future 
 | Phase | Issue | Description | Size | Status |
 |-------|-------|-------------|------|--------|
 | 1 | BT-587, BT-671, BT-672 | Type inference from class definitions; argument/return/state checks | M-L | Done |
-| 2 | BT-673 | Optional type annotations syntax + user-facing coverage (stdlib/docs/examples); Dialyzer spec generation pending | M | Done |
+| 2 | BT-673 | Optional type annotations syntax + user-facing coverage (stdlib/docs/examples); Dialyzer spec generation pending. Note: parameter type syntax updated to `::` per [ADR 0053](0053-double-colon-type-annotation-syntax.md) (BT-1134) | M | Done |
 | 3 | TBD | Protocol definitions and structural conformance | L | Planned |
 | 4 | TBD | Advanced types (union, generic, singleton, narrowing) | XL | Future |
 
