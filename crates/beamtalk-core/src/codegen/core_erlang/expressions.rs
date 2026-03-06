@@ -543,29 +543,12 @@ impl CoreErlangGenerator {
             .collect()
     }
 
-    /// BT-1140: Returns true if the block contains any field writes (`self.field := ...`).
-    ///
-    /// Used alongside `captured_mutations_for_block` to determine whether a block needs
-    /// the Tier 2 stateful calling convention (`StateAcc` threading) even when there are no
-    /// captured local variable mutations.
-    pub(super) fn block_has_field_writes(block: &Block) -> bool {
-        use crate::codegen::core_erlang::block_analysis::analyze_block;
-        !analyze_block(block).field_writes.is_empty()
-    }
-
     pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
         let captured_mutations = Self::captured_mutations_for_block(block);
 
         // BT-852: Blocks with captured local mutations use Tier 2 stateful calling convention.
         if !captured_mutations.is_empty() {
             return self.generate_block_stateful(block, &captured_mutations);
-        }
-
-        // BT-1140: Blocks that only write actor fields (self.field := ...) also use Tier 2.
-        // The actor State IS the StateAcc, so no local var packing is needed — the block
-        // receives the actor state as StateAcc and threads field reads/writes through it.
-        if Self::block_has_field_writes(block) {
-            return self.generate_block_stateful(block, &[]);
         }
 
         // Pure block: plain fun (no mutations to thread via Tier 2)
@@ -714,22 +697,19 @@ impl CoreErlangGenerator {
         &mut self,
         block: &Block,
     ) -> Result<(Document<'static>, bool)> {
-        // Use the shared helpers to ensure consistent Tier 2 promotion logic.
+        // Use the shared helper to ensure consistent Tier 2 promotion logic.
         let captured_mutations = Self::captured_mutations_for_block(block);
-        let has_field_writes = Self::block_has_field_writes(block);
 
-        if captured_mutations.is_empty() && !has_field_writes {
+        if captured_mutations.is_empty() {
             // Pure block — plain Tier 1 fun, no wrapping needed.
             return Ok((self.generate_block(block)?, false));
         }
 
-        // Stateful block (local mutations and/or field writes) — generate Tier 2 block,
+        // Stateful block (captured local mutations) — generate Tier 2 block,
         // then wrap it to strip the protocol so Erlang can call it as a plain fun.
         let bt_block_var = self.fresh_temp_var("BtBlock");
 
         // Generate the Tier 2 block: fun(Params..., StateAcc) -> {Result, NewStateAcc}
-        // For field-write-only blocks, captured_mutations is empty; field threading uses
-        // StateAcc directly via current_state_var() inside the block body.
         let tier2_doc = self.generate_block_stateful(block, &captured_mutations)?;
 
         // Seed StateAcc with captured locals before passing to the Tier 2 block.
