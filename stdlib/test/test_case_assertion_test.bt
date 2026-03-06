@@ -69,3 +69,14 @@ TestCase subclass: TestCaseAssertionTest
     self should: [
       TestCase new should: [1 / 0] raise: #does_not_understand
     ] raise: #assertion_failed
+
+  testSkipMechanism =>
+    // Running a class with skip tests via TestRunner yields skipped count > 0
+    // SampleSkipTestCase is loaded from fixtures/ automatically
+    result := TestRunner run: SampleSkipTestCase
+    self assert: result total equals: 3
+    self assert: result passed equals: 1
+    self assert: result skipped equals: 2
+    self assert: result failed equals: 0
+    // hasPassed is true because there are no failures (only skips)
+    self assert: result hasPassed
