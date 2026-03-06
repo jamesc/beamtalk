@@ -115,8 +115,8 @@ impl BindingPower {
 ///
 /// | Level | Operators | Associativity |
 /// |-------|-----------|---------------|
+/// | 3  | `->`                | Left |
 /// | 5  | `>>`                | Left |
-/// | 8  | `->`                | Left |
 /// | 10 | `==` `/=` `=:=` `=/=` | Left |
 /// | 20 | `<` `>` `<=` `>=`   | Left |
 /// | 30 | `+` `-`             | Left |
@@ -2883,6 +2883,22 @@ mod tests {
             crate::ast::TypeAnnotation::Simple(id) => assert_eq!(id.name, "Association"),
             other => panic!("Expected Simple type annotation, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_arrow_method_with_keyword_typed_param() {
+        // ADR 0047: `-> value: Association =>` — typed param via Keyword token
+        let module = parse_ok(
+            "Object subclass: Pair
+  -> value: Association => @primitive \"->\"",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "->");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.name, "value");
+        assert!(method.parameters[0].type_annotation.is_some());
+        assert!(method.return_type.is_none());
     }
 
     #[test]

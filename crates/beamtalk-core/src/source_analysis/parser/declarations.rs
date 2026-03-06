@@ -693,6 +693,19 @@ impl Parser {
                 let selector = MessageSelector::Binary("->".into());
                 self.advance();
 
+                // If parameter is lexed as Keyword (e.g., `-> value: Association`),
+                // treat it as a typed parameter: name is `value`, type follows.
+                if let TokenKind::Keyword(kw) = self.current_kind() {
+                    let param_name_str = kw.trim_end_matches(':');
+                    let full_span = self.current_token().span();
+                    let param_span = Self::span_without_trailing_colon(full_span);
+                    let param_name = Identifier::new(param_name_str, param_span);
+                    self.advance(); // consume `paramName:`
+                    let type_ann = self.parse_type_annotation();
+                    let param = ParameterDefinition::with_type(param_name, type_ann);
+                    return Some((selector, vec![param]));
+                }
+
                 let param_name =
                     self.parse_identifier("Expected parameter name after binary selector");
                 let type_annotation = self.parse_optional_param_type();
