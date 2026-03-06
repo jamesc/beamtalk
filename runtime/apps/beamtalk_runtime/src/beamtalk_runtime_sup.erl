@@ -50,6 +50,15 @@ init([]) ->
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_object_instances]
+        },
+        %% Supervisor for Subprocess gen_servers (simple_one_for_one, temporary)
+        #{
+            id => beamtalk_subprocess_sup,
+            start => {beamtalk_subprocess_sup, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => supervisor,
+            modules => [beamtalk_subprocess_sup]
         }
     ],
 
