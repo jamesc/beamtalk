@@ -43,18 +43,23 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    %% Should have 12 children: workspace_meta, transcript_stream, beamtalk_interface, actor_registry, workspace_interface, class_events, bindings_events, workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup
-    ?assertEqual(12, length(ChildSpecs)).
+    %% Should have 10 children: workspace_meta, transcript_stream, actor_registry,
+    %% class_events, bindings_events, workspace_bootstrap, repl_server, idle_monitor,
+    %% actor_sup, session_sup.
+    %% BeamtalkInterface and WorkspaceInterface are value singletons (no gen_server).
+    ?assertEqual(10, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    %% Verify all expected children are present
+    %% Verify all expected children are present.
+    %% BeamtalkInterface and WorkspaceInterface are value singletons —
+    %% they are NOT gen_server children of this supervisor.
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
     ?assert(lists:member('bt@stdlib@transcript_stream', Ids)),
-    ?assert(lists:member('bt@stdlib@beamtalk_interface', Ids)),
-    ?assert(lists:member('bt@stdlib@workspace_interface', Ids)),
+    ?assertNot(lists:member('bt@stdlib@beamtalk_interface', Ids)),
+    ?assertNot(lists:member('bt@stdlib@workspace_interface', Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)),
     ?assert(lists:member(beamtalk_class_events, Ids)),
     ?assert(lists:member(beamtalk_bindings_events, Ids)),
@@ -164,24 +169,18 @@ transcript_stream_spec_test() ->
 system_dictionary_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == 'bt@stdlib@beamtalk_interface'],
-    ?assertEqual(worker, maps:get(type, Spec)),
-    ?assertEqual(permanent, maps:get(restart, Spec)),
-    ?assertEqual(
-        {'bt@stdlib@beamtalk_interface', start_link, [{local, 'Beamtalk'}, #{}]},
-        maps:get(start, Spec)
-    ).
+    %% BeamtalkInterface is a value singleton — it must NOT appear as a supervisor child.
+    Specs = [S || S <- ChildSpecs, maps:get(id, S) == 'bt@stdlib@beamtalk_interface'],
+    ?assertEqual([], Specs).
 
 singletons_after_metadata_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
     Ids = [maps:get(id, S) || S <- ChildSpecs],
-    %% Singletons must come after workspace_meta (boot ordering)
+    %% Actor singletons must come after workspace_meta (boot ordering)
     MetaIdx = index_of(beamtalk_workspace_meta, Ids),
     TranscriptIdx = index_of('bt@stdlib@transcript_stream', Ids),
-    SysDictIdx = index_of('bt@stdlib@beamtalk_interface', Ids),
-    ?assert(TranscriptIdx > MetaIdx),
-    ?assert(SysDictIdx > MetaIdx).
+    ?assert(TranscriptIdx > MetaIdx).
 
 %%% Bootstrap child spec tests (ADR 0019 Phase 2)
 
@@ -201,10 +200,10 @@ bootstrap_after_singletons_before_repl_test() ->
 
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     BootstrapIdx = index_of(beamtalk_workspace_bootstrap, Ids),
-    WorkspaceInterfaceIdx = index_of('bt@stdlib@workspace_interface', Ids),
+    ActorRegistryIdx = index_of(beamtalk_actor_registry, Ids),
     ReplServerIdx = index_of(beamtalk_repl_server, Ids),
-    %% Bootstrap must come after all singletons but before REPL server
-    ?assert(BootstrapIdx > WorkspaceInterfaceIdx),
+    %% Bootstrap must come after actor registry (and all actor singletons) but before REPL
+    ?assert(BootstrapIdx > ActorRegistryIdx),
     ?assert(BootstrapIdx < ReplServerIdx).
 
 %%% Helpers
@@ -249,13 +248,12 @@ all_children_alive_test() ->
         %% Get all children
         Children = supervisor:which_children(Sup),
 
-        %% Verify each child has correct ID and is alive
+        %% Verify each child has correct ID and is alive.
+        %% BeamtalkInterface and WorkspaceInterface are value singletons — not children.
         ExpectedIds = [
             beamtalk_workspace_meta,
             'bt@stdlib@transcript_stream',
-            'bt@stdlib@beamtalk_interface',
             beamtalk_actor_registry,
-            'bt@stdlib@workspace_interface',
             beamtalk_class_events,
             beamtalk_bindings_events,
             beamtalk_workspace_bootstrap,
@@ -346,24 +344,20 @@ session_sup_shutdown_infinity_test() ->
 workspace_environment_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == 'bt@stdlib@workspace_interface'],
-    ?assertEqual(worker, maps:get(type, Spec)),
-    ?assertEqual(permanent, maps:get(restart, Spec)),
-    ?assertEqual(
-        {'bt@stdlib@workspace_interface', start_link, [{local, 'Workspace'}, #{}]},
-        maps:get(start, Spec)
-    ).
+    %% WorkspaceInterface is a value singleton — must NOT appear as a supervisor child.
+    Specs = [S || S <- ChildSpecs, maps:get(id, S) == 'bt@stdlib@workspace_interface'],
+    ?assertEqual([], Specs).
 
 %%% Registry interleaving test
 
-registry_before_workspace_environment_test() ->
+registry_before_bootstrap_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     RegistryIdx = index_of(beamtalk_actor_registry, Ids),
-    WorkspaceEnvIdx = index_of('bt@stdlib@workspace_interface', Ids),
-    %% Registry must come before WorkspaceInterface (it depends on registry)
-    ?assert(RegistryIdx < WorkspaceEnvIdx).
+    BootstrapIdx = index_of(beamtalk_workspace_bootstrap, Ids),
+    %% Registry must come before bootstrap (bootstrap depends on registry)
+    ?assert(RegistryIdx < BootstrapIdx).
 
 %%% File logger tests
 
@@ -396,11 +390,10 @@ bootstrap_spec_modules_test() ->
 singleton_specs_have_local_registration_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    %% Every singleton should use {local, Name} registration
+    %% Actor singletons use {local, Name} registration.
+    %% BeamtalkInterface and WorkspaceInterface are value singletons — not children.
     SingletonIds = [
-        'bt@stdlib@transcript_stream',
-        'bt@stdlib@beamtalk_interface',
-        'bt@stdlib@workspace_interface'
+        'bt@stdlib@transcript_stream'
     ],
     lists:foreach(
         fun(Id) ->

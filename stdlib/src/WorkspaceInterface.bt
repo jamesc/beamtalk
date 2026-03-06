@@ -17,7 +17,7 @@
 /// WorkspaceInterface current actorAt: "<0.132.0>"
 /// WorkspaceInterface current actorsOf: Counter
 /// ```
-Actor subclass: WorkspaceInterface
+sealed Object subclass: WorkspaceInterface
   classState: current = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).
@@ -32,7 +32,7 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actors
   /// ```
-  actors -> List => @primitive "actors"
+  actors -> List => (Erlang beamtalk_workspace_interface_primitives) actors
 
   /// Look up a specific actor by pid string.
   ///
@@ -40,7 +40,8 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace actorAt: "<0.132.0>"
   /// ```
-  actorAt: pidString: String -> Object => @primitive "actorAt:"
+  actorAt: pidString: String -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) actorAt: pidString
 
   /// Return all actors of a given class.
   ///
@@ -57,7 +58,7 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace classes
   /// ```
-  classes -> List => @primitive "classes"
+  classes -> List => (Erlang beamtalk_workspace_interface_primitives) classes
 
   /// Return classes that are TestCase subclasses.
   ///
@@ -76,7 +77,8 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace globals
   /// ```
-  globals -> Dictionary => @primitive "globals"
+  globals -> Dictionary =>
+    (Erlang beamtalk_workspace_interface_primitives) globals
 
   /// Compile and load a .bt file, registering the class.
   /// Returns a structured error if path is not a String.
@@ -85,7 +87,8 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace load: "examples/counter.bt"
   /// ```
-  load: path: String -> Object => @primitive "load:"
+  load: path: String -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) load: path
 
   /// Run all loaded test classes and return a TestResult.
   ///
@@ -112,7 +115,8 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace bind: myActor as: #MyTool
   /// ```
-  bind: value as: bindingName: Symbol -> Nil => @primitive "bind:as:"
+  bind: value as: bindingName: Symbol -> Nil =>
+    (Erlang beamtalk_workspace_interface_primitives) bind: value as: bindingName
 
   /// Remove a registered name from the workspace namespace.
   /// Raises an error if name is not found.
@@ -121,4 +125,5 @@ Actor subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace unbind: #MyTool
   /// ```
-  unbind: bindingName: Symbol -> Nil => @primitive "unbind:"
+  unbind: bindingName: Symbol -> Nil =>
+    (Erlang beamtalk_workspace_interface_primitives) unbind: bindingName

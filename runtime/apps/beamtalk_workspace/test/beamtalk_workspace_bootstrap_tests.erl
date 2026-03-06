@@ -58,26 +58,44 @@ bootstrap_sets_transcript_class_var_test_() ->
         ]
     end}.
 
-%% Test that bootstrap wires BeamtalkInterface singleton
+%% Test that bootstrap wires BeamtalkInterface value singleton (class variable current)
+%% BeamtalkInterface is a sealed Object subclass: (value type, no gen_server).
+%% Bootstrap calls Module:new() and sets the class variable 'current'.
 bootstrap_sets_beamtalk_class_var_test_() ->
     {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
         [
             ?_test(begin
-                {ok, BPid} = 'bt@stdlib@beamtalk_interface':start_link({local, 'Beamtalk'}, #{}),
                 {ok, _} = beamtalk_workspace_bootstrap:start_link(),
-                ?assertEqual(BPid, whereis('Beamtalk'))
+                case beamtalk_class_registry:whereis_class('BeamtalkInterface') of
+                    undefined ->
+                        %% Class not loaded in this test environment — skip
+                        ok;
+                    ClassPid ->
+                        Current = gen_server:call(ClassPid, {get_class_var, current}, 5000),
+                        ?assertNotEqual(nil, Current),
+                        ?assert(is_map(Current))
+                end
             end)
         ]
     end}.
 
-%% Test that bootstrap wires WorkspaceInterface singleton (Phase 2 compiled actor)
+%% Test that bootstrap wires WorkspaceInterface value singleton (class variable current)
+%% WorkspaceInterface is a sealed Object subclass: (value type, no gen_server).
+%% Bootstrap calls Module:new() and sets the class variable 'current'.
 bootstrap_sets_workspace_class_var_test_() ->
     {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
         [
             ?_test(begin
-                {ok, WPid} = 'bt@stdlib@workspace_interface':start_link({local, 'Workspace'}, #{}),
                 {ok, _} = beamtalk_workspace_bootstrap:start_link(),
-                ?assertEqual(WPid, whereis('Workspace'))
+                case beamtalk_class_registry:whereis_class('WorkspaceInterface') of
+                    undefined ->
+                        %% Class not loaded in this test environment — skip
+                        ok;
+                    ClassPid ->
+                        Current = gen_server:call(ClassPid, {get_class_var, current}, 5000),
+                        ?assertNotEqual(nil, Current),
+                        ?assert(is_map(Current))
+                end
             end)
         ]
     end}.

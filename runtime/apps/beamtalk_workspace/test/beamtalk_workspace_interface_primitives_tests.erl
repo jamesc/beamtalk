@@ -33,13 +33,14 @@ ensure_registry_started() ->
         {error, {already_started, Pid}} -> {ok, Pid}
     end.
 
-%% Clean up ETS entries for a given PID in the bindings table.
-cleanup_ets_for(Pid) ->
+%% Clean up all ETS entries in the bindings table.
+%% ETS keys are now just atoms (no pid component).
+cleanup_ets_for(_Pid) ->
     case ets:info(beamtalk_wi_user_bindings, id) of
         undefined ->
             ok;
         _ ->
-            ets:match_delete(beamtalk_wi_user_bindings, {{Pid, '_'}, '_'}),
+            ets:delete_all_objects(beamtalk_wi_user_bindings),
             ok
     end.
 
@@ -337,15 +338,16 @@ unknown_selector_raises_does_not_understand_test() ->
 %%====================================================================
 
 get_user_bindings_returns_empty_when_no_workspace_registered_test() ->
-    %% No 'Workspace' registered → should return empty map
-    catch unregister('Workspace'),
+    %% beamtalk_workspace_meta not registered → should return empty map
+    ?assertEqual(undefined, whereis(beamtalk_workspace_meta)),
     Result = beamtalk_workspace_interface_primitives:get_user_bindings(),
     ?assertEqual(#{}, Result).
 
 get_user_bindings_returns_bound_values_test() ->
     Self = fake_self(self()),
-    catch unregister('Workspace'),
-    register('Workspace', self()),
+    %% Register beamtalk_workspace_meta as the workspace-up sentinel
+    catch unregister(beamtalk_workspace_meta),
+    register(beamtalk_workspace_meta, self()),
     try
         beamtalk_workspace_interface_primitives:dispatch(
             'bind:as:', [100, wsVar], Self
@@ -355,7 +357,7 @@ get_user_bindings_returns_bound_values_test() ->
         ?assertEqual(100, maps:get(wsVar, Result))
     after
         cleanup_ets_for(self()),
-        catch unregister('Workspace')
+        catch unregister(beamtalk_workspace_meta)
     end.
 
 %%====================================================================
@@ -363,25 +365,27 @@ get_user_bindings_returns_bound_values_test() ->
 %%====================================================================
 
 get_session_bindings_returns_empty_when_no_workspace_registered_test() ->
-    catch unregister('Workspace'),
+    %% beamtalk_workspace_meta not registered → should return empty map
+    ?assertEqual(undefined, whereis(beamtalk_workspace_meta)),
     Result = beamtalk_workspace_interface_primitives:get_session_bindings(),
     ?assertEqual(#{}, Result).
 
 get_session_bindings_includes_workspace_singleton_test() ->
-    catch unregister('Workspace'),
-    register('Workspace', self()),
+    %% Register beamtalk_workspace_meta as the workspace-up sentinel
+    catch unregister(beamtalk_workspace_meta),
+    register(beamtalk_workspace_meta, self()),
     try
         Result = beamtalk_workspace_interface_primitives:get_session_bindings(),
         ?assert(is_map(Result)),
         %% Workspace singleton is always included
         ?assert(maps:is_key('Workspace', Result))
     after
-        catch unregister('Workspace')
+        catch unregister(beamtalk_workspace_meta)
     end.
 
 get_session_bindings_includes_user_bindings_test() ->
-    catch unregister('Workspace'),
-    register('Workspace', self()),
+    catch unregister(beamtalk_workspace_meta),
+    register(beamtalk_workspace_meta, self()),
     Self = fake_self(self()),
     try
         beamtalk_workspace_interface_primitives:dispatch(
@@ -392,5 +396,5 @@ get_session_bindings_includes_user_bindings_test() ->
         ?assertEqual(<<"hello">>, maps:get(sessionVar, Result))
     after
         cleanup_ets_for(self()),
-        catch unregister('Workspace')
+        catch unregister(beamtalk_workspace_meta)
     end.

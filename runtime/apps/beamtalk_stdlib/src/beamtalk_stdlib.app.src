@@ -9,7 +9,7 @@
             {'bt@stdlib@actor', 'Actor', 'Object'},
             {'bt@stdlib@array', 'Array', 'Collection'},
             {'bt@stdlib@beamerror', 'BEAMError', 'Error'},
-            {'bt@stdlib@beamtalk_interface', 'BeamtalkInterface', 'Actor'},
+            {'bt@stdlib@beamtalk_interface', 'BeamtalkInterface', 'Object'},
             {'bt@stdlib@behaviour', 'Behaviour', 'Object'},
             {'bt@stdlib@block', 'Block', 'Object'},
             {'bt@stdlib@boolean', 'Boolean', 'Value'},
@@ -63,7 +63,7 @@
             {'bt@stdlib@type_error', 'TypeError', 'Error'},
             {'bt@stdlib@undefined_object', 'UndefinedObject', 'Object'},
             {'bt@stdlib@value', 'Value', 'Object'},
-            {'bt@stdlib@workspace_interface', 'WorkspaceInterface', 'Actor'},
+            {'bt@stdlib@workspace_interface', 'WorkspaceInterface', 'Object'},
             {'bt@stdlib@yaml', 'Yaml', 'Object'}
         ]}
     ]}

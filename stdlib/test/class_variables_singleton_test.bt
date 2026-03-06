@@ -17,7 +17,7 @@ TestCase subclass: ClassVariablesSingletonTest
   testSetAndGetCurrent =>
     // Set a BeamtalkInterface instance as current and verify retrieval
     prev := BeamtalkInterface current
-    sd := BeamtalkInterface spawn
+    sd := BeamtalkInterface new
     BeamtalkInterface current: sd
     self assert: BeamtalkInterface current equals: sd
     // Restore previous value to avoid affecting other tests

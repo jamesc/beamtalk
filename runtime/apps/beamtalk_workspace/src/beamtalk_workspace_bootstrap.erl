@@ -53,6 +53,17 @@ start_link(ProjectPath) ->
 
 %% @private
 init([ProjectPath]) ->
+    %% Create the user-bindings ETS table here so that this long-lived process
+    %% owns it. If created inside a short-lived eval worker instead, the table
+    %% would be deleted when that worker exits (ETS tables are deleted on owner
+    %% process exit unless an heir is specified).
+    beamtalk_workspace_interface_primitives:create_bindings_table(),
+    %% Ensure beamtalk_interface_primitives is loaded so that all its exported
+    %% function names (e.g. findClass, allClasses) are in the atom table.
+    %% The sealed-Object BeamtalkInterface dispatches via beamtalk_message_dispatch
+    %% which uses list_to_existing_atom to resolve selector→function name; if
+    %% the module is not yet loaded, the atom won't exist and dispatch fails.
+    _ = code:ensure_loaded(beamtalk_interface_primitives),
     State = bootstrap_all(#state{}),
     %% Activate project modules synchronously before returning so that
     %% beamtalk_repl_server (the next child) does not write the port file
@@ -109,13 +120,22 @@ terminate(_Reason, _State) ->
 
 %% @private Bootstrap all singletons.
 bootstrap_all(State) ->
-    lists:foldl(
+    ActorState = lists:foldl(
         fun(#{class_name := ClassName, binding_name := RegName}, AccState) ->
             bootstrap_singleton(ClassName, RegName, AccState)
         end,
         State,
         beamtalk_workspace_config:singletons()
-    ).
+    ),
+    %% Bootstrap value singletons (sealed Object subclass:, no gen_server process).
+    %% Create a value object instance and set the class variable `current`.
+    lists:foreach(
+        fun(#{class_name := ClassName, module := Module}) ->
+            bootstrap_value_singleton(ClassName, Module)
+        end,
+        beamtalk_workspace_config:value_singletons()
+    ),
+    ActorState.
 
 %% @private Bootstrap a single singleton: set class var and monitor.
 bootstrap_singleton(ClassName, RegName, State) ->
@@ -130,6 +150,24 @@ bootstrap_singleton(ClassName, RegName, State) ->
             ?LOG_DEBUG("Bootstrap: wired singleton", #{class => ClassName, pid => Pid}),
             Monitors = maps:put(MonRef, {ClassName, RegName}, State#state.monitors),
             State#state{monitors = Monitors}
+    end.
+
+%% @private Bootstrap a value singleton: create a tagged-map instance and set class var.
+%% Value singletons are sealed Object subclasses (no gen_server process). The
+%% instance is created by calling `Module:new()` and set as the `current` class var.
+-spec bootstrap_value_singleton(atom(), module()) -> ok.
+bootstrap_value_singleton(ClassName, Module) ->
+    try
+        Obj = Module:new(),
+        set_class_variable(ClassName, Obj),
+        ?LOG_DEBUG("Bootstrap: wired value singleton", #{class => ClassName})
+    catch
+        error:#beamtalk_error{kind = class_not_found} ->
+            ?LOG_WARNING("Bootstrap: value singleton class not loaded yet", #{class => ClassName});
+        _:Reason ->
+            ?LOG_WARNING("Bootstrap: failed to initialize value singleton", #{
+                class => ClassName, reason => Reason
+            })
     end.
 
 %% @private Build the beamtalk_object reference tuple for a singleton.
