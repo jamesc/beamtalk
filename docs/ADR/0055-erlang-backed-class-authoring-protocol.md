@@ -147,7 +147,7 @@ Response = 'bt@stdlib@httpresponse':'class_status:headers:body:'(
 - `new/0` — default constructor with `-spec`
 - `new/1` — init constructor merging caller map with defaults
 - Keyword class-side constructor (`class_status:headers:body:/5`) with `-spec` — callable from Erlang with Dialyzer validation
-- A `-type t()` opaque map type representing the value
+- A `-type t()` map type alias representing the value
 - Reflection metadata (`fieldNames` returns `#(#status #headers #body)`)
 
 **Computed properties** use pure Beamtalk expressions in the method body:
@@ -200,7 +200,7 @@ This mechanism is available to **all library authors** — no compiler changes r
 
 With this protocol, the two pragma forms are narrowed to one case each (per the ADR 0007 amendment that introduced `@intrinsic`):
 
-1. **`@primitive "selector"`** — Direct BEAM BIF calls — `erlang:'+'`, `erlang:integer_to_binary`, `string:length` — where the Erlang module name is fixed by the BEAM standard library and cannot follow the keyword convention
+1. **`@primitive "selector"`** — Fixed Erlang/OTP function calls (BIFs or selected OTP standard library modules) — `erlang:'+'`, `erlang:integer_to_binary`, `string:length` — where the Erlang module name is fixed by the BEAM/OTP standard library and cannot follow the keyword convention
 2. **`@intrinsic name`** — Structural intrinsics — compiler-generated patterns with no corresponding Erlang function: `timesRepeat:`, `blockValue`, `actorSpawn`
 
 **`@primitive` must not be used** for calls into `beamtalk_*` modules — those use `(Erlang module)` FFI.
