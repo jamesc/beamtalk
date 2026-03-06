@@ -653,3 +653,167 @@ fn test_as_type_erasure() {
         "asType: should generate only the receiver expression. Got: {output}"
     );
 }
+
+#[test]
+fn test_binary_pattern_integer_segment() {
+    // <<version:8>> — single integer segment, default signedness/endianness
+    let mut generator = CoreErlangGenerator::new("test");
+    let seg = BinarySegment {
+        value: Pattern::Variable(Identifier::new("version", Span::new(0, 7))),
+        size: Some(Box::new(Expression::Literal(
+            Literal::Integer(8),
+            Span::new(8, 9),
+        ))),
+        segment_type: Some(BinarySegmentType::Integer),
+        signedness: None,
+        endianness: None,
+        unit: None,
+        span: Span::new(0, 9),
+    };
+    let doc = generator.generate_binary_segment(&seg).unwrap();
+    let output = doc.to_pretty_string();
+    // Must contain: #<Version>(8,1,'integer',['unsigned'|['big']])
+    assert!(
+        output.contains("#<"),
+        "Expected #< in binary segment, got: {output}"
+    );
+    assert!(
+        output.contains("'integer'"),
+        "Expected 'integer' type, got: {output}"
+    );
+    assert!(
+        output.contains("'unsigned'"),
+        "Expected 'unsigned' signedness, got: {output}"
+    );
+    assert!(
+        output.contains("'big'"),
+        "Expected 'big' endianness, got: {output}"
+    );
+}
+
+#[test]
+fn test_binary_pattern_binary_segment() {
+    // <<rest/binary>> — binary/rest segment with 'all' size and unit 8
+    let mut generator = CoreErlangGenerator::new("test");
+    let seg = BinarySegment {
+        value: Pattern::Variable(Identifier::new("rest", Span::new(0, 4))),
+        size: None,
+        segment_type: Some(BinarySegmentType::Binary),
+        signedness: None,
+        endianness: None,
+        unit: None,
+        span: Span::new(0, 4),
+    };
+    let doc = generator.generate_binary_segment(&seg).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'all'"),
+        "Expected 'all' size, got: {output}"
+    );
+    assert!(
+        output.contains("'binary'"),
+        "Expected 'binary' type, got: {output}"
+    );
+}
+
+#[test]
+fn test_binary_pattern_utf8_segment() {
+    // <<codepoint/utf8>> — UTF-8 segment with 'undefined' size and unit
+    let mut generator = CoreErlangGenerator::new("test");
+    let seg = BinarySegment {
+        value: Pattern::Variable(Identifier::new("cp", Span::new(0, 2))),
+        size: None,
+        segment_type: Some(BinarySegmentType::Utf8),
+        signedness: None,
+        endianness: None,
+        unit: None,
+        span: Span::new(0, 2),
+    };
+    let doc = generator.generate_binary_segment(&seg).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'undefined'"),
+        "UTF-8 segment should have 'undefined' size, got: {output}"
+    );
+    assert!(
+        output.contains("'utf8'"),
+        "Expected 'utf8' type, got: {output}"
+    );
+}
+
+#[test]
+fn test_binary_pattern_signed_little_segment() {
+    // <<val:16/signed-little>> — signed little-endian integer
+    let mut generator = CoreErlangGenerator::new("test");
+    let seg = BinarySegment {
+        value: Pattern::Variable(Identifier::new("val", Span::new(0, 3))),
+        size: Some(Box::new(Expression::Literal(
+            Literal::Integer(16),
+            Span::new(4, 6),
+        ))),
+        segment_type: Some(BinarySegmentType::Integer),
+        signedness: Some(BinarySignedness::Signed),
+        endianness: Some(BinaryEndianness::Little),
+        unit: None,
+        span: Span::new(0, 6),
+    };
+    let doc = generator.generate_binary_segment(&seg).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'signed'"),
+        "Expected 'signed', got: {output}"
+    );
+    assert!(
+        output.contains("'little'"),
+        "Expected 'little', got: {output}"
+    );
+}
+
+#[test]
+fn test_binary_pattern_whole_pattern() {
+    // <<version:8, rest/binary>> — full binary pattern
+    let mut generator = CoreErlangGenerator::new("test");
+    let pattern = Pattern::Binary {
+        segments: vec![
+            BinarySegment {
+                value: Pattern::Variable(Identifier::new("version", Span::new(0, 7))),
+                size: Some(Box::new(Expression::Literal(
+                    Literal::Integer(8),
+                    Span::new(8, 9),
+                ))),
+                segment_type: Some(BinarySegmentType::Integer),
+                signedness: None,
+                endianness: None,
+                unit: None,
+                span: Span::new(0, 9),
+            },
+            BinarySegment {
+                value: Pattern::Variable(Identifier::new("rest", Span::new(11, 15))),
+                size: None,
+                segment_type: Some(BinarySegmentType::Binary),
+                signedness: None,
+                endianness: None,
+                unit: None,
+                span: Span::new(11, 15),
+            },
+        ],
+        span: Span::new(0, 17),
+    };
+    let doc = generator.generate_pattern(&pattern).unwrap();
+    let output = doc.to_pretty_string();
+    // Should wrap in #{...}#
+    assert!(
+        output.starts_with("#{"),
+        "Expected #{{ prefix, got: {output}"
+    );
+    assert!(output.ends_with("}#"), "Expected }}# suffix, got: {output}");
+    // Should contain both segments
+    assert!(
+        output.contains("'integer'"),
+        "Expected integer segment, got: {output}"
+    );
+    assert!(
+        output.contains("'binary'"),
+        "Expected binary segment, got: {output}"
+    );
+}

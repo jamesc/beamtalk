@@ -1022,8 +1022,8 @@ impl Parser {
             offset += 1;
         }
 
-        // Must have `>>` binary selector
-        if !matches!(self.peek_at(offset), Some(TokenKind::BinarySelector(s)) if s == ">>") {
+        // Must have `>>` token (GtGt since BT-663)
+        if !matches!(self.peek_at(offset), Some(TokenKind::GtGt)) {
             return false;
         }
         offset += 1;
@@ -5582,5 +5582,111 @@ Actor subclass: Counter
             method.comments.leading[0].content
         );
         assert!(module.file_leading_comments.is_empty());
+    }
+
+    // ========================================================================
+    // Binary pattern tests (BT-663)
+    // ========================================================================
+
+    #[test]
+    fn parse_binary_pattern_simple() {
+        // <<version:8, rest/binary>> in a match expression
+        let source = r"
+Actor subclass: Parser
+  parse: data =>
+    data match: [
+      <<version:8, rest/binary>> -> version
+    ]";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+        // No errors — pattern parsed successfully
+    }
+
+    #[test]
+    fn parse_binary_pattern_wildcard_segment() {
+        // <<_/binary>> — wildcard segment
+        let source = r"
+Actor subclass: T
+  test: data =>
+    data match: [
+      <<_/binary>> -> #ok
+    ]";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+    }
+
+    #[test]
+    fn parse_binary_pattern_multiple_modifiers() {
+        // <<val:16/signed-little>> — signed little-endian 16-bit integer
+        let source = r"
+Actor subclass: T
+  test: data =>
+    data match: [
+      <<val:16/signed-little>> -> val
+    ]";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+    }
+
+    #[test]
+    fn parse_binary_pattern_utf8() {
+        // <<codepoint/utf8, rest/binary>>
+        let source = r"
+Actor subclass: T
+  test: data =>
+    data match: [
+      <<codepoint/utf8, rest/binary>> -> codepoint
+    ]";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+    }
+
+    #[test]
+    fn parse_binary_pattern_empty() {
+        // <<>> — empty binary
+        let source = r"
+Actor subclass: T
+  test: data =>
+    data match: [
+      <<>> -> #empty
+    ]";
+        let module = parse_ok(source);
+        assert_eq!(module.classes.len(), 1);
+    }
+
+    #[test]
+    fn lex_ltlt_gtgt_tokens() {
+        use crate::source_analysis::TokenKind;
+        let tokens = lex_with_eof("<<");
+        assert!(matches!(tokens[0].kind(), TokenKind::LtLt));
+        let tokens = lex_with_eof(">>");
+        assert!(matches!(tokens[0].kind(), TokenKind::GtGt));
+    }
+
+    #[test]
+    fn ltlt_not_a_binary_selector() {
+        // `<<` must NOT lex as BinarySelector("<<") any more
+        use crate::source_analysis::TokenKind;
+        let tokens = lex_with_eof("<<");
+        assert!(!matches!(tokens[0].kind(), TokenKind::BinarySelector(_)));
+    }
+
+    #[test]
+    fn gtgt_still_works_as_method_lookup() {
+        // `Counter >> #increment` is a binary message send (method lookup)
+        let module = parse_ok("Counter >> #increment");
+        assert!(module.method_definitions.is_empty());
+        assert_eq!(module.expressions.len(), 1);
+    }
+
+    #[test]
+    fn gtgt_still_works_in_standalone_method_definition() {
+        // `Counter >> increment =>` is a Tonel-style standalone method definition
+        let module = parse_ok("Counter >> increment => nil");
+        assert_eq!(module.method_definitions.len(), 1);
+        assert_eq!(
+            module.method_definitions[0].class_name.name.as_str(),
+            "Counter"
+        );
     }
 }
