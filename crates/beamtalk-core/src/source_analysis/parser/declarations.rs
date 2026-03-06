@@ -341,7 +341,7 @@ impl Parser {
     ///
     /// Also accepts `-> =>` (missing type) for error recovery — lets `parse_type_annotation`
     /// emit the specific error rather than failing to detect the method definition.
-    fn is_return_type_then_fat_arrow(&self, offset: usize) -> bool {
+    pub(super) fn is_return_type_then_fat_arrow(&self, offset: usize) -> bool {
         if !matches!(self.peek_at(offset), Some(TokenKind::Arrow)) {
             return false;
         }
@@ -369,55 +369,10 @@ impl Parser {
 
     /// Checks if there's a keyword method definition starting at the given offset.
     ///
-    /// Pattern: `keyword: param keyword: param ... =>` or with typed params/return type
+    /// Pattern: `keyword: param keyword: param ... =>` or with typed params/return type.
+    /// Delegates to the shared helper in `mod.rs`.
     fn is_keyword_method_at(&self, start_offset: usize) -> bool {
-        let mut offset = start_offset;
-
-        // Must have at least one keyword-parameter pair
-        loop {
-            // Expect keyword
-            if !matches!(self.peek_at(offset), Some(TokenKind::Keyword(_))) {
-                return false;
-            }
-            offset += 1;
-
-            // Expect parameter (identifier)
-            if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
-                return false;
-            }
-            offset += 1;
-
-            // After the parameter name, we may see:
-            // - a fat arrow (end of selector)
-            // - another keyword (more selector parts)
-            // - a return type introducer "->"
-            // - or a `:: Type` annotation
-            match self.peek_at(offset) {
-                Some(TokenKind::FatArrow) => return true,
-                Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
-                Some(TokenKind::Arrow) => {
-                    return self.is_return_type_then_fat_arrow(offset);
-                }
-                Some(TokenKind::DoubleColon) => {
-                    // Typed parameter: `paramName :: Type (| Type)*`
-                    // Malformed `::` still counts as a method — pass the offset
-                    // after `::` so the method is detected and errors emitted.
-                    offset = match self.skip_double_colon_type(offset) {
-                        DoubleColonSkip::Valid(o) | DoubleColonSkip::Malformed(o) => o,
-                        DoubleColonSkip::NotPresent => return false,
-                    };
-                    match self.peek_at(offset) {
-                        Some(TokenKind::FatArrow) => return true,
-                        Some(TokenKind::Keyword(_)) => {} // More keywords, continue loop
-                        Some(TokenKind::Arrow) => {
-                            return self.is_return_type_then_fat_arrow(offset);
-                        }
-                        _ => return false,
-                    }
-                }
-                _ => return false,
-            }
-        }
+        self.is_keyword_method_params_at(start_offset)
     }
 
     /// Parses a state declaration.

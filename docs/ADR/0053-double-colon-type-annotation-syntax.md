@@ -336,3 +336,15 @@ Type annotations were introduced recently (ADR 0025 Phase 2) and the language ha
   - [Haskell type signatures](https://wiki.haskell.org/Type_signature) — `::` for "has type"
   - [Erlang type specs](https://www.erlang.org/doc/reference_manual/typespec) — `::` in `-type` declarations and record field types
   - [Newspeak language spec](https://newspeaklanguage.org/) — angle-bracket type annotations (alternative solution to the same `:` ambiguity)
+
+## Implementation Tracking
+
+**Epic:** [BT-1134](https://linear.app/beamtalk/issue/BT-1134)
+**Issues:**
+- [BT-1135](https://linear.app/beamtalk/issue/BT-1135) — Add `TokenKind::DoubleColon` to lexer (S)
+- [BT-1136](https://linear.app/beamtalk/issue/BT-1136) — Update parser to use `DoubleColon` for type annotations (M)
+- [BT-1137](https://linear.app/beamtalk/issue/BT-1137) — Update formatter to emit `::` for type annotations (S)
+- [BT-1138](https://linear.app/beamtalk/issue/BT-1138) — Migrate stdlib `.bt` files to `::` type annotation syntax (M)
+- [BT-1139](https://linear.app/beamtalk/issue/BT-1139) — Update documentation for `::` type annotation syntax (S)
+
+**Status:** Planned
