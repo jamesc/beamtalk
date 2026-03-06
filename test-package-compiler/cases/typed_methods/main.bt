@@ -1,3 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
 // Typed method definitions for spec generation
 Actor subclass: TypedCounter
   state: value :: Integer = 0
