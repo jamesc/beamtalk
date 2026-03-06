@@ -28,7 +28,7 @@
 -export([erlangVersion/0, pid/0]).
 -export([has_method/1]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================

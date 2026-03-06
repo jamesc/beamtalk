@@ -36,7 +36,7 @@
 
 -export([has_method/1]).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %% Gregorian seconds at Unix epoch (1970-01-01 00:00:00)

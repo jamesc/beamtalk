@@ -12,7 +12,7 @@
 -module(beamtalk_timer_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Helpers

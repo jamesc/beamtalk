@@ -156,7 +156,7 @@ print_string_map(X) ->
         'Array' ->
             beamtalk_array_ops:print_string(X);
         'Stream' ->
-            beamtalk_stream:print_string(X);
+            maps:get(description, X);
         'CompiledMethod' ->
             beamtalk_compiled_method_ops:dispatch('printString', [], X);
         'ErlangModule' ->

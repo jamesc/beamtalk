@@ -30,7 +30,7 @@
 -module(beamtalk_transcript_stream).
 -behaviour(gen_server).
 
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %% API
