@@ -101,7 +101,7 @@ x := 1.
 // ========================================
 
 Counter := class [
-    state: value: Integer = 0.
+    state: value :: Integer = 0.
     
     increment =>
         [self.value < 10] whileTrue: [
@@ -132,7 +132,7 @@ Counter := class [
         ].
         ^temp.
     
-    state: result: Integer = 0.
+    state: result :: Integer = 0.
 ].
 
 // ========================================

@@ -49,7 +49,7 @@ sealed Object subclass: Symbol
   /// #hello =:= #hello        // => true
   /// #hello =:= #world        // => false
   /// ```
-  =:= other: Symbol -> Boolean => @primitive "=:="
+  =:= other :: Symbol -> Boolean => @primitive "=:="
 
   /// Test inequality with another symbol.
   ///
@@ -58,7 +58,7 @@ sealed Object subclass: Symbol
   /// #hello /= #world       // => true
   /// #hello /= #hello       // => false
   /// ```
-  /= other: Symbol -> Boolean => @primitive "/="
+  /= other :: Symbol -> Boolean => @primitive "/="
 
   /// Return a user-facing string representation without the `#` prefix.
   ///

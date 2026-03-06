@@ -54,7 +54,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 1.5 + 2.5        // => 4.0
   /// ```
-  + other: Number -> Float => @primitive "+"
+  + other :: Number -> Float => @primitive "+"
 
   /// Subtract a number from the receiver.
   ///
@@ -62,7 +62,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 5.0 - 2.5        // => 2.5
   /// ```
-  - other: Number -> Float => @primitive "-"
+  - other :: Number -> Float => @primitive "-"
 
   /// Multiply the receiver by a number.
   ///
@@ -70,7 +70,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 2.5 * 4.0        // => 10.0
   /// ```
-  * other: Number -> Float => @primitive "*"
+  * other :: Number -> Float => @primitive "*"
 
   /// Divide the receiver by a number.
   ///
@@ -78,7 +78,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 10.0 / 4.0       // => 2.5
   /// ```
-  / other: Number -> Float => @primitive "/"
+  / other :: Number -> Float => @primitive "/"
 
   /// Test strict equality with another number.
   ///
@@ -87,7 +87,7 @@ sealed Number subclass: Float
   /// 3.14 =:= 3.14      // => true
   /// 1.0 =:= 2.0        // => false
   /// ```
-  =:= other: Number -> Boolean => @primitive "=:="
+  =:= other :: Number -> Boolean => @primitive "=:="
 
   /// Test inequality with another number.
   ///
@@ -96,7 +96,7 @@ sealed Number subclass: Float
   /// 1.0 /= 2.0       // => true
   /// 3.14 /= 3.14     // => false
   /// ```
-  /= other: Number -> Boolean => @primitive "/="
+  /= other :: Number -> Boolean => @primitive "/="
 
   /// Test if the receiver is less than another number.
   ///
@@ -105,7 +105,7 @@ sealed Number subclass: Float
   /// 1.0 < 2.0        // => true
   /// 5.0 < 3.0        // => false
   /// ```
-  < other: Number -> Boolean => @primitive "<"
+  < other :: Number -> Boolean => @primitive "<"
 
   /// Test if the receiver is greater than another number.
   ///
@@ -114,7 +114,7 @@ sealed Number subclass: Float
   /// 5.0 > 3.0        // => true
   /// 1.0 > 2.0        // => false
   /// ```
-  > other: Number -> Boolean => @primitive ">"
+  > other :: Number -> Boolean => @primitive ">"
 
   /// Test if the receiver is less than or equal to another number.
   ///
@@ -123,7 +123,7 @@ sealed Number subclass: Float
   /// 1.0 <= 2.0       // => true
   /// 3.0 <= 3.0       // => true
   /// ```
-  <= other: Number -> Boolean => @primitive "<="
+  <= other :: Number -> Boolean => @primitive "<="
 
   /// Test if the receiver is greater than or equal to another number.
   ///
@@ -132,7 +132,7 @@ sealed Number subclass: Float
   /// 5.0 >= 3.0       // => true
   /// 3.0 >= 3.0       // => true
   /// ```
-  >= other: Number -> Boolean => @primitive ">="
+  >= other :: Number -> Boolean => @primitive ">="
 
   /// Negate the receiver.
   ///
@@ -157,7 +157,8 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 1.5 min: 3.0     // => 1.5
   /// ```
-  min: other: Number -> Float => (self < other) ifTrue: [self] ifFalse: [other]
+  min: other :: Number -> Float =>
+    (self < other) ifTrue: [self] ifFalse: [other]
 
   /// Return the larger of the receiver and `other`.
   ///
@@ -165,7 +166,8 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 1.5 max: 3.0     // => 3.0
   /// ```
-  max: other: Number -> Float => (self > other) ifTrue: [self] ifFalse: [other]
+  max: other :: Number -> Float =>
+    (self > other) ifTrue: [self] ifFalse: [other]
 
   /// Round to the nearest integer.
   ///
@@ -309,7 +311,7 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 1.0 atan2: 1.0       // => 0.7853981633974483
   /// ```
-  atan2: other: Number -> Float => @primitive "atan2:"
+  atan2: other :: Number -> Float => @primitive "atan2:"
 
   // === Exponential / logarithmic methods ===
 
@@ -370,4 +372,4 @@ sealed Number subclass: Float
   /// ```beamtalk
   /// 2.0 raisedTo: 10     // => 1024.0
   /// ```
-  raisedTo: exponent: Number -> Float => @primitive "raisedTo:"
+  raisedTo: exponent :: Number -> Float => @primitive "raisedTo:"

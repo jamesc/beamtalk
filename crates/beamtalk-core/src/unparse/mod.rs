@@ -519,7 +519,7 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
     ];
 
     if let Some(ty) = &state.type_annotation {
-        decl.push(Document::Str(": "));
+        decl.push(Document::Str(" :: "));
         decl.push(unparse_type_annotation(ty));
     }
 
@@ -1247,7 +1247,7 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
 
 fn unparse_type_annotation_opt(ty: Option<&TypeAnnotation>) -> Document<'static> {
     if let Some(t) = ty {
-        docvec![": ", unparse_type_annotation(t)]
+        docvec![" :: ", unparse_type_annotation(t)]
     } else {
         nil()
     }

@@ -2193,7 +2193,7 @@ fn test_bt1005_writeback_inferred_return_type_appears_in_method_return_types() {
     // before codegen, so the emitted BEAM module contains it in method_return_types.
     let src = "
 Actor subclass: Counter
-  state: value: Integer = 0
+  state: value :: Integer = 0
   getValue => value
 ";
     let tokens = crate::source_analysis::lex_with_eof(src);
@@ -2218,7 +2218,7 @@ fn test_bt1005_explicit_annotation_not_overwritten_by_writeback() {
     // BT-1005: An explicitly annotated method must NOT be changed by the writeback pass.
     let src = "
 Actor subclass: Counter
-  state: value: Integer = 0
+  state: value :: Integer = 0
   getValue -> Integer => value
 ";
     let tokens = crate::source_analysis::lex_with_eof(src);
@@ -2265,7 +2265,7 @@ fn test_bt1005_standalone_method_writeback_infers_return_type() {
     // This exercises the module.method_definitions loop in infer_method_return_types.
     let src = "
 Actor subclass: Counter
-  state: value: Integer = 0
+  state: value :: Integer = 0
 
 Counter >> getValue => value
 ";
@@ -2291,7 +2291,7 @@ fn test_bt1005_untyped_param_does_not_shadow_state_field_type() {
     // is also Dynamic and no writeback annotation is emitted.
     let src = "
 Actor subclass: Counter
-  state: value: Integer = 0
+  state: value :: Integer = 0
   add: value => value
 ";
     // `add: value` has an untyped param named `value` that shadows the `value`

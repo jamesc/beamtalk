@@ -48,7 +48,7 @@ Object subclass: TestCase
   /// self assert: (1 + 1 =:= 2)    // passes
   /// self assert: false              // fails
   /// ```
-  assert: condition: Boolean -> Nil =>
+  assert: condition :: Boolean -> Nil =>
     condition ifFalse: [
       self fail: "Assertion failed: expected true, got {condition}"
     ]
@@ -61,7 +61,7 @@ Object subclass: TestCase
   /// self deny: (1 =:= 2)           // passes
   /// self deny: true                 // fails
   /// ```
-  deny: condition: Boolean -> Nil =>
+  deny: condition :: Boolean -> Nil =>
     condition ifTrue: [
       self fail: "Denial failed: expected false, got {condition}"
     ]
@@ -86,7 +86,7 @@ Object subclass: TestCase
   /// ```beamtalk
   /// self should: [1 / 0] raise: ZeroDivisionError
   /// ```
-  should: block: Block raise: errorKind: Object -> Nil =>
+  should: block :: Block raise: errorKind :: Object -> Nil =>
     @primitive "should:raise:"
 
   /// Fail the test immediately with the given `message`.
@@ -95,4 +95,4 @@ Object subclass: TestCase
   /// ```beamtalk
   /// self fail: "This branch should not be reached"
   /// ```
-  fail: message: String -> Nil => @primitive "fail:"
+  fail: message :: String -> Nil => @primitive "fail:"

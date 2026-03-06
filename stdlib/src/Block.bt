@@ -55,7 +55,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// x := 0. [x < 3] whileTrue: [x := x + 1]
   /// ```
-  whileTrue: bodyBlock: Block -> Nil => @intrinsic whileTrue
+  whileTrue: bodyBlock :: Block -> Nil => @intrinsic whileTrue
 
   /// Repeatedly evaluate `bodyBlock` while the receiver evaluates to false.
   ///
@@ -63,7 +63,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// x := 0. [x >= 3] whileFalse: [x := x + 1]
   /// ```
-  whileFalse: bodyBlock: Block -> Nil => @intrinsic whileFalse
+  whileFalse: bodyBlock :: Block -> Nil => @intrinsic whileFalse
 
   /// Evaluate the block repeatedly forever (until an exception is raised).
   ///
@@ -79,7 +79,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [1 / 0] on: Error do: [:e | e message]
   /// ```
-  on: exClass do: handler: Block => @intrinsic onDo
+  on: exClass do: handler :: Block => @intrinsic onDo
 
   /// Evaluate the block, then always evaluate `cleanupBlock` (even on exception).
   ///
@@ -87,7 +87,7 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [File readAll: "data.txt"] ensure: [Transcript show: "done"]
   /// ```
-  ensure: cleanupBlock: Block => @intrinsic ensure
+  ensure: cleanupBlock :: Block => @intrinsic ensure
 
   /// Return the number of arguments the block expects.
   ///
@@ -104,4 +104,4 @@ sealed Object subclass: Block
   /// ```beamtalk
   /// [:x :y | x + y] valueWithArguments: #(3, 4)   // => 7
   /// ```
-  valueWithArguments: args: List => @primitive "valueWithArguments:"
+  valueWithArguments: args :: List => @primitive "valueWithArguments:"

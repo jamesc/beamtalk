@@ -8,15 +8,15 @@
 /// - typed state fields
 /// - typed parameters and return annotations
 typed Actor subclass: TypedAccount
-  state: balance: Integer = 0
-  state: owner: String = ""
+  state: balance :: Integer = 0
+  state: owner :: String = ""
 
-  deposit: amount: Integer -> Integer =>
+  deposit: amount :: Integer -> Integer =>
     amount < 0 ifTrue: [self error: "Amount must be non-negative"]
     self.balance := self.balance + amount
     self.balance
 
-  withdraw: amount: Integer -> Integer =>
+  withdraw: amount :: Integer -> Integer =>
     amount < 0 ifTrue: [self error: "Amount must be non-negative"]
     self.balance < amount ifTrue: [self error: "Insufficient funds (balance: "
         ++ self.balance printString
@@ -28,7 +28,7 @@ typed Actor subclass: TypedAccount
 
   balance -> Integer => self.balance
 
-  setOwner: name: String -> String =>
+  setOwner: name :: String -> String =>
     self.owner := name
     self.owner
 

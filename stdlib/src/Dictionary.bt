@@ -55,7 +55,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} at: #b ifAbsent: [0]            // => 0
   /// ```
-  at: key ifAbsent: block: Block => @primitive "at:ifAbsent:"
+  at: key ifAbsent: block :: Block => @primitive "at:ifAbsent:"
 
   /// Return a new dictionary with `key` mapped to `value`.
   ///
@@ -88,7 +88,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} merge: #{#b => 2}               // => #{#a => 1, #b => 2}
   /// ```
-  merge: other: Dictionary -> Dictionary => @primitive "merge:"
+  merge: other :: Dictionary -> Dictionary => @primitive "merge:"
 
   /// Test if the dictionary contains the given value.
   ///
@@ -105,7 +105,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} do: [:v | Transcript show: v]
   /// ```
-  do: block: Block -> Nil => @primitive "do:"
+  do: block :: Block -> Nil => @primitive "do:"
 
   /// Map `block` over each value, returning a new Dictionary with the
   /// same keys and transformed values.
@@ -117,7 +117,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1, #b => 2} collect: [:v | v * 10]  // => #{#a => 10, #b => 20}
   /// ```
-  collect: block: Block -> Dictionary =>
+  collect: block :: Block -> Dictionary =>
     dict := self
     self keys inject: #{} into: [:acc :k |
       acc at: k put: (block value: (dict at: k))
@@ -129,7 +129,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} doWithKey: [:k :v | Transcript show: k]
   /// ```
-  doWithKey: block: Block -> Nil => @primitive "doWithKey:"
+  doWithKey: block :: Block -> Nil => @primitive "doWithKey:"
 
   /// Iterate over each key-value pair, evaluating `block` with key and value.
   ///
@@ -137,7 +137,7 @@ sealed Collection subclass: Dictionary
   /// ```beamtalk
   /// #{#a => 1} keysAndValuesDo: [:k :v | Transcript show: k]
   /// ```
-  keysAndValuesDo: block: Block -> Nil => self doWithKey: block
+  keysAndValuesDo: block :: Block -> Nil => self doWithKey: block
 
   /// Return a string representation using Beamtalk syntax.
   ///

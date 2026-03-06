@@ -2609,7 +2609,7 @@ mod tests {
     fn parse_state_with_type_annotation() {
         let module = parse_ok(
             "Actor subclass: Person
-  state: name: String = \"unnamed\"",
+  state: name :: String = \"unnamed\"",
         );
 
         assert_eq!(module.classes.len(), 1);
@@ -2729,7 +2729,7 @@ mod tests {
     fn parse_typed_keyword_param() {
         let module = parse_ok(
             "Actor subclass: BankAccount
-  deposit: amount: Integer => self.balance := self.balance + amount",
+  deposit: amount :: Integer => self.balance := self.balance + amount",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2747,7 +2747,7 @@ mod tests {
     fn parse_typed_keyword_params_multiple() {
         let module = parse_ok(
             "Actor subclass: BankAccount
-  transfer: amount: Integer to: target: BankAccount => self",
+  transfer: amount :: Integer to: target :: BankAccount => self",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2763,7 +2763,7 @@ mod tests {
     fn parse_typed_param_with_return_type() {
         let module = parse_ok(
             "Actor subclass: BankAccount
-  deposit: amount: Integer -> Integer => self.balance := self.balance + amount",
+  deposit: amount :: Integer -> Integer => self.balance := self.balance + amount",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2793,7 +2793,7 @@ mod tests {
     fn parse_binary_typed_param() {
         let module = parse_ok(
             "Object subclass: Number
-  + other: Number -> Number => self",
+  + other :: Number -> Number => self",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2809,7 +2809,7 @@ mod tests {
         // First param typed, second untyped
         let module = parse_ok(
             "Actor subclass: BankAccount
-  transfer: amount: Integer to: target => self",
+  transfer: amount :: Integer to: target => self",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2823,10 +2823,10 @@ mod tests {
 
     #[test]
     fn parse_keyword_typed_param_with_space_colon() {
-        // Space around colon: `amount : Integer` instead of `amount: Integer`
+        // DoubleColon with spaces: `amount :: Integer`
         let module = parse_ok(
             "Actor subclass: BankAccount
-  deposit: amount : Integer => self",
+  deposit: amount :: Integer => self",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2838,10 +2838,10 @@ mod tests {
 
     #[test]
     fn parse_binary_typed_param_with_space_colon() {
-        // Space around colon: `other : Number` instead of `other: Number`
+        // DoubleColon with spaces: `other :: Number`
         let module = parse_ok(
             "Actor subclass: Adder
-  + other : Number => self",
+  + other :: Number => self",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2887,10 +2887,10 @@ mod tests {
 
     #[test]
     fn parse_arrow_method_with_keyword_typed_param() {
-        // ADR 0047: `-> value: Association =>` — typed param via Keyword token
+        // `-> value :: Association =>` — typed param via DoubleColon
         let module = parse_ok(
             "Object subclass: Pair
-  -> value: Association => @primitive \"->\"",
+  -> value :: Association => @primitive \"->\"",
         );
 
         let method = &module.classes[0].methods[0];
@@ -2926,7 +2926,7 @@ mod tests {
         let module = parse_ok(
             "Actor subclass: Counter
   state: value = 0
-  state: name: String
+  state: name :: String
 
   increment => self.value := self.value + 1
   decrement => self.value := self.value - 1",
@@ -4747,7 +4747,7 @@ Actor subclass: Counter
     fn parse_typed_class() {
         let module = parse_ok(
             "typed Actor subclass: StrictCounter
-  state: value: Integer = 0
+  state: value :: Integer = 0
 
   increment -> Integer => self.value := self.value + 1",
         );
@@ -4767,8 +4767,8 @@ Actor subclass: Counter
     fn parse_typed_sealed_class() {
         let module = parse_ok(
             "typed sealed Actor subclass: ImmutablePoint
-  state: x: Integer = 0
-  state: y: Integer = 0",
+  state: x :: Integer = 0
+  state: y :: Integer = 0",
         );
 
         let class = &module.classes[0];

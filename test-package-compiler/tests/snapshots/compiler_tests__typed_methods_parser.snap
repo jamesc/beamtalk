@@ -32,7 +32,7 @@ Module {
                         name: "value",
                         span: Span {
                             start: 86,
-                            end: 92,
+                            end: 91,
                         },
                     },
                     type_annotation: Some(
@@ -40,8 +40,8 @@ Module {
                             Identifier {
                                 name: "Integer",
                                 span: Span {
-                                    start: 93,
-                                    end: 100,
+                                    start: 95,
+                                    end: 102,
                                 },
                             },
                         ),
@@ -52,8 +52,8 @@ Module {
                                 0,
                             ),
                             Span {
-                                start: 103,
-                                end: 104,
+                                start: 105,
+                                end: 106,
                             },
                         ),
                     ),
@@ -64,7 +64,7 @@ Module {
                     doc_comment: None,
                     span: Span {
                         start: 79,
-                        end: 104,
+                        end: 106,
                     },
                 },
             ],
@@ -85,21 +85,21 @@ Module {
                                     Identifier {
                                         name: "self",
                                         span: Span {
-                                            start: 166,
-                                            end: 170,
+                                            start: 168,
+                                            end: 172,
                                         },
                                     },
                                 ),
                                 field: Identifier {
                                     name: "value",
                                     span: Span {
-                                        start: 171,
-                                        end: 176,
+                                        start: 173,
+                                        end: 178,
                                     },
                                 },
                                 span: Span {
-                                    start: 166,
-                                    end: 176,
+                                    start: 168,
+                                    end: 178,
                                 },
                             },
                             preceding_blank_line: false,
@@ -110,8 +110,8 @@ Module {
                             Identifier {
                                 name: "Integer",
                                 span: Span {
-                                    start: 155,
-                                    end: 162,
+                                    start: 157,
+                                    end: 164,
                                 },
                             },
                         ),
@@ -123,8 +123,8 @@ Module {
                             Comment {
                                 content: "Unary method with return type",
                                 span: Span {
-                                    start: 143,
-                                    end: 151,
+                                    start: 145,
+                                    end: 153,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -134,8 +134,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 143,
-                        end: 176,
+                        start: 145,
+                        end: 178,
                     },
                 },
                 MethodDefinition {
@@ -144,8 +144,8 @@ Module {
                             KeywordPart {
                                 keyword: "deposit:",
                                 span: Span {
-                                    start: 237,
-                                    end: 245,
+                                    start: 239,
+                                    end: 247,
                                 },
                             },
                         ],
@@ -155,8 +155,8 @@ Module {
                             name: Identifier {
                                 name: "amount",
                                 span: Span {
-                                    start: 246,
-                                    end: 252,
+                                    start: 248,
+                                    end: 254,
                                 },
                             },
                             type_annotation: Some(
@@ -164,8 +164,8 @@ Module {
                                     Identifier {
                                         name: "Integer",
                                         span: Span {
-                                            start: 254,
-                                            end: 261,
+                                            start: 258,
+                                            end: 265,
                                         },
                                     },
                                 ),
@@ -184,21 +184,21 @@ Module {
                                         Identifier {
                                             name: "self",
                                             span: Span {
-                                                start: 280,
-                                                end: 284,
+                                                start: 284,
+                                                end: 288,
                                             },
                                         },
                                     ),
                                     field: Identifier {
                                         name: "value",
                                         span: Span {
-                                            start: 285,
-                                            end: 290,
+                                            start: 289,
+                                            end: 294,
                                         },
                                     },
                                     span: Span {
-                                        start: 280,
-                                        end: 290,
+                                        start: 284,
+                                        end: 294,
                                     },
                                 },
                                 value: MessageSend {
@@ -207,21 +207,21 @@ Module {
                                             Identifier {
                                                 name: "self",
                                                 span: Span {
-                                                    start: 294,
-                                                    end: 298,
+                                                    start: 298,
+                                                    end: 302,
                                                 },
                                             },
                                         ),
                                         field: Identifier {
                                             name: "value",
                                             span: Span {
-                                                start: 299,
-                                                end: 304,
+                                                start: 303,
+                                                end: 308,
                                             },
                                         },
                                         span: Span {
-                                            start: 294,
-                                            end: 304,
+                                            start: 298,
+                                            end: 308,
                                         },
                                     },
                                     selector: Binary(
@@ -232,21 +232,21 @@ Module {
                                             Identifier {
                                                 name: "amount",
                                                 span: Span {
-                                                    start: 307,
-                                                    end: 313,
+                                                    start: 311,
+                                                    end: 317,
                                                 },
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 294,
-                                        end: 313,
+                                        start: 298,
+                                        end: 317,
                                     },
                                 },
                                 span: Span {
-                                    start: 280,
-                                    end: 313,
+                                    start: 284,
+                                    end: 317,
                                 },
                             },
                             preceding_blank_line: false,
@@ -257,8 +257,8 @@ Module {
                             Identifier {
                                 name: "Integer",
                                 span: Span {
-                                    start: 265,
-                                    end: 272,
+                                    start: 269,
+                                    end: 276,
                                 },
                             },
                         ),
@@ -270,8 +270,8 @@ Module {
                             Comment {
                                 content: "Keyword method with typed parameter and return type",
                                 span: Span {
-                                    start: 237,
-                                    end: 245,
+                                    start: 239,
+                                    end: 247,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -281,8 +281,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 237,
-                        end: 313,
+                        start: 239,
+                        end: 317,
                     },
                 },
                 MethodDefinition {
@@ -304,21 +304,21 @@ Module {
                                                 Identifier {
                                                     name: "self",
                                                     span: Span {
-                                                        start: 384,
-                                                        end: 388,
+                                                        start: 388,
+                                                        end: 392,
                                                     },
                                                 },
                                             ),
                                             field: Identifier {
                                                 name: "value",
                                                 span: Span {
-                                                    start: 389,
-                                                    end: 394,
+                                                    start: 393,
+                                                    end: 398,
                                                 },
                                             },
                                             span: Span {
-                                                start: 384,
-                                                end: 394,
+                                                start: 388,
+                                                end: 398,
                                             },
                                         },
                                         selector: Binary(
@@ -330,20 +330,20 @@ Module {
                                                     0,
                                                 ),
                                                 Span {
-                                                    start: 397,
-                                                    end: 398,
+                                                    start: 401,
+                                                    end: 402,
                                                 },
                                             ),
                                         ],
                                         is_cast: false,
                                         span: Span {
-                                            start: 384,
-                                            end: 398,
+                                            start: 388,
+                                            end: 402,
                                         },
                                     },
                                     span: Span {
-                                        start: 383,
-                                        end: 399,
+                                        start: 387,
+                                        end: 403,
                                     },
                                 },
                                 selector: Keyword(
@@ -351,15 +351,15 @@ Module {
                                         KeywordPart {
                                             keyword: "ifTrue:",
                                             span: Span {
-                                                start: 400,
-                                                end: 407,
+                                                start: 404,
+                                                end: 411,
                                             },
                                         },
                                         KeywordPart {
                                             keyword: "ifFalse:",
                                             span: Span {
-                                                start: 421,
-                                                end: 429,
+                                                start: 425,
+                                                end: 433,
                                             },
                                         },
                                     ],
@@ -379,29 +379,29 @@ Module {
                                                             Identifier {
                                                                 name: "self",
                                                                 span: Span {
-                                                                    start: 409,
-                                                                    end: 413,
+                                                                    start: 413,
+                                                                    end: 417,
                                                                 },
                                                             },
                                                         ),
                                                         field: Identifier {
                                                             name: "value",
                                                             span: Span {
-                                                                start: 414,
-                                                                end: 419,
+                                                                start: 418,
+                                                                end: 423,
                                                             },
                                                         },
                                                         span: Span {
-                                                            start: 409,
-                                                            end: 419,
+                                                            start: 413,
+                                                            end: 423,
                                                         },
                                                     },
                                                     preceding_blank_line: false,
                                                 },
                                             ],
                                             span: Span {
-                                                start: 408,
-                                                end: 420,
+                                                start: 412,
+                                                end: 424,
                                             },
                                         },
                                     ),
@@ -418,8 +418,8 @@ Module {
                                                         Identifier {
                                                             name: "nil",
                                                             span: Span {
-                                                                start: 431,
-                                                                end: 434,
+                                                                start: 435,
+                                                                end: 438,
                                                             },
                                                         },
                                                     ),
@@ -427,16 +427,16 @@ Module {
                                                 },
                                             ],
                                             span: Span {
-                                                start: 430,
-                                                end: 435,
+                                                start: 434,
+                                                end: 439,
                                             },
                                         },
                                     ),
                                 ],
                                 is_cast: false,
                                 span: Span {
-                                    start: 383,
-                                    end: 435,
+                                    start: 387,
+                                    end: 439,
                                 },
                             },
                             preceding_blank_line: false,
@@ -449,8 +449,8 @@ Module {
                                     Identifier {
                                         name: "Integer",
                                         span: Span {
-                                            start: 362,
-                                            end: 369,
+                                            start: 366,
+                                            end: 373,
                                         },
                                     },
                                 ),
@@ -458,15 +458,15 @@ Module {
                                     Identifier {
                                         name: "Nil",
                                         span: Span {
-                                            start: 372,
-                                            end: 375,
+                                            start: 376,
+                                            end: 379,
                                         },
                                     },
                                 ),
                             ],
                             span: Span {
-                                start: 362,
-                                end: 375,
+                                start: 366,
+                                end: 379,
                             },
                         },
                     ),
@@ -477,8 +477,8 @@ Module {
                             Comment {
                                 content: "Method with union return type",
                                 span: Span {
-                                    start: 352,
-                                    end: 358,
+                                    start: 356,
+                                    end: 362,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -488,8 +488,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 352,
-                        end: 435,
+                        start: 356,
+                        end: 439,
                     },
                 },
                 MethodDefinition {
@@ -509,21 +509,21 @@ Module {
                                         Identifier {
                                             name: "self",
                                             span: Span {
-                                                start: 503,
-                                                end: 507,
+                                                start: 507,
+                                                end: 511,
                                             },
                                         },
                                     ),
                                     field: Identifier {
                                         name: "value",
                                         span: Span {
-                                            start: 508,
-                                            end: 513,
+                                            start: 512,
+                                            end: 517,
                                         },
                                     },
                                     span: Span {
-                                        start: 503,
-                                        end: 513,
+                                        start: 507,
+                                        end: 517,
                                     },
                                 },
                                 value: MessageSend {
@@ -532,21 +532,21 @@ Module {
                                             Identifier {
                                                 name: "self",
                                                 span: Span {
-                                                    start: 517,
-                                                    end: 521,
+                                                    start: 521,
+                                                    end: 525,
                                                 },
                                             },
                                         ),
                                         field: Identifier {
                                             name: "value",
                                             span: Span {
-                                                start: 522,
-                                                end: 527,
+                                                start: 526,
+                                                end: 531,
                                             },
                                         },
                                         span: Span {
-                                            start: 517,
-                                            end: 527,
+                                            start: 521,
+                                            end: 531,
                                         },
                                     },
                                     selector: Binary(
@@ -558,20 +558,20 @@ Module {
                                                 1,
                                             ),
                                             Span {
-                                                start: 530,
-                                                end: 531,
+                                                start: 534,
+                                                end: 535,
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 517,
-                                        end: 531,
+                                        start: 521,
+                                        end: 535,
                                     },
                                 },
                                 span: Span {
-                                    start: 503,
-                                    end: 531,
+                                    start: 507,
+                                    end: 535,
                                 },
                             },
                             preceding_blank_line: false,
@@ -585,8 +585,8 @@ Module {
                             Comment {
                                 content: "Untyped method (should not generate spec)",
                                 span: Span {
-                                    start: 486,
-                                    end: 495,
+                                    start: 490,
+                                    end: 499,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -596,8 +596,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 486,
-                        end: 531,
+                        start: 490,
+                        end: 535,
                     },
                 },
             ],
@@ -620,7 +620,7 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 48,
-                end: 531,
+                end: 535,
             },
         },
     ],
@@ -628,7 +628,7 @@ Module {
     expressions: [],
     span: Span {
         start: 48,
-        end: 531,
+        end: 535,
     },
     file_leading_comments: [],
     file_trailing_comments: [],
