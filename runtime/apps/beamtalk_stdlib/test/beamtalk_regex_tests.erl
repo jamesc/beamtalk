@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 %%%
 %%% Tests constructors, instance methods, string helper functions,
-%%% has_method/1, and error paths.
+%%% and error paths.
 
 -module(beamtalk_regex_tests).
 

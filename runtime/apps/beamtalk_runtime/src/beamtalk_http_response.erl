@@ -28,7 +28,7 @@
 %%% | `headers/1`   | List of [name, value] binary pairs             |
 %%% | `body/1`      | Response body (binary / String)                |
 %%% | `ok/1`        | True for 2xx status codes                      |
-%%% | `bodyAsJson/1`  | Parse body via beamtalk_json                   |
+%%% | `bodyAsJson/1`  | Parse body as JSON (jsx), null → nil           |
 %%% | `printString/1` | Human-readable representation                  |
 
 -module(beamtalk_http_response).

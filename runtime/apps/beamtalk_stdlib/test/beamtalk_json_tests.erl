@@ -5,8 +5,8 @@
 %%%
 %%% **DDD Context:** Object System Context
 %%%
-%%% Tests cover parse:/1, generate:/1, prettyPrint:/1, the FFI no-colon
-%%% aliases (parse/1, generate/1, prettyPrint/1), and has_method/1.
+%%% Tests cover parse:/1, generate:/1, prettyPrint:/1, and the FFI no-colon
+%%% aliases (parse/1, generate/1, prettyPrint/1).
 
 -module(beamtalk_json_tests).
 

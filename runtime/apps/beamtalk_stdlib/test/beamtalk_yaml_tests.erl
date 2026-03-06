@@ -5,7 +5,7 @@
 %%%
 %%% **DDD Context:** Object System Context
 %%%
-%%% Tests parse:, parseAll:, generate:, parseFile:, has_method/1,
+%%% Tests parse:, parseAll:, generate:, parseFile:,
 %%% type conversion, error paths, and round-trip correctness.
 
 -module(beamtalk_yaml_tests).
