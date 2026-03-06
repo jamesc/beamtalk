@@ -617,6 +617,8 @@ mod tests {
         assert_eq!(TokenKind::Symbol("sym".into()).to_string(), "#sym");
         assert_eq!(TokenKind::Keyword("at:".into()).to_string(), "at:");
         assert_eq!(TokenKind::BinarySelector("+".into()).to_string(), "+");
+        assert_eq!(TokenKind::Arrow.to_string(), "->"); // ADR 0047
+        assert_eq!(TokenKind::FatArrow.to_string(), "=>");
         assert_eq!(TokenKind::Assign.to_string(), ":=");
         assert_eq!(TokenKind::Caret.to_string(), "^");
         assert_eq!(TokenKind::AtPrimitive.to_string(), "@primitive");
@@ -641,6 +643,7 @@ mod tests {
         // is_selector
         assert!(TokenKind::Keyword("at:".into()).is_selector());
         assert!(TokenKind::BinarySelector("+".into()).is_selector());
+        assert!(TokenKind::Arrow.is_selector()); // Arrow is a binary selector (ADR 0047)
         assert!(!TokenKind::Identifier("x".into()).is_selector());
 
         // is_delimiter

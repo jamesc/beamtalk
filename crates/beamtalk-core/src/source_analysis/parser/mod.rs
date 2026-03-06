@@ -301,8 +301,11 @@ pub fn is_input_complete(source: &str) -> bool {
         return false;
     }
 
-    // Trailing binary operator missing its right operand (e.g., "1 +" or "3 *")
-    if let Some(TokenKind::BinarySelector(_)) = last_meaningful_kind {
+    // Trailing binary operator missing its right operand (e.g., "1 +" or "3 *" or "x ->")
+    if matches!(
+        last_meaningful_kind,
+        Some(TokenKind::BinarySelector(_) | TokenKind::Arrow)
+    ) {
         return false;
     }
 
@@ -2846,6 +2849,40 @@ mod tests {
         assert_eq!(method.parameters.len(), 1);
         assert_eq!(method.parameters[0].name.name, "other");
         assert!(method.parameters[0].type_annotation.is_some());
+    }
+
+    #[test]
+    fn parse_arrow_as_binary_method_selector() {
+        // ADR 0047: `->` (Arrow token) is a valid binary method selector name
+        let module = parse_ok(
+            "Object subclass: Pair
+  -> value => self",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "->");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.name, "value");
+        assert!(method.return_type.is_none());
+    }
+
+    #[test]
+    fn parse_arrow_method_with_return_type() {
+        // ADR 0047: `->` method can have a return type annotation (the original bug fix)
+        let module = parse_ok(
+            "Object subclass: Pair
+  -> value -> Association => @primitive \"->\"",
+        );
+
+        let method = &module.classes[0].methods[0];
+        assert_eq!(method.selector.name(), "->");
+        assert_eq!(method.parameters.len(), 1);
+        assert_eq!(method.parameters[0].name.name, "value");
+        assert!(method.return_type.is_some());
+        match method.return_type.as_ref().unwrap() {
+            crate::ast::TypeAnnotation::Simple(id) => assert_eq!(id.name, "Association"),
+            other => panic!("Expected Simple type annotation, got {other:?}"),
+        }
     }
 
     #[test]
