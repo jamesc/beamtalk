@@ -1058,7 +1058,9 @@ impl Parser {
     /// Handles all keyword param forms:
     /// - `keyword: param =>` (untyped)
     /// - `keyword: paramName: Type =>` (typed via `Keyword` token, i.e. `name:`)
+    /// - `keyword: paramName: Type | Type =>` (union type)
     /// - `keyword: param : Type =>` (typed via separate `Colon` token)
+    /// - `keyword: param : Type | Type =>` (union type)
     /// - Any of the above followed by `-> ReturnType =>`
     pub(super) fn is_keyword_method_params_at(&self, start_offset: usize) -> bool {
         let mut offset = start_offset;
@@ -1073,20 +1075,29 @@ impl Parser {
             // Check for typed parameter written as `paramName: Type`
             // where `paramName:` is lexed as a Keyword token followed by an Identifier (the type)
             if let Some(TokenKind::Keyword(_)) = self.peek_at(offset) {
-                if matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
-                    // Skip paramName: and Type
-                    offset += 2;
-                    match self.peek_at(offset) {
-                        Some(TokenKind::FatArrow) => return true,
-                        Some(TokenKind::Keyword(_)) => continue,
-                        Some(TokenKind::Arrow) => {
-                            return self.is_return_type_then_fat_arrow(offset);
-                        }
-                        _ => return false,
-                    }
+                // Skip `paramName:`
+                offset += 1;
+                // Must be followed by a type Identifier
+                if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
+                    return false;
                 }
-                // Keyword not followed by Identifier — not a valid typed param
-                return false;
+                offset += 1;
+                // Skip union tail: `| Type | Type ...`
+                while matches!(self.peek_at(offset), Some(TokenKind::Pipe)) {
+                    offset += 1;
+                    if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
+                        return false;
+                    }
+                    offset += 1;
+                }
+                match self.peek_at(offset) {
+                    Some(TokenKind::FatArrow) => return true,
+                    Some(TokenKind::Keyword(_)) => continue,
+                    Some(TokenKind::Arrow) => {
+                        return self.is_return_type_then_fat_arrow(offset);
+                    }
+                    _ => return false,
+                }
             }
 
             // Expect parameter name (untyped or `param : Type` form)
@@ -1103,10 +1114,19 @@ impl Parser {
                 }
                 Some(TokenKind::Colon) => {
                     // Typed parameter: `paramName : Type`
-                    if !matches!(self.peek_at(offset + 1), Some(TokenKind::Identifier(_))) {
+                    offset += 1; // skip `:`
+                    if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
                         return false;
                     }
-                    offset += 2; // skip `:` and type name
+                    offset += 1; // skip type name
+                    // Skip union tail: `| Type | Type ...`
+                    while matches!(self.peek_at(offset), Some(TokenKind::Pipe)) {
+                        offset += 1;
+                        if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
+                            return false;
+                        }
+                        offset += 1;
+                    }
                     match self.peek_at(offset) {
                         Some(TokenKind::FatArrow) => return true,
                         Some(TokenKind::Keyword(_)) => {} // More keyword parts, continue loop
@@ -4675,6 +4695,36 @@ Actor subclass: Counter
         assert_eq!(
             module.method_definitions[1].method.selector.name().as_str(),
             "getValue"
+        );
+    }
+
+    #[test]
+    fn standalone_method_definition_keyword_typed_param() {
+        // Regression: BT-1151 — is_keyword_method_selector_at must handle typed params
+        // just like is_keyword_method_at; without the shared helper this was missed.
+        let module = parse_ok("Counter >> setValue: v: Integer => self.value := v");
+        assert_eq!(module.method_definitions.len(), 1);
+        let method_def = &module.method_definitions[0];
+        assert_eq!(method_def.class_name.name.as_str(), "Counter");
+        assert_eq!(method_def.method.selector.name().as_str(), "setValue:");
+        assert_eq!(method_def.method.parameters.len(), 1);
+    }
+
+    #[test]
+    fn standalone_method_definition_keyword_union_typed_param_lookahead() {
+        // The lookahead (is_keyword_method_params_at) must not return false for
+        // `deposit: amount: Integer | Nil =>` — it should recognise this as a method
+        // definition even though the parser does not yet fully parse union-typed params.
+        // This test verifies the lookahead produces a method_definition node (with
+        // possible parse errors) rather than silently treating it as an expression.
+        let source = "Counter >> deposit: amount: Integer | Nil => self.value := 0";
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, _diagnostics) = crate::source_analysis::parser::parse(tokens);
+        // The lookahead must identify this as a standalone method, not an expression
+        assert_eq!(module.method_definitions.len(), 1);
+        assert_eq!(
+            module.method_definitions[0].class_name.name.as_str(),
+            "Counter"
         );
     }
 
