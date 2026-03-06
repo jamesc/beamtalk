@@ -14,7 +14,7 @@
 TestCase subclass: SubprocessTest
   state: isUnix = false
 
-  setUp => self.isUnix := System osFamily =:= "unix"
+  setUp => self.isUnix := System osFamily = "unix"
 
   testSpawnAndReadLine =>
     self.isUnix
