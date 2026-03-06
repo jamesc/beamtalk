@@ -413,8 +413,21 @@ The Beamtalk API (message selectors) does not change. Callers of `resp status`, 
 
 ## References
 
-- Related issues: BT-1142, BT-1143, BT-1144, BT-1145, BT-1146, BT-1147
-- Related ADRs: ADR 0005 (BEAM Object Model — Value vs Actor), ADR 0007 (Compilable Stdlib with Primitive Injection — scope narrowed by this ADR), ADR 0013 (Class Variables, Class-Side Methods, Instantiation — keyword constructor protocol), ADR 0025 (Gradual Typing and Protocols — Phase 2 type annotations on `state:` use `: Type`; ADR 0053 supersedes with `:: Type`), ADR 0028 (BEAM Interop Strategy — FFI mechanism), ADR 0034 (Stdlib Self-Hosting), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State — immutability guarantee for Value `state:`), ADR 0043 (Sync-by-Default Actor Messaging — messaging model for Erlang-backed Actor facades), ADR 0049 (Remove Method-Level `sealed`), ADR 0051 (Subprocess Execution — `@native` proof-of-concept), ADR 0053 (Double-Colon Type Annotation Syntax — `state:` type annotation form; supersedes ADR 0025 `: Type` syntax)
-- Gleam external functions: https://gleam.run/documentation/externals/
-- Pharo UFFI: https://files.pharo.org/books-pdfs/booklet-uFFI/UFFIDRAFT.pdf
-- Newspeak Alien FFI: https://bracha.org/newspeak.pdf
+- Related issues:
+  - BT-1142, BT-1143, BT-1144, BT-1145, BT-1146, BT-1147
+- Related ADRs:
+  - ADR 0005 (BEAM Object Model — Value vs Actor)
+  - ADR 0007 (Compilable Stdlib with Primitive Injection — scope narrowed by this ADR)
+  - ADR 0013 (Class Variables, Class-Side Methods, Instantiation — keyword constructor protocol)
+  - ADR 0025 (Gradual Typing and Protocols — Phase 2 type annotations on `state:` use `: Type`; ADR 0053 supersedes with `:: Type`)
+  - ADR 0028 (BEAM Interop Strategy — FFI mechanism)
+  - ADR 0034 (Stdlib Self-Hosting)
+  - ADR 0042 (Immutable Value Objects and Actor-Only Mutable State — immutability guarantee for Value `state:`)
+  - ADR 0043 (Sync-by-Default Actor Messaging — messaging model for Erlang-backed Actor facades)
+  - ADR 0049 (Remove Method-Level `sealed`)
+  - ADR 0051 (Subprocess Execution — `@native` proof-of-concept)
+  - ADR 0053 (Double-Colon Type Annotation Syntax — `state:` type annotation form; supersedes ADR 0025 `: Type` syntax)
+- External references:
+  - Gleam external functions: https://gleam.run/documentation/externals/
+  - Pharo UFFI: https://files.pharo.org/books-pdfs/booklet-uFFI/UFFIDRAFT.pdf
+  - Newspeak Alien FFI: https://bracha.org/newspeak.pdf
