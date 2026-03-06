@@ -153,7 +153,7 @@ bootstrap_singleton(ClassName, RegName, State) ->
             State;
         Pid ->
             Obj = build_object_ref(ClassName, Pid),
-            set_class_variable(ClassName, Obj),
+            _ = set_class_variable(ClassName, Obj),
             MonRef = erlang:monitor(process, Pid),
             ?LOG_DEBUG("Bootstrap: wired singleton", #{class => ClassName, pid => Pid}),
             Monitors = maps:put(MonRef, {ClassName, RegName}, State#state.monitors),
@@ -168,8 +168,15 @@ bootstrap_singleton(ClassName, RegName, State) ->
 bootstrap_value_singleton(ClassName, Module, Retries) ->
     try
         Obj = Module:new(),
-        set_class_variable(ClassName, Obj),
-        ?LOG_DEBUG("Bootstrap: wired value singleton", #{class => ClassName})
+        case set_class_variable(ClassName, Obj) of
+            ok ->
+                ?LOG_DEBUG("Bootstrap: wired value singleton", #{class => ClassName});
+            {error, class_not_found} ->
+                ?LOG_WARNING("Bootstrap: value singleton class not loaded yet", #{
+                    class => ClassName
+                }),
+                erlang:send_after(200, self(), {rebootstrap_value, ClassName, Module, Retries + 1})
+        end
     catch
         error:#beamtalk_error{kind = class_not_found} ->
             ?LOG_WARNING("Bootstrap: value singleton class not loaded yet", #{class => ClassName}),
@@ -201,12 +208,15 @@ class_module(ClassName) ->
     end.
 
 %% @private Set the `current` class variable on the class.
+%% Returns `ok` on success or `{error, class_not_found}` if the class is not
+%% yet registered (so callers can detect failure and schedule a retry).
+-spec set_class_variable(atom(), term()) -> ok | {error, class_not_found}.
 set_class_variable(ClassName, Obj) ->
     try
         beamtalk_runtime_api:set_class_var(ClassName, current, Obj)
     catch
         error:#beamtalk_error{kind = class_not_found} ->
-            ?LOG_WARNING("Bootstrap: class not loaded yet", #{class => ClassName})
+            {error, class_not_found}
     end.
 
 %% @private Activate compiled project modules from _build/dev/ebin/ (BT-739).
