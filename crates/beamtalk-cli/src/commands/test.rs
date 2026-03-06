@@ -230,6 +230,7 @@ fn compile_fixtures_directory(
     output_dir: &Utf8Path,
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
+    warnings_as_errors: bool,
 ) -> Result<Vec<String>> {
     if !fixtures_dir.is_dir() {
         return Ok(Vec::new());
@@ -266,6 +267,7 @@ fn compile_fixtures_directory(
             output_dir,
             class_module_index,
             class_superclass_index,
+            warnings_as_errors,
         )?;
         module_names.push(module_name);
     }
@@ -279,6 +281,7 @@ fn compile_fixture(
     output_dir: &Utf8Path,
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
+    warnings_as_errors: bool,
 ) -> Result<String> {
     let module_name = fixture_module_name(fixture_path)?;
 
@@ -288,6 +291,7 @@ fn compile_fixture(
         stdlib_mode: false,
         allow_primitives: false,
         workspace_mode: false,
+        warnings_as_errors,
         ..Default::default()
     };
 
@@ -362,6 +366,7 @@ fn compile_test_file(
     output_dir: &Utf8Path,
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
+    warnings_as_errors: bool,
 ) -> Result<()> {
     let core_file = output_dir.join(format!("{module_name}.core"));
 
@@ -369,6 +374,7 @@ fn compile_test_file(
         stdlib_mode: false,
         allow_primitives: false,
         workspace_mode: false,
+        warnings_as_errors,
         ..Default::default()
     };
 
@@ -731,6 +737,7 @@ fn discover_and_compile_doc_tests(
     build_dir: &Utf8Path,
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
+    warnings_as_errors: bool,
 ) -> Result<Vec<CompiledDocTestResult>> {
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
@@ -750,6 +757,7 @@ fn discover_and_compile_doc_tests(
         build_dir,
         class_module_index,
         class_superclass_index,
+        warnings_as_errors,
     )
     .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
 
@@ -958,7 +966,7 @@ struct CompiledDocTest {
 /// `EUnit` wrappers, and runs all tests in a single BEAM process.
 #[instrument(skip_all)]
 #[allow(clippy::too_many_lines)] // test orchestration pipeline: discover, compile, run, report
-pub fn run_tests(path: &str) -> Result<()> {
+pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
     info!("Starting BUnit test run");
     let start_time = Instant::now();
 
@@ -1093,6 +1101,7 @@ pub fn run_tests(path: &str) -> Result<()> {
         &build_dir,
         &class_module_index,
         &class_superclass_index,
+        warnings_as_errors,
     )?;
     for module_name in &precompiled {
         precompiled_modules.insert(module_name.clone());
@@ -1190,6 +1199,7 @@ pub fn run_tests(path: &str) -> Result<()> {
                 &build_dir,
                 &file_class_index,
                 &file_super_index,
+                warnings_as_errors,
             )?;
             all_fixture_modules.push(module_name);
         }
@@ -1203,6 +1213,7 @@ pub fn run_tests(path: &str) -> Result<()> {
                 &build_dir,
                 &file_class_index,
                 &file_super_index,
+                warnings_as_errors,
             )?;
 
             // Generate EUnit wrapper
@@ -1228,6 +1239,7 @@ pub fn run_tests(path: &str) -> Result<()> {
             &build_dir,
             &file_class_index,
             &file_super_index,
+            warnings_as_errors,
         )?;
         for dr in doc_results {
             all_erl_files.push(dr.erl_file);
@@ -1261,6 +1273,7 @@ pub fn run_tests(path: &str) -> Result<()> {
             stdlib_mode: false,
             allow_primitives: false,
             workspace_mode: false,
+            warnings_as_errors,
             ..Default::default()
         };
         super::build::build(pkg_root.as_str(), &build_options).wrap_err_with(|| {
