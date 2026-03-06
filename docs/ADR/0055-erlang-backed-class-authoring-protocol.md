@@ -196,12 +196,12 @@ The Erlang module uses the keyword naming convention throughout:
 
 This mechanism is available to **all library authors** — no compiler changes required. It is the recommended approach for any operation that cannot be expressed in pure Beamtalk.
 
-### Scope of `@primitive`
+### Scope of `@primitive` and `@intrinsic`
 
-With this protocol, `@primitive` is narrowed to two cases only:
+With this protocol, the two pragma forms are narrowed to one case each (per the ADR 0007 amendment that introduced `@intrinsic`):
 
-1. **Direct BEAM BIF calls** — `erlang:'+'`, `erlang:integer_to_binary`, `string:length` — where the Erlang module name is fixed by the BEAM standard library and cannot follow the keyword convention
-2. **Structural intrinsics** — compiler-generated patterns with no corresponding Erlang function: `timesRepeat:`, `blockValue`, `actorSpawn`
+1. **`@primitive "selector"`** — Direct BEAM BIF calls — `erlang:'+'`, `erlang:integer_to_binary`, `string:length` — where the Erlang module name is fixed by the BEAM standard library and cannot follow the keyword convention
+2. **`@intrinsic name`** — Structural intrinsics — compiler-generated patterns with no corresponding Erlang function: `timesRepeat:`, `blockValue`, `actorSpawn`
 
 **`@primitive` must not be used** for calls into `beamtalk_*` modules — those use `(Erlang module)` FFI.
 
@@ -216,7 +216,8 @@ With this protocol, `@primitive` is narrowed to two cases only:
 | Actor with Beamtalk logic | `state:` declarations + method bodies (existing) |
 | Actor backed by Erlang gen_server | See ADR 0056 (`@native`) |
 | Utility/namespace Object subclass (class-side only) | `(Erlang module) selector: arg` in each class method body |
-| Direct BIF or Erlang stdlib call | `@primitive` (narrowed scope) |
+| Direct BIF or Erlang stdlib call | `@primitive "selector"` (narrowed scope) |
+| Structural compiler intrinsic | `@intrinsic name` (e.g. `blockValue`, `actorSpawn`) |
 
 ## Prior Art
 
@@ -356,7 +357,7 @@ Generate the entire `beamtalk_foo.erl` from the `.bt` file, with stubs for compl
 - Any library author can create Erlang-backed classes without touching the Rust compiler
 - `state:` declarations on Value classes make object structure visible to `inspect`, the LSP, and gradual typing
 - The keyword constructor provides compile-time validation when field declarations change
-- `@primitive` scope is narrowed to BIFs and structural intrinsics — the list stops growing. Of ~442 `@primitive` entries across stdlib, approximately 24 (in HTTPResponse, JSON, Yaml, Regex, System) are targeted for immediate migration to `state:` or FFI; an additional ~12 (Timer, Random) are candidates; the remainder are direct BIF calls or structural intrinsics that correctly remain `@primitive`
+- `@primitive` scope is narrowed to direct BIF calls only — the list stops growing. `@intrinsic` covers structural compiler intrinsics (`blockValue`, `actorSpawn`, etc.) and is already separate (ADR 0007 amendment). Of ~442 `@primitive` entries across stdlib, approximately 24 (in HTTPResponse, JSON, Yaml, Regex, System) are targeted for immediate migration to `state:` or FFI; an additional ~12 (Timer, Random) are candidates; the remainder are direct BIF calls that correctly remain `@primitive`
 - `dispatch/3` and `has_method/1` boilerplate can be removed from existing stdlib modules
 - `beamtalk_http_response.erl` can be **deleted entirely** — `state:` declarations + pure Beamtalk methods replace all its functionality
 - Extends generation pipeline that already exists in `value_type_codegen.rs` — minimal new work
