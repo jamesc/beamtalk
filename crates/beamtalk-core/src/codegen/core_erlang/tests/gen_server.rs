@@ -2408,6 +2408,10 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
         code.contains("'integer'"),
         "Typed Integer fields should map to integer(). Got:\n{code}"
     );
+    assert!(
+        code.contains("'export_type' = [{'t', 0}]"),
+        "Should emit export_type([t/0]) so other modules can reference Point:t(). Got:\n{code}"
+    );
 }
 
 #[test]
@@ -2425,5 +2429,9 @@ fn test_value_subclass_untyped_fields_still_emit_type_alias() {
     assert!(
         code.contains("'any'"),
         "Untyped fields should use any(). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'export_type' = [{'t', 0}]"),
+        "Should emit export_type([t/0]) so other modules can reference Point:t(). Got:\n{code}"
     );
 }

@@ -1,13 +1,20 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Dialyzer `-spec` generation from type annotations.
+//! Dialyzer `-spec` and `-type` generation from type annotations.
 //!
 //! **DDD Context:** Code Generation
 //!
-//! Generates Core Erlang `'spec'` module attributes from Beamtalk type
-//! annotations on method parameters and return types. This enables Dialyzer
-//! to perform cross-language type checking at the BEAM level.
+//! Generates Core Erlang `'spec'` and `'type'` module attributes from Beamtalk
+//! type annotations. This enables Dialyzer to perform cross-language type
+//! checking at the BEAM level.
+//!
+//! - [`generate_class_specs`] / [`format_spec_attributes`] — emit `-spec`
+//!   annotations for each method with type-annotated parameters or return type
+//! - [`generate_type_alias`] — emit a `-type t()` map alias for Value classes
+//!   with `state:` declarations, so Erlang producers can reference `Module:t()`
+//!   in their own `-spec` annotations (requires a paired `-export_type([t/0])`
+//!   emitted by `value_type_codegen.rs`)
 //!
 //! ## Core Erlang Spec Format
 //!
