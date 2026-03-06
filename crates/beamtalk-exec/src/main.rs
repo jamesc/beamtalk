@@ -278,8 +278,8 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
         );
     }
 
-    // Spawn stdout reader thread.
-    {
+    // Spawn stdout reader thread — join handle passed to reaper for synchronisation.
+    let stdout_handle = {
         let writer = Arc::clone(writer);
         thread::spawn(move || {
             let mut buf = [0u8; 4096];
@@ -296,11 +296,11 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
                     }
                 }
             }
-        });
-    }
+        })
+    };
 
-    // Spawn stderr reader thread.
-    {
+    // Spawn stderr reader thread — join handle passed to reaper for synchronisation.
+    let stderr_handle = {
         let writer = Arc::clone(writer);
         thread::spawn(move || {
             let mut buf = [0u8; 4096];
@@ -317,10 +317,17 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
                     }
                 }
             }
-        });
-    }
+        })
+    };
 
-    // Spawn reaper thread: waits for the child and sends the exit event.
+    // Spawn reaper thread: waits for the child, joins reader threads, then sends exit event.
+    //
+    // Joining the reader threads before sending exit guarantees that all buffered
+    // stdout/stderr data has already been written to the port before the BEAM
+    // gen_server receives the exit signal.  Without this, the reaper could send
+    // exit before the reader threads have flushed their final reads, causing the
+    // gen_server to close the port and discard in-flight data (the race fixed by
+    // the 10 ms drain timer in the previous workaround — see BT-1148).
     {
         let writer = Arc::clone(writer);
         let children = Arc::clone(children);
@@ -337,6 +344,11 @@ fn handle_spawn(request: &Map, writer: &SharedWriter, children: &ChildMap) -> Re
             if let Ok(mut map) = children.lock() {
                 map.remove(&child_id);
             }
+            // Join reader threads: blocks until both have finished sending all
+            // stdout/stderr events.  Errors from join (thread panicked) are
+            // ignored — we still send the exit event.
+            let _ = stdout_handle.join();
+            let _ = stderr_handle.join();
             send_event(&writer, &exit_event(child_id, exit_code));
         });
     }

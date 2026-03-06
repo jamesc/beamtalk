@@ -415,6 +415,12 @@ test-runtime: build-stdlib
         echo "$OUTPUT"
         exit 1
     fi
+    if OUTPUT=$(BEAMTALK_NO_FILE_LOG=1 rebar3 eunit --dir=apps/beamtalk_stdlib/test 2>&1); then
+        echo "$OUTPUT" | tail -2
+    else
+        echo "$OUTPUT"
+        exit 1
+    fi
     echo "✅ Runtime tests complete"
 
 [windows]
@@ -422,6 +428,7 @@ test-runtime: build-stdlib
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
     @$env:BEAMTALK_NO_FILE_LOG = "1"; $output = rebar3 eunit '--app=beamtalk_runtime,beamtalk_workspace' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
+    @$env:BEAMTALK_NO_FILE_LOG = "1"; $output = rebar3 eunit '--dir=apps/beamtalk_stdlib/test' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @echo "✅ Runtime tests complete"
 
 # Run performance benchmarks (separate from unit tests, ~30s)
@@ -474,6 +481,12 @@ coverage-runtime:
     if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace --cover 2>&1); then
         echo "$OUTPUT"
         echo "❌ Runtime tests failed"
+        exit 1
+    fi
+    echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || true
+    if ! OUTPUT=$(rebar3 eunit --dir=apps/beamtalk_stdlib/test --cover 2>&1); then
+        echo "$OUTPUT"
+        echo "❌ Stdlib tests failed"
         exit 1
     fi
     echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || true

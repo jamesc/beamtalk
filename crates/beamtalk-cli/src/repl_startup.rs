@@ -41,7 +41,13 @@ pub struct BeamPaths {
     /// Path to the `yamerl` YAML library's `ebin/` directory (BT-1122).
     pub yamerl_ebin: PathBuf,
     /// Path to the `beamtalk_stdlib` application's `ebin/` directory.
+    /// In Dev layout this is `apps/beamtalk_stdlib/ebin/` (Beamtalk-compiled class beams).
     pub stdlib_ebin: PathBuf,
+    /// Path to the rebar3-compiled Erlang modules for `beamtalk_stdlib`.
+    /// In Dev layout this is `_build/default/lib/beamtalk_stdlib/ebin/`
+    /// (contains `beamtalk_yaml.beam`, `beamtalk_json.beam`, `beamtalk_regex.beam`).
+    /// In Installed layout this equals `stdlib_ebin`.
+    pub stdlib_erlang_ebin: PathBuf,
     /// Path to the `cowboy` HTTP server's `ebin/` directory (ADR 0020).
     pub cowboy_ebin: PathBuf,
     /// Path to the `cowlib` library's `ebin/` directory (cowboy dependency).
@@ -75,8 +81,10 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
                 cowlib_ebin: build_lib_dir.join("cowlib/ebin"),
                 ranch_ebin: build_lib_dir.join("ranch/ebin"),
                 gun_ebin: build_lib_dir.join("gun/ebin"),
-                // Stdlib beams are produced by `beamtalk build-stdlib` under apps/, not _build/
+                // Stdlib class beams are produced by `beamtalk build-stdlib` under apps/, not _build/
                 stdlib_ebin: runtime_dir.join("apps/beamtalk_stdlib/ebin"),
+                // Stdlib Erlang module beams are rebar3-compiled to _build/
+                stdlib_erlang_ebin: build_lib_dir.join("beamtalk_stdlib/ebin"),
             }
         }
         RuntimeLayout::Installed => {
@@ -92,6 +100,8 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
                 ranch_ebin: lib_dir.join("ranch/ebin"),
                 gun_ebin: lib_dir.join("gun/ebin"),
                 stdlib_ebin: lib_dir.join("beamtalk_stdlib/ebin"),
+                // In installed layout, Erlang modules and class beams are in the same dir
+                stdlib_erlang_ebin: lib_dir.join("beamtalk_stdlib/ebin"),
             }
         }
     }
@@ -226,6 +236,7 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
         &paths.ranch_ebin,
         &paths.gun_ebin,
         &paths.stdlib_ebin,
+        &paths.stdlib_erlang_ebin,
     ];
     let mut args = Vec::with_capacity(dirs.len() * 2);
     for dir in dirs {
@@ -460,14 +471,18 @@ mod tests {
             paths.stdlib_ebin,
             PathBuf::from("/rt/apps/beamtalk_stdlib/ebin")
         );
+        assert_eq!(
+            paths.stdlib_erlang_ebin,
+            PathBuf::from("/rt/_build/default/lib/beamtalk_stdlib/ebin")
+        );
     }
 
     #[test]
     fn beam_pa_args_alternates_flag_and_path() {
         let paths = beam_paths(Path::new("/rt"));
         let args = beam_pa_args(&paths);
-        // Should be 20 elements: 10 dirs × 2 (flag + path)
-        assert_eq!(args.len(), 20);
+        // Should be 22 elements: 11 dirs × 2 (flag + path)
+        assert_eq!(args.len(), 22);
         for i in (0..args.len()).step_by(2) {
             assert_eq!(args[i], "-pa");
         }
@@ -519,6 +534,10 @@ mod tests {
             paths.stdlib_ebin,
             PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_stdlib/ebin")
         );
+        assert_eq!(
+            paths.stdlib_erlang_ebin,
+            PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_stdlib/ebin")
+        );
     }
 
     #[test]
@@ -529,10 +548,15 @@ mod tests {
             paths.runtime_ebin,
             PathBuf::from("/rt/_build/default/lib/beamtalk_runtime/ebin")
         );
-        // But stdlib is under apps/
+        // Class beams are under apps/
         assert_eq!(
             paths.stdlib_ebin,
             PathBuf::from("/rt/apps/beamtalk_stdlib/ebin")
+        );
+        // Erlang module beams are under _build/
+        assert_eq!(
+            paths.stdlib_erlang_ebin,
+            PathBuf::from("/rt/_build/default/lib/beamtalk_stdlib/ebin")
         );
     }
 

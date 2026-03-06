@@ -10,7 +10,7 @@
 %%% - headers/1 accessor
 %%% - body/1 accessor
 %%% - ok/1 for 2xx/non-2xx ranges
-%%% - bodyAsJson/1 delegating to beamtalk_json
+%%% - bodyAsJson/1 decoding JSON via jsx with null→nil normalization and parse_error on invalid JSON
 %%% - printString/1 human-readable representation
 
 -module(beamtalk_http_response_tests).
@@ -136,6 +136,13 @@ body_as_json_object_test() ->
     Resp = make_resp(200, [], <<"{\"key\":\"val\"}">>),
     Result = beamtalk_http_response:'bodyAsJson'(Resp),
     ?assertMatch(#{<<"key">> := <<"val">>}, Result).
+
+body_as_json_invalid_test() ->
+    Resp = make_resp(200, [], <<"{invalid">>),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}},
+        beamtalk_http_response:'bodyAsJson'(Resp)
+    ).
 
 %%% ============================================================================
 %%% printString/1

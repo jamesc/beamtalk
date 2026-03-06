@@ -5,156 +5,119 @@
 // EOF, timeout, stderr, exitCode, close, stop, lines Stream, stderrLines Stream.
 //
 // All tests require Unix (absolute paths: /bin/echo, /bin/cat, /bin/sh,
-// /bin/sleep). Each test guards with self.isUnix ifTrue: [...] and is a
-// no-op (pass) on non-Unix platforms until BT-1149 adds a BUnit skip mechanism.
-//
-// Note: ^ inside a block returns from the block, not the enclosing method, so
-// the guard uses ifTrue: wrapping rather than ifFalse: [^nil].
+// /bin/sleep). Non-Unix platforms are marked as skipped via self skip:.
 
 TestCase subclass: SubprocessTest
-  state: isUnix = false
-
-  setUp =>
-    @expect dnu  // String understands = at runtime; type checker doesn't resolve it on Object
-    self.isUnix := System osFamily = "unix"
 
   testSpawnAndReadLine =>
-    self.isUnix
-      ifTrue: [
-        // echo outputs one line then exits
-        agent := Subprocess open: "/bin/echo" args: #("hello")
-        self assert: agent isAlive
-        self assert: agent readLine equals: "hello"
-        // After process exits and buffer is drained, readLine returns nil (EOF)
-        self assert: agent readLine equals: nil
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // echo outputs one line then exits
+    agent := Subprocess open: "/bin/echo" args: #("hello")
+    self assert: agent isAlive
+    self assert: agent readLine equals: "hello"
+    // After process exits and buffer is drained, readLine returns nil (EOF)
+    self assert: agent readLine equals: nil
+    self assert: agent stop equals: #ok
 
   testWriteLineAndReadLine =>
-    self.isUnix
-      ifTrue: [
-        // cat echoes stdin lines back to stdout
-        agent := Subprocess open: "/bin/cat" args: #()
-        agent writeLine: "hello world"
-        self assert: agent readLine equals: "hello world"
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // cat echoes stdin lines back to stdout
+    agent := Subprocess open: "/bin/cat" args: #()
+    agent writeLine: "hello world"
+    self assert: agent readLine equals: "hello world"
+    self assert: agent stop equals: #ok
 
   testReadLineEofReturnsNil =>
-    self.isUnix
-      ifTrue: [
-        // echo produces one line; second readLine returns nil (EOF)
-        agent := Subprocess open: "/bin/echo" args: #("goodbye")
-        self assert: agent readLine equals: "goodbye"
-        self assert: agent readLine equals: nil
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // echo produces one line; second readLine returns nil (EOF)
+    agent := Subprocess open: "/bin/echo" args: #("goodbye")
+    self assert: agent readLine equals: "goodbye"
+    self assert: agent readLine equals: nil
+    self assert: agent stop equals: #ok
 
   testReadLineWithTimeoutReturnsNil =>
-    self.isUnix
-      ifTrue: [
-        // cat blocks waiting for stdin; readLine: returns nil after timeout
-        agent := Subprocess open: "/bin/cat" args: #()
-        self assert: (agent readLine: 100) equals: nil
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // cat blocks waiting for stdin; readLine: returns nil after timeout
+    agent := Subprocess open: "/bin/cat" args: #()
+    self assert: (agent readLine: 100) equals: nil
+    self assert: agent stop equals: #ok
 
   testSeparateStderrChannel =>
-    self.isUnix
-      ifTrue: [
-        // sh writes only to stderr; stdout readLine returns nil, stderr returns the line
-        agent := Subprocess open: "/bin/sh" args: #("-c", "echo err >&2")
-        self assert: agent readLine equals: nil
-        self assert: agent readStderrLine equals: "err"
-        self assert: agent readStderrLine equals: nil
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // sh writes only to stderr; stdout readLine returns nil, stderr returns the line
+    agent := Subprocess open: "/bin/sh" args: #("-c", "echo err >&2")
+    self assert: agent readLine equals: nil
+    self assert: agent readStderrLine equals: "err"
+    self assert: agent readStderrLine equals: nil
+    self assert: agent stop equals: #ok
 
   testStdoutAndStderrAreIndependent =>
-    self.isUnix
-      ifTrue: [
-        // sh writes to both channels independently
-        agent := Subprocess open: "/bin/sh" args: #("-c", "echo out; echo err >&2")
-        self assert: agent readLine equals: "out"
-        self assert: agent readStderrLine equals: "err"
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // sh writes to both channels independently
+    agent := Subprocess open: "/bin/sh" args: #("-c", "echo out; echo err >&2")
+    self assert: agent readLine equals: "out"
+    self assert: agent readStderrLine equals: "err"
+    self assert: agent stop equals: #ok
 
   testExitCodeNilWhileRunning =>
-    self.isUnix
-      ifTrue: [
-        // sleep stays running; exitCode is nil until exit
-        agent := Subprocess open: "/bin/sleep" args: #("10")
-        self assert: agent exitCode equals: nil
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // sleep stays running; exitCode is nil until exit
+    agent := Subprocess open: "/bin/sleep" args: #("10")
+    self assert: agent exitCode equals: nil
+    self assert: agent stop equals: #ok
 
   testExitCodeAfterExit =>
-    self.isUnix
-      ifTrue: [
-        // echo exits with code 0; after draining output exitCode is 0
-        agent := Subprocess open: "/bin/echo" args: #("done")
-        self assert: agent readLine equals: "done"
-        // Second readLine blocks until subprocess exits; when nil is returned
-        // the exit event has been processed and exitCode is set
-        self assert: agent readLine equals: nil
-        self assert: agent exitCode equals: 0
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // echo exits with code 0; after draining output exitCode is 0
+    agent := Subprocess open: "/bin/echo" args: #("done")
+    self assert: agent readLine equals: "done"
+    // Second readLine blocks until subprocess exits; when nil is returned
+    // the exit event has been processed and exitCode is set
+    self assert: agent readLine equals: nil
+    self assert: agent exitCode equals: 0
+    self assert: agent stop equals: #ok
 
   testCloseRaisesPortClosedOnWriteLine =>
-    self.isUnix
-      ifTrue: [
-        // After close, writeLine: raises port_closed
-        agent := Subprocess open: "/bin/cat" args: #()
-        self assert: agent close equals: nil
-        self should: [agent writeLine: "after close"] raise: #port_closed
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // After close, writeLine: raises port_closed
+    agent := Subprocess open: "/bin/cat" args: #()
+    self assert: agent close equals: nil
+    self should: [agent writeLine: "after close"] raise: #port_closed
+    self assert: agent stop equals: #ok
 
   testCloseIdempotent =>
-    self.isUnix
-      ifTrue: [
-        // close can be called multiple times safely
-        agent := Subprocess open: "/bin/cat" args: #()
-        self assert: agent close equals: nil
-        self assert: agent close equals: nil
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // close can be called multiple times safely
+    agent := Subprocess open: "/bin/cat" args: #()
+    self assert: agent close equals: nil
+    self assert: agent close equals: nil
+    self assert: agent stop equals: #ok
 
   testStopLifecycle =>
-    self.isUnix
-      ifTrue: [
-        // Standard Actor lifecycle: isAlive, stop, deny isAlive
-        agent := Subprocess open: "/bin/cat" args: #()
-        self assert: agent isAlive
-        self assert: agent stop equals: #ok
-        self deny: agent isAlive
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // Standard Actor lifecycle: isAlive, stop, deny isAlive
+    agent := Subprocess open: "/bin/cat" args: #()
+    self assert: agent isAlive
+    self assert: agent stop equals: #ok
+    self deny: agent isAlive
 
   testLinesStream =>
-    self.isUnix
-      ifTrue: [
-        // printf writes three lines to stdout; lines asList materializes them
-        agent := Subprocess open: "/bin/sh" args: #("-c", "printf 'alpha\nbeta\ngamma\n'")
-        self assert: agent lines asList equals: #("alpha", "beta", "gamma")
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // printf writes three lines to stdout; lines asList materializes them
+    agent := Subprocess open: "/bin/sh" args: #("-c", "printf 'alpha\nbeta\ngamma\n'")
+    self assert: agent lines asList equals: #("alpha", "beta", "gamma")
+    self assert: agent stop equals: #ok
 
   testStderrLinesStream =>
-    self.isUnix
-      ifTrue: [
-        // echo writes three lines to stderr; stderrLines asList materializes them
-        agent := Subprocess open: "/bin/sh" args: #("-c", "echo x >&2; echo y >&2; echo z >&2")
-        self assert: agent stderrLines asList equals: #("x", "y", "z")
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // echo writes three lines to stderr; stderrLines asList materializes them
+    agent := Subprocess open: "/bin/sh" args: #("-c", "echo x >&2; echo y >&2; echo z >&2")
+    self assert: agent stderrLines asList equals: #("x", "y", "z")
+    self assert: agent stop equals: #ok
 
   testReadStderrLineTimeout =>
-    self.isUnix
-      ifTrue: [
-        // cat produces no stderr; readStderrLine: returns nil after timeout
-        agent := Subprocess open: "/bin/cat" args: #()
-        self assert: (agent readStderrLine: 100) equals: nil
-        self assert: agent stop equals: #ok
-      ]
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    // cat produces no stderr; readStderrLine: returns nil after timeout
+    agent := Subprocess open: "/bin/cat" args: #()
+    self assert: (agent readStderrLine: 100) equals: nil
+    self assert: agent stop equals: #ok

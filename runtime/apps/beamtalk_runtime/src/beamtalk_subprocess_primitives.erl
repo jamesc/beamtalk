@@ -3,7 +3,7 @@
 
 %%% @doc Primitive dispatch for the Subprocess actor class (ADR 0051, BT-1132).
 %%%
-%%% **DDD Context:** runtime
+%%% **DDD Context:** Actor System Context
 %%%
 %%% Implements class-side `@primitive` methods for `Subprocess`. The compiled
 %%% `bt@stdlib@subprocess:dispatch/3` delegates here for any selector that
@@ -65,10 +65,10 @@ dispatch(Selector, _Args, _Self) ->
 %%% Internal helpers
 %%% ============================================================================
 
-%% @private Start a beamtalk_subprocess gen_server and return a beamtalk_object.
+%% @private Start a supervised beamtalk_subprocess gen_server and return a beamtalk_object.
 -spec start_subprocess(map(), atom()) -> #beamtalk_object{}.
 start_subprocess(Config, Selector) ->
-    case beamtalk_subprocess:start_link(Config) of
+    case beamtalk_subprocess_sup:start_child(Config) of
         {ok, Pid} ->
             #beamtalk_object{
                 class = 'Subprocess',

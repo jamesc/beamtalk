@@ -6,12 +6,12 @@
 %%% **DDD Context:** Object System Context
 %%%
 %%% Tests constructors, instance methods, string helper functions,
-%%% has_method/1, and error paths.
+%%% and error paths.
 
 -module(beamtalk_regex_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Helpers
@@ -105,18 +105,6 @@ source_test() ->
 print_string_test() ->
     R = make_regex(<<"[a-z]+">>),
     ?assertEqual(<<"Regex([a-z]+)">>, beamtalk_regex:'printString'(R)).
-
-%%% ============================================================================
-%%% has_method/1
-%%% ============================================================================
-
-has_method_known_test() ->
-    ?assert(beamtalk_regex:has_method(source)),
-    ?assert(beamtalk_regex:has_method('printString')).
-
-has_method_unknown_test() ->
-    ?assertNot(beamtalk_regex:has_method(foobar)),
-    ?assertNot(beamtalk_regex:has_method(new)).
 
 %%% ============================================================================
 %%% matches_regex/2 — String + Pattern or Compiled Regex

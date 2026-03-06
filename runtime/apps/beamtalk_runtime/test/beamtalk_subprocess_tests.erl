@@ -316,6 +316,35 @@ lines_stream_yields_correct_sequence_test() ->
     end.
 
 %%% ============================================================================
+%%% fast-exit stderr race regression (BT-1148)
+%%% ============================================================================
+
+%% Regression test for the port closure race: a fast-exiting process that writes
+%% only to stderr must not lose data.  Before BT-1148 this failed ~20% of the
+%% time because the reaper sent the exit event before the reader thread had
+%% finished flushing stderr data.
+fast_exit_stderr_data_not_lost_test_() ->
+    case os:type() of
+        {unix, _} ->
+            %% Run 50 times: pre-fix failure rate was ~20%, giving (0.8)^50 < 0.001% false-pass chance.
+            Tests = [
+                begin
+                    {ok, Pid} = beamtalk_subprocess:start(#{
+                        executable => <<"/bin/sh">>,
+                        args => [<<"-c">>, <<"echo err >&2">>]
+                    }),
+                    Line = gen_server:call(Pid, {readStderrLine, []}, 5000),
+                    gen_server:stop(Pid),
+                    ?_assertEqual(<<"err">>, Line)
+                end
+             || _ <- lists:seq(1, 50)
+            ],
+            Tests;
+        _ ->
+            []
+    end.
+
+%%% ============================================================================
 %%% stderrLines — Stream yields correct sequence
 %%% ============================================================================
 
