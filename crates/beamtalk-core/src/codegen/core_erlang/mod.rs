@@ -1436,11 +1436,7 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    docvec![
-                        "call '",
-                        actor_module,
-                        "':'dispatch'(Selector, Args, Self)",
-                    ],
+                    docvec!["call '", actor_module, "':'dispatch'(Selector, Args, Self)",],
                 ]
             ),
             "\n\n",
