@@ -171,23 +171,25 @@ whether code is correct, evaluate it directly rather than inferring from source.
 | Tool | When to use |
 |------|-------------|
 | `evaluate` | Test expressions, explore values, prototype code snippets |
+| `complete` | Get autocompletion suggestions for partial input |
 | `load_file` | Load a `.bt` file into the workspace before evaluating it |
 | `reload_module` | Hot-reload a module after editing — migrates live actors |
+| `unload` | Remove a module and its classes from the workspace |
 | `list_modules` | Check what's currently loaded |
 | `list_actors` | See running actors and their classes |
 | `inspect` | Examine a live actor's state by PID |
-| `run_tests` | Run BUnit tests (class name, or all) |
+| `test` | Run BUnit tests — pass a class name or omit to run all |
 | `docs` | Look up stdlib class or method docs — primary stdlib reference |
-| `info` | Get full symbol info: superclass chain, methods, source location |
 | `show_codegen` | Inspect generated Core Erlang to debug compilation |
 | `get_bindings` | See current REPL variable bindings |
+| `clear` | Reset the REPL — clears all bindings |
+| `interrupt` | Cancel a stuck or long-running evaluation |
+| `describe` | List available MCP ops and protocol version |
 
-**Stdlib reference:** use `docs` and `info` instead of guessing. The stdlib
-source lives inside the beamtalk installation, not in this project. Ask the
-live workspace:
+**Stdlib reference:** use `docs` instead of guessing. The stdlib source lives
+inside the beamtalk installation, not in this project. Ask the live workspace:
 - `docs: "Integer"` — all Integer methods with docs
-- `docs: "List" selector: "select:"` — specific method
-- `info: "Dictionary"` — superclass chain, method list, source path
+- `docs: "List" selector: "select:"` — specific method docs
 
 **Typical workflow:**
 1. Edit a `.bt` source file
@@ -206,9 +208,27 @@ catch most of these, but they waste time:
 | Trailing `.` on every statement | Newline is the separator | `.` is optional; use it only to disambiguate cascades |
 | `"this is a comment"` | `// this is a comment` | Double-quoted strings are data, not comments |
 | `^value` on last expression | Just write `value` | `^` is early-return only; last expr is implicitly returned |
+| `^expr` in a block (non-local return) | Use `ifTrue:` guard pattern | `^` in a block returns from the **block**, not the enclosing method |
 | Left-to-right binary (`2+3*4=20`) | Standard math precedence (`2+3*4=14`) | `*` binds tighter than `+` |
 | `'hello', name` concatenation | `"hello {name}"` interpolation | `++` also works: `"hello" ++ name` |
 | `[:x \| \|temp\| temp := x]` block locals | `[:x \| temp := x]` | No block-local declarations |
+| `:` for type annotations | `::` (double-colon) | `state: x :: Integer = 0`, `param :: Type -> ReturnType =>` |
+| Unknown message raises an error | Returns `false` silently | DNU returns `false` by default — not an exception |
+
+**`^` in blocks returns from the block, not the method:**
+
+```beamtalk
+// ^ exits the block — method continues after ifFalse:
+self.flag ifFalse: [^nil].   // nil returned from block; method goes on
+// To guard the whole test body, wrap the assertions:
+self.flag ifTrue: [
+  // all assertions here
+]
+```
+
+**DNU (doesNotUnderstand) returns `false` silently.** If you send a message
+a class doesn't implement, you get `false` back — not an error. Use `docs`
+in the live workspace to confirm a method exists before calling it.
 
 **Implicit return rule:** the last expression of a method body is always its
 return value. Never write `^` on the last line — only use it for early exits
