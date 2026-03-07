@@ -451,8 +451,11 @@ store_bootstrap_class_source(ModuleName, SourcePath) ->
                 end,
                 ClassNames
             );
-        {error, _Reason} ->
-            ok
+        {error, Reason} ->
+            ?LOG_DEBUG(
+                "Bootstrap: could not read source file for class source storage",
+                #{module => ModuleName, path => SourcePath, reason => Reason}
+            )
     end.
 
 %% @private Extract class name atoms from a loaded module's beamtalk_class attribute.
