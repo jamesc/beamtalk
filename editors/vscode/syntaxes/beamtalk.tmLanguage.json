@@ -188,7 +188,7 @@
             "1": { "name": "keyword.other.state.beamtalk" },
             "2": { "name": "variable.other.field.beamtalk" },
             "3": { "name": "keyword.operator.type-annotation.beamtalk" },
-            "4": { "name": "entity.name.type.beamtalk" }
+            "4": { "name": "entity.name.type.class.beamtalk" }
           }
         }
       ]
