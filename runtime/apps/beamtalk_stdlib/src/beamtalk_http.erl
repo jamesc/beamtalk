@@ -311,7 +311,7 @@ do_request(Method, Url, BtHeaders, Body, Timeout, Selector) ->
 %%
 %% `Deadline` is an absolute monotonic timestamp (ms) so the total wall-clock
 %% time across all gun:await calls is bounded by the original timeout.
--spec collect_response(pid(), reference(), reference(), integer() | infinity, atom()) ->
+-spec collect_response(pid(), reference(), reference(), integer(), atom()) ->
     beamtalk_http_response:t().
 collect_response(ConnPid, StreamRef, MRef, Deadline, Selector) ->
     case gun:await(ConnPid, StreamRef, remaining(Deadline), MRef) of
@@ -372,6 +372,7 @@ collect_response(ConnPid, StreamRef, MRef, Deadline, Selector) ->
 %% can be made (beamtalk_stdlib starts after beamtalk_runtime).
 -dialyzer({nowarn_function, make_response/3}).
 -spec make_response(non_neg_integer(), list(), binary()) -> beamtalk_http_response:t().
+
 make_response(Status, GunHeaders, Body) ->
     BtHeaders = from_gun_headers(GunHeaders),
     'bt@stdlib@httpresponse':'class_status:headers:body:'(

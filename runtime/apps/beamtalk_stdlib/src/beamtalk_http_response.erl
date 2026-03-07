@@ -28,7 +28,7 @@
 %%   state: body    :: String  = ""
 -type t() :: #{
     '$beamtalk_class' := 'HTTPResponse',
-    'status' := integer(),
-    'headers' := list(),
+    'status' := non_neg_integer(),
+    'headers' := [[binary()]],
     'body' := binary()
 }.
