@@ -212,12 +212,19 @@ handle_call({exitCode, []}, _From, State) ->
 handle_call({close, []}, _From, State) ->
     handle_close(State);
 handle_call(Msg, _From, State) ->
-    ?LOG_WARNING("Unknown call", #{message => Msg}),
+    Meta =
+        case Msg of
+            {Selector, Args} when is_atom(Selector), is_list(Args) ->
+                #{selector => Selector, arity => length(Args)};
+            _ ->
+                #{message_kind => unknown_call}
+        end,
+    ?LOG_WARNING("Unknown call", Meta),
     Err0 = beamtalk_error:new(does_not_understand, 'ReactiveSubprocess'),
     Err1 =
         case Msg of
-            {Selector, _Args} when is_atom(Selector) ->
-                beamtalk_error:with_selector(Err0, Selector);
+            {Sel, _Args} when is_atom(Sel) ->
+                beamtalk_error:with_selector(Err0, Sel);
             _ ->
                 Err0
         end,
@@ -230,6 +237,9 @@ handle_cast(_Msg, State) ->
 
 %% @doc Handle port data and port exit.
 -spec handle_info(term(), map()) -> {noreply, map()}.
+handle_info({Port, {data, _Packet}}, #{port := Port, port_closed := true} = State) ->
+    %% Port was closed — discard any queued data arriving after close.
+    {noreply, State};
 handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
     case erlang:binary_to_term(Packet, [safe]) of
         {stdout, _ChildId, Data} ->

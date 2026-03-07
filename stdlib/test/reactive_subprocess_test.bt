@@ -15,115 +15,97 @@ TestCase subclass: ReactiveSubprocessTest
   setUp => self.isUnix := System osFamily == "unix"
 
   testStdoutLinesPushedToNotify =>
-    self.isUnix
-      ifTrue: [
-        delegate := StubDelegate spawn
-        proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "printf 'alpha\nbeta\ngamma\n'") notify: delegate
-        // Wait for exit
-        self waitForExit: delegate from: proc
-        self assert: delegate stdoutLines equals: #("alpha", "beta", "gamma")
-        self assert: delegate stop equals: #ok
-        self assert: proc stop equals: #ok
-      ]
+    self.isUnix ifFalse: [^self skip: "Unix only"]
+    delegate := StubDelegate spawn
+    proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "printf 'alpha\nbeta\ngamma\n'") notify: delegate
+    // Wait for exit
+    self waitForExit: delegate from: proc
+    self assert: delegate stdoutLines equals: #("alpha", "beta", "gamma")
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
 
   testStderrLinesPushedToNotify =>
-    self.isUnix
-      ifTrue: [
-        delegate := StubDelegate spawn
-        proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "printf 'x\ny\nz\n' >&2") notify: delegate
-        self waitForExit: delegate from: proc
-        self assert: delegate stderrLines equals: #("x", "y", "z")
-        self assert: delegate stdoutLines equals: #()
-        self assert: delegate stop equals: #ok
-        self assert: proc stop equals: #ok
-      ]
+    self.isUnix ifFalse: [^self skip: "Unix only"]
+    delegate := StubDelegate spawn
+    proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "printf 'x\ny\nz\n' >&2") notify: delegate
+    self waitForExit: delegate from: proc
+    self assert: delegate stderrLines equals: #("x", "y", "z")
+    self assert: delegate stdoutLines equals: #()
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
 
   testExitCodePushedToNotify =>
-    self.isUnix
-      ifTrue: [
-        delegate := StubDelegate spawn
-        proc := ReactiveSubprocess open: "/bin/true" args: #() notify: delegate
-        self waitForExit: delegate from: proc
-        self assert: delegate exitCode equals: 0
-        self assert: delegate stop equals: #ok
-        self assert: proc stop equals: #ok
-      ]
+    self.isUnix ifFalse: [^self skip: "Unix only"]
+    delegate := StubDelegate spawn
+    proc := ReactiveSubprocess open: "/bin/true" args: #() notify: delegate
+    self waitForExit: delegate from: proc
+    self assert: delegate exitCode equals: 0
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
 
   testPartialLineFlushedOnExit =>
-    self.isUnix
-      ifTrue: [
-        delegate := StubDelegate spawn
-        proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "printf hello") notify: delegate
-        self waitForExit: delegate from: proc
-        self assert: delegate stdoutLines equals: #("hello")
-        self assert: delegate stop equals: #ok
-        self assert: proc stop equals: #ok
-      ]
+    self.isUnix ifFalse: [^self skip: "Unix only"]
+    delegate := StubDelegate spawn
+    proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "printf hello") notify: delegate
+    self waitForExit: delegate from: proc
+    self assert: delegate stdoutLines equals: #("hello")
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
 
   testStdoutAndStderrIndependent =>
-    self.isUnix
-      ifTrue: [
-        delegate := StubDelegate spawn
-        proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "echo out; echo err >&2") notify: delegate
-        self waitForExit: delegate from: proc
-        self assert: delegate stdoutLines equals: #("out")
-        self assert: delegate stderrLines equals: #("err")
-        self assert: delegate stop equals: #ok
-        self assert: proc stop equals: #ok
-      ]
+    self.isUnix ifFalse: [^self skip: "Unix only"]
+    delegate := StubDelegate spawn
+    proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "echo out; echo err >&2") notify: delegate
+    self waitForExit: delegate from: proc
+    self assert: delegate stdoutLines equals: #("out")
+    self assert: delegate stderrLines equals: #("err")
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
 
   testWriteLineDeliversThroughCat =>
-    self.isUnix
-      ifTrue: [
-        delegate := StubDelegate spawn
-        proc := ReactiveSubprocess open: "/bin/cat" args: #() notify: delegate
-        proc writeLine: "hello"
-        // Poll up to 5 s (50 × 100 ms) for cat to echo back
-        50 timesRepeat: [
-          (delegate stdoutLines includes: "hello") ifFalse: [Timer sleep: 100]
-        ]
-        self assert: (delegate stdoutLines includes: "hello")
-        proc close
-        self assert: delegate stop equals: #ok
-        self assert: proc stop equals: #ok
-      ]
+    self.isUnix ifFalse: [^self skip: "Unix only"]
+    delegate := StubDelegate spawn
+    proc := ReactiveSubprocess open: "/bin/cat" args: #() notify: delegate
+    proc writeLine: "hello"
+    // Poll up to 5 s (50 × 100 ms) for cat to echo back
+    50 timesRepeat: [
+      (delegate stdoutLines includes: "hello") ifFalse: [Timer sleep: 100]
+    ]
+    self assert: (delegate stdoutLines includes: "hello")
+    proc close
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
 
   testExitCodeNilWhileRunning =>
-    self.isUnix
-      ifTrue: [
-        delegate := StubDelegate spawn
-        proc := ReactiveSubprocess open: "/bin/sleep" args: #("10") notify: delegate
-        self assert: proc exitCode equals: nil
-        proc close
-        self assert: delegate stop equals: #ok
-        self assert: proc stop equals: #ok
-      ]
+    self.isUnix ifFalse: [^self skip: "Unix only"]
+    delegate := StubDelegate spawn
+    proc := ReactiveSubprocess open: "/bin/sleep" args: #("10") notify: delegate
+    self assert: proc exitCode equals: nil
+    proc close
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
 
   testCloseIsIdempotent =>
-    self.isUnix
-      ifTrue: [
-        delegate := StubDelegate spawn
-        proc := ReactiveSubprocess open: "/bin/cat" args: #() notify: delegate
-        self assert: proc close equals: nil
-        self assert: proc close equals: nil
-        self assert: delegate stop equals: #ok
-        self assert: proc stop equals: #ok
-      ]
+    self.isUnix ifFalse: [^self skip: "Unix only"]
+    delegate := StubDelegate spawn
+    proc := ReactiveSubprocess open: "/bin/cat" args: #() notify: delegate
+    self assert: proc close equals: nil
+    self assert: proc close equals: nil
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
 
   testOpenWithEnvAndDir =>
-    self.isUnix
-      ifTrue: [
-        delegate := StubDelegate spawn
-        // Print the env var and the working directory to verify both are passed through
-        proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "echo $BT_TEST_SEED; pwd") env: #{
-          "BT_TEST_SEED" => "hello1187"
-        } dir: "/tmp" notify: delegate
-        self waitForExit: delegate from: proc
-        self assert: (delegate stdoutLines includes: "hello1187")
-        self assert: (delegate stdoutLines includes: "/tmp")
-        self assert: delegate stop equals: #ok
-        self assert: proc stop equals: #ok
-      ]
+    self.isUnix ifFalse: [^self skip: "Unix only"]
+    delegate := StubDelegate spawn
+    // Print the env var and the working directory to verify both are passed through
+    proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "echo $BT_TEST_SEED; pwd") env: #{
+      "BT_TEST_SEED" => "hello1187"
+    } dir: "/tmp" notify: delegate
+    self waitForExit: delegate from: proc
+    self assert: (delegate stdoutLines includes: "hello1187")
+    self assert: (delegate stdoutLines includes: "/tmp")
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
 
   // Helper: poll up to 50 times (100ms each) for delegate exitReceived.
   // Uses timesRepeat: to avoid mutable local variables across block boundaries.
