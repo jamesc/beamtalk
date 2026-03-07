@@ -394,9 +394,29 @@ third was anticipated before the issue closed.
    `gen_server:call(Pid, superclass)`.
 3. Update the EUnit test that exercises the workaround path.
 
-### Phase 4 (follow-up ADR) — Migrate Static Metadata out of gen_server
+### Phase 3 — Add Regression Test (beamtalk_object_class_tests.erl)
 
-Once Phase 1-3 land and correctness is established, a follow-up ADR covers Option C:
+Add a test that:
+- Registers a class with a placeholder superclass (simulating bootstrap stub behaviour).
+- Calls `update_class` with a `ClassInfo` carrying `meta => #{superclass => 'Behaviour'}`.
+- Asserts `gen_server:call(Pid, superclass)` returns `'Behaviour'`.
+- Asserts `beamtalk_class_hierarchy_table:lookup(ClassName)` returns `{ok, 'Behaviour'}`.
+
+Run `just test` and `just test-stdlib` to verify the metaclass tower tests pass
+without the workaround.
+
+### Phase 4 — Simplify `collect_instance_methods_via_meta`
+
+With `walk_hierarchy/3` now producing correct results for all classes,
+`collect_instance_methods_via_meta/3` in `beamtalk_behaviour_intrinsics.erl` can be
+replaced by a `walk_hierarchy` call. This helper was introduced specifically to bypass
+the stale gen_server superclass; after Phase 1, its raison d'etre is gone. The
+method-collection logic can use the same `walk_hierarchy` + `gen_server:call` pattern
+as `metaclassClassMethods` and other intrinsics.
+
+### Phase 5 (follow-up ADR) — Migrate Static Metadata out of gen_server
+
+Once Phases 1-4 land and correctness is established, a follow-up ADR covers Option C:
 
 - Define the gen_server's role as **mutable runtime state only**: live method table
   (with hot-patch deltas), class variables, runtime-added docs.
@@ -407,9 +427,6 @@ Once Phase 1-3 land and correctness is established, a follow-up ADR covers Optio
   cache over it for dynamic classes).
 - Dynamic classes (no compiled module) populate the ETS cache at `register_class`
   time from `ClassInfo` — same data, different source.
-- Remove the now-redundant `superclass_name_from_meta_or_state` pattern entirely
-  (already done in Phase 2 above, but Phase 4 makes it structurally impossible to
-  reintroduce).
 
 Phase 4 is tracked separately. It does not block Phase 1-3.
 
