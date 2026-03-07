@@ -101,7 +101,7 @@ dispatch('open:args:env:dir:', [Command, Args, Env, Dir], _ClassSelf) when
     is_binary(Command), is_binary(Dir), is_map(Env)
 ->
     ArgsList = bt_array_to_list(Args),
-    EnvMap = maps:without([''], Env),
+    EnvMap = maps:without(['$beamtalk_class'], Env),
     start_subprocess(
         #{executable => Command, args => ArgsList, env => EnvMap, dir => Dir},
         'open:args:env:dir:'
@@ -138,7 +138,7 @@ start_subprocess(Config, Selector) ->
 %% Array literals in Beamtalk method call arguments compile to plain Erlang lists.
 %% Array values returned from collection operations are tagged maps.
 -spec bt_array_to_list(term()) -> list().
-bt_array_to_list(#{'' := 'Array', 'data' := Arr}) ->
+bt_array_to_list(#{'$beamtalk_class' := 'Array', 'data' := Arr}) ->
     case array:is_array(Arr) of
         true ->
             array:to_list(Arr);
