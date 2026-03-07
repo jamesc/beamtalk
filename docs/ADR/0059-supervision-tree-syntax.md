@@ -35,7 +35,7 @@ There is no way to define a user-level supervision tree from `.bt` files, neithe
 
 ```erlang
 %% Object subclass: Counter  state: count = 0
-CB = Supervisor classBuilder,
+CB = Object classBuilder,
 CB name: 'Counter';
    fields: #{count => 0};
    methods: #{...};
@@ -229,7 +229,7 @@ app which: DatabasePool.            // => #Actor<DatabasePool, <0.201.0>>
 app terminate: DatabasePool.        // gracefully stop the child
 ```
 
-These are message sends to the supervisor pid — the compiler generates `handle_call/3` clauses for each.
+These are message sends to the supervisor instance. **OTP supervisors cannot define custom `handle_call/3` clauses** — the compiler generates exported module functions (e.g., `'children'/1`, `'which:'/2`) that call `supervisor:which_children/1` and related OTP APIs directly. They are invoked via `gen:call/4` (same wire protocol as gen_server calls), not via `beamtalk_actor:sync_send/3`.
 
 ### Codegen: What Gets Generated
 
@@ -275,7 +275,8 @@ init([]) ->
     ],
     {ok, {SupFlags, ChildSpecs}}.
 
-%% Instance-side inspection methods (called via beamtalk_actor:sync_send)
+%% Instance-side inspection methods — exported functions, not handle_call/3 clauses.
+%% Called via gen:call/4 directly; supervisor processes do not dispatch gen_server user messages.
 'children'(Self) ->
     Pid = element(4, Self),
     [Id || {Id, _, _, _} <- supervisor:which_children(Pid)].
@@ -353,7 +354,7 @@ error: unknown supervision strategy '#unknown'
 2 |   strategy: #unknown
   |             ^^^^^^^^
   |
-  = help: valid strategies are #oneForOne, #oneForAll, #restForOne
+  = help: valid strategies are #oneForOne, #oneForAll, #restForOne, #dynamic
 ```
 
 ```
@@ -688,7 +689,7 @@ Add `Supervisor` as a new base class in the bootstrap sequence:
 - `register` detects `Supervisor` superclass and routes to supervisor module generation
 
 **Semantic Analysis:**
-- Validate `strategy:` is one of `#oneForOne`, `#oneForAll`, `#restForOne`
+- Validate `strategy:` is one of `#oneForOne`, `#oneForAll`, `#restForOne`, `#dynamic`
 - Validate `children:` is non-empty
 - Validate each child class exists in the class hierarchy and is an `Actor subclass:` or `Supervisor subclass:`
 - For `strategy: #dynamic`: validate `childClass:` is present, `children:` is absent; validate `childClass` is an `Actor subclass:`
@@ -728,7 +729,7 @@ Add `Supervisor` as a new base class in the bootstrap sequence:
 
 ## References
 
-- Related issues: BT-448
+- Related issues: BT-448 (supervision tree syntax epic), BT-567 (Pharo-style Announcements / pub-sub — named process registry gap), BT-1189 (ETS shared in-memory table class), BT-1190 (actor message timeout configuration syntax)
 - Related ADRs: ADR 0009 (OTP Application Structure), ADR 0015 (Signal-Time Exceptions — supervision motivation and pseudocode), ADR 0038 (ClassBuilder Protocol — class-level declarations mechanism), ADR 0042 (Immutable Value Objects / Actor-Only Mutable State), ADR 0043 (Sync-by-Default Actor Messaging), ADR 0056 (`@native` Erlang-Backed Actors)
 - OTP Supervisor: https://www.erlang.org/doc/man/supervisor.html
 - Elixir Supervisor: https://hexdocs.pm/elixir/Supervisor.html
