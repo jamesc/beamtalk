@@ -16,6 +16,19 @@ class variables, hot-patch state). `superclass` happens to be the only field tha
 is currently wrong — but the architectural direction is to stop duplicating static
 metadata in process state at all.
 
+## Summary
+
+**Phase 1 (this ADR):** Fix `apply_class_info/2` to update the `superclass` field
+from `__beamtalk_meta/0` when the compiled module loads. One field, targeted fix,
+restores correctness immediately.
+
+**Phase 2 (follow-up):** Migrate static structural metadata out of the class
+gen_server entirely, making `__beamtalk_meta/0` the sole source for immutable facts
+and the gen_server responsible only for mutable runtime state (live method table,
+class variables, hot-patch state). `superclass` happens to be the only field that
+is currently wrong — but the architectural direction is to stop duplicating static
+metadata in process state at all.
+
 ## Context
 
 ### The Problem
@@ -380,6 +393,25 @@ third was anticipated before the issue closed.
 2. Replace its two call sites in `metaclassSuperclass/1` with direct
    `gen_server:call(Pid, superclass)`.
 3. Update the EUnit test that exercises the workaround path.
+
+### Phase 4 (follow-up ADR) — Migrate Static Metadata out of gen_server
+
+Once Phase 1-3 land and correctness is established, a follow-up ADR covers Option C:
+
+- Define the gen_server's role as **mutable runtime state only**: live method table
+  (with hot-patch deltas), class variables, runtime-added docs.
+- Remove static fields from `#class_state{}`: `superclass`, `is_sealed`,
+  `is_abstract`, `fields`, `method_return_types`, `class_method_return_types`,
+  `method_signatures`, `class_method_signatures`, `doc` (~9 fields of 17).
+- All structural queries read from `__beamtalk_meta/0` directly (or a thin ETS
+  cache over it for dynamic classes).
+- Dynamic classes (no compiled module) populate the ETS cache at `register_class`
+  time from `ClassInfo` — same data, different source.
+- Remove the now-redundant `superclass_name_from_meta_or_state` pattern entirely
+  (already done in Phase 2 above, but Phase 4 makes it structurally impossible to
+  reintroduce).
+
+Phase 4 is tracked separately. It does not block Phase 1-3.
 
 ### Phase 3 — Add Regression Test (beamtalk_object_class_tests.erl)
 
