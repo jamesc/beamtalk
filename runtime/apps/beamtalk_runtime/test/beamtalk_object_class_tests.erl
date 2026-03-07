@@ -1450,7 +1450,7 @@ apply_class_info_preserves_dynamic_class_superclass_test_() ->
                 UpdateInfo = #{
                     name => 'BT1185StaleSuper',
                     module => test_module_dyn,
-                    instance_methods => #{greet => fun(S, _, St) -> {reply, ok, St, S} end}
+                    instance_methods => #{greet => #{arity => 0}}
                 },
                 {ok, _} = beamtalk_object_class:update_class('BT1185StaleSuper', UpdateInfo),
 
