@@ -23,7 +23,7 @@ Object subclass: TestResult
   /// ```beamtalk
   /// result passed      // => 5
   /// ```
-  passed -> Integer => @primitive "passed"
+  passed -> Integer => (Erlang beamtalk_test_runner) passed: self
 
   /// Number of test methods that failed or raised an error.
   ///
@@ -31,7 +31,7 @@ Object subclass: TestResult
   /// ```beamtalk
   /// result failed      // => 0
   /// ```
-  failed -> Integer => @primitive "failed"
+  failed -> Integer => (Erlang beamtalk_test_runner) failed: self
 
   /// Number of test methods that were skipped.
   ///
@@ -39,7 +39,7 @@ Object subclass: TestResult
   /// ```beamtalk
   /// result skipped     // => 0
   /// ```
-  skipped -> Integer => @primitive "skipped"
+  skipped -> Integer => (Erlang beamtalk_test_runner) skipped: self
 
   /// Total number of test methods that were run.
   ///
@@ -47,7 +47,7 @@ Object subclass: TestResult
   /// ```beamtalk
   /// result total       // => 5
   /// ```
-  total -> Integer => @primitive "total"
+  total -> Integer => (Erlang beamtalk_test_runner) total: self
 
   /// Wall-clock duration of the test run in seconds.
   ///
@@ -55,7 +55,7 @@ Object subclass: TestResult
   /// ```beamtalk
   /// result duration    // => 0.123
   /// ```
-  duration -> Float => @primitive "duration"
+  duration -> Float => (Erlang beamtalk_test_runner) duration: self
 
   /// List of failure records. Each record is a Dictionary with keys
   /// `name` (String) and `error` (String).
@@ -64,7 +64,7 @@ Object subclass: TestResult
   /// ```beamtalk
   /// result failures    // => []
   /// ```
-  failures -> List => @primitive "failures"
+  failures -> List => (Erlang beamtalk_test_runner) failures: self
 
   /// True if all tests passed (i.e. `failed` is zero).
   ///
@@ -72,7 +72,7 @@ Object subclass: TestResult
   /// ```beamtalk
   /// result hasPassed   // => true
   /// ```
-  hasPassed -> Boolean => @primitive "hasPassed"
+  hasPassed -> Boolean => (Erlang beamtalk_test_runner) hasPassed: self
 
   /// Human-readable summary line.
   ///
@@ -80,7 +80,7 @@ Object subclass: TestResult
   /// ```beamtalk
   /// result summary     // => "5 tests, 5 passed (0.1s)"
   /// ```
-  summary -> String => @primitive "summary"
+  summary -> String => (Erlang beamtalk_test_runner) summary: self
 
   /// Developer-readable representation of the result.
   ///
@@ -88,4 +88,4 @@ Object subclass: TestResult
   /// ```beamtalk
   /// result printString // => "TestResult(5/5 passed)"
   /// ```
-  printString -> String => @primitive "printString"
+  printString -> String => (Erlang beamtalk_test_runner) printString: self
