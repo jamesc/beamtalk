@@ -12,7 +12,7 @@ Beamtalk has several TCP communication channels that need security consideration
 
 | Channel | Transport | Current Security | Users |
 |---------|-----------|-----------------|-------|
-| **REPL ↔ Workspace** | WebSocket `ws://127.0.0.1:49152` | Loopback + cookie handshake (BT-683) | `beamtalk repl` |
+| **REPL ↔ Workspace** | WebSocket `ws://127.0.0.1:{port}` (OS-assigned ephemeral) | Loopback + cookie handshake (BT-683) | `beamtalk repl` |
 | **CLI ↔ Compiler** | OTP Port (stdin/stdout) | Process isolation (ADR 0022) | `beamtalk build`, LSP |
 | **Distributed Erlang** | Erlang distribution protocol | Cookie file (`chmod 600`) | Workspace-to-workspace |
 | **Web terminal** | Not yet implemented | — | Browser-based REPL |
@@ -28,7 +28,7 @@ Beamtalk has several TCP communication channels that need security consideration
 
 **Local development** (shared machine, CI runner, Docker `--net=host`):
 - Multiple users/processes share the loopback interface
-- Any local process can connect to `127.0.0.1:49152` — but cookie handshake (BT-683) requires knowledge of the workspace cookie file (`chmod 600`)
+- Any local process can connect to `127.0.0.1:{port}` — but cookie handshake (BT-683) requires knowledge of the workspace cookie file (`chmod 600`)
 - The REPL is an **arbitrary code execution endpoint** — a valid cookie = full RCE as the workspace owner
 - Erlang cookie protects distributed Erlang; workspace cookie protects the REPL WebSocket protocol
 - **Threat level: medium.** Loopback binding + cookie auth provides adequate isolation on shared machines where filesystem permissions are enforced.
@@ -72,7 +72,7 @@ Beamtalk has several TCP communication channels that need security consideration
 Local REPL connections remain loopback-only. The compiler uses an OTP Port (stdin/stdout, no network). The REPL protocol uses **WebSocket** as its sole transport, with a **cookie handshake** on connection to authenticate the client on shared machines.
 
 ```
-┌──────────────┐   WS ws://127.0.0.1:49152   ┌──────────────────┐
+┌──────────────┐   WS ws://127.0.0.1:{port}  ┌──────────────────┐
 │  beamtalk    │ ──────────────────────────── │  Workspace Node  │
 │  repl (CLI)  │  1. WebSocket connect        │  (BEAM + cowboy)  │
 │              │  2. Send cookie message       │                  │
@@ -83,8 +83,8 @@ Local REPL connections remain loopback-only. The compiler uses an OTP Port (stdi
 
 **Single transport: WebSocket.** The workspace uses `cowboy` (standard Erlang HTTP/WebSocket server) instead of `gen_tcp`. The REPL protocol is the same JSON messages, carried over WebSocket frames instead of newline-delimited TCP. This means:
 
-- **CLI** connects via `ws://127.0.0.1:49152` (using `tungstenite` crate in Rust)
-- **Browser** connects via `ws://localhost:49152` directly — no proxy needed for local dev
+- **CLI** connects via `ws://127.0.0.1:{port}` (using `tungstenite` crate in Rust) — port discovered from `~/.beamtalk/workspaces/{id}/port` file written by the workspace on startup
+- **Browser** connects via `ws://localhost:{port}` directly — no proxy needed for local dev
 - **Remote/TLS** — standard reverse proxy (Caddy, nginx) in front, zero custom code
 
 **Why WebSocket only (not TCP + WebSocket):** One transport means one implementation to test and maintain. WebSocket is HTTP-upgrade-compatible, so standard proxies (Caddy, nginx, envoy) can terminate TLS, handle auth headers, and forward without custom bridging code. This follows nREPL's principle of transport-agnostic protocol design — the JSON messages are the protocol; WebSocket is the transport.
@@ -114,13 +114,13 @@ Since the workspace speaks WebSocket natively, the browser can connect directly 
 
 **Local dev (no proxy needed):**
 ```
-┌────────────┐    ws://localhost:49152    ┌────────────────────┐
+┌────────────┐  ws://localhost:{port}     ┌────────────────────┐
 │  Browser   │ ────────────────────────── │  Workspace Node    │
 │  (xterm.js)│    (WebSocket, direct)     │  (cowboy)          │
 └────────────┘                            └────────────────────┘
 ```
 
-The browser loads a static xterm.js page (served by `beamtalk web` from `http://localhost`) and connects to `ws://localhost:49152`. The cookie handshake authenticates the connection. The page must be served over HTTP (not loaded from `file://`) so that the `Origin` header is present for WebSocket validation.
+The browser loads a static xterm.js page (served by `beamtalk web` from `http://localhost`) and connects to `ws://localhost:{port}` (port discovered from the workspace port file). The cookie handshake authenticates the connection. The page must be served over HTTP (not loaded from `file://`) so that the `Origin` header is present for WebSocket validation.
 
 **Remote/TLS (standard proxy):**
 ```
@@ -133,12 +133,12 @@ The browser loads a static xterm.js page (served by `beamtalk web` from `http://
 ```bash
 # Caddyfile — entire proxy config
 localhost:8443 {
-    reverse_proxy localhost:49152
+    reverse_proxy localhost:{port}  # port from ~/.beamtalk/workspaces/{id}/port
 }
 
 # Or with Tailscale:
 my-laptop.tail12345.ts.net:8443 {
-    reverse_proxy localhost:49152
+    reverse_proxy localhost:{port}
 }
 ```
 
@@ -163,18 +163,18 @@ my-laptop.tail12345.ts.net:8443 {
 
 # Default: local only (browser connects directly, no proxy needed)
 beamtalk repl
-# → Workspace listens on ws://127.0.0.1:49152
+# → Workspace listens on ws://127.0.0.1:{OS-assigned port}
 
 # Serve xterm.js web terminal (proposed UX — Phase 1, not yet implemented)
 beamtalk web
-# → Opens browser to http://localhost page that connects to ws://localhost:49152
+# → Opens browser to http://localhost page that connects to ws://localhost:{port}
 
 # Remote via Caddy (workspace stays on loopback)
-caddy reverse-proxy --from :8443 --to localhost:49152
+caddy reverse-proxy --from :8443 --to localhost:{port}
 
 # Remote via Tailscale (workspace binds to overlay IP) — proposed UX, Phase 2
 beamtalk run server.bt --bind tailscale
-# → ws://100.64.x.x:49152, only reachable by Tailscale peers
+# → ws://100.64.x.x:{port}, only reachable by Tailscale peers
 
 # Safety check for non-loopback binding — proposed UX, Phase 2
 beamtalk run server.bt --bind 0.0.0.0
@@ -197,7 +197,7 @@ The simplest path. The overlay provides encryption and identity. Beamtalk treats
 └──────────────┘                            └──────────────────┘
         │                                            │
 beamtalk attach prod@100.64.0.2               beamtalk repl
-(connects to 100.64.0.2:49152)                (listens on 100.64.0.2:49152)
+(connects to 100.64.0.2:{port})               (listens on 100.64.0.2:{port})
 ```
 
 **Changes needed:**

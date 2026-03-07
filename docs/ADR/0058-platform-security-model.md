@@ -11,7 +11,7 @@ Beamtalk is a developer tool. Its primary interface is an interactive workspace 
 
 Several targeted security decisions have already been made and implemented:
 
-- **ADR 0020 (Connection Security):** The REPL WebSocket binds to `127.0.0.1:49152`. A cookie handshake (cookie file at `~/.beamtalk/workspaces/{id}/cookie`, `chmod 600`) authenticates every connection. mTLS via OTP `ssl_dist` is available for remote attach. ADR 0020 explicitly states: "The REPL is an **arbitrary code execution endpoint** — a valid cookie = full RCE as the workspace owner."
+- **ADR 0020 (Connection Security):** The REPL WebSocket binds to `127.0.0.1` on an OS-assigned ephemeral port. A cookie handshake (cookie file at `~/.beamtalk/workspaces/{id}/cookie`, `chmod 600`) authenticates every connection. mTLS via OTP `ssl_dist` is available for remote attach. ADR 0020 explicitly states: "The REPL is an **arbitrary code execution endpoint** — a valid cookie = full RCE as the workspace owner."
 - **ADR 0051 (Subprocess Execution):** `System runCommand:` and the `Subprocess` actor expose OS process spawning. The ADR notes "no shell injection mitigation built-in (user responsibility to sanitize inputs)" as a deliberately accepted trade-off.
 - **ADR 0028 (BEAM Interop):** The `Erlang` global object calls any Erlang function via `erlang:apply/3`, making every loaded Erlang module reachable from Beamtalk code with no restrictions.
 
@@ -32,7 +32,7 @@ This ADR fills that gap. It is a **platform-level architectural decision**, not 
 | **Hot reload** | `beamtalk_hot_reload.erl` + `sys:change_code/4` | Replaces live actor code in running node |
 | **Subprocess** | `beamtalk_subprocess.erl`, `beamtalk_exec_port.erl` | Spawns arbitrary OS processes; interactive stdin/stdout |
 | **HTTP client** | `beamtalk_http.erl` (gun 2.x) | Outbound HTTP/HTTPS to arbitrary URLs |
-| **REPL/workspace** | Cowboy WebSocket on `127.0.0.1:49152` | Evaluates arbitrary Beamtalk code |
+| **REPL/workspace** | Cowboy WebSocket on `127.0.0.1:{ephemeral port}` | Evaluates arbitrary Beamtalk code |
 | **Workspace storage** | `~/.beamtalk/workspaces/{id}/` | Cookie (`0600`), `metadata.json`, `node.info` |
 
 ### The Core Design Tension
