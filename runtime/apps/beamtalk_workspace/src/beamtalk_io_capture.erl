@@ -142,7 +142,13 @@ reset_captured_group_leaders(CapturePid, OldGL) ->
                 true ->
                     case erlang:process_info(Pid, group_leader) of
                         {group_leader, CapturePid} ->
-                            group_leader(OldGL, Pid);
+                            %% BT-1172: Guard against TOCTOU race — Pid may die
+                            %% between is_process_alive/1 and group_leader/2.
+                            try
+                                group_leader(OldGL, Pid)
+                            catch
+                                error:badarg -> ok
+                            end;
                         {group_leader, _} ->
                             % Different GL, leave it alone
                             ok;
