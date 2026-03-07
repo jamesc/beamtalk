@@ -816,7 +816,7 @@ No new syntax. Users invoke Erlang supervision APIs via BEAM interop:
 - **Named registration and singleton-per-node:** `supervise` registers the supervisor locally under its Erlang module name (`{local, ?MODULE}`), the standard OTP pattern for named application supervisors. This makes each `Supervisor subclass:` a singleton per node: only one instance of `WebApp` can run at a time. `ClassName current` finds it from anywhere on the node via `whereis(?MODULE)`. `supervise` is idempotent: calling it on an already-running supervisor returns the existing instance. If two instances of the same topology are needed, define two classes. This is node-local registration only; cluster-wide named registration is deferred to future work. Ad-hoc `DynamicSupervisor new supervise` (no subclass) uses anonymous registration and is not a singleton.
 - The generated module exports both `start_link/0` (OTP-compatible, returns `{ok, Pid}`, used when embedding in an OTP application supervision tree) and `supervise/0` (Beamtalk-wrapped object, used in Beamtalk code and the REPL).
 - `Supervisor` instances are OTP supervisor processes, not gen_servers — `beamtalk_actor:sync_send/3` is not used for inspection messages. The generated supervisor module exports functions (e.g. `'children'/1`, `'which:'/2`) that call `supervisor:which_children/1` etc. directly from the calling process's context, passing the supervisor's pid.
-- `supervise` is the canonical start method, synthesized by the compiler. Supervisors may additionally define `class start => self supervise` as a named alias, but this is convention, not required.
+- `supervise` is the canonical start method, inherited from the abstract base. Supervisors may additionally define `class start => self supervise` as a named alias, but this is convention, not required.
 
 ## Implementation
 
@@ -851,44 +851,61 @@ Add `Supervisor`, `DynamicSupervisor`, and `SupervisionSpec` to the stdlib and b
 - Synthesize `supervisionSpec` class-side method on all `Actor subclass:` definitions (alongside existing `spawn`/`spawnWith:`)
 - `supervisionSpec` returns a `SupervisionSpec` value with `actorClass` set to the class, `restart` set by calling `Module:'supervisionPolicy'()` (which returns the inherited or overridden value)
 
-### Phase 2 — Supervisor Codegen (L)
+### Phase 2 — Supervisor Codegen (M)
+
+The compiler work is intentionally minimal. Most logic lives in the stdlib (`Supervisor.bt`, `SupervisionSpec.bt`) and the runtime Erlang helper (`beamtalk_supervisor.erl`). The compiler generates only two functions per supervisor subclass.
 
 **New file: `crates/beamtalk-core/src/codegen/core_erlang/supervisor_codegen.rs`**
 
-Generates OTP `supervisor` behaviour modules from `Supervisor subclass:` and `DynamicSupervisor subclass:` definitions. The codegen calls the class-side methods at startup — it does not parse or statically analyse the `children` or `childClass` method body.
+For each `Supervisor subclass:` or `DynamicSupervisor subclass:`, generates exactly:
 
-- `-behaviour(supervisor)` header; exports `start_link/0`, `init/1`
-- `start_link/0` — registered named start: `supervisor:start_link({local, ?MODULE}, ?MODULE, [])`
-- `supervise/0` — inherited class-side method (from `Supervisor` or `DynamicSupervisor` base via BEAM interop); calls `start_link/0`, wraps pid as `beamtalk_supervisor` tuple; handles `{already_started, Pid}` for idempotency
-- `current/0` — inherited class-side method; calls `whereis(?MODULE)`, returns wrapped supervisor object or `nil`
-- `init/1` for `Supervisor` subclasses — calls `bt@classname:'children'()`, `bt@classname:'strategy'()`, `bt@classname:'maxRestarts'()`, `bt@classname:'restartWindow'()`; delegates child spec construction to `beamtalk_supervisor:build_child_specs/1`
-- `init/1` for `DynamicSupervisor` subclasses — calls `bt@classname:'childClass'()`, `bt@classname:'maxRestarts'()`, `bt@classname:'restartWindow'()`; generates `simple_one_for_one` spec
-- Instance-side inspection: `'children'/1`, `'which:'/2`, `'terminate:'/2`, `'count'/1`, `'stop'/1` — exported functions calling `supervisor:which_children/1` etc. from the requesting process's context; inherited from `Supervisor` or `DynamicSupervisor` base via BEAM interop (no per-subclass generation needed)
-- Dynamic management (for `DynamicSupervisor` subclasses): `'startChild:'/2`, `'startChild'/1`, `'terminateChild:'/2` — inherited from `DynamicSupervisor` base via BEAM interop
+```erlang
+-behaviour(supervisor).
+-export([start_link/0, init/1]).
+
+start_link() -> supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+%% Static supervisor (Supervisor subclass:)
+init([]) ->
+    ChildClasses = 'bt@classname':'children'(),
+    SupFlags = #{strategy  => 'bt@classname':'strategy'(),
+                 intensity => 'bt@classname':'maxRestarts'(),
+                 period    => 'bt@classname':'restartWindow'()},
+    {ok, {SupFlags, beamtalk_supervisor:build_child_specs(ChildClasses)}}.
+
+%% Dynamic supervisor (DynamicSupervisor subclass:)
+init([]) ->
+    ChildClass = 'bt@classname':'childClass'(),
+    SupFlags = #{strategy  => simple_one_for_one,
+                 intensity => 'bt@classname':'maxRestarts'(),
+                 period    => 'bt@classname':'restartWindow'()},
+    ChildSpec = beamtalk_supervisor:build_child_specs([ChildClass]),
+    {ok, {SupFlags, ChildSpec}}.
+```
+
+Everything else — `supervise`, `current`, all instance-side methods, `childSpec` logic — is inherited from the stdlib abstract bases or lives in `beamtalk_supervisor.erl`. No per-subclass generation needed for any of those.
 
 **`crates/beamtalk-core/src/codegen/core_erlang/actor_codegen.rs`:**
-- Detect `supervisor_kind` in `ClassDefinition` and branch to `supervisor_codegen.rs` instead of generating `gen_server` behaviour
+- Check `supervisor_kind` on `ClassDefinition`; if set, delegate to `supervisor_codegen.rs` instead of generating `gen_server` behaviour
 
 **New file: `runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl`**
 
-Runtime helper module:
-- `build_child_specs/1` — takes a list of class references (or `SupervisionSpec` values); for each, reads `supervisionPolicy` from class metadata (or uses the spec's `restart`); uses `spawn` as the start function unless `args` is set (then uses `spawnWith:`); detects `Supervisor` or `DynamicSupervisor` ancestry via `is_supervisor/1` (sets `type => supervisor, shutdown => infinity`); constructs OTP child spec maps
-- `build_child_spec/1` — single-item variant
+Thin dispatch glue — no construction logic (that lives in `SupervisionSpec childSpec`):
+- `build_child_specs/1` — normalize bare class refs to `SupervisionSpec` (via `supervisionSpec`), then call `childSpec` on each
+- BEAM interop entry points called by inherited stdlib methods: `startLink:`, `current:`, `whichChildren:`, `whichChild:class:`, `terminateChild:class:`, `startChild:`, `startChild:with:`, `terminateChild:child:`, `countChildren:`, `stop:`
+- `is_supervisor/1` — compile-time codegen helper (ancestry check for routing)
 
-**No new lexer tokens** — `strategy`, `maxRestarts`, `restartWindow`, `children`, `childClass` are parsed as ordinary Beamtalk identifiers in method definitions.
+**No new lexer tokens, no new parser grammar, no new AST node types** beyond the `supervisor_kind` field already added in Phase 1.
 
 **Full affected file list:**
-- `crates/beamtalk-core/src/ast.rs` — `supervisor_kind` field on `ClassDefinition` (no `supervision_policy` field — it's a regular method)
-- `crates/beamtalk-core/src/semantic_analysis/` — validate `supervisionPolicy` override value; set `supervisor_kind`; warn on children without explicit policy
-- `crates/beamtalk-core/src/codegen/core_erlang/supervisor_codegen.rs` — new file
-- `crates/beamtalk-core/src/codegen/core_erlang/actor_codegen.rs` — routing + `supervisionSpec` synthesis
-- `runtime/apps/beamtalk_runtime/src/beamtalk_dispatch.erl` — detect `'beamtalk_supervisor'` tag; route to direct `Module:'method'(Self)` call instead of `beamtalk_actor:sync_send/3`
-- `runtime/apps/beamtalk_runtime/src/beamtalk_repl.erl` (or equivalent pretty-printer) — add `'beamtalk_supervisor'` clause to display `#Supervisor<ClassName, Pid>` and `#DynamicSupervisor<ClassName, Pid>`
-- `stdlib/src/Actor.bt` — add `class supervisionPolicy => #temporary` default
-- `stdlib/src/Supervisor.bt` — `Supervisor` and `DynamicSupervisor` abstract classes with all inherited methods
-- `stdlib/src/SupervisionSpec.bt` — value type
-- `runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl` — new file; implements `startLink:`, `current:`, `whichChildren:`, `whichChild:class:`, `terminateChild:class:`, `startChild:`, `startChild:with:`, `terminateChild:child:`, `countChildren:`, `stop:`, `build_child_specs/1` (thin normalization + dispatch to `childSpec`), `is_supervisor/1` (used for compile-time codegen routing)
-- `stdlib/src/Actor.bt` — add `class supervisionPolicy -> Symbol => #temporary` and `class isSupervisor -> Boolean => false` defaults
+- `crates/beamtalk-core/src/codegen/core_erlang/supervisor_codegen.rs` — new file (~60 lines)
+- `crates/beamtalk-core/src/codegen/core_erlang/actor_codegen.rs` — add `supervisor_kind` branch (~5 lines)
+- `runtime/apps/beamtalk_runtime/src/beamtalk_dispatch.erl` — detect `'beamtalk_supervisor'` tag; route to `Module:'method'(Self)` directly instead of `beamtalk_actor:sync_send/3`
+- `runtime/apps/beamtalk_runtime/src/beamtalk_repl.erl` — add `'beamtalk_supervisor'` clause to display `#Supervisor<ClassName, Pid>` and `#DynamicSupervisor<ClassName, Pid>`
+- `stdlib/src/Actor.bt` — add `class supervisionPolicy -> Symbol => #temporary` and `class isSupervisor -> Boolean => false`
+- `stdlib/src/Supervisor.bt` — `Supervisor` and `DynamicSupervisor` abstract classes with all inherited methods and type annotations
+- `stdlib/src/SupervisionSpec.bt` — value type with `childSpec` and fluent override methods
+- `runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl` — new file
 - `runtime/apps/beamtalk_runtime/src/beamtalk_bootstrap.erl` — add `Supervisor`, `DynamicSupervisor` to sequence
 
 ### Phase 3 — Tests and Docs (M)
