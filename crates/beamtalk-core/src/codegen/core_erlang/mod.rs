@@ -1416,7 +1416,7 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// 'dispatch'/3 = fun (Selector, Args, Self) ->
-    ///     call 'beamtalk_transcript_stream_primitives':'dispatch'(Selector, Args, Self)
+    ///     call 'beamtalk_my_class_primitives':'dispatch'(Selector, Args, Self)
     /// ```
     fn generate_primitive_dispatch_3_doc(&self) -> Document<'static> {
         // Build primitives module name: `beamtalk_{snake}_primitives`.

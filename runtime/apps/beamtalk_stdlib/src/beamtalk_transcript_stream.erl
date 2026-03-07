@@ -38,6 +38,9 @@
 -export([has_method/1, class_info/0]).
 -export([ensure_utf8/1]).
 -export([subscribe/1, unsubscribe/1]).
+%% Primitive dispatch — called by bt@stdlib@transcript_stream via the primitives shim.
+%% Runs inside the compiled actor's gen_server process; state is in the process dictionary.
+-export([dispatch/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -137,6 +140,178 @@ unsubscribe(TranscriptRef) ->
     gen_server:cast(TranscriptRef, {unsubscribe, self()}).
 
 %%% ============================================================================
+%%% Primitive dispatch — called from within the compiled actor's gen_server
+%%% ============================================================================
+
+%% Process dictionary keys used by dispatch/3 (runs in compiled actor's process)
+-define(TS_BUFFER, '$ts_buffer').
+-define(TS_BUFFER_SIZE, '$ts_buffer_size').
+-define(TS_MAX_BUFFER, '$ts_max_buffer').
+-define(TS_SUBSCRIBERS, '$ts_subscribers').
+-define(TS_DEFAULT_MAX_BUFFER, 1000).
+
+%% @doc Dispatch a primitive method call for TranscriptStream.
+%%
+%% Called from within the compiled `bt@stdlib@transcript_stream` gen_server process
+%% via `beamtalk_transcript_stream_primitives:dispatch/3`. All state is managed in
+%% the process dictionary to avoid gen_server re-entry. The `Self` argument is the
+%% `#beamtalk_object{}` tuple wrapping the gen_server pid.
+%%
+%% The compiled handle_cast stores FuturePid in `'$bt_future_pid'` before
+%% dispatching, so subscribe/unsubscribe can identify the caller via
+%% `prim_caller_from_future/1`.
+-spec dispatch(atom(), list(), term()) -> term().
+dispatch('show:', [Value], Self) ->
+    prim_ensure_initialized(),
+    Text = prim_to_string(Value),
+    prim_buffer_text(Text),
+    prim_push_to_subscribers(Text),
+    Self;
+dispatch(cr, [], Self) ->
+    prim_ensure_initialized(),
+    prim_buffer_text(<<"\n">>),
+    prim_push_to_subscribers(<<"\n">>),
+    Self;
+dispatch(subscribe, [], Self) ->
+    prim_ensure_initialized(),
+    FuturePid = erlang:get('$bt_future_pid'),
+    CallerPid = prim_caller_from_future(FuturePid),
+    prim_add_subscriber(CallerPid),
+    Self;
+dispatch(unsubscribe, [], Self) ->
+    prim_ensure_initialized(),
+    FuturePid = erlang:get('$bt_future_pid'),
+    CallerPid = prim_caller_from_future(FuturePid),
+    prim_remove_subscriber(CallerPid),
+    Self;
+dispatch(recent, [], _Self) ->
+    prim_ensure_initialized(),
+    queue:to_list(erlang:get(?TS_BUFFER));
+dispatch(clear, [], Self) ->
+    prim_ensure_initialized(),
+    erlang:put(?TS_BUFFER, queue:new()),
+    erlang:put(?TS_BUFFER_SIZE, 0),
+    Self;
+dispatch(Selector, _Args, _Self) ->
+    Err0 = beamtalk_error:new(does_not_understand, 'TranscriptStream'),
+    Err1 = beamtalk_error:with_selector(Err0, Selector),
+    beamtalk_error:raise(Err1).
+
+%% @private Ensure the process dictionary state keys are initialised.
+-spec prim_ensure_initialized() -> ok.
+prim_ensure_initialized() ->
+    case erlang:get(?TS_BUFFER) of
+        undefined ->
+            erlang:put(?TS_BUFFER, queue:new()),
+            erlang:put(?TS_BUFFER_SIZE, 0),
+            erlang:put(?TS_MAX_BUFFER, ?TS_DEFAULT_MAX_BUFFER),
+            erlang:put(?TS_SUBSCRIBERS, #{});
+        _ ->
+            ok
+    end.
+
+%% @private Add text to the ring buffer, dropping oldest entry if at capacity.
+-spec prim_buffer_text(binary()) -> ok.
+prim_buffer_text(Text) ->
+    Buffer = erlang:get(?TS_BUFFER),
+    Size = erlang:get(?TS_BUFFER_SIZE),
+    Max = erlang:get(?TS_MAX_BUFFER),
+    Buffer1 = queue:in(Text, Buffer),
+    case Size >= Max of
+        true ->
+            {_, Buffer2} = queue:out(Buffer1),
+            erlang:put(?TS_BUFFER, Buffer2);
+        false ->
+            erlang:put(?TS_BUFFER, Buffer1),
+            erlang:put(?TS_BUFFER_SIZE, Size + 1)
+    end,
+    ok.
+
+%% @private Send text to all current subscribers, pruning any dead processes.
+-spec prim_push_to_subscribers(binary()) -> ok.
+prim_push_to_subscribers(Text) ->
+    Subs = erlang:get(?TS_SUBSCRIBERS),
+    AliveSubs = maps:fold(
+        fun(Pid, Ref, Acc) ->
+            case is_process_alive(Pid) of
+                true ->
+                    Pid ! {transcript_output, Text},
+                    Acc#{Pid => Ref};
+                false ->
+                    demonitor(Ref, [flush]),
+                    Acc
+            end
+        end,
+        #{},
+        Subs
+    ),
+    erlang:put(?TS_SUBSCRIBERS, AliveSubs),
+    ok.
+
+%% @private Add a subscriber and monitor it for automatic cleanup.
+-spec prim_add_subscriber(pid()) -> ok.
+prim_add_subscriber(Pid) when is_pid(Pid) ->
+    Subs = erlang:get(?TS_SUBSCRIBERS),
+    case maps:is_key(Pid, Subs) of
+        true ->
+            ok;
+        false ->
+            Ref = monitor(process, Pid),
+            erlang:put(?TS_SUBSCRIBERS, Subs#{Pid => Ref}),
+            ok
+    end.
+
+%% @private Remove a subscriber and demonitor it.
+-spec prim_remove_subscriber(pid()) -> ok.
+prim_remove_subscriber(Pid) ->
+    Subs = erlang:get(?TS_SUBSCRIBERS),
+    case maps:find(Pid, Subs) of
+        {ok, Ref} ->
+            demonitor(Ref, [flush]),
+            erlang:put(?TS_SUBSCRIBERS, maps:remove(Pid, Subs)),
+            ok;
+        error ->
+            ok
+    end.
+
+%% @private Derive the caller's pid from a future process via its group_leader.
+-spec prim_caller_from_future(pid() | undefined) -> pid().
+prim_caller_from_future(undefined) ->
+    self();
+prim_caller_from_future(FuturePid) when is_pid(FuturePid) ->
+    case erlang:process_info(FuturePid, group_leader) of
+        {group_leader, GL} -> GL;
+        undefined -> FuturePid
+    end;
+prim_caller_from_future(_Other) ->
+    self().
+
+%% @private Convert a value to its string representation for display.
+-spec prim_to_string(term()) -> binary().
+prim_to_string(Value) when is_binary(Value) ->
+    ensure_utf8(Value);
+prim_to_string(Value) when is_integer(Value) ->
+    integer_to_binary(Value);
+prim_to_string(Value) when is_float(Value) ->
+    float_to_binary(Value, [{decimals, 10}, compact]);
+prim_to_string(Value) when is_atom(Value) ->
+    atom_to_binary(Value, utf8);
+prim_to_string(Value) when is_list(Value) ->
+    try unicode:characters_to_binary(Value) of
+        Bin when is_binary(Bin) -> Bin;
+        {error, _, _} -> list_to_binary(io_lib:format("~p", [Value]));
+        {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [Value]))
+    catch
+        _:_ -> list_to_binary(io_lib:format("~p", [Value]))
+    end;
+prim_to_string(#beamtalk_object{class = Class}) ->
+    <<"a ", (atom_to_binary(Class, utf8))/binary>>;
+prim_to_string(Value) when is_map(Value) ->
+    beamtalk_tagged_map:format_for_display(Value);
+prim_to_string(Value) ->
+    list_to_binary(io_lib:format("~p", [Value])).
+
+%%% ============================================================================
 %%% gen_server callbacks
 %%% ============================================================================
 
@@ -163,6 +338,20 @@ handle_call(recent, _From, #state{buffer = Buffer} = State) ->
     {reply, queue:to_list(Buffer), State};
 handle_call(clear, _From, #state{self_ref = SelfRef} = State) ->
     {reply, SelfRef, State#state{buffer = queue:new(), buffer_size = 0}};
+handle_call({'show:', [Value]}, _From, #state{self_ref = SelfRef} = State) ->
+    Text = beamtalk_primitive:display_string(Value),
+    State1 = buffer_text(Text, State),
+    push_to_subscribers(Text, State1),
+    {reply, SelfRef, State1};
+handle_call({cr, []}, _From, #state{self_ref = SelfRef} = State) ->
+    Text = <<"\n">>,
+    State1 = buffer_text(Text, State),
+    push_to_subscribers(Text, State1),
+    {reply, SelfRef, State1};
+handle_call({subscribe, []}, {CallerPid, _}, #state{self_ref = SelfRef} = State) ->
+    {reply, SelfRef, add_subscriber(CallerPid, State)};
+handle_call({unsubscribe, []}, {CallerPid, _}, #state{self_ref = SelfRef} = State) ->
+    {reply, SelfRef, remove_subscriber(CallerPid, State)};
 handle_call({recent, []}, From, State) ->
     handle_call(recent, From, State);
 handle_call({clear, []}, From, State) ->
