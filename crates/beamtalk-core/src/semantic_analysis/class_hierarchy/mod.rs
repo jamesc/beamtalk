@@ -13,7 +13,9 @@
 //!
 //! The hierarchy uses simple depth-first MRO (no multiple inheritance).
 
-use crate::ast::{ClassDefinition, ClassKind, MethodKind, Module, TypeAnnotation};
+use crate::ast::{
+    ClassDefinition, ClassKind, Expression, Literal, MethodKind, Module, TypeAnnotation,
+};
 use crate::semantic_analysis::SemanticError;
 use crate::source_analysis::Diagnostic;
 use ecow::EcoString;
@@ -42,6 +44,10 @@ pub struct MethodInfo {
     /// Parameter type annotations (e.g., `vec![Some("Number")]` for `+ other: Number`).
     /// Empty for unary methods. `None` elements mean the parameter type is unknown.
     pub param_types: Vec<Option<EcoString>>,
+    /// Documentation string for this method.
+    /// Populated for compiler-synthesized methods; `None` for user-written methods
+    /// (whose docs are read from the AST `doc_comment` field instead).
+    pub doc: Option<String>,
 }
 
 impl MethodInfo {
@@ -873,9 +879,16 @@ impl ClassHierarchy {
 
         for slot in &class.state {
             let slot_name = slot.name.name.as_str();
+            let default_str = slot
+                .default_value
+                .as_ref()
+                .map_or_else(|| "nil".to_string(), format_default_value);
 
             // Auto-getter: unary method returning the slot value
             if !user_instance_selectors.contains(slot_name) {
+                let getter_doc = format!(
+                    "Returns the `{slot_name}` field value. Default: `{default_str}`.\n\n*(compiler-generated)*"
+                );
                 instance_methods.push(MethodInfo {
                     selector: slot.name.name.clone(),
                     arity: 0,
@@ -884,6 +897,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     return_type: slot.type_annotation.as_ref().map(TypeAnnotation::type_name),
                     param_types: vec![],
+                    doc: Some(getter_doc),
                 });
             }
 
@@ -899,6 +913,9 @@ impl ClassHierarchy {
                 }
             };
             if !user_instance_selectors.contains(&with_sel) {
+                let setter_doc = format!(
+                    "Returns a new `{class_name}` with `{slot_name}` set to the given value.\n\n*(compiler-generated)*"
+                );
                 instance_methods.push(MethodInfo {
                     selector: with_sel,
                     arity: 1,
@@ -907,6 +924,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None],
+                    doc: Some(setter_doc),
                 });
             }
         }
@@ -924,6 +942,21 @@ impl ClassHierarchy {
             };
             let arity = class.state.len();
             if !user_class_selectors.contains(&kw_sel) {
+                let args_desc: String = class
+                    .state
+                    .iter()
+                    .map(|s| {
+                        let dv = s
+                            .default_value
+                            .as_ref()
+                            .map_or_else(|| "nil".to_string(), format_default_value);
+                        format!("{} (default: {})", s.name.name, dv)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ctor_doc = format!(
+                    "Creates a new `{class_name}`. Args: {args_desc}.\n\n*(compiler-generated)*"
+                );
                 class_methods.push(MethodInfo {
                     selector: kw_sel,
                     arity,
@@ -932,6 +965,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None; arity],
+                    doc: Some(ctor_doc),
                 });
             }
         }
@@ -979,6 +1013,7 @@ impl ClassHierarchy {
                         .iter()
                         .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
                         .collect(),
+                    doc: None,
                 })
                 .collect();
 
@@ -997,6 +1032,7 @@ impl ClassHierarchy {
                         .iter()
                         .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
                         .collect(),
+                    doc: None,
                 })
                 .collect();
 
@@ -1110,6 +1146,27 @@ impl ClassHierarchy {
 impl Default for ClassHierarchy {
     fn default() -> Self {
         Self::with_builtins()
+    }
+}
+
+/// Formats an AST expression as a compact string for use in generated doc comments.
+///
+/// Only handles simple literal values (integer, float, string, boolean, nil).
+/// Complex expressions fall back to `"..."`.
+fn format_default_value(expr: &Expression) -> String {
+    match expr {
+        Expression::Literal(lit, _) => match lit {
+            Literal::Integer(n) => n.to_string(),
+            Literal::Float(f) => f.to_string(),
+            Literal::String(s) => format!("\"{s}\""),
+            Literal::Symbol(s) => format!("#{s}"),
+            Literal::Character(c) => format!("${c}"),
+            Literal::List(_) => "...".to_string(),
+        },
+        Expression::Identifier(ident) if ident.name == "nil" => "nil".to_string(),
+        Expression::Identifier(ident) if ident.name == "true" => "true".to_string(),
+        Expression::Identifier(ident) if ident.name == "false" => "false".to_string(),
+        _ => "...".to_string(),
     }
 }
 
@@ -3039,6 +3096,7 @@ mod tests {
                 is_sealed: false,
                 return_type: Some(EcoString::from("Integer")),
                 param_types: vec![],
+                doc: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -3072,6 +3130,7 @@ mod tests {
                 is_sealed: false,
                 return_type: None,
                 param_types: vec![],
+                doc: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -3096,6 +3155,7 @@ mod tests {
                 is_sealed: false,
                 return_type: None,
                 param_types: vec![],
+                doc: None,
             }],
             class_methods: vec![],
             class_variables: vec![],

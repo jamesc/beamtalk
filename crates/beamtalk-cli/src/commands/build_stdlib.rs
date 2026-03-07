@@ -881,7 +881,7 @@ fn generate_method_list(
             code,
             "                MethodInfo {{ selector: \"{selector}\".into(), arity: {arity}, \
              kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
-             return_type: {return_type_expr}, param_types: {param_types_expr} }},",
+             return_type: {return_type_expr}, param_types: {param_types_expr}, doc: None }},",
             arity = m.arity,
             class = class_name,
             sealed = m.is_sealed,

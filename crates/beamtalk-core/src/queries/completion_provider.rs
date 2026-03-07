@@ -641,7 +641,7 @@ fn add_receiver_type_completions(
         Some(ReceiverSide::Instance(class_name)) if hierarchy.has_class(class_name) => {
             for method in hierarchy.all_methods(class_name) {
                 if seen.insert(method.selector.clone()) {
-                    let doc = format!("{}#{}", method.defined_in, method.selector);
+                    let doc = method_completion_doc(&method, false);
                     completions.push(
                         Completion::new(method.selector.as_str(), CompletionKind::Function)
                             .with_documentation(doc)
@@ -654,7 +654,7 @@ fn add_receiver_type_completions(
         Some(ReceiverSide::Class(class_name)) if hierarchy.has_class(class_name) => {
             for method in hierarchy.all_class_methods(class_name) {
                 if seen.insert(method.selector.clone()) {
-                    let doc = format!("{}#{}", method.defined_in, method.selector);
+                    let doc = method_completion_doc(&method, true);
                     completions.push(
                         Completion::new(method.selector.as_str(), CompletionKind::Function)
                             .with_documentation(doc)
@@ -694,6 +694,24 @@ fn method_completion_detail(
     detail
 }
 
+/// Returns the documentation string for a method completion.
+///
+/// Uses the generated `doc` string if present; otherwise falls back to the
+/// `DefinedIn#selector` format used for user-written methods.
+fn method_completion_doc(
+    method: &crate::semantic_analysis::class_hierarchy::MethodInfo,
+    class_side: bool,
+) -> String {
+    if let Some(doc) = &method.doc {
+        return doc.clone();
+    }
+    if class_side {
+        format!("class {}#{}", method.defined_in, method.selector)
+    } else {
+        format!("{}#{}", method.defined_in, method.selector)
+    }
+}
+
 /// Adds method completions from the class hierarchy.
 ///
 /// Uses the cursor's class context to provide relevant completions:
@@ -725,7 +743,7 @@ fn add_hierarchy_completions(
             let class_name = class.name.name.as_str();
             for method in hierarchy.all_methods(class_name) {
                 if seen.insert(method.selector.clone()) {
-                    let doc = format!("{}#{}", method.defined_in, method.selector);
+                    let doc = method_completion_doc(&method, false);
                     completions.push(
                         Completion::new(method.selector.as_str(), CompletionKind::Function)
                             .with_documentation(doc),
@@ -745,7 +763,7 @@ fn add_hierarchy_completions(
             let class_name = class.name.name.as_str();
             for method in hierarchy.all_class_methods(class_name) {
                 if seen.insert(method.selector.clone()) {
-                    let doc = format!("class {}#{}", method.defined_in, method.selector);
+                    let doc = method_completion_doc(&method, true);
                     completions.push(
                         Completion::new(method.selector.as_str(), CompletionKind::Function)
                             .with_documentation(doc),
@@ -755,7 +773,7 @@ fn add_hierarchy_completions(
             // Also include instance methods (class methods can access them via instances)
             for method in hierarchy.all_methods(class_name) {
                 if seen.insert(method.selector.clone()) {
-                    let doc = format!("{}#{}", method.defined_in, method.selector);
+                    let doc = method_completion_doc(&method, false);
                     completions.push(
                         Completion::new(method.selector.as_str(), CompletionKind::Function)
                             .with_documentation(doc),
@@ -768,7 +786,7 @@ fn add_hierarchy_completions(
             for class in &module.classes {
                 for method in hierarchy.all_methods(class.name.name.as_str()) {
                     if seen.insert(method.selector.clone()) {
-                        let doc = format!("{}#{}", method.defined_in, method.selector);
+                        let doc = method_completion_doc(&method, false);
                         completions.push(
                             Completion::new(method.selector.as_str(), CompletionKind::Function)
                                 .with_documentation(doc),
@@ -778,7 +796,7 @@ fn add_hierarchy_completions(
                 // Also add class-side methods for top-level completions
                 for method in hierarchy.all_class_methods(class.name.name.as_str()) {
                     if seen.insert(method.selector.clone()) {
-                        let doc = format!("class {}#{}", method.defined_in, method.selector);
+                        let doc = method_completion_doc(&method, true);
                         completions.push(
                             Completion::new(method.selector.as_str(), CompletionKind::Function)
                                 .with_documentation(doc),
@@ -790,7 +808,7 @@ fn add_hierarchy_completions(
             // Always include common Object/ProtoObject methods for general completions
             for method in hierarchy.all_methods("Object") {
                 if seen.insert(method.selector.clone()) {
-                    let doc = format!("{}#{}", method.defined_in, method.selector);
+                    let doc = method_completion_doc(&method, false);
                     completions.push(
                         Completion::new(method.selector.as_str(), CompletionKind::Function)
                             .with_documentation(doc),

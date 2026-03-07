@@ -36,6 +36,7 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
         is_sealed: false,
         return_type: None,
         param_types: vec![None; arity],
+        doc: None,
     }
 }
 
