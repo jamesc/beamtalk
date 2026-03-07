@@ -389,6 +389,34 @@ impl MethodKindMeta {
     }
 }
 
+/// Format a default-value expression as a short string for doc generation.
+///
+/// Mirrors `format_default_value` in `beamtalk-core/class_hierarchy/mod.rs`.
+fn fmt_default(expr: &beamtalk_core::ast::Expression) -> String {
+    use beamtalk_core::ast::{Expression, Literal};
+    match expr {
+        Expression::Literal(lit, _) => match lit {
+            Literal::Integer(n) => n.to_string(),
+            Literal::Float(f) => {
+                let rendered = f.to_string();
+                if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
+                    rendered
+                } else {
+                    format!("{rendered}.0")
+                }
+            }
+            Literal::String(s) => format!("{s:?}"),
+            Literal::Symbol(s) => format!("#{s}"),
+            Literal::Character(c) => format!("${}", c.escape_default()),
+            Literal::List(_) => "...".to_string(),
+        },
+        Expression::Identifier(ident) if ident.name == "nil" => "nil".to_string(),
+        Expression::Identifier(ident) if ident.name == "true" => "true".to_string(),
+        Expression::Identifier(ident) if ident.name == "false" => "false".to_string(),
+        _ => "...".to_string(),
+    }
+}
+
 /// Extract class metadata from a `.bt` source file.
 ///
 /// Parses the full class definition to extract the class name, superclass,
@@ -498,6 +526,13 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
 
             // Auto getter: `fieldName` → slot type (or Object if unannotated)
             if !user_selectors.contains(slot_name) {
+                let default_str = slot
+                    .default_value
+                    .as_ref()
+                    .map_or_else(|| "nil".to_string(), fmt_default);
+                let getter_doc = format!(
+                    "Returns the `{slot_name}` field value. Default: `{default_str}`.\n\n*(compiler-generated)*"
+                );
                 methods.push(MethodMeta {
                     selector: slot_name.to_string(),
                     arity: 0,
@@ -508,7 +543,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                         .as_ref()
                         .map(|t| t.type_name().to_string()),
                     param_types: vec![],
-                    doc: None,
+                    doc: Some(getter_doc),
                 });
             }
 
@@ -528,6 +563,9 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                     .type_annotation
                     .as_ref()
                     .map(|t| t.type_name().to_string());
+                let setter_doc = format!(
+                    "Returns a new `{class_name}` with `{slot_name}` set to the given value.\n\n*(compiler-generated)*"
+                );
                 methods.push(MethodMeta {
                     selector: with_sel,
                     arity: 1,
@@ -535,7 +573,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                     is_sealed: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![param_type],
-                    doc: None,
+                    doc: Some(setter_doc),
                 });
             }
         }
@@ -557,6 +595,21 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                         .map(|t| t.type_name().to_string())
                 })
                 .collect();
+            let args_desc: String = class
+                .state
+                .iter()
+                .map(|s| {
+                    let dv = s
+                        .default_value
+                        .as_ref()
+                        .map_or_else(|| "nil".to_string(), fmt_default);
+                    format!("{} (default: {})", s.name.name, dv)
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let ctor_doc = format!(
+                "Creates a new `{class_name}`. Args: {args_desc}.\n\n*(compiler-generated)*"
+            );
             class_methods.push(MethodMeta {
                 selector: kw_sel,
                 arity,
@@ -564,7 +617,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                 is_sealed: false,
                 return_type: Some(class_name.clone()),
                 param_types,
-                doc: None,
+                doc: Some(ctor_doc),
             });
         }
     }

@@ -1013,7 +1013,7 @@ impl ClassHierarchy {
                         .iter()
                         .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
                         .collect(),
-                    doc: None,
+                    doc: m.doc_comment.clone().map(Into::into),
                 })
                 .collect();
 
@@ -1032,7 +1032,7 @@ impl ClassHierarchy {
                         .iter()
                         .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
                         .collect(),
-                    doc: None,
+                    doc: m.doc_comment.clone().map(Into::into),
                 })
                 .collect();
 
@@ -1168,7 +1168,7 @@ fn format_default_value(expr: &Expression) -> String {
             }
             Literal::String(s) => format!("{s:?}"),
             Literal::Symbol(s) => format!("#{s}"),
-            Literal::Character(c) => format!("${c}"),
+            Literal::Character(c) => format!("${}", c.escape_default()),
             Literal::List(_) => "...".to_string(),
         },
         Expression::Identifier(ident) if ident.name == "nil" => "nil".to_string(),
