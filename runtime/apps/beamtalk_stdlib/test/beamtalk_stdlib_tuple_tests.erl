@@ -7,7 +7,7 @@
 %%%
 %%% Tests at, as_string, do, and error paths.
 
--module(beamtalk_tuple_tests).
+-module(beamtalk_stdlib_tuple_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -74,13 +74,12 @@ as_string_two_elements_test() ->
     ?assertEqual(<<"{1, 2}">>, Result).
 
 as_string_three_elements_test() ->
-    Result = beamtalk_tuple:as_string({a, b, c}),
-    ?assertMatch(<<"{", _/binary>>, Result),
-    ?assert(binary:match(Result, <<"a">>) =/= nomatch).
+    ?assertEqual(<<"{#a, #b, #c}">>, beamtalk_tuple:as_string({a, b, c})).
 
 as_string_binary_elements_test() ->
-    Result = beamtalk_tuple:as_string({<<"hello">>, <<"world">>}),
-    ?assertMatch(<<"{", _/binary>>, Result).
+    ?assertEqual(
+        <<"{\"hello\", \"world\"}">>, beamtalk_tuple:as_string({<<"hello">>, <<"world">>})
+    ).
 
 %%% ============================================================================
 %%% do/2
