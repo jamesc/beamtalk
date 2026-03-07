@@ -483,11 +483,13 @@ coverage-rust:
 
 # Unix-only: uses bash process substitution and piping
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
-# All three apps run in a single rebar3 eunit call so their cover data merges into
-# one session — separate calls overwrite eunit.coverdata, losing prior coverage.
+# Two-pass EUnit strategy: Run 1 covers beamtalk_runtime + beamtalk_workspace (without
+# listing beamtalk_stdlib as an explicit --app, so bt@*.beam files in
+# apps/beamtalk_stdlib/ebin/ stay on the code path). Run 2 covers beamtalk_stdlib Erlang
+# modules via --dir. Both coverdata files are merged into eunit.coverdata before reporting.
 # Generate Erlang runtime coverage
 [unix]
-coverage-runtime:
+coverage-runtime: build-stdlib
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime
@@ -523,6 +525,9 @@ coverage-runtime:
         cover:stop(),
         init:stop().
     '
+    # Remove phase files so coverage-all's wildcard does not re-import them
+    # (which would double-count the EUnit data on top of the merged eunit.coverdata).
+    rm -f _build/test/cover/eunit_runtime.coverdata _build/test/cover/eunit_stdlib.coverdata
     rebar3 cover --verbose
     rebar3 covertool generate
     # Clean up covertool XML: remove empty phantom packages, shorten path-based names
