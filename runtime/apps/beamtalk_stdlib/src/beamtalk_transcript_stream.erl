@@ -38,7 +38,7 @@
 -export([has_method/1, class_info/0]).
 -export([ensure_utf8/1]).
 -export([subscribe/1, unsubscribe/1]).
-%% Primitive dispatch — called by bt@stdlib@transcript_stream via the primitives shim.
+%% Primitive dispatch — called directly by bt@stdlib@transcript_stream.
 %% Runs inside the compiled actor's gen_server process; state is in the process dictionary.
 -export([dispatch/3]).
 
@@ -122,18 +122,6 @@ class_info() ->
         class_methods => #{},
         fields => []
     }.
-
-%%% ============================================================================
-%%% Class-side @primitive dispatch — BT-1163: shim delegating to primitives module
-%%% until the full implementation is merged here
-%%% ============================================================================
-
-%% @doc Dispatch a class-side @primitive method call for TranscriptStream.
-%%
-%% Delegates to `beamtalk_transcript_stream_primitives:dispatch/3` pending BT-1163.
--spec dispatch(atom(), list(), term()) -> term().
-dispatch(Selector, Args, Self) ->
-    beamtalk_transcript_stream_primitives:dispatch(Selector, Args, Self).
 
 %%% ============================================================================
 %%% Module-level subscribe/unsubscribe API
