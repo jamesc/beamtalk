@@ -26,6 +26,7 @@ Both approaches share these problems:
 - Provides no declared relationship between the `.bt` file and its backing module — the compiler has no knowledge of which Erlang module backs the Actor
 - Previously used `@primitive` stubs, requiring hardcoded entries in `generated_builtins.rs` — some classes have been migrated to FFI but the `generated_builtins.rs` entries remain
 - Each backing module implements its own dispatch pattern (Subprocess uses `sync_send`, TranscriptStream uses process-dictionary `dispatch/3`) — there is no uniform protocol for native-backed Actors
+- TranscriptStream's process-dictionary `dispatch/3` exists because its FFI shims are called from _inside_ the compiled actor's `handle_call` (during method dispatch) — using `gen_server:call` back to the same process would deadlock. This complexity is an artifact of the FFI-inside-compiled-actor architecture, not an inherent requirement of TranscriptStream's logic
 
 ### Current State
 
@@ -191,7 +192,7 @@ _ = send(CB, 'methods:', [#{'writeLine:' => fun ?MODULE:'dispatch_writeLine:'/2,
 send(CB, 'register', []).
 ```
 
-This is the same ClassBuilder cascade pattern used for all class creation — `native:` is just another setter, like `name:`, `fields:`, `methods:`, and `supervisionPolicy:` (ADR 0059 for supervisors).
+This is the same ClassBuilder cascade pattern used for all class creation — `native:` is just another setter, like `name:`, `fields:`, and `methods:`.
 
 ### What the Compiler Generates
 
@@ -443,6 +444,34 @@ handle_call({close, []}, _From, #{conn := Conn} = State) ->
     {reply, {ok, nil}, State}.
 ```
 
+### ETS-Backed Data Structure Example
+
+ETS tables are a natural fit for `native:` — table lifecycle (create, own, delete) requires Erlang, and the actor owns the table (ETS tables die with their owner process), so Actor supervision gives table durability for free:
+
+```beamtalk
+/// A persistent key-value store backed by an ETS table.
+Actor subclass: KeyValueStore native: beamtalk_kv_store
+
+  class create => self spawn
+  class create: name => self spawnWith: #{"name" => name}
+
+  get: key -> Object => self delegate
+  put: key value: value -> Nil => self delegate
+  delete: key -> Nil => self delegate
+  keys -> List => self delegate
+  size -> Integer => self delegate
+```
+
+Methods that need to bypass the gen_server (e.g. concurrent ETS reads) can use a full Beamtalk body with FFI instead of `self delegate`:
+
+```beamtalk
+  /// Fast read — bypasses gen_server, reads ETS directly.
+  get: key -> Object =>
+    (Erlang beamtalk_kv_store) directGet: self key: key
+```
+
+This mixes `self delegate` and FFI bodies on the same `native:` class — the same pattern as Subprocess's `open:args:` factory method.
+
 ## Prior Art
 
 ### Pharo — `ffiCall:` and `<primitive: N>`
@@ -518,7 +547,7 @@ Smalltalk's `<primitive: N>` pragma is metadata inside the method body — the m
 
 - **Language designer:** "`@native BackingModule` as a class annotation is familiar from Gleam's `@external`. It's explicit, grep-able, and doesn't require integrating with ClassBuilder."
 - **BEAM veteran:** "Annotations are a well-understood pattern. Adding a keyword to `subclass:` changes the grammar of the most important declaration in the language."
-- - **Tension:** `@native` introduces a class-level annotation syntax that sits outside Beamtalk's message-send model. `native:` as a keyword on `subclass:` integrates with ClassBuilder and is consistent with `supervisionPolicy:` for supervisors (ADR 0059) — it's a message argument, not an annotation.
+- **Tension:** `@native` introduces a class-level annotation syntax that sits outside Beamtalk's message-send model. `native:` as a keyword on `subclass:` integrates with ClassBuilder — it's a message argument, not an annotation. `native:` must be a compile-time keyword because the compiler needs the backing module name during codegen to generate the facade.
 
 ### Steelman for bodyless methods instead of `self delegate`
 
@@ -559,7 +588,7 @@ Actor subclass: Subprocess
   writeLine: data -> Nil => @native
 ```
 
-Rejected because: introduces an annotation syntax (`@`) outside Beamtalk's message-send model, doesn't integrate with the ClassBuilder protocol, and is inconsistent with how other class metadata (like `supervisionPolicy:` for supervisors) uses keyword arguments on `subclass:`. The `@native` on both class and method was "two annotation types to learn."
+Rejected because: introduces an annotation syntax (`@`) outside Beamtalk's message-send model, doesn't integrate with the ClassBuilder protocol, and is inconsistent with Beamtalk's keyword message style. The `@native` on both class and method was "two annotation types to learn."
 
 ### Bodyless Methods on `native:` Classes
 
@@ -624,7 +653,7 @@ Rejected because it conflates two different mechanisms (BIF-level primitives and
 
 ### Positive
 
-- **ClassBuilder integration:** `native:` is a keyword argument on `subclass:`, flowing through the same ClassBuilder cascade as `name:`, `fields:`, `methods:`, and `supervisionPolicy:` — no separate annotation system
+- **ClassBuilder integration:** `native:` is a keyword argument on `subclass:`, flowing through the same ClassBuilder cascade as `name:`, `fields:`, and `methods:` — no separate annotation system
 - **Uniform dispatch protocol:** `self delegate` routes through `sync_send/3` for all native-backed Actors. Currently, Subprocess shims already use `sync_send` but TranscriptStream uses a process-dictionary `dispatch/3` path — `native:` standardises both on the same protocol with consistent dead actor detection, timeout handling, and `#beamtalk_error{}` wrapping
 - **Open to library authors:** Any library author can back an Actor with a hand-written gen_server by adding `native: module` to their `subclass:` declaration — no compiler modifications required
 - **Stub generation:** The `.bt` declaration contains enough information to auto-generate skeleton `handle_call/3` clauses for the backing gen_server
@@ -633,6 +662,7 @@ Rejected because it conflates two different mechanisms (BIF-level primitives and
 - **LSP navigation:** `native: BackingModule` gives the LSP an explicit link to the Erlang implementation; mismatch detection between declared selectors and `handle_call` clauses is possible
 - **Smalltalk idiom:** `self delegate` follows the Pharo `ffiCall:` pattern — every method has a body, the body expresses intent, and a runtime fallback exists
 - **`gen_statem` supported:** Both `gen_server` and `gen_statem` route through `gen:call/4`, so `native:` works transparently with either
+- **No deadlock on TranscriptStream migration:** The process-dictionary `dispatch/3` hack was needed because FFI shims ran inside the compiled actor's `handle_call`. With `native:`, the backing gen_server IS the process — `self delegate` sends from the caller, and `handle_call/3` runs self-contained logic with no re-entry. The existing `handle_call/3` clauses in `beamtalk_transcript_stream.erl` are already safe
 
 ### Negative
 
@@ -643,7 +673,8 @@ Rejected because it conflates two different mechanisms (BIF-level primitives and
 - **`self delegate` repetition:** Each delegating method says `=> self delegate` — more verbose than bodyless methods, but explicit
 - **`delegate` namespace occupation:** Adding `sealed delegate` to Actor means every Actor subclass responds to `delegate`. The name is reserved — a library author cannot use `delegate` as a business-logic selector on an Actor. The `sealed` modifier prevents accidental shadowing but the name is consumed
 - **Gradual typing interaction:** When the type checker (ADR 0025) validates return types, `self delegate` methods return whatever the gen_server returns — opaque to the type checker. The type checker will need a special case: on `native:` classes, `self delegate` is assumed to return the method's declared return type. This is analogous to how `@primitive` return types are trusted today
-- **Parser grammar extension:** Adding `native:` as an optional keyword argument after the class name in `subclass:` is a grammar change with no current precedent — the same extension needed for `supervisionPolicy:` on `Supervisor subclass:` (ADR 0059). These should be designed together as a general "keyword arguments on `subclass:`" parser feature
+- **`__beamtalk_meta/0` schema (ADR 0050):** Native facade modules must generate a `__beamtalk_meta/0` that differs from standard actors: `native => true`, `backing_module => atom()`, no `fields`, and delegate stubs rather than real method implementations in the method metadata. The incremental compiler's `ClassInfo` schema must account for native classes so that crash recovery and compiler server injection produce correct type information
+- **Parser grammar extension:** Adding `native:` as an optional keyword argument after the class name in `subclass:` is a grammar change — the compiler needs the backing module name during codegen. This is compiler special sauce: it fundamentally changes the codegen path from "generate gen_server" to "generate facade"
 
 ### Neutral
 
@@ -651,6 +682,7 @@ Rejected because it conflates two different mechanisms (BIF-level primitives and
 - `code_change/3` hot reload support lives entirely in the backing gen_server — no changes to the Beamtalk compiler's hot reload machinery
 - `classState:` is permitted on `native:` actors — only instance `state:` is prohibited
 - **Hot code reload:** Reloading a `native:` class's facade module updates the dispatch functions but does not disrupt existing actor processes — the pid identity is stable, and callers continue reaching the same gen_server. The backing gen_server's own `code_change/3` handles state migration independently
+- **`inspect` shows class and pid only:** Since `native:` actors have no `state:` declarations, `inspect` shows the class name and pid (e.g. `a Subprocess (pid: <0.123.0>)`) but not internal state. The gen_server state is an Erlang implementation detail — exposing it would break the abstraction that the `.bt` file deliberately does not declare. Operators can still use `:sys.get_state/1` from Erlang to inspect backing gen_server state for debugging
 - **REPL limitation:** `native:` requires a pre-existing compiled Erlang gen_server module on the code path. It is not suitable for interactive class definition at the REPL — the backing module must exist before the `native:` class can be loaded. Attempting to spawn a `native:` actor whose backing module doesn't exist produces `instantiation_error: module not found`
 
 ## Implementation
@@ -674,6 +706,7 @@ The primary remaining Phase 0 deliverable is documentation: write and publish th
 - Define `delegate` method on `Actor.bt` with error fallback
 - Validate: `state:` declarations on `native:` actors produce a compile error
 - Generate facade module: `spawn/1`, `spawnWith:`, `has_method/1`, dispatch functions for `self delegate` methods
+- Generate `__beamtalk_meta/0` with `native => true`, `backing_module => atom()`, and delegate method metadata (ADR 0050)
 - Full Beamtalk method bodies on `native:` actors compile normally (e.g. `open:args:`)
 - Remove `Subprocess` and `TranscriptStream` from `generated_builtins.rs`
 
@@ -685,6 +718,7 @@ The primary remaining Phase 0 deliverable is documentation: write and publish th
 - Migrate `TranscriptStream.bt` from FFI wrappers to `native: beamtalk_transcript_stream` with `self delegate`
 - Remove public wrapper functions from `beamtalk_subprocess.erl` and `beamtalk_transcript_stream.erl` — retain only gen_server callbacks
 - Remove `has_method/1` and `dispatch/3` exports from both modules
+- **TranscriptStream deadlock safety:** The process-dictionary `dispatch/3` path in `beamtalk_transcript_stream.erl` exists because the current FFI shims run _inside_ the compiled actor's `handle_call` — calling `gen_server:call` back to the same process would deadlock. With `native:`, this architecture changes: the backing gen_server IS the process, and `self delegate` sends messages from the _caller's_ process via `sync_send`. The backing `handle_call/3` clauses (which already exist and are self-contained — they call internal functions like `buffer_text/2` directly, with no gen_server re-entry) handle requests without deadlock risk. The process-dictionary `dispatch/3` and FFI shims become dead code
 - Add integration tests covering `native:` spawn, sync dispatch, async/cast dispatch, deferred replies, and error propagation
 
 **Issues:** BT-1158, BT-1159
@@ -698,7 +732,7 @@ The primary remaining Phase 0 deliverable is documentation: write and publish th
 ### Affected Components
 
 - `crates/beamtalk-core/src/source_analysis/lexer.rs` — no changes needed; `native` is not a keyword, it's a keyword-argument identifier in the `subclass:` message
-- `crates/beamtalk-core/src/source_analysis/parser/` — parse `native:` as a keyword argument on `subclass:` class definitions. This is a grammar extension: the current parser consumes `subclass:` then an identifier (class name) then enters the class body. Adding `native:` requires parsing an additional optional keyword argument after the class name — the same kind of extension needed for `supervisionPolicy:` on `Supervisor subclass:` (ADR 0059). The parser should implement a general "optional keyword arguments on `subclass:`" mechanism that both `native:` and `supervisionPolicy:` use
+- `crates/beamtalk-core/src/source_analysis/parser/` — parse `native:` as a keyword argument on `subclass:` class definitions. This is a grammar extension: the current parser consumes `subclass:` then an identifier (class name) then enters the class body. Adding `native:` requires parsing an additional optional keyword argument after the class name — a targeted parser change
 - `crates/beamtalk-core/src/ast.rs` — add optional `backing_module` field to `ClassDefinition`
 - `crates/beamtalk-core/src/codegen/core_erlang/actor_codegen.rs` — detect `native:` on class; branch to facade codegen instead of full gen_server codegen
 - `crates/beamtalk-core/src/codegen/core_erlang/gen_server/` — new `native_facade.rs` generating `spawn/1`, `has_method/1`, dispatch functions
@@ -732,7 +766,7 @@ The Beamtalk API (message selectors and return types) does not change. Callers o
 ## References
 
 - Related issues: BT-1155, BT-1156, BT-1157, BT-1158, BT-1159
-- Related ADRs: ADR 0005 (BEAM Object Model — Actor vs Value distinction), ADR 0028 (BEAM Interop Strategy — FFI mechanism), ADR 0038 (ClassBuilder Protocol — `native:` as ClassBuilder method), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State), ADR 0043 (Sync-by-Default Actor Messaging — `sync_send/3` and `cast_send/3` protocols, `!` bang semantics), ADR 0048 (Class-Side Method Syntax Redesign), ADR 0051 (Subprocess Execution — proof-of-concept), ADR 0055 (Erlang-Backed Class Authoring Protocol — `state:` and FFI for Value classes), ADR 0059 (Supervisors — `supervisionPolicy:` keyword on `Supervisor subclass:`, same ClassBuilder keyword-argument pattern; planned, not yet published)
+- Related ADRs: ADR 0005 (BEAM Object Model — Actor vs Value distinction), ADR 0028 (BEAM Interop Strategy — FFI mechanism), ADR 0038 (ClassBuilder Protocol — `native:` as ClassBuilder method), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State), ADR 0043 (Sync-by-Default Actor Messaging — `sync_send/3` and `cast_send/3` protocols, `!` bang semantics), ADR 0048 (Class-Side Method Syntax Redesign), ADR 0050 (Incremental Compiler ClassHierarchy — `__beamtalk_meta/0` schema), ADR 0051 (Subprocess Execution — proof-of-concept), ADR 0055 (Erlang-Backed Class Authoring Protocol — `state:` and FFI for Value classes)
 - gen_server protocol: https://www.erlang.org/doc/man/gen_server.html
 - gen_statem protocol: https://www.erlang.org/doc/man/gen_statem.html
 - Pharo UFFI / ffiCall: https://files.pharo.org/books-pdfs/booklet-uFFI/UFFIDRAFT.pdf
