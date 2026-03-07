@@ -19,7 +19,9 @@
 ///   > (p withX: 0) distanceSquared     => 16
 ///   > (Point x: 3 y: 4) == (Point x: 3 y: 4)   => true
 Value subclass: Point
+  /// X coordinate (default 0)
   state: x = 0
+  /// Y coordinate (default 0)
   state: y = 0
 
   // Euclidean distance squared from the origin (avoids a Float sqrt dependency)

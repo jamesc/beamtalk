@@ -514,7 +514,7 @@ export class WorkspaceTreeDataProvider
 
   private _methodTooltipFallback(method: MethodInfo): vscode.MarkdownString {
     return new vscode.MarkdownString(
-      `**${method.selector}**\n\n_${method.side === "instance" ? "instance" : "class"} method_`
+      `**${method.selector}**\n\n_${method.side === "instance" ? "instance-side" : "class-side"}_`
     );
   }
 
