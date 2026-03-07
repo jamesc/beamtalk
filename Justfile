@@ -492,12 +492,37 @@ coverage-runtime:
     set -euo pipefail
     cd runtime
     echo "📊 Generating Erlang runtime coverage..."
-    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace,beamtalk_stdlib --cover 2>&1); then
+    # Run 1: runtime + workspace tests.
+    # bt@*.beam files are findable via apps/beamtalk_stdlib/ebin/ (project app ebin
+    # stays on the code path when beamtalk_stdlib is not listed as an explicit --app).
+    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace --cover 2>&1); then
         echo "$OUTPUT"
-        echo "❌ EUnit tests failed"
+        echo "❌ EUnit tests (runtime+workspace) failed"
         exit 1
     fi
     echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || true
+    # Save before Run 2 overwrites eunit.coverdata.
+    cp _build/test/cover/eunit.coverdata _build/test/cover/eunit_runtime.coverdata
+    # Run 2: stdlib Erlang module tests (using --dir, not --app, to avoid rebar3
+    # treating bt@*.beam files in the ebin as test modules).
+    if ! OUTPUT=$(rebar3 eunit --dir=apps/beamtalk_stdlib/test --cover 2>&1); then
+        echo "$OUTPUT"
+        echo "❌ EUnit tests (stdlib) failed"
+        exit 1
+    fi
+    echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || true
+    # Save stdlib coverdata before the merge overwrites eunit.coverdata.
+    cp _build/test/cover/eunit.coverdata _build/test/cover/eunit_stdlib.coverdata
+    # Merge both coverdata files so the final report includes all modules.
+    erl -noshell -eval '
+        cover:start(),
+        lists:foreach(fun(F) ->
+            cover:import(F)
+        end, filelib:wildcard("_build/test/cover/eunit_*.coverdata")),
+        ok = cover:export("_build/test/cover/eunit.coverdata"),
+        cover:stop(),
+        init:stop().
+    '
     rebar3 cover --verbose
     rebar3 covertool generate
     # Clean up covertool XML: remove empty phantom packages, shorten path-based names
