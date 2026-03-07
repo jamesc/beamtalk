@@ -703,7 +703,7 @@ fn method_completion_doc(
     class_side: bool,
 ) -> String {
     if let Some(doc) = &method.doc {
-        return doc.clone();
+        return doc.to_string();
     }
     if class_side {
         format!("class {}#{}", method.defined_in, method.selector)

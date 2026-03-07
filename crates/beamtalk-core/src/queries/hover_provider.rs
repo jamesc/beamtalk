@@ -829,12 +829,14 @@ fn resolved_selector_hover_info(
     let typed_sig = method_info_signature(&method);
     let summary = format!("Method: `{typed_sig}` ({dispatch})");
 
-    let doc = method.doc.clone().unwrap_or_else(|| {
-        format!(
-            "Resolved on `{receiver_class}` (defined in `{}`)",
-            method.defined_in
-        )
-    });
+    let resolution_context = format!(
+        "Resolved on `{receiver_class}` (defined in `{}`)",
+        method.defined_in
+    );
+    let doc = match method.doc.as_deref() {
+        Some(existing) => format!("{existing}\n\n{resolution_context}"),
+        None => resolution_context,
+    };
     Some(HoverInfo::new(summary, span).with_documentation(doc))
 }
 

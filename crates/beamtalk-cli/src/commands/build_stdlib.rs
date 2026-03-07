@@ -889,8 +889,10 @@ fn generate_method_list(
                 let escaped = doc
                     .replace('\\', "\\\\")
                     .replace('"', "\\\"")
-                    .replace('\n', "\\n");
-                format!("Some(\"{escaped}\".to_string())")
+                    .replace('\r', "\\r")
+                    .replace('\n', "\\n")
+                    .replace('\t', "\\t");
+                format!("Some(\"{escaped}\".into())")
             }
             None => "None".to_string(),
         };

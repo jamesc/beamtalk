@@ -45,9 +45,9 @@ pub struct MethodInfo {
     /// Empty for unary methods. `None` elements mean the parameter type is unknown.
     pub param_types: Vec<Option<EcoString>>,
     /// Documentation string for this method.
-    /// Populated for compiler-synthesized methods; `None` for user-written methods
-    /// (whose docs are read from the AST `doc_comment` field instead).
-    pub doc: Option<String>,
+    /// Populated for compiler-synthesized methods and stdlib methods with `///` doc comments;
+    /// `None` for user-written methods without doc comments.
+    pub doc: Option<EcoString>,
 }
 
 impl MethodInfo {
@@ -897,7 +897,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     return_type: slot.type_annotation.as_ref().map(TypeAnnotation::type_name),
                     param_types: vec![],
-                    doc: Some(getter_doc),
+                    doc: Some(getter_doc.into()),
                 });
             }
 
@@ -924,7 +924,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None],
-                    doc: Some(setter_doc),
+                    doc: Some(setter_doc.into()),
                 });
             }
         }
@@ -965,7 +965,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None; arity],
-                    doc: Some(ctor_doc),
+                    doc: Some(ctor_doc.into()),
                 });
             }
         }
@@ -1375,7 +1375,8 @@ mod tests {
             "isAlive must NOT be in class_methods"
         );
 
-        // Actor class methods carry doc strings extracted from Actor.bt
+        // Actor class methods carry doc strings from generated_builtins.rs
+        // (sourced from Actor.bt via build-stdlib)
         let spawn = class_methods
             .iter()
             .find(|m| m.selector == "spawn")
