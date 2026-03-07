@@ -1425,10 +1425,10 @@ impl CoreErlangGenerator {
         // If `to_module_name` already emits a `beamtalk_` prefix (e.g.
         // `BeamtalkInterface` → `beamtalk_interface`), use it as-is.
         let snake_name = to_module_name(&self.class_name());
-        let primitives_module = if snake_name.starts_with("beamtalk_") {
-            snake_name
+        let actor_module: Document<'static> = if snake_name.starts_with("beamtalk_") {
+            Document::String(snake_name)
         } else {
-            format!("beamtalk_{snake_name}")
+            docvec!["beamtalk_", Document::String(snake_name)]
         };
         docvec![
             "'dispatch'/3 = fun (Selector, Args, Self) ->",
@@ -1438,7 +1438,7 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "call '",
-                        Document::String(primitives_module),
+                        actor_module,
                         "':'dispatch'(Selector, Args, Self)",
                     ],
                 ]

@@ -92,7 +92,8 @@
 -spec dispatch(atom(), list(), term()) -> term().
 
 dispatch('open:args:', [Command, Args], _ClassSelf) when is_binary(Command) ->
-    ArgsList = bt_array_to_list(Args),
+    ArgsList = bt_array_to_list(Args, 'open:args:'),
+    ensure_binary_args(ArgsList, 'open:args:'),
     start_subprocess(#{executable => Command, args => ArgsList}, 'open:args:');
 dispatch('open:args:', [_Command, _Args], _ClassSelf) ->
     Err = beamtalk_error:new(type_error, 'Subprocess', 'open:args:'),
@@ -100,8 +101,10 @@ dispatch('open:args:', [_Command, _Args], _ClassSelf) ->
 dispatch('open:args:env:dir:', [Command, Args, Env, Dir], _ClassSelf) when
     is_binary(Command), is_binary(Dir), is_map(Env)
 ->
-    ArgsList = bt_array_to_list(Args),
+    ArgsList = bt_array_to_list(Args, 'open:args:env:dir:'),
+    ensure_binary_args(ArgsList, 'open:args:env:dir:'),
     EnvMap = maps:without(['$beamtalk_class'], Env),
+    ensure_binary_env(EnvMap, 'open:args:env:dir:'),
     start_subprocess(
         #{executable => Command, args => ArgsList, env => EnvMap, dir => Dir},
         'open:args:env:dir:'
@@ -137,20 +140,36 @@ start_subprocess(Config, Selector) ->
 %%
 %% Array literals in Beamtalk method call arguments compile to plain Erlang lists.
 %% Array values returned from collection operations are tagged maps.
--spec bt_array_to_list(term()) -> list().
-bt_array_to_list(#{'$beamtalk_class' := 'Array', 'data' := Arr}) ->
+-spec bt_array_to_list(term(), atom()) -> list().
+bt_array_to_list(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Selector) ->
     case array:is_array(Arr) of
         true ->
             array:to_list(Arr);
         false ->
-            Err = beamtalk_error:new(type_error, 'Subprocess'),
+            Err = beamtalk_error:new(type_error, 'Subprocess', Selector),
             beamtalk_error:raise(Err)
     end;
-bt_array_to_list(List) when is_list(List) ->
+bt_array_to_list(List, _Selector) when is_list(List) ->
     List;
-bt_array_to_list(_Other) ->
-    Err = beamtalk_error:new(type_error, 'Subprocess'),
+bt_array_to_list(_Other, Selector) ->
+    Err = beamtalk_error:new(type_error, 'Subprocess', Selector),
     beamtalk_error:raise(Err).
+
+%% @private Raise type_error if any element of Args is not a binary.
+-spec ensure_binary_args(list(), atom()) -> ok.
+ensure_binary_args(Args, Selector) ->
+    case lists:all(fun erlang:is_binary/1, Args) of
+        true -> ok;
+        false -> beamtalk_error:raise(beamtalk_error:new(type_error, 'Subprocess', Selector))
+    end.
+
+%% @private Raise type_error if any key or value in Env is not a binary.
+-spec ensure_binary_env(map(), atom()) -> ok.
+ensure_binary_env(Env, Selector) ->
+    case lists:all(fun({K, V}) -> is_binary(K) andalso is_binary(V) end, maps:to_list(Env)) of
+        true -> ok;
+        false -> beamtalk_error:raise(beamtalk_error:new(type_error, 'Subprocess', Selector))
+    end.
 
 %%% ============================================================================
 %%% Public API

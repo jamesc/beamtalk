@@ -2,6 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 %%% @doc EUnit tests for beamtalk_interface module.
+%%% **DDD Context:** Object System Context
 %%%
 %%% Tests the Phase 2 dispatch/3 interface for BeamtalkInterface primitives:
 %%% - allClasses selector
