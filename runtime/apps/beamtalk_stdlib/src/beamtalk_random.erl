@@ -28,12 +28,22 @@
 %%% |----------------------|-------------------------------------|
 %%% | `next`               | Random float, pure on instance state|
 %%% | `nextInteger:`        | Random integer, pure on instance state|
+%%%
+%%% ## FFI Shims
+%%%
+%%% The `beamtalk_erlang_proxy:direct_call/3` dispatch derives the Erlang function
+%%% name from the first keyword of the Beamtalk selector (stripping the trailing
+%%% colon). The shims (`nextInteger/1`, `seed/1`, `instanceNextInteger/2`) bridge
+%%% the gap so that `(Erlang beamtalk_random) nextInteger: max` dispatches
+%%% correctly to the canonical `'nextInteger:'/1` implementation.
 -module(beamtalk_random).
 
 -export(['next'/0, 'nextInteger:'/1, 'new'/0, 'seed:'/1]).
 -export(['instanceNext'/1, 'instanceNextInteger:'/2]).
 -export(['atRandom'/1]).
--export([has_method/1]).
+
+%% FFI shims for (Erlang beamtalk_random) dispatch
+-export([nextInteger/1, seed/1, instanceNextInteger/2]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -158,15 +168,29 @@
     beamtalk_error:raise(Error2).
 
 %%% ============================================================================
-%%% Method Dispatch
+%%% FFI Shims
+%%%
+%%% The (Erlang beamtalk_random) FFI uses beamtalk_erlang_proxy:direct_call/3,
+%%% which derives the Erlang function name from the first keyword of the
+%%% Beamtalk selector (stripping the trailing colon). These shims provide
+%%% the colon-free entry points that the proxy calls:
+%%%
+%%%   (Erlang beamtalk_random) next              → next/0  (direct)
+%%%   (Erlang beamtalk_random) nextInteger: max  → nextInteger/1
+%%%   (Erlang beamtalk_random) new               → new/0   (direct)
+%%%   (Erlang beamtalk_random) seed: seed        → seed/1
+%%%   (Erlang beamtalk_random) instanceNext: self            → instanceNext/1 (direct)
+%%%   (Erlang beamtalk_random) instanceNextInteger: self with: max → instanceNextInteger/2
 %%% ============================================================================
 
-%% @doc Check if Random responds to the given selector.
--spec has_method(atom()) -> boolean().
-has_method('next') -> true;
-has_method('nextInteger:') -> true;
-has_method('new') -> true;
-has_method('seed:') -> true;
-has_method('instanceNext') -> true;
-has_method('instanceNextInteger:') -> true;
-has_method(_) -> false.
+%% @doc FFI shim: `(Erlang beamtalk_random) nextInteger: max`
+-spec nextInteger(integer()) -> integer().
+nextInteger(Max) -> 'nextInteger:'(Max).
+
+%% @doc FFI shim: `(Erlang beamtalk_random) seed: seed`
+-spec seed(integer()) -> map().
+seed(Seed) -> 'seed:'(Seed).
+
+%% @doc FFI shim: `(Erlang beamtalk_random) instanceNextInteger: self with: max`
+-spec instanceNextInteger(map(), integer()) -> integer().
+instanceNextInteger(Self, Max) -> 'instanceNextInteger:'(Self, Max).

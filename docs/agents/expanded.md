@@ -84,6 +84,29 @@ Before using ANY Beamtalk syntax, verify it exists in at least one of:
 
 **If it doesn't appear in any of these → it's likely hallucinated. Search the codebase or ask.**
 
+### Pattern Lookup Protocol — Required Before Any New Implementation
+
+**Before writing new `.bt` code or Erlang FFI, run these searches and review 3+ hits:**
+
+```bash
+# Find existing examples of a class/method pattern in Beamtalk source
+grep -r "subclass:" stdlib/test/ stdlib/src/ examples/ --include="*.bt" -l
+grep -r "state:.*::" stdlib/src/ --include="*.bt" | head -10   # type annotations
+grep -r "ifTrue:\|ifFalse:\|whileTrue:" stdlib/test/ --include="*.bt" | head -10
+
+# Find Erlang FFI primitives for a domain area
+grep -r "beamtalk_\|@primitive\|(Erlang " stdlib/src/ --include="*.bt" | head -10
+grep -r "beamtalk_http\|beamtalk_system\|beamtalk_file" runtime/apps/ --include="*.erl" -l
+
+# Confirm type annotation syntax (always ::, never :)
+grep -r " :: " stdlib/src/ --include="*.bt" | head -5
+
+# Confirm ^ usage (early return only, never on last expression)
+grep -rn "\^" stdlib/src/ stdlib/test/ --include="*.bt" | grep -v "// =>" | head -10
+```
+
+**Do this lookup before proposing an approach.** Show the examples found, identify the pattern they follow, then implement consistently with them. If no examples exist, check the language spec before writing any code.
+
 ---
 
 ## Domain-Driven Design (DDD)

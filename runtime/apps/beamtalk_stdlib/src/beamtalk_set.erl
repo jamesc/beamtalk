@@ -13,7 +13,7 @@
 %% where OrdsetData is a sorted list maintained by the ordsets module.
 %%
 %%% **DDD Context:** Object System Context
--module(beamtalk_set_ops).
+-module(beamtalk_set).
 
 -export([
     new/0,

@@ -46,7 +46,7 @@ fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Do
         ]),
         "length" => Some(Document::Str("call 'string':'length'(Self)")),
         "at:" => Some(docvec![
-            "call 'beamtalk_string_ops':'at'(Self, ",
+            "call 'beamtalk_string':'at'(Self, ",
             p0.to_string(),
             ")"
         ]),
@@ -56,9 +56,7 @@ fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Do
         "lowercase" => Some(Document::Str(
             "call 'unicode':'characters_to_binary'(call 'string':'lowercase'(Self))",
         )),
-        "capitalize" => Some(Document::Str(
-            "call 'beamtalk_string_ops':'capitalize'(Self)",
-        )),
+        "capitalize" => Some(Document::Str("call 'beamtalk_string':'capitalize'(Self)")),
         "trim" => Some(Document::Str(
             "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'both'))",
         )),
@@ -68,7 +66,7 @@ fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Do
         "trimRight" => Some(Document::Str(
             "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'trailing'))",
         )),
-        "reverse" => Some(Document::Str("call 'beamtalk_string_ops':'reverse'(Self)")),
+        "reverse" => Some(Document::Str("call 'beamtalk_string':'reverse'(Self)")),
         _ => None,
     }
 }
@@ -77,22 +75,22 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
     let p0 = param(params, 0, "_Arg0");
     match selector {
         "includes:" => Some(docvec![
-            "call 'beamtalk_string_ops':'includes'(Self, ",
+            "call 'beamtalk_string':'includes'(Self, ",
             p0.to_string(),
             ")"
         ]),
         "startsWith:" => Some(docvec![
-            "call 'beamtalk_string_ops':'starts_with'(Self, ",
+            "call 'beamtalk_string':'starts_with'(Self, ",
             p0.to_string(),
             ")",
         ]),
         "endsWith:" => Some(docvec![
-            "call 'beamtalk_string_ops':'ends_with'(Self, ",
+            "call 'beamtalk_string':'ends_with'(Self, ",
             p0.to_string(),
             ")",
         ]),
         "indexOf:" => Some(docvec![
-            "call 'beamtalk_string_ops':'index_of'(Self, ",
+            "call 'beamtalk_string':'index_of'(Self, ",
             p0.to_string(),
             ")"
         ]),
@@ -102,17 +100,17 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
             ", ['global'])"
         ]),
         "splitOn:" => Some(docvec![
-            "call 'beamtalk_string_ops':'split_on'(Self, ",
+            "call 'beamtalk_string':'split_on'(Self, ",
             p0.to_string(),
             ")"
         ]),
         "repeat:" => Some(docvec![
-            "call 'beamtalk_string_ops':'repeat'(Self, ",
+            "call 'beamtalk_string':'repeat'(Self, ",
             p0.to_string(),
             ")"
         ]),
-        "lines" => Some(Document::Str("call 'beamtalk_string_ops':'lines'(Self)")),
-        "words" => Some(Document::Str("call 'beamtalk_string_ops':'words'(Self)")),
+        "lines" => Some(Document::Str("call 'beamtalk_string':'lines'(Self)")),
+        "words" => Some(Document::Str("call 'beamtalk_string':'words'(Self)")),
         "replaceAll:with:" => {
             let p1 = param(params, 1, "_Arg1");
             Some(docvec![
@@ -134,12 +132,12 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
             ])
         }
         "take:" => Some(docvec![
-            "call 'beamtalk_string_ops':'take'(Self, ",
+            "call 'beamtalk_string':'take'(Self, ",
             p0.to_string(),
             ")"
         ]),
         "drop:" => Some(docvec![
-            "call 'beamtalk_string_ops':'drop'(Self, ",
+            "call 'beamtalk_string':'drop'(Self, ",
             p0.to_string(),
             ")"
         ]),
@@ -177,34 +175,34 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
 fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     let p0 = param(params, 0, "_Arg0");
     match selector {
-        "isBlank" => Some(Document::Str("call 'beamtalk_string_ops':'is_blank'(Self)")),
-        "isDigit" => Some(Document::Str("call 'beamtalk_string_ops':'is_digit'(Self)")),
-        "isAlpha" => Some(Document::Str("call 'beamtalk_string_ops':'is_alpha'(Self)")),
+        "isBlank" => Some(Document::Str("call 'beamtalk_string':'is_blank'(Self)")),
+        "isDigit" => Some(Document::Str("call 'beamtalk_string':'is_digit'(Self)")),
+        "isAlpha" => Some(Document::Str("call 'beamtalk_string':'is_alpha'(Self)")),
         "asInteger" => Some(Document::Str("call 'erlang':'binary_to_integer'(Self)")),
         "asFloat" => Some(Document::Str("call 'erlang':'binary_to_float'(Self)")),
         "asAtom" => Some(Document::Str(
             "call 'erlang':'binary_to_existing_atom'(Self, 'utf8')",
         )),
-        "asList" => Some(Document::Str("call 'beamtalk_string_ops':'as_list'(Self)")),
+        "asList" => Some(Document::Str("call 'beamtalk_string':'as_list'(Self)")),
         "each:" => Some(docvec![
-            "call 'beamtalk_string_ops':'each'(Self, ",
+            "call 'beamtalk_string':'each'(Self, ",
             p0.to_string(),
             ")"
         ]),
         "collect:" => Some(docvec![
-            "call 'beamtalk_string_ops':'collect'(Self, ",
+            "call 'beamtalk_string':'collect'(Self, ",
             p0.to_string(),
             ")"
         ]),
         "select:" => Some(docvec![
-            "call 'beamtalk_string_ops':'select'(Self, ",
+            "call 'beamtalk_string':'select'(Self, ",
             p0.to_string(),
             ")"
         ]),
         "stream" => Some(Document::Str("call 'beamtalk_stream':'on'(Self)")),
         // Class-side factory: String class withAll: list joins grapheme list into a String
         "withAll:" => Some(docvec![
-            "call 'beamtalk_string_ops':'join'(",
+            "call 'beamtalk_string':'join'(",
             p0.to_string(),
             ")"
         ]),

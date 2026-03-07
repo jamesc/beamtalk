@@ -10,7 +10,7 @@
 %% stdlib module bt@stdlib@dictionary.
 %%
 %% Replaces the former beamtalk_map.erl hand-written dispatch module.
--module(beamtalk_map_ops).
+-module(beamtalk_map).
 
 -export([at_if_absent/3, do/2, do_with_key/2, includes/2, print_string/1]).
 

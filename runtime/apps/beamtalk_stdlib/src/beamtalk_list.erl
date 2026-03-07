@@ -9,7 +9,7 @@
 %% beyond simple BIF calls (bounds checking, error formatting, iteration).
 %%
 %% BT-419: Created as part of Array→List rename and compiled stdlib migration.
--module(beamtalk_list_ops).
+-module(beamtalk_list).
 
 -export([
     at/2,

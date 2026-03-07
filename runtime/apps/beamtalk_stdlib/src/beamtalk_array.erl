@@ -14,7 +14,7 @@
 %% `array` module.
 %%
 %%% **DDD Context:** Object System Context
--module(beamtalk_array_ops).
+-module(beamtalk_array).
 
 -export([
     from_list/1,

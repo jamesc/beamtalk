@@ -326,20 +326,26 @@ lines_stream_yields_correct_sequence_test() ->
 fast_exit_stderr_data_not_lost_test_() ->
     case os:type() of
         {unix, _} ->
-            %% Run 50 times: pre-fix failure rate was ~20%, giving (0.8)^50 < 0.001% false-pass chance.
-            Tests = [
-                begin
-                    {ok, Pid} = beamtalk_subprocess:start(#{
-                        executable => <<"/bin/sh">>,
-                        args => [<<"-c">>, <<"echo err >&2">>]
-                    }),
-                    Line = gen_server:call(Pid, {readStderrLine, []}, 5000),
-                    gen_server:stop(Pid),
-                    ?_assertEqual(<<"err">>, Line)
-                end
-             || _ <- lists:seq(1, 50)
-            ],
-            Tests;
+            %% Guard against missing beamtalk-exec binary (not yet built in some envs).
+            case beamtalk_subprocess:start(#{executable => <<"/bin/sh">>, args => []}) of
+                {error, {{exec_not_found, _}, _}} ->
+                    [];
+                {ok, CheckPid} ->
+                    gen_server:stop(CheckPid),
+                    %% Run 50 times: pre-fix failure rate was ~20%, giving (0.8)^50 < 0.001% false-pass chance.
+                    [
+                        begin
+                            {ok, Pid} = beamtalk_subprocess:start(#{
+                                executable => <<"/bin/sh">>,
+                                args => [<<"-c">>, <<"echo err >&2">>]
+                            }),
+                            Line = gen_server:call(Pid, {readStderrLine, []}, 5000),
+                            gen_server:stop(Pid),
+                            ?_assertEqual(<<"err">>, Line)
+                        end
+                     || _ <- lists:seq(1, 50)
+                    ]
+            end;
         _ ->
             []
     end.

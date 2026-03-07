@@ -1,9 +1,9 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_map_ops helper module and compiled
+%% @doc Tests for beamtalk_map helper module and compiled
 %% bt@stdlib@dictionary stdlib dispatch (BT-418).
--module(beamtalk_map_ops_tests).
+-module(beamtalk_map_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -12,13 +12,13 @@
 %%% ============================================================================
 
 at_if_absent_found_test() ->
-    ?assertEqual(1, beamtalk_map_ops:at_if_absent(#{a => 1}, a, fun() -> 99 end)).
+    ?assertEqual(1, beamtalk_map:at_if_absent(#{a => 1}, a, fun() -> 99 end)).
 
 at_if_absent_missing_test() ->
-    ?assertEqual(99, beamtalk_map_ops:at_if_absent(#{a => 1}, b, fun() -> 99 end)).
+    ?assertEqual(99, beamtalk_map:at_if_absent(#{a => 1}, b, fun() -> 99 end)).
 
 at_if_absent_empty_map_test() ->
-    ?assertEqual(42, beamtalk_map_ops:at_if_absent(#{}, x, fun() -> 42 end)).
+    ?assertEqual(42, beamtalk_map:at_if_absent(#{}, x, fun() -> 42 end)).
 
 %%% ============================================================================
 %%% Compiled bt@stdlib@dictionary dispatch/3

@@ -446,16 +446,21 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// Generates `new/0` that delegates to a class method `new` primitive.
+    /// Generates `new/0` that delegates to a class method `new`.
     ///
-    /// When a class defines `class sealed new => @primitive "new"`, the auto-generated
-    /// `new/0` must call through to the primitive implementation rather than creating
-    /// an empty tagged map. This ensures `handle_new_compiled` (which calls `Module:new/0`)
-    /// uses the correct constructor.
+    /// When a class defines `class sealed new => <body>`, the auto-generated
+    /// `new/0` must call through to the implementation rather than creating
+    /// an empty tagged map. This ensures `handle_new_compiled` (which calls
+    /// `Module:new/0`) uses the correct constructor.
+    ///
+    /// Two cases:
+    /// 1. Body is `@primitive "selector"` — inline the BIF call directly.
+    /// 2. Body is an FFI call (ADR 0055) — delegate to the compiled
+    ///    `class_new/2` function with `undefined` for `ClassSelf` and `ClassVars`.
     fn generate_delegating_new(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
 
-        // Find the class method `new` and its primitive selector
+        // Find the class method `new`
         let new_method = class
             .class_methods
             .iter()
@@ -467,39 +472,43 @@ impl CoreErlangGenerator {
                 CodeGenError::Internal("Expected class method 'new' not found".to_string())
             })?;
 
-        // Extract the primitive name from the method body; this is required for delegating `new`
-        let prim_name = new_method
-            .body
-            .iter()
-            .find_map(|stmt| {
-                if let crate::ast::Expression::Primitive { name, .. } = &stmt.expression {
-                    Some(name.clone())
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                CodeGenError::Internal(
-                    "Expected @primitive in class method 'new' for delegating constructor"
-                        .to_string(),
-                )
-            })?;
+        // Check whether the method body is a @primitive annotation.
+        let prim_name = new_method.body.iter().find_map(|stmt| {
+            if let crate::ast::Expression::Primitive { name, .. } = &stmt.expression {
+                Some(name.clone())
+            } else {
+                None
+            }
+        });
 
-        // Generate the BIF call for this primitive; failure is a hard error
-        let bif_doc = super::primitives::generate_primitive_bif(&class_name, &prim_name, &[])
-            .ok_or_else(|| {
+        if let Some(prim_name) = prim_name {
+            // Original path: inline the BIF call for the @primitive.
+            let bif_doc = super::primitives::generate_primitive_bif(&class_name, &prim_name, &[])
+                .ok_or_else(|| {
                 CodeGenError::Internal(format!(
                     "Failed to generate BIF for primitive '{prim_name}' in class method 'new'"
                 ))
             })?;
-
-        Ok(docvec![
-            "'new'/0 = fun () ->\n",
-            "    ",
-            bif_doc,
-            "\n",
-            "\n",
-        ])
+            Ok(docvec![
+                "'new'/0 = fun () ->\n",
+                "    ",
+                bif_doc,
+                "\n",
+                "\n",
+            ])
+        } else {
+            // ADR 0055 FFI path: delegate to the compiled class_new/2 function.
+            // class_new/2 is generated from the `class sealed new => (Erlang M) fn`
+            // method body. `ClassSelf` and `ClassVars` are unused for Object subclasses.
+            let module_name = self.module_name.clone();
+            Ok(docvec![
+                "'new'/0 = fun () ->\n",
+                "    call '",
+                Document::String(module_name),
+                "':'class_new'('undefined', 'undefined')\n",
+                "\n",
+            ])
+        }
     }
 
     /// Generates the `new/1` function for a value type.
@@ -1103,7 +1112,7 @@ impl CoreErlangGenerator {
                     " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
                      <'true'> when 'true' -> {list_var} \
                      <'false'> when 'true' -> \
-                     call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                     call 'beamtalk_collection':'to_list'({list_var}) end \
                      in let {lambda_var} = fun ({item_var}, StateAcc) -> "
                 ),
             ],
