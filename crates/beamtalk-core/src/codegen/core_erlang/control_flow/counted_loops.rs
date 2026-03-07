@@ -168,10 +168,38 @@ impl CoreErlangGenerator {
                 let doc = self.generate_self_dispatch_open(expr)?;
                 docs.push(doc);
             } else if Self::is_local_var_assignment(expr) {
-                // BT-153: Handle local variable assignments for REPL context
-                // Generate: let _Val = <value> in let StateAccN = maps:put('var', _Val, StateAcc{N-1}) in
-                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
-                docs.push(assign_doc);
+                // BT-1224: Threaded locals are pre-bound in scope; block-local vars use plain let.
+                // REPL mode excluded: in REPL all local vars thread through StateAcc.
+                let is_block_local = if let Expression::Assignment { target, .. } = expr {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        self.lookup_var(&id.name).is_none()
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if is_block_local && !self.is_repl_mode {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let core_var = Self::to_core_erlang_var(&id.name);
+                            let val_doc = self.expression_doc(value)?;
+                            self.bind_var(&id.name, &core_var);
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(core_var),
+                                " = ",
+                                val_doc,
+                                " in",
+                            ]);
+                        }
+                    }
+                } else {
+                    // BT-153: Threaded variable — thread through StateAcc
+                    let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                    docs.push(assign_doc);
+                }
             } else if is_last && !has_direct_field_assignments {
                 // BT-478/BT-483: Last expression with no direct field assignments in body.
                 // Mutations come from nested constructs (e.g., inner to:do:).
@@ -340,13 +368,39 @@ impl CoreErlangGenerator {
                 // caller's recursive apply will be the body of the let, which is valid
                 // Core Erlang: "let StateAcc1 = ... in apply 'loop'/2 (I+1, StateAcc1)"
             } else if Self::is_local_var_assignment(expr) {
-                // BT-153: Handle local variable assignments for REPL context
-                // No "in" prefix needed — prior expressions already end with "in "
-                // (field_assignment_open, local_var_assignment_in_loop, and non-assignment
-                // branches all emit trailing "in" or "in ").
-                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
-                docs.push(assign_doc);
-                docs.push(Document::Str(" "));
+                // BT-1224: Threaded locals are pre-bound in scope; block-local vars use plain let.
+                // REPL mode excluded: in REPL all local vars thread through StateAcc.
+                let is_block_local = if let Expression::Assignment { target, .. } = expr {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        self.lookup_var(&id.name).is_none()
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if is_block_local && !self.is_repl_mode {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            let core_var = Self::to_core_erlang_var(&id.name);
+                            let val_doc = self.expression_doc(value)?;
+                            self.bind_var(&id.name, &core_var);
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(core_var),
+                                " = ",
+                                val_doc,
+                                " in ",
+                            ]);
+                        }
+                    }
+                } else {
+                    // BT-153: Threaded variable — thread through StateAcc
+                    let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                    docs.push(assign_doc);
+                    docs.push(Document::Str(" "));
+                }
             } else {
                 // Non-assignment expression (could be a nested control flow construct)
                 if is_last && !has_direct_field_assignments {
