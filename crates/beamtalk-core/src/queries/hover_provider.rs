@@ -332,7 +332,7 @@ fn method_declaration_selector_hover_info(
 
 fn state_declaration_hover_info(state: &StateDeclaration) -> HoverInfo {
     let title = if let Some(ty) = &state.type_annotation {
-        format!("`{}` :: {}", state.name.name, type_annotation_label(ty))
+        format!("`{} :: {}`", state.name.name, type_annotation_label(ty))
     } else {
         format!("`{}`", state.name.name)
     };
@@ -693,7 +693,7 @@ fn find_hover_in_expr(
                     _ => None,
                 };
                 let contents = if let Some(ty) = field_type {
-                    format!("`{}` :: {ty}", field.name)
+                    format!("`{} :: {ty}`", field.name)
                 } else {
                     format!("`{}`", field.name)
                 };
@@ -1201,9 +1201,18 @@ mod tests {
         assert!(hover.is_some(), "Should hover call-site selector");
         let hover = hover.unwrap();
         assert!(
-            hover.contents.contains("```beamtalk") || hover.contents.contains("Unary message"),
+            hover.contents.contains("```beamtalk"),
             "Unexpected hover contents: {}",
             hover.contents
+        );
+        assert!(
+            hover
+                .documentation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Resolved on `Counter`"),
+            "Unexpected hover documentation: {:?}",
+            hover.documentation
         );
     }
 
@@ -1355,7 +1364,7 @@ mod tests {
         assert!(hover.is_some(), "Should hover state declaration name");
         let hover = hover.unwrap();
         assert!(
-            hover.contents.contains("`count` :: Integer"),
+            hover.contents.contains("`count :: Integer`"),
             "Should show name and type, got: {}",
             hover.contents
         );
