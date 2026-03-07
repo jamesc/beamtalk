@@ -158,6 +158,70 @@ Valid values: `#permanent` (always restart), `#transient` (restart on abnormal e
 
 `supervisionPolicy:` is a class-level declaration, not an instance variable. It compiles to a ClassBuilder message and is stored as class metadata, readable via `ClassName supervisionPolicy`.
 
+### `spawnSpec:` — Building Child Specs Programmatically
+
+Every `Actor subclass:` gains two synthesized class-side methods alongside `spawn` and `spawnWith:`:
+
+| Message | Returns | OTP mapping |
+|---|---|---|
+| `ClassName spawnSpec` | `ChildSpec` | default id, args=`[]`, restart from `supervisionPolicy:` |
+| `ClassName spawnSpec: dict` | `ChildSpec` | default id, args=`[dict]`, restart from `supervisionPolicy:` |
+
+`ChildSpec` is a value object:
+
+```beamtalk
+Value subclass: ChildSpec
+  state: id = nil               // OTP child spec id atom
+  state: actorClass = nil       // class name atom
+  state: startArgs = #{}        // dict passed to spawnWith:
+  state: restart = #temporary   // #permanent, #transient, or #temporary
+  state: shutdown = 5000        // ms, or #infinity for supervisor children
+```
+
+`ChildSpec` instances support fluent overrides:
+
+```beamtalk
+spec := DatabasePool spawnSpec: #{#dsn => "postgres://primary"}.
+spec id.                          // => #DatabasePool
+spec restart.                     // => #permanent (from supervisionPolicy:)
+
+spec2 := spec withId: #replica withRestart: #transient.
+spec2 id.                         // => #replica
+```
+
+`spawnSpec:` is the programmatic counterpart to `startArgs:` in the declarative `children:` list. The static `#id -> ClassName startArgs: dict` form desugars to `ClassName spawnSpec: dict withId: #id` at codegen time — they are two faces of the same concept.
+
+### Class-Side `init` Override — Runtime-Configured Supervision
+
+For cases where children depend on runtime configuration (environment variables, feature flags, config files), a Supervisor may declare a class-side `init` method instead of a static `children:` list. The method returns an `Array` of `ChildSpec` objects and is called inside the generated OTP `init([])` callback:
+
+```beamtalk
+Supervisor subclass: DBSup
+  strategy: #oneForOne
+
+  class init =>
+    | primary replica |
+    primary := System env: "PRIMARY_DSN" ifAbsent: ["postgres://localhost/app"].
+    replica  := System env: "REPLICA_DSN" ifAbsent: ["postgres://localhost/app_replica"].
+    ^Array
+      with: (DatabasePool spawnSpec: #{#dsn => primary})
+      with: ((DatabasePool spawnSpec: #{#dsn => replica}) withId: #replica withRestart: #transient)
+```
+
+**Constraint:** `children:` and a class-side `init` method are mutually exclusive:
+
+```text
+error: supervisor 'DBSup' declares both 'children:' and a class-side 'init' method
+  --> DBSup.bt:3
+  |
+3 |   children: #(DatabasePool)
+  |   ^^^^^^^^
+  = help: remove 'children:' to use the 'init' method for dynamic child configuration,
+          or remove the 'init' method to use the static 'children:' declaration
+```
+
+The `init` method is the escape hatch for supervised actors whose configuration isn't known at compile time. For the common case — children known statically — use `children:`.
+
 ### Dynamic Supervision — `strategy: #dynamic`
 
 When the set of children is not known at compile time (worker pools, per-request handlers, connection managers), use `strategy: #dynamic` with a `childClass:` declaration instead of `children:`:
@@ -656,12 +720,16 @@ No new syntax. Users invoke Erlang supervision APIs via BEAM interop:
 - Generated supervisor modules are standard OTP — fully observable with existing BEAM tools
 - REPL inspection via message sends (`app children`, `app which: ClassName`) is consistent with Beamtalk's interactive-first design
 - `@native` actors participate in supervision without special handling
-- Static analysis: the compiler validates children at compile time (class must be Actor or Supervisor subclass, strategy must be a valid symbol)
+- Static analysis: the compiler validates children at compile time for the `children:` path (class must be Actor or Supervisor subclass, strategy must be a valid symbol)
+- `spawnSpec:`/`spawnSpec: dict` extend the `spawn`/`spawnWith:` family coherently: "spawn starts a process now; spawnSpec describes one for the supervisor to start and restart"
+- `spawnSpec:` results are REPL-inspectable as `ChildSpec` value objects — consistent with interactive-first design
 
 ### Negative
 
 - `Supervisor` joins the bootstrap class hierarchy: `ProtoObject → Object → Actor → [user actors]` and `ProtoObject → Object → Supervisor → [user supervisors]`. One more class to bootstrap before user modules load.
 - New class-level declaration keywords: `strategy:`, `maxRestarts:`, `restartWindow:`, `children:`, `childClass:`, `childRestart:`, `supervisionPolicy:` must be added to the parser's class body grammar and to ClassBuilder. Child entry modifiers `restart:` and `startArgs:` are parsed as part of the `children:` list grammar, not class-body declarations.
+- Class-side `init` override and static `children:` are mutually exclusive — compile error if both present.
+- `ChildSpec` value type added to stdlib; `spawnSpec` and `spawnSpec:` synthesized on all `Actor subclass:` definitions.
 - Cross-file compile dependency: to compile `WebApp.bt`, the compiler must know the `supervisionPolicy:` of each listed child class (to fill in restart defaults). This is a new dependency in the compilation graph. If the child class hasn't been compiled yet, the compiler uses `#temporary` and emits a warning.
 - `shutdown:` per-child configuration is not in scope for this ADR. The default of `5000ms` is used for all children. Production systems needing custom shutdown timeouts must use BEAM interop.
 - `strategy: #dynamic` supervisors use OTP's `simple_one_for_one` — all dynamic children are the same class. Mixed-class dynamic supervisors require Erlang FFI.
@@ -729,17 +797,19 @@ Add `Supervisor` as a new base class in the bootstrap sequence:
 **Affected components (full list):**
 - `crates/beamtalk-core/src/source_analysis/lexer.rs` — lex `strategy`, `maxRestarts`, `restartWindow`, `children`, `childClass`, `childRestart`, `supervisionPolicy` as class-body keyword tokens
 - `crates/beamtalk-core/src/source_analysis/parser/` — parse new class-level declarations
-- `crates/beamtalk-core/src/ast.rs` — `SupervisionSpec`, `ChildEntry`, `supervision_policy` on actor class
+- `crates/beamtalk-core/src/ast.rs` — `SupervisionSpec` gains `init_override: Option<ClassMethodDef>`; `ChildEntry` gains `id`, `start_args` fields; `supervision_policy` on actor class
 - `crates/beamtalk-core/src/semantic_analysis/` — validation pass for supervision spec
-- `crates/beamtalk-core/src/codegen/core_erlang/supervisor_codegen.rs` — new file
+- `crates/beamtalk-core/src/codegen/core_erlang/supervisor_codegen.rs` — new file; checks `SupervisionSpec.init_override`: if present, generates `init/1` as delegation to class-side `init` method; if absent, generates inline ChildSpec construction from `children:` declarations
 - `crates/beamtalk-core/src/codegen/core_erlang/actor_codegen.rs` — routing to supervisor codegen
 - `stdlib/src/Supervisor.bt` — Supervisor base class with `supervise` and inspection methods
+- `stdlib/src/ChildSpec.bt` — new `ChildSpec` Value class with `id`, `actorClass`, `startArgs`, `restart`, `shutdown` fields; `withId:withRestart:` fluent override
+- `actor_codegen.rs` — synthesize `spawnSpec` and `spawnSpec:` class-side methods on all `Actor subclass:` definitions (alongside existing `spawn`/`spawnWith:`)
 - `beamtalk_class_builder.erl` — new messages + supervisor register path
 - `runtime/apps/beamtalk_runtime/src/beamtalk_bootstrap.erl` — add `Supervisor` to sequence
 
 ### Phase 3 — Tests and Docs (M)
 
-- `stdlib/test/SupervisorTest.bt` — BUnit tests: start a supervision tree, verify children, crash a child and verify restart, verify `supervisionPolicy:` on Actor
+- `stdlib/test/SupervisorTest.bt` — BUnit tests: static supervision, `init` method override, `spawnSpec:` construction and inspection, crash-and-restart, `supervisionPolicy:` on Actor
 - `tests/e2e/cases/supervisor.bt` — REPL integration: `WebApp supervise`, `app children`, `app which: ClassName`
 - `docs/beamtalk-language-features.md` — add Supervision Tree section after Actor Message Passing
 - `docs/beamtalk-principles.md` — update Principle 10 from "planned but not available" to "available via `Supervisor subclass:`"
