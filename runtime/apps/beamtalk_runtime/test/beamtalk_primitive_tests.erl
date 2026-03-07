@@ -697,7 +697,7 @@ print_string_plain_map_test_() ->
             ok
         end,
         fun(_) -> ok end, fun() ->
-            %% Plain map (Dictionary) — should use beamtalk_map_ops format
+            %% Plain map (Dictionary) — should use beamtalk_map format
             Result = beamtalk_primitive:print_string(#{a => 1}),
             ?assert(is_binary(Result))
         end}.

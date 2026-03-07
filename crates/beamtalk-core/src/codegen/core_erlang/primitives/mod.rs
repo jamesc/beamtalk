@@ -400,7 +400,7 @@ mod tests {
         ));
         assert_eq!(
             result,
-            Some("call 'beamtalk_list_ops':'from_to'(Self, Start, End)".to_string())
+            Some("call 'beamtalk_list':'from_to'(Self, Start, End)".to_string())
         );
     }
 

@@ -1,11 +1,11 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%% @doc Tests for beamtalk_tuple_ops runtime helper (BT-417).
+%% @doc Tests for beamtalk_tuple runtime helper (BT-417).
 %%
 %% Tests the runtime helper module that provides complex Tuple operations
 %% (bounds-checked at:, unwrap*, asString). The compiled Tuple class
-%% (from lib/Tuple.bt) delegates these methods to beamtalk_tuple_ops.
+%% (from lib/Tuple.bt) delegates these methods to beamtalk_tuple.
 
 -module(beamtalk_tuple_tests).
 -include_lib("eunit/include/eunit.hrl").
@@ -16,10 +16,10 @@
 %%% ============================================================================
 
 at_valid_index_test() ->
-    ?assertEqual(a, beamtalk_tuple_ops:at({a, b, c}, 1)),
-    ?assertEqual(b, beamtalk_tuple_ops:at({a, b, c}, 2)),
-    ?assertEqual(c, beamtalk_tuple_ops:at({a, b, c}, 3)),
-    ?assertEqual(42, beamtalk_tuple_ops:at({ok, 42}, 2)).
+    ?assertEqual(a, beamtalk_tuple:at({a, b, c}, 1)),
+    ?assertEqual(b, beamtalk_tuple:at({a, b, c}, 2)),
+    ?assertEqual(c, beamtalk_tuple:at({a, b, c}, 3)),
+    ?assertEqual(42, beamtalk_tuple:at({ok, 42}, 2)).
 
 at_out_of_bounds_test() ->
     ?assertError(
@@ -27,21 +27,21 @@ at_out_of_bounds_test() ->
             '$beamtalk_class' := _,
             error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}
         },
-        beamtalk_tuple_ops:at({a, b}, 0)
+        beamtalk_tuple:at({a, b}, 0)
     ),
     ?assertError(
         #{
             '$beamtalk_class' := _,
             error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}
         },
-        beamtalk_tuple_ops:at({a, b}, 3)
+        beamtalk_tuple:at({a, b}, 3)
     ),
     ?assertError(
         #{
             '$beamtalk_class' := _,
             error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}
         },
-        beamtalk_tuple_ops:at({a, b}, -1)
+        beamtalk_tuple:at({a, b}, -1)
     ).
 
 at_empty_tuple_test() ->
@@ -50,7 +50,7 @@ at_empty_tuple_test() ->
             '$beamtalk_class' := _,
             error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}
         },
-        beamtalk_tuple_ops:at({}, 1)
+        beamtalk_tuple:at({}, 1)
     ).
 
 at_non_integer_index_test() ->
@@ -59,7 +59,7 @@ at_non_integer_index_test() ->
             '$beamtalk_class' := _,
             error := #beamtalk_error{kind = type_error, class = 'Tuple', selector = 'at:'}
         },
-        beamtalk_tuple_ops:at({a, b}, foo)
+        beamtalk_tuple:at({a, b}, foo)
     ).
 
 %%% ============================================================================
@@ -68,11 +68,11 @@ at_non_integer_index_test() ->
 
 as_string_test() ->
     %% BT-536: Atoms now use #symbol notation via beamtalk_primitive:print_string/1
-    ?assertEqual(<<"{#a, #b}">>, beamtalk_tuple_ops:as_string({a, b})),
-    ?assertEqual(<<"{#ok, 42}">>, beamtalk_tuple_ops:as_string({ok, 42})),
-    ?assertEqual(<<"{#error, #not_found}">>, beamtalk_tuple_ops:as_string({error, not_found})),
-    ?assertEqual(<<"{#hello}">>, beamtalk_tuple_ops:as_string({hello})),
-    ?assertEqual(<<"{}">>, beamtalk_tuple_ops:as_string({})).
+    ?assertEqual(<<"{#a, #b}">>, beamtalk_tuple:as_string({a, b})),
+    ?assertEqual(<<"{#ok, 42}">>, beamtalk_tuple:as_string({ok, 42})),
+    ?assertEqual(<<"{#error, #not_found}">>, beamtalk_tuple:as_string({error, not_found})),
+    ?assertEqual(<<"{#hello}">>, beamtalk_tuple:as_string({hello})),
+    ?assertEqual(<<"{}">>, beamtalk_tuple:as_string({})).
 
 %%% ============================================================================
 %%% Compiled dispatch integration tests
@@ -171,7 +171,7 @@ primitive_send_as_string_test() ->
 do_iterates_elements_test() ->
     Self = self(),
     Ref = make_ref(),
-    beamtalk_tuple_ops:do({a, b, c}, fun(X) -> Self ! {Ref, X} end),
+    beamtalk_tuple:do({a, b, c}, fun(X) -> Self ! {Ref, X} end),
     ?assertEqual(
         a,
         receive
@@ -195,7 +195,7 @@ do_iterates_elements_test() ->
     ).
 
 do_returns_nil_test() ->
-    ?assertEqual(nil, beamtalk_tuple_ops:do({1, 2, 3}, fun(_) -> ok end)).
+    ?assertEqual(nil, beamtalk_tuple:do({1, 2, 3}, fun(_) -> ok end)).
 
 do_empty_tuple_test() ->
-    ?assertEqual(nil, beamtalk_tuple_ops:do({}, fun(_) -> ok end)).
+    ?assertEqual(nil, beamtalk_tuple:do({}, fun(_) -> ok end)).

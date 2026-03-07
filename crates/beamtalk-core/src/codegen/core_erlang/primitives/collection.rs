@@ -11,7 +11,7 @@
 //! an abstract `do:` call, which the compiler does not yet support for
 //! abstract-class methods (it generates `lists:foreach` rather than
 //! `lists:foldl`).  `inject:into:` therefore remains a `@primitive` backed
-//! by `beamtalk_collection_ops:inject_into/3`.
+//! by `beamtalk_collection:inject_into/3`.
 //!
 //! Concrete subclasses (List, Set, Dictionary) retain their own `@primitive`
 //! overrides handled by `list.rs`, `misc.rs`, and `dictionary.rs`.
@@ -30,7 +30,7 @@ pub(crate) fn generate_collection_bif(
             let p0 = param(params, 0, "_Initial");
             let p1 = param(params, 1, "_Block");
             Some(docvec![
-                "call 'beamtalk_collection_ops':'inject_into'(Self, ",
+                "call 'beamtalk_collection':'inject_into'(Self, ",
                 p0.to_string(),
                 ", ",
                 p1.to_string(),

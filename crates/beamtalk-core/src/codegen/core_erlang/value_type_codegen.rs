@@ -1103,7 +1103,7 @@ impl CoreErlangGenerator {
                     " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
                      <'true'> when 'true' -> {list_var} \
                      <'false'> when 'true' -> \
-                     call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                     call 'beamtalk_collection':'to_list'({list_var}) end \
                      in let {lambda_var} = fun ({item_var}, StateAcc) -> "
                 ),
             ],

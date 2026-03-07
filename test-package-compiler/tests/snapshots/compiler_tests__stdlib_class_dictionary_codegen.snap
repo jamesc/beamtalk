@@ -27,7 +27,7 @@ call 'maps':'values'(Self)
 call 'maps':'get'(_key1, Self)
 
 'at:ifAbsent:'/3 = fun (Self, _key2, _block3) ->
-call 'beamtalk_map_ops':'at_if_absent'(Self, _key2, _block3)
+call 'beamtalk_map':'at_if_absent'(Self, _key2, _block3)
 
 'at:put:'/3 = fun (Self, _key4, _value5) ->
 call 'maps':'put'(_key4, _value5, Self)
