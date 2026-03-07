@@ -152,12 +152,11 @@ impl MethodValidatorRegistry {
 /// Validates that reflection methods receive symbol literal arguments.
 ///
 /// Methods like `respondsTo:`, `fieldAt:`, and `classNamed:` expect
-/// symbol literals (e.g., `#increment`). When users pass bare identifiers,
-/// this validator produces a helpful diagnostic suggesting `#symbol` syntax.
-///
-/// When `allow_identifier` is `true`, variable (identifier) arguments are
-/// accepted — the runtime handles symbol values correctly. Only `classNamed:`
-/// retains strict literal-only enforcement (`allow_identifier: false`).
+/// symbol arguments (e.g., `#increment`). When `allow_identifier` is `true`,
+/// variable (identifier) arguments are also accepted for dynamic dispatch —
+/// the runtime handles symbol values correctly. Only `classNamed:` retains
+/// strict literal-only enforcement (`allow_identifier: false`). Reserved
+/// pseudo-literals (`true`, `false`, `nil`, `self`) are always rejected.
 struct ReflectionMethodValidator {
     allow_identifier: bool,
 }
@@ -181,8 +180,14 @@ impl MethodValidator for ReflectionMethodValidator {
             // Symbol literal is correct usage
             Expression::Literal(Literal::Symbol(_), _) => vec![],
 
-            // Bare identifier — allowed when the validator permits dynamic use
-            Expression::Identifier(_) if self.allow_identifier => vec![],
+            // Bare identifier — allowed when the validator permits dynamic use,
+            // except for reserved pseudo-literals that are never symbol variables.
+            Expression::Identifier(id)
+                if self.allow_identifier
+                    && !matches!(id.name.as_str(), "true" | "false" | "nil" | "self") =>
+            {
+                vec![]
+            }
 
             // Bare identifier - most common mistake (strict mode only)
             Expression::Identifier(id) => {
@@ -882,6 +887,24 @@ mod tests {
         ))];
         let diagnostics = validator.validate(&selector, &args, None, test_span());
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_reserved_pseudo_literals_rejected_even_in_permissive_mode() {
+        // true, false, nil, self are never symbol variables — still reject them
+        let validator = ReflectionMethodValidator {
+            allow_identifier: true,
+        };
+        for name in &["true", "false", "nil", "self"] {
+            let args = vec![Expression::Identifier(Identifier::new(*name, test_span()))];
+            let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());
+            assert_eq!(
+                diagnostics.len(),
+                1,
+                "Expected error for reserved identifier `{name}`, got none"
+            );
+            assert!(diagnostics[0].message.contains("expects a symbol literal"));
+        }
     }
 
     // ── Primitive instantiation validator tests ──────────────────────────
