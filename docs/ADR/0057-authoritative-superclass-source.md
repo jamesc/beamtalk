@@ -3,6 +3,19 @@
 ## Status
 Proposed (2026-03-07)
 
+## Summary
+
+**Phase 1 (this ADR):** Fix `apply_class_info/2` to update the `superclass` field
+from `__beamtalk_meta/0` when the compiled module loads. One field, targeted fix,
+restores correctness immediately.
+
+**Phase 2 (follow-up):** Migrate static structural metadata out of the class
+gen_server entirely, making `__beamtalk_meta/0` the sole source for immutable facts
+and the gen_server responsible only for mutable runtime state (live method table,
+class variables, hot-patch state). `superclass` happens to be the only field that
+is currently wrong — but the architectural direction is to stop duplicating static
+metadata in process state at all.
+
 ## Context
 
 ### The Problem
@@ -231,21 +244,27 @@ Change `walk_hierarchy/3` to use `superclass_name_from_meta_or_state` per hop.
 **Rejected** because it perpetuates stale state and requires all future callers to
 defend against it independently.
 
-### Option C (Deferred): `__beamtalk_meta/0` as sole hierarchy authority
+### Option C (Planned Phase 2): `__beamtalk_meta/0` as sole source for static metadata
 
-Deprecate `gen_server:call(Pid, superclass)` entirely; all traversal goes through
-`__beamtalk_meta/0`. Dynamic classes use a separate lightweight registry.
+Remove static structural fields from `#class_state{}` entirely. The gen_server
+becomes responsible only for mutable runtime state: live method table, class
+variables, hot-patch state. All structural queries (`superclass`, `is_sealed`,
+`fields`, etc.) read directly from `__beamtalk_meta/0`. Dynamic classes (no compiled
+module) use a separate lightweight in-memory store populated at `register_class` time.
 
 - **Newcomer**: "No visible difference."
 - **Smalltalk purist**: "More principled — the compiled module *is* the class."
-- **BEAM veteran**: "Larger surface area; risk of breaking dynamic class creation.
-  Premature given that Option A solves the problem."
-- **Language designer**: "The right long-term direction. Option A is Option C done
-  incrementally — it makes gen_server state correct rather than obsolete. Revisit
-  full deprecation when the class gen_server's role is narrower."
+- **BEAM veteran**: "Larger surface area than Option A; worth doing once the gen_server
+  role is clearly scoped. Option A establishes correctness first."
+- **Language designer**: "This is the destination. Option A is the first step — it
+  makes gen_server state correct. Option C makes gen_server state *minimal*. The
+  right sequence: fix correctness now, migrate to cleanliness later."
 
-**Deferred**: Option A is the right incremental step and fully compatible with
-eventually pursuing Option C.
+**Planned Phase 2**: `superclass` is the only field that is currently wrong, so
+Option A fixes all active bugs. Option C is the follow-up architectural migration
+once the gen_server's role as mutable-state-only process is fully defined. The two
+phases are independent — Option C can proceed whenever the codebase is ready, without
+blocking on any other work.
 
 ### Tension Points
 
@@ -264,10 +283,14 @@ See Steelman Analysis above. Rejected because it perpetuates stale state and doe
 scale: every new hierarchy-traversal intrinsic must independently defend against the
 inconsistency.
 
-### Option C: Deprecate gen_server superclass field
+### Option C: Remove static metadata from gen_server (Phase 2)
 
-See Steelman Analysis above. Deferred: conceptually correct but premature. Option A
-gets 100% of the practical benefit with a fraction of the risk and effort.
+See Steelman Analysis above. Not rejected — planned as a follow-up architectural
+migration once Option A restores correctness. `superclass` is the only field
+currently wrong; Option A fixes the active bug. Option C then cleans up the
+remaining ~9 static fields that are duplicated between `#class_state{}` and
+`__beamtalk_meta/0`. The two phases are independent and sequenced deliberately:
+correctness first, architectural cleanliness second.
 
 ### Do Nothing (per-site workarounds)
 
@@ -302,6 +325,9 @@ third was anticipated before the issue closed.
   bootstrap stub registration and compiled module load.
 - Hot-reload of user-defined classes is unaffected: their bootstrap superclass was
   always correct (set by the compiler, not a stub).
+- `superclass` is the only field currently set incorrectly by bootstrap stubs. The
+  other ~9 static fields duplicated between `#class_state{}` and `__beamtalk_meta/0`
+  are correct but redundant — cleaning them up is the Phase 4 (Option C) migration.
 
 ## Implementation
 
@@ -320,6 +346,25 @@ third was anticipated before the issue closed.
 2. Replace its two call sites in `metaclassSuperclass/1` with direct
    `gen_server:call(Pid, superclass)`.
 3. Update the EUnit test that exercises the workaround path.
+
+### Phase 4 (follow-up ADR) — Migrate Static Metadata out of gen_server
+
+Once Phase 1-3 land and correctness is established, a follow-up ADR covers Option C:
+
+- Define the gen_server's role as **mutable runtime state only**: live method table
+  (with hot-patch deltas), class variables, runtime-added docs.
+- Remove static fields from `#class_state{}`: `superclass`, `is_sealed`,
+  `is_abstract`, `fields`, `method_return_types`, `class_method_return_types`,
+  `method_signatures`, `class_method_signatures`, `doc` (~9 fields of 17).
+- All structural queries read from `__beamtalk_meta/0` directly (or a thin ETS
+  cache over it for dynamic classes).
+- Dynamic classes (no compiled module) populate the ETS cache at `register_class`
+  time from `ClassInfo` — same data, different source.
+- Remove the now-redundant `superclass_name_from_meta_or_state` pattern entirely
+  (already done in Phase 2 above, but Phase 4 makes it structurally impossible to
+  reintroduce).
+
+Phase 4 is tracked separately. It does not block Phase 1-3.
 
 ### Phase 3 — Add Regression Test (beamtalk_object_class_tests.erl)
 
