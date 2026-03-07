@@ -6,12 +6,18 @@ Beamtalk is a Smalltalk/Newspeak-inspired language compiling to BEAM via Rust. T
 
 ## Essential Rules
 
-- **Verify Beamtalk syntax** in `docs/beamtalk-language-features.md`, `examples/`, or `tests/` before using it. Do not invent syntax.
+- **Verify Beamtalk syntax** before writing any new `.bt` or Erlang FFI code: grep for 3+ existing codebase examples of the pattern, then confirm against `docs/beamtalk-language-features.md`. Do not invent syntax or guess from Smalltalk memory.
 - **Structured errors:** Use `#beamtalk_error{}` for all user-facing/public API errors. Internal runtime helpers may use `{ok, Value} | {error, Reason}` if translated at public boundaries.
 - **Codegen:** All Core Erlang codegen MUST use `Document` / `docvec!` API. **NEVER use `format!()` or string concatenation to produce Core Erlang fragments — not even for "simple" atoms, arities, or map keys.** This rule has been violated repeatedly and required a dedicated cleanup effort (BT-875). Do not reintroduce violations.
 - **Erlang logging:** Use OTP logger macros (`?LOG_ERROR`, etc.), never `io:format` or `logger:error()`.
 - **License headers:** All source **code** files (`.rs`, `.erl`, `.bt`, `.hrl`) need `Copyright 2026 James Casey` / `SPDX-License-Identifier: Apache-2.0`. Do **not** add license headers to `.md` files.
 - **Implicit returns:** Use `^` ONLY for early returns, never on last expression.
+- **Block returns (`^`):** `^` inside a block is a **non-local return** — it exits the *enclosing method* immediately with that value, not just the block. This is standard Smalltalk semantics, implemented via a throw/catch token in codegen.
+- **Type annotations:** Beamtalk uses `::` (double-colon) for type annotations, never single `:`. Examples: `state: x :: Integer = 0`, `param :: Type -> ReturnType =>`.
+- **DNU:** Sending an unrecognised message raises a `does_not_understand` error (`#beamtalk_error{}`). Use `respondsTo:` to check whether a method exists before calling it.
+- **Generated files:** Before editing `.app.src` or other generated artifacts, check if a build step owns them. `build_stdlib.rs` generates `beamtalk_stdlib.app.src` — edit the generator, not the output.
+- **Worktree stale builds:** After entering or creating a worktree, run `just build` before running tests. Stale BEAM artifacts from another build cause false failures.
+- **REPL output:** Before changing any REPL display value, prompt format, or output behaviour, confirm with the user — existing output is usually intentional and covered by e2e tests. Do not "fix" output that looks wrong without checking first.
 - **Test assertions:** Every expression in test files MUST have a `// =>` assertion (even `// => _`). No assertion = no execution.
 
 ## CI Commands
