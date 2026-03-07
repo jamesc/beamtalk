@@ -29,8 +29,16 @@ reset_captured_group_leaders_dead_process_test() ->
     %% Spawn a process, make the capture PID its group leader, then kill it.
     %% reset_captured_group_leaders must not crash with badarg.
     OldGL = group_leader(),
-    CapturePid = spawn(fun() -> receive stop -> ok end end),
-    Pid = spawn(fun() -> receive stop -> ok end end),
+    CapturePid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
     group_leader(CapturePid, Pid),
     %% Kill the target process to trigger the race condition
     exit(Pid, kill),
@@ -43,8 +51,16 @@ reset_captured_group_leaders_dead_process_test() ->
 reset_captured_group_leaders_live_process_test() ->
     %% Live process whose group_leader is CapturePid gets reset to OldGL.
     OldGL = group_leader(),
-    CapturePid = spawn(fun() -> receive stop -> ok end end),
-    Pid = spawn(fun() -> receive stop -> ok end end),
+    CapturePid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
     group_leader(CapturePid, Pid),
     ?assertEqual(ok, beamtalk_io_capture:reset_captured_group_leaders(CapturePid, OldGL)),
     {group_leader, GL} = erlang:process_info(Pid, group_leader),
@@ -55,8 +71,16 @@ reset_captured_group_leaders_live_process_test() ->
 reset_captured_group_leaders_different_gl_left_alone_test() ->
     %% Process with a different group_leader is not touched.
     OldGL = group_leader(),
-    CapturePid = spawn(fun() -> receive stop -> ok end end),
-    OtherPid = spawn(fun() -> receive stop -> ok end end),
+    CapturePid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    OtherPid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
     %% OtherPid's GL is OldGL (default), not CapturePid
     ?assertEqual(ok, beamtalk_io_capture:reset_captured_group_leaders(CapturePid, OldGL)),
     {group_leader, GL2} = erlang:process_info(OtherPid, group_leader),
