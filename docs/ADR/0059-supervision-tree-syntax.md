@@ -417,14 +417,6 @@ ok
 ### Error Cases
 
 ```text
-> DatabasePool start.
-RuntimeError: 'DatabasePool' is an Actor, not a Supervisor.
-  Hint: Use 'spawn' to create an actor instance; use 'supervise' to start a supervision tree.
-
-> WebApp spawn.
-RuntimeError: 'WebApp' is a Supervisor, not an Actor.
-  Hint: Use 'supervise' to start the supervision tree.
-
 > Supervisor subclass: BadSup  strategy: #unknown  children: #(DatabasePool)
 error: unknown supervision strategy '#unknown'
   --> BadSup.bt:2
