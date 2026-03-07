@@ -28,3 +28,13 @@ TestCase subclass: ClassMethodNonLocalReturnTest
   testNlrFromClassMethodDoBlockNoMatch =>
     // No positive element — falls through do:, returns nil
     self assert: (ClassMethodNlrEarly firstPositive: #(-1, -2, -3)) equals: nil
+
+  testNlrFromClassMethodWithClassVars =>
+    // ^ in a class method that also mutates class vars:
+    // the class var mutation should be preserved when ^ fires via NLR.
+    self assert: (ClassMethodNlrClassVars check: 5) equals: "positive"
+    self assert: ClassMethodNlrClassVars flagValue equals: true
+
+  testNlrFromClassMethodWithClassVarsFallthrough =>
+    // When ^ is not taken, normal return also works
+    self assert: (ClassMethodNlrClassVars check: -1) equals: "negative"
