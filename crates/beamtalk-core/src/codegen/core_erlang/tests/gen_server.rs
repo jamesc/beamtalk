@@ -2435,3 +2435,31 @@ fn test_value_subclass_untyped_fields_still_emit_type_alias() {
         "Should emit export_type([t/0]) so other modules can reference Point:t(). Got:\n{code}"
     );
 }
+
+#[test]
+fn test_class_method_local_var_assignment_of_self_class_method() {
+    // BT-1201: class method `x := self classMethod` must NOT produce `in  in`.
+    // Previously generated invalid Core Erlang:
+    //   let X = let _CMR = call ... in let ClassVars1 = ... in let _Unwrapped = ... in  in X
+    let src = "Object subclass: Broken\n  class a =>\n    x := self b.\n    x\n\n  class b => 42";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@broken").with_workspace_mode(true),
+    );
+    assert!(result.is_ok(), "Codegen should succeed. Got: {result:?}");
+    let code = result.unwrap();
+    assert!(
+        !code.contains("in  in"),
+        "Should not contain doubled `in` keyword. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class_a'/2"),
+        "Should generate class_a/2 function. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class_b'/2"),
+        "Should generate class_b/2 function. Got:\n{code}"
+    );
+}

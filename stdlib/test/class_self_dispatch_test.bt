@@ -3,6 +3,7 @@
 
 // BT-773: self and explicit class name in class methods should both use
 // direct dispatch (not actor message send) to avoid deadlock
+// BT-1201: class method assigning result of self classMethod to local var
 
 TestCase subclass: ClassSelfDispatchTest
 
@@ -14,3 +15,12 @@ TestCase subclass: ClassSelfDispatchTest
     // ClassName new: in a class method should also use direct dispatch
     // Before BT-773, this would deadlock because it routed through class_send
     self assert: (ClassSelfDispatch makeExplicit: 99) x equals: 99
+
+  testLocalVarAssignmentOfClassMethodResult =>
+    // BT-1201: `obj := self makeSelf: v. obj` must generate valid Core Erlang.
+    // Previously produced `in  in` causing a core_parse_error.
+    self assert: (ClassSelfDispatch makeViaLocal: 7) x equals: 7
+
+  testChainedClassMethodCallViaLocalVar =>
+    // BT-1201: two class methods chained via local var
+    self assert: ClassSelfDispatch fortytwo equals: 42

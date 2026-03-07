@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-773: Test fixture for class method self vs explicit class name dispatch
+// BT-1201: class method assigning result of self classMethod call to a local var
 
 Object subclass: ClassSelfDispatch
   state: x = 0
@@ -9,5 +10,17 @@ Object subclass: ClassSelfDispatch
   class makeSelf: v => self new: #{#x => v}
 
   class makeExplicit: v => ClassSelfDispatch new: #{#x => v}
+
+  // BT-1201: assigns result of self classMethod to local var, then returns it
+  class makeViaLocal: v =>
+    obj := self makeSelf: v
+    obj
+
+  // BT-1201: chains two class method calls via local var
+  class fortytwo =>
+    n := self rawValue
+    n
+
+  class rawValue => 42
 
   x => self.x
