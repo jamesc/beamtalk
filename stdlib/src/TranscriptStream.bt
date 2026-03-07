@@ -42,8 +42,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript cr
   /// ```
-  cr -> Nil =>
-    (Erlang beamtalk_transcript_stream) cr: self
+  cr -> Nil => (Erlang beamtalk_transcript_stream) cr: self
 
   /// Subscribe the calling process to receive transcript output.
   ///
@@ -51,8 +50,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript subscribe
   /// ```
-  subscribe -> Nil =>
-    (Erlang beamtalk_transcript_stream) subscribe: self
+  subscribe -> Nil => (Erlang beamtalk_transcript_stream) subscribe: self
 
   /// Unsubscribe the calling process from transcript output.
   ///
@@ -60,8 +58,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript unsubscribe
   /// ```
-  unsubscribe -> Nil =>
-    (Erlang beamtalk_transcript_stream) unsubscribe: self
+  unsubscribe -> Nil => (Erlang beamtalk_transcript_stream) unsubscribe: self
 
   /// Return recent transcript entries as a list.
   ///
@@ -69,8 +66,7 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript recent
   /// ```
-  recent -> List =>
-    (Erlang beamtalk_transcript_stream) recent: self
+  recent -> List => (Erlang beamtalk_transcript_stream) recent: self
 
   /// Clear the transcript buffer.
   ///
@@ -78,5 +74,4 @@ Actor subclass: TranscriptStream
   /// ```beamtalk
   /// Transcript clear
   /// ```
-  clear -> Nil =>
-    (Erlang beamtalk_transcript_stream) clear: self
+  clear -> Nil => (Erlang beamtalk_transcript_stream) clear: self

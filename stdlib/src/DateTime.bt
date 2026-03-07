@@ -28,8 +28,7 @@ sealed Value subclass: DateTime
   /// ```beamtalk
   /// DateTime now                                   // => a DateTime(...)
   /// ```
-  class sealed now -> DateTime =>
-    (Erlang beamtalk_datetime) now
+  class sealed now -> DateTime => (Erlang beamtalk_datetime) now
 
   /// Monotonic clock value in nanoseconds (for measuring intervals).
   /// Returns an Integer, not a DateTime.

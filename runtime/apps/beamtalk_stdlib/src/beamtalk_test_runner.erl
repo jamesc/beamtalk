@@ -37,6 +37,21 @@
     result_print_string/1
 ]).
 
+%% FFI shims for (Erlang beamtalk_test_runner) dispatch
+-export([runAll/0, run/1, run/2]).
+%% TestResult instance-side
+-export([
+    passed/1,
+    failed/1,
+    skipped/1,
+    total/1,
+    duration/1,
+    failures/1,
+    hasPassed/1,
+    summary/1,
+    printString/1
+]).
+
 %%====================================================================
 %% TestRunner primitives
 %%====================================================================
@@ -320,3 +335,27 @@ aggregate_results(ClassResults) ->
         DurationSum,
         lists:reverse(RevTests)
     ).
+
+%%====================================================================
+%% FFI shims — (Erlang beamtalk_test_runner) dispatch
+%%====================================================================
+
+%% runAll → runAll/0  (TestRunner runAll)
+runAll() -> run_all().
+
+%% run: → run/1  (TestRunner run: testClass)
+run(TestClass) -> run_class(TestClass).
+
+%% run:method: → run/2  (TestRunner run: testClass method: testName)
+run(TestClass, TestName) -> run_method(TestClass, TestName).
+
+%% TestResult instance shims — passed: → passed/1, etc.
+passed(Self) -> result_passed(Self).
+failed(Self) -> result_failed(Self).
+skipped(Self) -> result_skipped(Self).
+total(Self) -> result_total(Self).
+duration(Self) -> result_duration(Self).
+failures(Self) -> result_failures(Self).
+hasPassed(Self) -> result_has_passed(Self).
+summary(Self) -> result_summary(Self).
+printString(Self) -> result_print_string(Self).

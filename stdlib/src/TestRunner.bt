@@ -24,7 +24,7 @@ Object subclass: TestRunner
   /// result := TestRunner runAll
   /// result hasPassed       // => true
   /// ```
-  class runAll -> TestResult => @primitive "runAll"
+  class runAll -> TestResult => (Erlang beamtalk_test_runner) runAll
 
   /// Run all test methods in the given TestCase subclass `testClass`.
   /// Returns a TestResult for that class.
@@ -34,7 +34,8 @@ Object subclass: TestRunner
   /// result := TestRunner run: CounterTest
   /// result summary         // => "3 tests, 3 passed (0.0s)"
   /// ```
-  class run: testClass -> TestResult => @primitive "run:"
+  class run: testClass -> TestResult =>
+    (Erlang beamtalk_test_runner) run: testClass
 
   /// Run a single named test method in `testClass`.
   /// Returns a TestResult containing just that method's outcome.
@@ -45,4 +46,4 @@ Object subclass: TestRunner
   /// result hasPassed       // => true
   /// ```
   class run: testClass method: testName -> TestResult =>
-    @primitive "run:method:"
+    (Erlang beamtalk_test_runner) run: testClass method: testName

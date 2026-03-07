@@ -217,7 +217,9 @@ duplicate_subscribe_test() ->
 
 ffi_shim_dispatch_show_test() ->
     {ok, Pid} = beamtalk_transcript_stream:spawn(),
-    Self = #beamtalk_object{class = 'TranscriptStream', class_mod = 'bt@stdlib@transcript_stream', pid = Pid},
+    Self = #beamtalk_object{
+        class = 'TranscriptStream', class_mod = 'bt@stdlib@transcript_stream', pid = Pid
+    },
     gen_server:call(Pid, {'show:', [Self, <<"dispatch_show">>]}),
     Recent = gen_server:call(Pid, recent),
     ?assert(is_list(Recent)),

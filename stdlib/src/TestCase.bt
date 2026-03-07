@@ -23,7 +23,7 @@ Object subclass: TestCase
   /// ```beamtalk
   /// CounterTest runAll     // prints results to transcript
   /// ```
-  class runAll -> String => @primitive "runAll"
+  class runAll -> String => (Erlang beamtalk_test_case) runAll: self
 
   /// Run the named test method in this class and print a summary.
   ///
@@ -31,7 +31,8 @@ Object subclass: TestCase
   /// ```beamtalk
   /// CounterTest run: #testIncrement
   /// ```
-  class run: testName -> String => @primitive "run:"
+  class run: testName -> String =>
+    (Erlang beamtalk_test_case) runClass: self withTest: testName
 
   /// Prepare the test fixture. Called before each test method.
   /// Override in subclasses to set up shared state or resources.
@@ -87,7 +88,7 @@ Object subclass: TestCase
   /// self should: [1 / 0] raise: ZeroDivisionError
   /// ```
   should: block :: Block raise: errorKind :: Object -> Nil =>
-    @primitive "should:raise:"
+    (Erlang beamtalk_test_case) should: block raise: errorKind
 
   /// Fail the test immediately with the given `message`.
   ///
@@ -95,7 +96,7 @@ Object subclass: TestCase
   /// ```beamtalk
   /// self fail: "This branch should not be reached"
   /// ```
-  fail: message :: String -> Nil => @primitive "fail:"
+  fail: message :: String -> Nil => (Erlang beamtalk_test_case) fail: message
 
   /// Skip the current test with a reason.
   ///
@@ -108,7 +109,7 @@ Object subclass: TestCase
   ///   System osFamily =:= "unix" ifFalse: [^self skip: "Unix only"]
   ///   // ... test body
   /// ```
-  skip: reason :: String -> Nil => @primitive "skip:"
+  skip: reason :: String -> Nil => (Erlang beamtalk_test_case) skipTest: reason
 
   /// Skip the current test with no reason.
   ///

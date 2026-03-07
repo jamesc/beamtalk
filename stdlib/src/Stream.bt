@@ -97,8 +97,7 @@ sealed Object subclass: Stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) do: [:n | Transcript show: n]
   /// ```
-  do: block :: Block -> Nil =>
-    (Erlang beamtalk_stream) do: self block: block
+  do: block :: Block -> Nil => (Erlang beamtalk_stream) do: self block: block
 
   /// Fold/reduce with initial value (terminal).
   ///
