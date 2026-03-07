@@ -1060,7 +1060,7 @@ mod tests {
                 }
                 // Wait for epmd deregistration so the retry can reuse the same node name.
                 let _ = wait_for_epmd_deregistration(&node_name, 5);
-                // Exponential backoff: 1 s, 2 s.
+                // Linear backoff: 1 s, 2 s.
                 std::thread::sleep(std::time::Duration::from_secs(attempt as u64));
             }
             match start_detached_node(&tw.id, 0, &paths, &[], false, Some(60), None, None, None) {
