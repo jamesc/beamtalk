@@ -32,33 +32,34 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% Should have exactly 4 children: bootstrap, stdlib, object_instances, subprocess_sup
-    ?assertEqual(4, length(ChildSpecs)).
+    %% Should have exactly 5 children: bootstrap, stdlib, object_instances, subprocess_sup, reactive_subprocess_sup
+    ?assertEqual(5, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% Children should be bootstrap, stdlib, object_instances, and subprocess_sup
+    %% Children should be bootstrap, stdlib, object_instances, subprocess_sup, and reactive_subprocess_sup
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assert(lists:member(beamtalk_bootstrap, Ids)),
     ?assert(lists:member(beamtalk_stdlib, Ids)),
     ?assert(lists:member(beamtalk_object_instances, Ids)),
     ?assert(lists:member(beamtalk_subprocess_sup, Ids)),
+    ?assert(lists:member(beamtalk_reactive_subprocess_sup, Ids)),
     ?assertNot(lists:member(beamtalk_classes, Ids)).
 
 children_are_workers_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% First three children are workers; subprocess_sup is a supervisor
+    %% First three children are workers; subprocess_sup and reactive_subprocess_sup are supervisors
     Types = [maps:get(type, Spec) || Spec <- ChildSpecs],
-    ?assertEqual([worker, worker, worker, supervisor], Types).
+    ?assertEqual([worker, worker, worker, supervisor, supervisor], Types).
 
 children_are_permanent_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
     %% All children should have permanent restart
     RestartTypes = [maps:get(restart, Spec) || Spec <- ChildSpecs],
-    ?assertEqual([permanent, permanent, permanent, permanent], RestartTypes).
+    ?assertEqual([permanent, permanent, permanent, permanent, permanent], RestartTypes).
 
 %%% Child ordering tests
 %%% Order matters: bootstrap must start before stdlib (which registers classes),
@@ -67,10 +68,16 @@ children_are_permanent_test() ->
 children_ordered_correctly_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% Verify ordering: bootstrap -> stdlib -> instances -> subprocess_sup
+    %% Verify ordering: bootstrap -> stdlib -> instances -> subprocess_sup -> reactive_subprocess_sup
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assertEqual(
-        [beamtalk_bootstrap, beamtalk_stdlib, beamtalk_object_instances, beamtalk_subprocess_sup],
+        [
+            beamtalk_bootstrap,
+            beamtalk_stdlib,
+            beamtalk_object_instances,
+            beamtalk_subprocess_sup,
+            beamtalk_reactive_subprocess_sup
+        ],
         Ids
     ).
 
@@ -79,7 +86,7 @@ children_ordered_correctly_test() ->
 bootstrap_child_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    [BootstrapSpec, _StdlibSpec, _InstancesSpec, _SubprocessSupSpec] = ChildSpecs,
+    [BootstrapSpec, _StdlibSpec, _InstancesSpec, _SubprocessSupSpec, _ReactiveSupSpec] = ChildSpecs,
     ?assertEqual(beamtalk_bootstrap, maps:get(id, BootstrapSpec)),
     ?assertEqual({beamtalk_bootstrap, start_link, []}, maps:get(start, BootstrapSpec)),
     ?assertEqual(permanent, maps:get(restart, BootstrapSpec)),
@@ -90,7 +97,7 @@ bootstrap_child_spec_test() ->
 instances_child_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    [_BootstrapSpec, _StdlibSpec, InstancesSpec, _SubprocessSupSpec] = ChildSpecs,
+    [_BootstrapSpec, _StdlibSpec, InstancesSpec, _SubprocessSupSpec, _ReactiveSupSpec] = ChildSpecs,
     ?assertEqual(beamtalk_object_instances, maps:get(id, InstancesSpec)),
     ?assertEqual({beamtalk_object_instances, start_link, []}, maps:get(start, InstancesSpec)),
     ?assertEqual(permanent, maps:get(restart, InstancesSpec)),
@@ -101,7 +108,7 @@ instances_child_spec_test() ->
 stdlib_child_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    [_BootstrapSpec, StdlibSpec, _InstancesSpec, _SubprocessSupSpec] = ChildSpecs,
+    [_BootstrapSpec, StdlibSpec, _InstancesSpec, _SubprocessSupSpec, _ReactiveSupSpec] = ChildSpecs,
     ?assertEqual(beamtalk_stdlib, maps:get(id, StdlibSpec)),
     ?assertEqual({beamtalk_stdlib, start_link, []}, maps:get(start, StdlibSpec)),
     ?assertEqual(permanent, maps:get(restart, StdlibSpec)),
@@ -112,7 +119,7 @@ stdlib_child_spec_test() ->
 subprocess_sup_child_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    [_BootstrapSpec, _StdlibSpec, _InstancesSpec, SubprocessSupSpec] = ChildSpecs,
+    [_BootstrapSpec, _StdlibSpec, _InstancesSpec, SubprocessSupSpec, _ReactiveSupSpec] = ChildSpecs,
     ?assertEqual(beamtalk_subprocess_sup, maps:get(id, SubprocessSupSpec)),
     ?assertEqual({beamtalk_subprocess_sup, start_link, []}, maps:get(start, SubprocessSupSpec)),
     ?assertEqual(permanent, maps:get(restart, SubprocessSupSpec)),
@@ -120,11 +127,24 @@ subprocess_sup_child_spec_test() ->
     ?assertEqual(supervisor, maps:get(type, SubprocessSupSpec)),
     ?assertEqual([beamtalk_subprocess_sup], maps:get(modules, SubprocessSupSpec)).
 
+reactive_subprocess_sup_child_spec_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
+
+    [_BootstrapSpec, _StdlibSpec, _InstancesSpec, _SubprocessSupSpec, ReactiveSupSpec] = ChildSpecs,
+    ?assertEqual(beamtalk_reactive_subprocess_sup, maps:get(id, ReactiveSupSpec)),
+    ?assertEqual(
+        {beamtalk_reactive_subprocess_sup, start_link, []}, maps:get(start, ReactiveSupSpec)
+    ),
+    ?assertEqual(permanent, maps:get(restart, ReactiveSupSpec)),
+    ?assertEqual(5000, maps:get(shutdown, ReactiveSupSpec)),
+    ?assertEqual(supervisor, maps:get(type, ReactiveSupSpec)),
+    ?assertEqual([beamtalk_reactive_subprocess_sup], maps:get(modules, ReactiveSupSpec)).
+
 %%% init/1 tests
 
 init_returns_proper_format_test() ->
     Result = beamtalk_runtime_sup:init([]),
-    ?assertMatch({ok, {#{strategy := one_for_one}, [_, _, _, _]}}, Result).
+    ?assertMatch({ok, {#{strategy := one_for_one}, [_, _, _, _, _]}}, Result).
 
 %%% Behavioral tests
 
@@ -156,7 +176,11 @@ all_children_alive_test() ->
 
         %% Verify each child has correct ID and is alive
         ExpectedIds = [
-            beamtalk_bootstrap, beamtalk_stdlib, beamtalk_object_instances, beamtalk_subprocess_sup
+            beamtalk_bootstrap,
+            beamtalk_stdlib,
+            beamtalk_object_instances,
+            beamtalk_subprocess_sup,
+            beamtalk_reactive_subprocess_sup
         ],
         ActualIds = [Id || {Id, _Pid, _Type, _Modules} <- Children],
         ?assertEqual(lists:sort(ExpectedIds), lists:sort(ActualIds)),

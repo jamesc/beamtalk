@@ -42,6 +42,7 @@
             {'bt@stdlib@port', 'Port', 'Object'},
             {'bt@stdlib@proto_object', 'ProtoObject', 'none'},
             {'bt@stdlib@random', 'Random', 'Object'},
+            {'bt@stdlib@reactive_subprocess', 'ReactiveSubprocess', 'Actor'},
             {'bt@stdlib@reference', 'Reference', 'Object'},
             {'bt@stdlib@regex', 'Regex', 'Value'},
             {'bt@stdlib@runtime_error', 'RuntimeError', 'Error'},

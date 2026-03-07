@@ -314,11 +314,11 @@ class_doc_for_nonexistent_method_test_() ->
     end}.
 
 %%% ============================================================================
-%%% metaclassSuperclass/1 — via superclass_name_from_meta_or_state/1 (BT-1169)
+%%% metaclassSuperclass/1 — via gen_server:call(Pid, superclass) (BT-1186)
 %%% ============================================================================
 
-%% When no compiled __beamtalk_meta/0 is available (gen_server fallback path),
-%% metaclassSuperclass/1 still returns the correct metaclass for the superclass.
+%% BT-1186: metaclassSuperclass/1 now calls gen_server:call(Pid, superclass)
+%% directly (BT-1185 ensures the gen_server always holds the correct superclass).
 %% A dynamically-created class has 'Object' as its superclass; Object is
 %% registered at boot, so metaclassSuperclass returns a Metaclass-tagged object.
 metaclass_superclass_no_meta_returns_metaclass_test_() ->
@@ -328,9 +328,9 @@ metaclass_superclass_no_meta_returns_metaclass_test_() ->
                 {ClassObj, Pid} = register_class('BT1169BiSuperclassNoMeta', #{}, #{}),
                 try
                     MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    %% No __beamtalk_meta/0 on the gen_server-based stub — falls
-                    %% through to gen_server:call(Pid, superclass) which returns
-                    %% 'Object'. Object is registered, so we get its metaclass.
+                    %% gen_server:call(Pid, superclass) returns 'Object' for a
+                    %% dynamically-created class. Object is registered, so we get
+                    %% its metaclass.
                     Result = beamtalk_behaviour_intrinsics:metaclassSuperclass(MetaObj),
                     ?assertMatch(#beamtalk_object{class = 'Metaclass'}, Result)
                 after

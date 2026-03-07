@@ -54,6 +54,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Port"
             | "ProtoObject"
             | "Random"
+            | "ReactiveSubprocess"
             | "Reference"
             | "Regex"
             | "RuntimeError"
@@ -678,7 +679,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "lines".into(), arity: 0, kind: MethodKind::Primary, defined_in: "FileHandle".into(), is_sealed: false, return_type: Some("Stream".into()), param_types: vec![], doc: Some("Return a lazy Stream of lines from this file handle.\n\nThe Stream reads lines one at a time. It must be consumed within the\n`File open:do:` block — the Stream must not escape the block.\n\n## Examples\n\n```beamtalk\nFile open: \"data.csv\" do: [:handle |\n  handle lines do: [:line | Transcript show: line].\n].\n```".into()) },
-                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "FileHandle".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n\n```beamtalk\nhandle printString.\n// => \"a FileHandle\"\n```".into()) },
             ],
             class_methods: vec![],
             class_variables: vec![],
@@ -1167,6 +1167,30 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "ReactiveSubprocess".into(),
+        ClassInfo {
+            name: "ReactiveSubprocess".into(),
+            superclass: Some("Actor".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "writeLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![None], doc: Some("Write a line to the subprocess's stdin (appends newline).\n\n## Examples\n```beamtalk\nproc writeLine: \"{\\\"jsonrpc\\\":\\\"2.0\\\",\\\"method\\\":\\\"ping\\\"}\"\n```".into()) },
+                MethodInfo { selector: "exitCode".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Get the exit code. Returns nil if the subprocess is still running.\n\n## Examples\n```beamtalk\nproc exitCode.   // => 0\n```".into()) },
+                MethodInfo { selector: "close".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Force-close the subprocess (sends kill to process group).\n\n## Examples\n```beamtalk\nproc close.\n```".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "open:args:notify:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, return_type: None, param_types: vec![None, None, None], doc: Some("Open a subprocess in push mode, delivering lines to `notify`.\n\nThe `notify` actor receives async casts for each stdout line, stderr line,\nand the final exit code.\n\n## Examples\n```beamtalk\nproc := ReactiveSubprocess open: \"echo\" args: #(\"hello\") notify: delegate\n```".into()) },
+                MethodInfo { selector: "open:args:env:dir:notify:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, return_type: None, param_types: vec![None, None, None, None, None], doc: Some("Open a subprocess with environment and working directory, delivering lines to `notify`.\n\n## Examples\n```beamtalk\nproc := ReactiveSubprocess\n  open: \"make\" args: #(\"test\")\n  env: #{#\"CI\" => #\"true\"} dir: #\"/tmp\"\n  notify: delegate\n```".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
         "Reference".into(),
         ClassInfo {
             name: "Reference".into(),
@@ -1426,7 +1450,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "close".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Force-close the subprocess (sends kill to process group).\n\n## Examples\n```beamtalk\nagent close.\n```".into()) },
             ],
             class_methods: vec![
-                MethodInfo { selector: "open:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: None, param_types: vec![None, None], doc: Some("Convenience factory — open a subprocess with command and args.\n\nBacked by `beamtalk_subprocess_primitives` which starts a\n`beamtalk_subprocess` gen_server and returns the actor reference.\n\n## Examples\n```beamtalk\nagent := Subprocess open: \"ls\" args: #(\"-la\")\n```".into()) },
+                MethodInfo { selector: "open:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: None, param_types: vec![None, None], doc: Some("Convenience factory — open a subprocess with command and args.\n\nBacked by `beamtalk_subprocess` which starts a gen_server and returns the actor reference.\n\n## Examples\n```beamtalk\nagent := Subprocess open: \"ls\" args: #(\"-la\")\n```".into()) },
                 MethodInfo { selector: "open:args:env:dir:".into(), arity: 4, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: None, param_types: vec![None, None, None, None], doc: Some("Convenience factory — open a subprocess with command, args, environment, and working directory.\n\n## Examples\n```beamtalk\nagent := Subprocess open: \"make\" args: #(\"test\") env: #{#\"CI\" => #\"true\"} dir: #\"/tmp\"\n```".into()) },
             ],
             class_variables: vec![],

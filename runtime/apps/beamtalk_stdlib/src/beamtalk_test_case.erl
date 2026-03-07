@@ -32,6 +32,9 @@
     resolve_module/1
 ]).
 
+%% FFI shims for (Erlang beamtalk_test_case) dispatch
+-export([should/2, runAll/1, runClass/2, skipTest/1]).
+
 %% @doc Assert that a block raises an error of the specified kind.
 %%
 %% Executes the block and verifies that it raises an error with the
@@ -549,6 +552,9 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods) ->
             catch
                 throw:{bunit_skip, Reason} ->
                     {skip, MethodName, Reason};
+                %% skip: called via FFI — proxy wraps the throw, we detect bunit_skip error kind
+                error:#{error := #beamtalk_error{kind = bunit_skip, message = SkipReason}} ->
+                    {skip, MethodName, SkipReason};
                 error:#beamtalk_error{kind = assertion_failed, message = AssertMsg} ->
                     {fail, MethodName, AssertMsg};
                 error:#beamtalk_error{message = ErrMsg} ->
@@ -581,8 +587,11 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods) ->
         TestResult
     catch
         %% skip: called from setUp — propagate as skip, not failure
-        throw:{bunit_skip, SkipReason} ->
-            {skip, MethodName, SkipReason};
+        throw:{bunit_skip, SetupSkipReason} ->
+            {skip, MethodName, SetupSkipReason};
+        %% skip: called from setUp via FFI — proxy wraps the throw, we detect bunit_skip error kind
+        error:#{error := #beamtalk_error{kind = bunit_skip, message = SetupFfiSkipReason}} ->
+            {skip, MethodName, SetupFfiSkipReason};
         %% setUp or new() itself failed
         error:#beamtalk_error{message = SetupErrMsg} ->
             Prefix = <<"setUp failed: ">>,
@@ -726,3 +735,47 @@ spawn_test_execution(Selector, Args, ClassName, TestModule, FlatMethods, From) -
                 gen_server:reply(From, {error, Error})
         end
     end).
+
+%%====================================================================
+%% FFI shims — (Erlang beamtalk_test_case) dispatch
+%%====================================================================
+
+%% should:raise: → should/2
+should(Block, ErrorKind) -> should_raise(Block, ErrorKind).
+
+%% runAll: → runAll/1 (ClassSelf tuple → extract class name → run_all/1)
+runAll(ClassRef) -> run_all(ffi_extract_class_name(ClassRef)).
+
+%% runClass:withTest: → runClass/2 (ClassSelf tuple + test name → run_single/2)
+runClass(ClassRef, TestName) -> run_single(ffi_extract_class_name(ClassRef), TestName).
+
+%% skipTest: → skipTest/1
+%%
+%% Uses error (not throw) so it survives beamtalk_erlang_proxy dispatch,
+%% which catches all throws and wraps them as erlang_throw errors.
+%% run_test_method/4 detects bunit_skip errors and counts them as skips.
+skipTest(Reason) when is_binary(Reason) ->
+    Error0 = beamtalk_error:new(bunit_skip, 'TestCase'),
+    beamtalk_error:raise(beamtalk_error:with_message(Error0, Reason));
+skipTest(Reason) when is_atom(Reason) ->
+    skipTest(atom_to_binary(Reason, utf8));
+skipTest(Reason) ->
+    skipTest(iolist_to_binary(io_lib:format("~p", [Reason]))).
+
+%% Extract the bare class name atom from a class reference tuple.
+%% Element 2 of the tuple is 'ClassName class'; strip trailing " class" (6 chars).
+%% Uses list_to_existing_atom/1 to avoid leaking atoms from malformed input.
+-spec ffi_extract_class_name(tuple()) -> atom().
+ffi_extract_class_name(ClassRef) when is_tuple(ClassRef) ->
+    Tag = element(2, ClassRef),
+    TagStr = atom_to_list(Tag),
+    Len = length(TagStr),
+    NameStr = lists:sublist(TagStr, Len - 6),
+    try
+        list_to_existing_atom(NameStr)
+    catch
+        error:badarg ->
+            Err0 = beamtalk_error:new(does_not_understand, 'TestCase'),
+            Msg = iolist_to_binary(io_lib:format("Unknown TestCase class: ~s", [NameStr])),
+            beamtalk_error:raise(beamtalk_error:with_message(Err0, Msg))
+    end.

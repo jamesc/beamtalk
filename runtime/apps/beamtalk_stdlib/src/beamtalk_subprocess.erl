@@ -54,8 +54,12 @@
 
 %% Public API
 -export([start_link/1, start/1]).
-%% Class-side @primitive dispatch (called from compiled bt@stdlib@subprocess)
+%% Class-side dispatch (called from compiled bt@stdlib@subprocess)
 -export([dispatch/3]).
+%% FFI shims for (Erlang beamtalk_subprocess) dispatch
+-export([open/2, open/4]).
+-export([writeLine/2, readLine/1, readLine/2, readStderrLine/1, readStderrLine/2]).
+-export([lines/1, stderrLines/1, exitCode/1, close/1]).
 
 %% gen_server callbacks
 -export([
@@ -81,13 +85,12 @@
 }.
 
 %%% ============================================================================
-%%% Class-side @primitive dispatch — called from bt@stdlib@subprocess:dispatch/3
+%%% Class-side dispatch — called from FFI shims open/2, open/4
 %%% ============================================================================
 
-%% @doc Dispatch a class-side @primitive method call for Subprocess.
+%% @doc Dispatch a class-side method call for Subprocess.
 %%
-%% Called by the compiled `bt@stdlib@subprocess:dispatch/3` for class-side
-%% `@primitive` annotations: `open:args:` and `open:args:env:dir:`.
+%% Called by the `open/2` and `open/4` FFI shims.
 %% Instance method calls go directly to the gen_server via `beamtalk_actor:sync_send/3`.
 -spec dispatch(atom(), list(), term()) -> term().
 
@@ -117,6 +120,56 @@ dispatch(Selector, _Args, _Self) ->
     Err1 = beamtalk_error:with_selector(Err0, Selector),
     beamtalk_error:raise(Err1).
 
+%%% ============================================================================
+%%% FFI Shims — (Erlang beamtalk_subprocess) dispatch
+%%% ============================================================================
+%%
+%% selector_to_function/1 extracts the first keyword segment as the function name.
+%% Class-side shims delegate to dispatch/3; instance-side shims use sync_send/3
+%% to route through the gen_server's handle_call.
+
+%% `open:args:` → strips to `open`, arity 2
+open(Command, Args) -> dispatch('open:args:', [Command, Args], nil).
+
+%% `open:args:env:dir:` → strips to `open`, arity 4
+open(Command, Args, Env, Dir) -> dispatch('open:args:env:dir:', [Command, Args, Env, Dir], nil).
+
+%% `writeLine:data:` → strips to `writeLine`, arity 2
+writeLine(#beamtalk_object{pid = Pid}, Data) ->
+    beamtalk_actor:sync_send(Pid, 'writeLine:', [Data]).
+
+%% `readLine:` → strips to `readLine`, arity 1
+readLine(#beamtalk_object{pid = Pid}) ->
+    beamtalk_actor:sync_send(Pid, readLine, []).
+
+%% `readLine:timeout:` → strips to `readLine`, arity 2
+readLine(#beamtalk_object{pid = Pid}, Timeout) ->
+    beamtalk_actor:sync_send(Pid, 'readLine:', [Timeout]).
+
+%% `readStderrLine:` → strips to `readStderrLine`, arity 1
+readStderrLine(#beamtalk_object{pid = Pid}) ->
+    beamtalk_actor:sync_send(Pid, readStderrLine, []).
+
+%% `readStderrLine:timeout:` → strips to `readStderrLine`, arity 2
+readStderrLine(#beamtalk_object{pid = Pid}, Timeout) ->
+    beamtalk_actor:sync_send(Pid, 'readStderrLine:', [Timeout]).
+
+%% `lines:` → strips to `lines`, arity 1
+lines(#beamtalk_object{pid = Pid}) ->
+    beamtalk_actor:sync_send(Pid, lines, []).
+
+%% `stderrLines:` → strips to `stderrLines`, arity 1
+stderrLines(#beamtalk_object{pid = Pid}) ->
+    beamtalk_actor:sync_send(Pid, stderrLines, []).
+
+%% `exitCode:` → strips to `exitCode`, arity 1
+exitCode(#beamtalk_object{pid = Pid}) ->
+    beamtalk_actor:sync_send(Pid, exitCode, []).
+
+%% `close:` → strips to `close`, arity 1
+close(#beamtalk_object{pid = Pid}) ->
+    beamtalk_actor:sync_send(Pid, close, []).
+
 %% @private Start a supervised beamtalk_subprocess gen_server and return a beamtalk_object.
 -spec start_subprocess(map(), atom()) -> #beamtalk_object{}.
 start_subprocess(Config, Selector) ->
@@ -137,39 +190,19 @@ start_subprocess(Config, Selector) ->
     end.
 
 %% @private Convert a Beamtalk Array (tagged map or plain list) to an Erlang list.
-%%
-%% Array literals in Beamtalk method call arguments compile to plain Erlang lists.
-%% Array values returned from collection operations are tagged maps.
 -spec bt_array_to_list(term(), atom()) -> list().
-bt_array_to_list(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Selector) ->
-    case array:is_array(Arr) of
-        true ->
-            array:to_list(Arr);
-        false ->
-            Err = beamtalk_error:new(type_error, 'Subprocess', Selector),
-            beamtalk_error:raise(Err)
-    end;
-bt_array_to_list(List, _Selector) when is_list(List) ->
-    List;
-bt_array_to_list(_Other, Selector) ->
-    Err = beamtalk_error:new(type_error, 'Subprocess', Selector),
-    beamtalk_error:raise(Err).
+bt_array_to_list(Args, Selector) ->
+    beamtalk_subprocess_port:bt_array_to_list('Subprocess', Args, Selector).
 
 %% @private Raise type_error if any element of Args is not a binary.
 -spec ensure_binary_args(list(), atom()) -> ok.
 ensure_binary_args(Args, Selector) ->
-    case lists:all(fun erlang:is_binary/1, Args) of
-        true -> ok;
-        false -> beamtalk_error:raise(beamtalk_error:new(type_error, 'Subprocess', Selector))
-    end.
+    beamtalk_subprocess_port:ensure_binary_args('Subprocess', Args, Selector).
 
 %% @private Raise type_error if any key or value in Env is not a binary.
 -spec ensure_binary_env(map(), atom()) -> ok.
 ensure_binary_env(Env, Selector) ->
-    case lists:all(fun({K, V}) -> is_binary(K) andalso is_binary(V) end, maps:to_list(Env)) of
-        true -> ok;
-        false -> beamtalk_error:raise(beamtalk_error:new(type_error, 'Subprocess', Selector))
-    end.
+    beamtalk_subprocess_port:ensure_binary_env('Subprocess', Env, Selector).
 
 %%% ============================================================================
 %%% Public API
@@ -397,8 +430,7 @@ buffer_and_maybe_reply(Channel, Data, State) ->
     WaitKey = {Channel, waiting},
     Buffer = maps:get(BufKey, State),
     Pending = maps:get(PendKey, State, <<>>),
-    Combined = <<Pending/binary, Data/binary>>,
-    {Lines, Remainder} = split_lines(Combined),
+    {Lines, Remainder} = beamtalk_subprocess_port:flush_and_collect(Pending, Data),
     NewBuffer = queue:join(Buffer, queue:from_list(Lines)),
     case maps:get(WaitKey, State, undefined) of
         undefined ->
@@ -417,20 +449,6 @@ buffer_and_maybe_reply(Channel, Data, State) ->
                     %% Data arrived but no complete lines yet — keep waiting
                     {noreply, State#{BufKey => NewBuffer, PendKey => Remainder}}
             end
-    end.
-
-%% @private Split binary data on newlines.
-%% Returns {CompleteLines, PartialRemainder}.
--spec split_lines(binary()) -> {[binary()], binary()}.
-split_lines(Data) ->
-    case binary:split(Data, <<"\n">>, [global]) of
-        [Remainder] ->
-            %% No newlines — entire data is a partial line
-            {[], Remainder};
-        Parts ->
-            %% Last element is the remainder after the last newline (may be <<>>)
-            {Lines, [Remainder]} = lists:split(length(Parts) - 1, Parts),
-            {Lines, Remainder}
     end.
 
 %% @private Flush any partial line from the pending buffer into the line queue.

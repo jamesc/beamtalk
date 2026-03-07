@@ -33,14 +33,14 @@ Actor subclass: Subprocess
 
   /// Convenience factory — open a subprocess with command and args.
   ///
-  /// Backed by `beamtalk_subprocess_primitives` which starts a
-  /// `beamtalk_subprocess` gen_server and returns the actor reference.
+  /// Backed by `beamtalk_subprocess` which starts a gen_server and returns the actor reference.
   ///
   /// ## Examples
   /// ```beamtalk
   /// agent := Subprocess open: "ls" args: #("-la")
   /// ```
-  class open: command args: args => @primitive "open:args:"
+  class open: command args: args =>
+    (Erlang beamtalk_subprocess) open: command args: args
 
   /// Convenience factory — open a subprocess with command, args, environment, and working directory.
   ///
@@ -49,7 +49,7 @@ Actor subclass: Subprocess
   /// agent := Subprocess open: "make" args: #("test") env: #{#"CI" => #"true"} dir: #"/tmp"
   /// ```
   class open: command args: args env: env dir: dir =>
-    @primitive "open:args:env:dir:"
+    (Erlang beamtalk_subprocess) open: command args: args env: env dir: dir
 
   /// Write a line to the subprocess's stdin (appends newline).
   ///
@@ -57,7 +57,8 @@ Actor subclass: Subprocess
   /// ```beamtalk
   /// agent writeLine: "{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
   /// ```
-  writeLine: data -> Nil => @primitive "writeLine:"
+  writeLine: data -> Nil =>
+    (Erlang beamtalk_subprocess) writeLine: self data: data
 
   /// Read one line from stdout. Blocks until a line is available. Returns nil at EOF.
   ///
@@ -65,7 +66,7 @@ Actor subclass: Subprocess
   /// ```beamtalk
   /// line := agent readLine.   // => "hello" or nil
   /// ```
-  readLine -> Object => @primitive "readLine"
+  readLine -> Object => (Erlang beamtalk_subprocess) readLine: self
 
   /// Read one line from stdout with a timeout in milliseconds. Returns nil on timeout or EOF.
   ///
@@ -73,7 +74,8 @@ Actor subclass: Subprocess
   /// ```beamtalk
   /// line := agent readLine: 5000.   // => String or nil
   /// ```
-  readLine: timeout -> Object => @primitive "readLine:"
+  readLine: timeout -> Object =>
+    (Erlang beamtalk_subprocess) readLine: self timeout: timeout
 
   /// Read one line from stderr. Blocks until a line is available. Returns nil at EOF.
   ///
@@ -81,7 +83,7 @@ Actor subclass: Subprocess
   /// ```beamtalk
   /// errLine := agent readStderrLine.
   /// ```
-  readStderrLine -> Object => @primitive "readStderrLine"
+  readStderrLine -> Object => (Erlang beamtalk_subprocess) readStderrLine: self
 
   /// Read one line from stderr with a timeout in milliseconds. Returns nil on timeout or EOF.
   ///
@@ -89,7 +91,8 @@ Actor subclass: Subprocess
   /// ```beamtalk
   /// errLine := agent readStderrLine: 5000.
   /// ```
-  readStderrLine: timeout -> Object => @primitive "readStderrLine:"
+  readStderrLine: timeout -> Object =>
+    (Erlang beamtalk_subprocess) readStderrLine: self timeout: timeout
 
   /// Return a Stream of stdout lines. Each step sends a sync message to the actor.
   ///
@@ -97,7 +100,7 @@ Actor subclass: Subprocess
   /// ```beamtalk
   /// agent lines do: [:line | Transcript show: line]
   /// ```
-  lines -> Stream => @primitive "lines"
+  lines -> Stream => (Erlang beamtalk_subprocess) lines: self
 
   /// Return a Stream of stderr lines. Same mechanics as lines.
   ///
@@ -105,7 +108,7 @@ Actor subclass: Subprocess
   /// ```beamtalk
   /// agent stderrLines do: [:line | Transcript show: line]
   /// ```
-  stderrLines -> Stream => @primitive "stderrLines"
+  stderrLines -> Stream => (Erlang beamtalk_subprocess) stderrLines: self
 
   /// Get the exit code. Returns nil if the subprocess is still running.
   ///
@@ -113,7 +116,7 @@ Actor subclass: Subprocess
   /// ```beamtalk
   /// agent exitCode.   // => 0
   /// ```
-  exitCode -> Object => @primitive "exitCode"
+  exitCode -> Object => (Erlang beamtalk_subprocess) exitCode: self
 
   /// Force-close the subprocess (sends kill to process group).
   ///
@@ -121,4 +124,4 @@ Actor subclass: Subprocess
   /// ```beamtalk
   /// agent close.
   /// ```
-  close -> Nil => @primitive "close"
+  close -> Nil => (Erlang beamtalk_subprocess) close: self
