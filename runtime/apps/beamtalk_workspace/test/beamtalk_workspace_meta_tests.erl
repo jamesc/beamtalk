@@ -461,6 +461,58 @@ load_corrupt_json_falls_back_test() ->
     _ = file:delete(MetaFile),
     _ = file:del_dir(MetaDir).
 
+%%% Class source storage tests (BT-1174)
+
+set_get_class_source_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        OldPid ->
+            gen_server:stop(OldPid),
+            timer:sleep(10)
+    end,
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+
+    %% Unknown class returns undefined
+    ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"Unknown">>)),
+
+    %% Store and retrieve source text
+    Source = "Object subclass: Counter [\n  count := 0\n]\n",
+    ok = beamtalk_workspace_meta:set_class_source(<<"Counter">>, Source),
+    ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"Counter">>)),
+
+    %% Overwrite with updated source
+    Source2 = "Object subclass: Counter [\n  count := 0\n  increment => count := count + 1\n]\n",
+    ok = beamtalk_workspace_meta:set_class_source(<<"Counter">>, Source2),
+    ?assertEqual(Source2, beamtalk_workspace_meta:get_class_source(<<"Counter">>)),
+
+    %% Other class names are still undefined
+    ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"Point">>)),
+
+    gen_server:stop(Pid).
+
+set_class_source_when_not_started_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        Pid ->
+            gen_server:stop(Pid),
+            timer:sleep(10)
+    end,
+    %% Should not crash
+    ?assertEqual(ok, beamtalk_workspace_meta:set_class_source(<<"Foo">>, "source")).
+
+get_class_source_when_not_started_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        Pid ->
+            gen_server:stop(Pid),
+            timer:sleep(10)
+    end,
+    %% Should return undefined gracefully
+    ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"Foo">>)).
+
 %%% Debounce coalescing test
 
 debounce_coalesces_rapid_changes_test() ->
