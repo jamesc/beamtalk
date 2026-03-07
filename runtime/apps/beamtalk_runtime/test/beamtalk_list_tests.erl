@@ -8,7 +8,7 @@
 %% and beamtalk_primitive:send/3 integration for the List class.
 %%
 %% For direct beamtalk_list module tests (at, detect, reject, etc.),
-%% see beamtalk_list_tests.erl.
+%% see beamtalk_stdlib/test/beamtalk_list_tests.erl.
 -module(beamtalk_list_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
