@@ -363,6 +363,8 @@ struct MethodMeta {
     return_type: Option<String>,
     /// Parameter type annotations, one per parameter. `None` means untyped.
     param_types: Vec<Option<String>>,
+    /// Doc comment extracted from the source (`///` lines before the method).
+    doc: Option<String>,
 }
 
 /// Simplified method kind for code generation.
@@ -431,6 +433,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                         .map(|t| t.type_name().to_string())
                 })
                 .collect(),
+            doc: m.doc_comment.clone(),
         })
         .collect();
 
@@ -452,6 +455,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                         .map(|t| t.type_name().to_string())
                 })
                 .collect(),
+            doc: m.doc_comment.clone(),
         })
         .collect();
 
@@ -504,6 +508,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                         .as_ref()
                         .map(|t| t.type_name().to_string()),
                     param_types: vec![],
+                    doc: None,
                 });
             }
 
@@ -530,6 +535,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                     is_sealed: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![param_type],
+                    doc: None,
                 });
             }
         }
@@ -558,6 +564,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
                 is_sealed: false,
                 return_type: Some(class_name.clone()),
                 param_types,
+                doc: None,
             });
         }
     }
@@ -877,11 +884,21 @@ fn generate_method_list(
                 .collect();
             format!("vec![{}]", parts.join(", "))
         };
+        let doc_expr = match &m.doc {
+            Some(doc) => {
+                let escaped = doc
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n");
+                format!("Some(\"{escaped}\".to_string())")
+            }
+            None => "None".to_string(),
+        };
         let _ = writeln!(
             code,
             "                MethodInfo {{ selector: \"{selector}\".into(), arity: {arity}, \
              kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
-             return_type: {return_type_expr}, param_types: {param_types_expr}, doc: None }},",
+             return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr} }},",
             arity = m.arity,
             class = class_name,
             sealed = m.is_sealed,
@@ -1045,6 +1062,7 @@ mod tests {
                     is_sealed: false,
                     return_type: None,
                     param_types: vec![],
+                    doc: None,
                 },
                 MethodMeta {
                     selector: "add:".to_string(),
@@ -1053,6 +1071,7 @@ mod tests {
                     is_sealed: true,
                     return_type: Some("Counter".to_string()),
                     param_types: vec![Some("Integer".to_string())],
+                    doc: None,
                 },
             ],
             class_methods: vec![MethodMeta {
@@ -1062,6 +1081,7 @@ mod tests {
                 is_sealed: false,
                 return_type: Some("Counter".to_string()),
                 param_types: vec![],
+                doc: None,
             }],
             class_variables: vec![],
         }
@@ -1182,6 +1202,7 @@ mod tests {
             is_sealed: false,
             return_type: Some("Counter".to_string()),
             param_types: vec![Some("Integer".to_string())],
+            doc: None,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "methods", &methods, "Counter");
@@ -1204,6 +1225,7 @@ mod tests {
             is_sealed: false,
             return_type: None,
             param_types: vec![],
+            doc: None,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "methods", &methods, "Counter");

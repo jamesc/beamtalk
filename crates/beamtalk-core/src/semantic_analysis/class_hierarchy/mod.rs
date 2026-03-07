@@ -1375,12 +1375,15 @@ mod tests {
             "isAlive must NOT be in class_methods"
         );
 
-        // Synthesized Actor class methods carry generated doc strings
-        let spawn = class_methods.iter().find(|m| m.selector == "spawn").unwrap();
+        // Actor class methods carry doc strings extracted from Actor.bt
+        let spawn = class_methods
+            .iter()
+            .find(|m| m.selector == "spawn")
+            .unwrap();
         let spawn_doc = spawn.doc.as_deref().unwrap();
         assert!(
-            spawn_doc.contains("*(compiler-generated)*"),
-            "spawn doc missing tag: {spawn_doc}"
+            spawn_doc.contains("actor process"),
+            "spawn doc should describe actor process creation: {spawn_doc}"
         );
 
         let spawn_with = class_methods
@@ -1388,8 +1391,8 @@ mod tests {
             .find(|m| m.selector == "spawnWith:")
             .unwrap();
         assert!(
-            spawn_with.doc.as_deref().unwrap().contains("*(compiler-generated)*"),
-            "spawnWith: doc missing tag"
+            spawn_with.doc.as_deref().unwrap().contains("actor"),
+            "spawnWith: doc should describe actor creation"
         );
 
         let new = class_methods.iter().find(|m| m.selector == "new").unwrap();
@@ -2972,16 +2975,26 @@ mod tests {
         let getter = info.methods.iter().find(|m| m.selector == "x").unwrap();
         let getter_doc = getter.doc.as_deref().unwrap();
         assert!(getter_doc.contains("`x`"), "getter doc missing field name");
-        assert!(getter_doc.contains("`0`"), "getter doc missing default value");
+        assert!(
+            getter_doc.contains("`0`"),
+            "getter doc missing default value"
+        );
         assert!(
             getter_doc.contains("*(compiler-generated)*"),
             "getter doc missing tag"
         );
 
         // Setter doc mentions class name and field name
-        let setter = info.methods.iter().find(|m| m.selector == "withX:").unwrap();
+        let setter = info
+            .methods
+            .iter()
+            .find(|m| m.selector == "withX:")
+            .unwrap();
         let setter_doc = setter.doc.as_deref().unwrap();
-        assert!(setter_doc.contains("`Point`"), "setter doc missing class name");
+        assert!(
+            setter_doc.contains("`Point`"),
+            "setter doc missing class name"
+        );
         assert!(setter_doc.contains("`x`"), "setter doc missing field name");
         assert!(
             setter_doc.contains("*(compiler-generated)*"),
@@ -2989,10 +3002,17 @@ mod tests {
         );
 
         // Keyword constructor doc mentions class name and field arg with default
-        let ctor = info.class_methods.iter().find(|m| m.selector == "x:").unwrap();
+        let ctor = info
+            .class_methods
+            .iter()
+            .find(|m| m.selector == "x:")
+            .unwrap();
         let ctor_doc = ctor.doc.as_deref().unwrap();
         assert!(ctor_doc.contains("`Point`"), "ctor doc missing class name");
-        assert!(ctor_doc.contains("x (default: 0)"), "ctor doc missing arg desc");
+        assert!(
+            ctor_doc.contains("x (default: 0)"),
+            "ctor doc missing arg desc"
+        );
         assert!(
             ctor_doc.contains("*(compiler-generated)*"),
             "ctor doc missing tag"
