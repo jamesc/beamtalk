@@ -578,40 +578,19 @@ metaclassThisClass(Self) ->
     ClassName = gen_server:call(Pid, class_name),
     atom_to_class_object(ClassName).
 
-%% @private
-%% @doc Return the superclass atom for a class Pid, preferring __beamtalk_meta/0.
-%%
-%% Bootstrap stubs (beamtalk_class_bt, beamtalk_behaviour_bt) register 'Class'
-%% with superclass='Object' before being replaced by compiled stdlib modules.
-%% apply_class_info/2 does NOT update the gen_server superclass field, so the
-%% stale value persists. __beamtalk_meta/0 always reflects the source-declared
-%% superclass and must be preferred when available.
-%%
-%% Note: the meta map uses atom `nil` for root classes (no superclass), while
-%% the gen_server returns `none`. We normalise both to atom `none` so callers
-%% can use a single guard.
--spec superclass_name_from_meta_or_state(pid()) -> atom() | 'none'.
-superclass_name_from_meta_or_state(Pid) ->
-    Module = beamtalk_object_class:module_name(Pid),
-    case meta_for_module(Module) of
-        {ok, Meta} ->
-            case maps:get(superclass, Meta, none) of
-                nil -> none;
-                Other -> Other
-            end;
-        not_available ->
-            gen_server:call(Pid, superclass)
-    end.
-
 %% @doc Return the superclass of the metaclass parallel hierarchy.
 %%
 %% ADR 0036: Backs `@primitive "metaclassSuperclass"` in Metaclass.bt.
 %% The superclass of Counter's metaclass is the metaclass of Counter's superclass.
 %% Example: `Counter class superclass == Actor class`.
+%%
+%% BT-1186: Now uses gen_server:call(Pid, superclass) directly. BT-1185 fixed
+%% apply_class_info/2 to update the gen_server superclass from __beamtalk_meta/0,
+%% so the gen_server always holds the correct superclass.
 -spec metaclassSuperclass(#beamtalk_object{}) -> #beamtalk_object{} | 'nil'.
 metaclassSuperclass(Self) ->
     Pid = erlang:element(4, Self),
-    case superclass_name_from_meta_or_state(Pid) of
+    case gen_server:call(Pid, superclass) of
         none ->
             nil;
         SuperName ->
@@ -631,17 +610,27 @@ metaclassSuperclass(Self) ->
 %% We walk the instance method chain of 'Class' directly in Erlang to avoid
 %% dispatching through the Metaclass chain (which would recurse into this method).
 %%
-%% Uses __beamtalk_meta/0 for both method collection and superclass traversal because
-%% bootstrap stubs (beamtalk_class_bt, beamtalk_behaviour_bt) register 'Class' with
-%% superclass='Object' before being replaced by the compiled stdlib modules. The
-%% gen_server superclass field is not updated by update_class/apply_class_info, so
-%% walk_hierarchy would skip 'Behaviour' entirely and miss reload/superclass/etc.
-%% __beamtalk_meta/0 always carries the correct superclass from the source.
+%% BT-1186: Now uses walk_hierarchy/3 directly. BT-1185 fixed apply_class_info/2
+%% to update the gen_server superclass from __beamtalk_meta/0, so walk_hierarchy/3
+%% correctly traverses Class → Behaviour → Object.
 -spec metaclassAllMethods(#beamtalk_object{}) -> [atom()].
 metaclassAllMethods(Self) ->
     ClassMethods = metaclassClassMethods(Self),
-    BehaviourMethodsOrdset =
-        collect_instance_methods_via_meta('Class', ordsets:new(), 0),
+    BehaviourMethodsOrdset = walk_hierarchy(
+        'Class',
+        fun(_CN, CPid, A) ->
+            Module = beamtalk_object_class:module_name(CPid),
+            Methods =
+                case meta_for_module(Module) of
+                    {ok, Meta} ->
+                        maps:keys(maps:get(method_info, Meta));
+                    not_available ->
+                        gen_server:call(CPid, methods)
+                end,
+            {cont, ordsets:union(A, ordsets:from_list(Methods))}
+        end,
+        ordsets:new()
+    ),
     ordsets:to_list(
         ordsets:union(BehaviourMethodsOrdset, ordsets:from_list(ClassMethods))
     ).
@@ -700,57 +689,6 @@ metaclassNew() ->
 %%% ============================================================================
 %%% Internal Helpers
 %%% ============================================================================
-
-%% @private
-%% @doc Collect instance method selectors by walking the class hierarchy via __beamtalk_meta/0.
-%%
-%% BT-1169: Unlike walk_hierarchy/3 (which uses gen_server:call(Pid, superclass)),
-%% this function reads the superclass from __beamtalk_meta/0. This is necessary because
-%% bootstrap stubs register abstract classes (e.g. 'Class') with an incorrect superclass
-%% ('Object' instead of 'Behaviour'), and apply_class_info/2 does not update the
-%% gen_server superclass field during on_load. The meta map always carries the correct
-%% superclass as declared in the Beamtalk source.
-%%
-%% Falls back to gen_server methods/superclass when __beamtalk_meta is not available
-%% (e.g. dynamic classes created via ClassBuilder at runtime).
--spec collect_instance_methods_via_meta(
-    atom() | none, ordsets:ordset(atom()), non_neg_integer()
-) -> ordsets:ordset(atom()).
-collect_instance_methods_via_meta(none, Acc, _Depth) ->
-    Acc;
-collect_instance_methods_via_meta(nil, Acc, _Depth) ->
-    Acc;
-collect_instance_methods_via_meta(ClassName, Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    ?LOG_WARNING(
-        "collect_instance_methods_via_meta: max hierarchy depth ~p exceeded at ~p",
-        [?MAX_HIERARCHY_DEPTH, ClassName]
-    ),
-    Acc;
-collect_instance_methods_via_meta(ClassName, Acc, Depth) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            Acc;
-        Pid ->
-            Module = beamtalk_object_class:module_name(Pid),
-            case meta_for_module(Module) of
-                {ok, Meta} ->
-                    Methods = maps:keys(maps:get(method_info, Meta, #{})),
-                    Super = maps:get(superclass, Meta, none),
-                    collect_instance_methods_via_meta(
-                        Super,
-                        ordsets:union(Acc, ordsets:from_list(Methods)),
-                        Depth + 1
-                    );
-                not_available ->
-                    Methods = gen_server:call(Pid, methods),
-                    Super = gen_server:call(Pid, superclass),
-                    collect_instance_methods_via_meta(
-                        Super,
-                        ordsets:union(Acc, ordsets:from_list(Methods)),
-                        Depth + 1
-                    )
-            end
-    end.
 
 %% @private
 %% @doc Try to retrieve reflection metadata from a compiled module's __beamtalk_meta/0.
