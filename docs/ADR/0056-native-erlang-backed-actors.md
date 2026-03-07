@@ -14,13 +14,18 @@ However, some Actors require hand-written Erlang gen_server implementations:
 - **`Subprocess`** — manages an OS port, deferred gen_server replies, and line buffering across two I/O channels. This logic cannot be expressed in Beamtalk.
 - **`TranscriptStream`** — maintains a ring buffer with pub/sub subscriber management and dead-process monitoring via `handle_info/2`. These OTP patterns require direct gen_server control.
 
-Currently, these classes use `(Erlang module)` FFI to call wrapper functions on the backing Erlang module, passing `self` explicitly. The wrapper functions extract the pid and call `gen_server:call/2` or `gen_server:cast/2` internally. This approach:
+Currently, these classes use `(Erlang module)` FFI to call wrapper functions on the backing Erlang module, passing `self` explicitly. The wrapper functions vary by class:
+
+- **`Subprocess`** — instance method shims extract the pid from `self` and call `beamtalk_actor:sync_send/3`. Class-side shims (`open:args:`) use a `dispatch/3` function. This approach already gets dead actor detection and timeout handling.
+- **`TranscriptStream`** — shims delegate to a `dispatch/3` function that operates on process-dictionary state within the actor's own process. This avoids gen_server re-entry deadlocks but uses a different dispatch path from standard Actor messaging.
+
+Both approaches share these problems:
 
 - Requires repetitive boilerplate — every method repeats `(Erlang beamtalk_module) selector: self`
-- Bypasses `beamtalk_actor:sync_send/3` — missing dead actor detection, timeout handling, and consistent error wrapping
-- Requires the backing Erlang module to export public wrapper functions in addition to its gen_server callbacks
+- Requires the backing Erlang module to export public wrapper/shim functions in addition to its gen_server callbacks
 - Provides no declared relationship between the `.bt` file and its backing module — the compiler has no knowledge of which Erlang module backs the Actor
 - Previously used `@primitive` stubs, requiring hardcoded entries in `generated_builtins.rs` — some classes have been migrated to FFI but the `generated_builtins.rs` entries remain
+- Each backing module implements its own dispatch pattern (Subprocess uses `sync_send`, TranscriptStream uses process-dictionary `dispatch/3`) — there is no uniform protocol for native-backed Actors
 
 ### Current State
 
@@ -40,7 +45,7 @@ Actor subclass: TranscriptStream
   clear -> Nil => (Erlang beamtalk_transcript_stream) clear: self
 ```
 
-The backing `beamtalk_transcript_stream.erl` implements the full `gen_server` behaviour with `handle_call/3` using the `{Selector, [Args]}` wire protocol. It also exports public wrapper functions (`'show:value:'/2`, `'cr:'/1`, etc.) that extract the pid and forward to `gen_server:call`. These wrapper functions exist solely because the FFI path calls them directly rather than going through `sync_send`.
+The backing `beamtalk_transcript_stream.erl` implements the full `gen_server` behaviour with `handle_call/3` using the `{Selector, [Args]}` wire protocol. It also exports public shim functions (e.g. `show/2`, `cr/1`) that adapt FFI-facing calls into an internal `dispatch/3` function operating on process-dictionary state. These shims exist to centralise selector-to-function mapping and avoid gen_server re-entry deadlocks when the transcript is called from within its own callbacks.
 
 Similarly for `Subprocess`:
 
@@ -77,7 +82,7 @@ where `Selector` is an atom and `Args` is a list. Generated actors wrap replies 
 
 For **async** methods, `beamtalk_actor:cast_send/3` sends `gen_server:cast(Pid, {cast, Selector, Args})`. Some backing gen_servers (e.g. TranscriptStream's `show:`, `cr`) use casts for non-blocking semantics.
 
-The current FFI approach **bypasses** `sync_send/3` — the wrapper functions call `gen_server:call` directly. This means dead actor detection, timeout handling, and consistent `#beamtalk_error{}` wrapping are missing from these classes. This ADR fixes that.
+The current FFI approach has no uniform dispatch protocol — Subprocess's instance shims already use `sync_send/3` (getting dead actor detection), while TranscriptStream uses a process-dictionary `dispatch/3` path that bypasses standard Actor messaging. This ADR establishes a single, consistent dispatch protocol for all native-backed Actors via the generated facade.
 
 ## Decision
 
@@ -251,13 +256,13 @@ handle_call({exitCode, []}, _From, State) ->
 
 **`start_link` arity:** The facade always calls `BackingModule:start_link(Config)` where Config is the `spawnWith:` dictionary. When `spawn` is called without arguments, Config is `#{}` (empty map). Backing modules MUST export `start_link/1` accepting a map. There is no fallback to `start_link/0` — a single arity simplifies the contract.
 
-**`start_link` failure:** If `start_link/1` returns `{error, Reason}`, the facade raises a `#beamtalk_error{type => instantiation_error}` with the original Reason preserved in the error metadata. If `start_link/1` crashes (throws an exception), the exception propagates to the caller as a `#beamtalk_error{type => instantiation_error, data => #{reason => CrashReason}}`.
+**`start_link` failure:** If `start_link/1` returns `{error, Reason}`, the facade raises a `#beamtalk_error{kind = instantiation_error, details = #{reason => Reason}}` with the original Reason preserved under `details.reason`. If `start_link/1` crashes (throws an exception), the exception propagates to the caller as a `#beamtalk_error{kind = instantiation_error, details = #{reason => CrashReason}}`.
 
 ### Stub Generation
 
 Because the `.bt` file fully describes the Actor's API — selectors, arities, and return types — tooling can auto-generate a skeleton gen_server:
 
-```
+```bash
 $ beamtalk gen-native MyActor
 ```
 
@@ -494,7 +499,7 @@ Smalltalk's `<primitive: N>` pragma is metadata inside the method body — the m
 
 ### Production Operator
 
-`native:` actors behave identically to generated actors from an OTP perspective — they are gen_server processes under the standard supervision tree. `observer:start()`, `:sys.get_state/1`, and standard tracing tools work. The backing gen_server module can implement `code_change/3` for hot reload state migration independently of the `.bt` facade. Moving to `sync_send` adds dead actor detection and timeout handling that the previous FFI approach was missing.
+`native:` actors behave identically to generated actors from an OTP perspective — they are gen_server processes under the standard supervision tree. `observer:start()`, `:sys.get_state/1`, and standard tracing tools work. The backing gen_server module can implement `code_change/3` for hot reload state migration independently of the `.bt` facade. Standardising on `sync_send` ensures uniform dead actor detection and timeout handling across all native-backed Actors (Subprocess already used `sync_send` but TranscriptStream used a different dispatch path).
 
 ### Tooling Developer (LSP/IDE)
 
@@ -513,7 +518,7 @@ Smalltalk's `<primitive: N>` pragma is metadata inside the method body — the m
 
 - **Language designer:** "`@native BackingModule` as a class annotation is familiar from Gleam's `@external`. It's explicit, grep-able, and doesn't require integrating with ClassBuilder."
 - **BEAM veteran:** "Annotations are a well-understood pattern. Adding a keyword to `subclass:` changes the grammar of the most important declaration in the language."
-- **Tension:** `@native` introduces a class-level annotation syntax that sits outside Beamtalk's message-send model. `native:` as a keyword on `subclass:` integrates with ClassBuilder and is consistent with `strategy:` for supervisors (ADR 0059) — it's a message argument, not an annotation.
+- - **Tension:** `@native` introduces a class-level annotation syntax that sits outside Beamtalk's message-send model. `native:` as a keyword on `subclass:` integrates with ClassBuilder and is consistent with `supervisionPolicy:` for supervisors (ADR 0059) — it's a message argument, not an annotation.
 
 ### Steelman for bodyless methods instead of `self delegate`
 
@@ -542,7 +547,7 @@ Actor subclass: Subprocess
     (Erlang beamtalk_subprocess) readLine: self
 ```
 
-Rejected because: bypasses `sync_send` (missing dead actor detection, timeout handling, error wrapping), requires public wrapper functions in the Erlang module, is repetitive (module name repeated in every method), and doesn't use the Actor message-passing protocol. Library authors must manually handle pid extraction and error translation.
+Rejected because: requires public wrapper/shim functions in the Erlang module with per-class dispatch patterns (Subprocess uses `sync_send`, TranscriptStream uses process-dictionary `dispatch/3`), is repetitive (module name repeated in every method), provides no declared relationship between class and backing module, and does not establish a uniform dispatch protocol. Library authors must manually implement whichever dispatch pattern suits their use case.
 
 ### `@native BackingModule` Class Annotation (Previous Draft)
 
@@ -620,7 +625,7 @@ Rejected because it conflates two different mechanisms (BIF-level primitives and
 ### Positive
 
 - **ClassBuilder integration:** `native:` is a keyword argument on `subclass:`, flowing through the same ClassBuilder cascade as `name:`, `fields:`, `methods:`, and `supervisionPolicy:` — no separate annotation system
-- **Consistent error handling:** `self delegate` routes through `sync_send/3`, adding dead actor detection, timeout handling, and `#beamtalk_error{}` wrapping that the current FFI approach is missing
+- **Uniform dispatch protocol:** `self delegate` routes through `sync_send/3` for all native-backed Actors. Currently, Subprocess shims already use `sync_send` but TranscriptStream uses a process-dictionary `dispatch/3` path — `native:` standardises both on the same protocol with consistent dead actor detection, timeout handling, and `#beamtalk_error{}` wrapping
 - **Open to library authors:** Any library author can back an Actor with a hand-written gen_server by adding `native: module` to their `subclass:` declaration — no compiler modifications required
 - **Stub generation:** The `.bt` declaration contains enough information to auto-generate skeleton `handle_call/3` clauses for the backing gen_server
 - **`@primitive` scope further narrowed:** Subprocess and TranscriptStream no longer use `@primitive` or FFI wrappers for module-backed delegation
@@ -642,7 +647,7 @@ Rejected because it conflates two different mechanisms (BIF-level primitives and
 
 ### Neutral
 
-- `spawn/0` behaviour: for `native:` actors, `spawn/1` is the primary entry point (since `spawnWith:` passes config). The `spawn/0` form raises an error if the backing `start_link/0` doesn't exist
+- `spawn/0` behaviour: for `native:` actors, the facade always calls `start_link(#{})` (empty config map). `spawn/0` works if the backing module's `start_link/1` accepts an empty map; it raises `instantiation_error` if `start_link/1` rejects it. There is no fallback to `start_link/0`
 - `code_change/3` hot reload support lives entirely in the backing gen_server — no changes to the Beamtalk compiler's hot reload machinery
 - `classState:` is permitted on `native:` actors — only instance `state:` is prohibited
 - **Hot code reload:** Reloading a `native:` class's facade module updates the dispatch functions but does not disrupt existing actor processes — the pid identity is stable, and callers continue reaching the same gen_server. The backing gen_server's own `code_change/3` handles state migration independently
@@ -727,7 +732,7 @@ The Beamtalk API (message selectors and return types) does not change. Callers o
 ## References
 
 - Related issues: BT-1155, BT-1156, BT-1157, BT-1158, BT-1159
-- Related ADRs: ADR 0005 (BEAM Object Model — Actor vs Value distinction), ADR 0028 (BEAM Interop Strategy — FFI mechanism), ADR 0038 (ClassBuilder Protocol — `native:` as ClassBuilder method), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State), ADR 0043 (Sync-by-Default Actor Messaging — `sync_send/3` and `cast_send/3` protocols, `!` bang semantics), ADR 0048 (Class-Side Method Syntax Redesign), ADR 0051 (Subprocess Execution — proof-of-concept), ADR 0055 (Erlang-Backed Class Authoring Protocol — `state:` and FFI for Value classes), ADR 0059 (Supervisors — `supervisionPolicy:` keyword on `Supervisor subclass:`, same ClassBuilder keyword-argument pattern)
+- Related ADRs: ADR 0005 (BEAM Object Model — Actor vs Value distinction), ADR 0028 (BEAM Interop Strategy — FFI mechanism), ADR 0038 (ClassBuilder Protocol — `native:` as ClassBuilder method), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State), ADR 0043 (Sync-by-Default Actor Messaging — `sync_send/3` and `cast_send/3` protocols, `!` bang semantics), ADR 0048 (Class-Side Method Syntax Redesign), ADR 0051 (Subprocess Execution — proof-of-concept), ADR 0055 (Erlang-Backed Class Authoring Protocol — `state:` and FFI for Value classes), ADR 0059 (Supervisors — `supervisionPolicy:` keyword on `Supervisor subclass:`, same ClassBuilder keyword-argument pattern; planned, not yet published)
 - gen_server protocol: https://www.erlang.org/doc/man/gen_server.html
 - gen_statem protocol: https://www.erlang.org/doc/man/gen_statem.html
 - Pharo UFFI / ffiCall: https://files.pharo.org/books-pdfs/booklet-uFFI/UFFIDRAFT.pdf
