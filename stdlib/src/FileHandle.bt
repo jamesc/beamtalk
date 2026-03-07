@@ -32,12 +32,3 @@ sealed Object subclass: FileHandle
   /// ```
   lines -> Stream => (Erlang beamtalk_file) handleLines: self
 
-  /// Return a developer-readable string representation.
-  ///
-  /// ## Examples
-  ///
-  /// ```beamtalk
-  /// handle printString.
-  /// // => "a FileHandle"
-  /// ```
-  printString -> String => "a FileHandle"
