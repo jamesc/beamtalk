@@ -298,7 +298,7 @@ track_module_source(ModuleName, SourcePath, State) ->
 store_file_class_sources(ClassNames, Source, State) ->
     lists:foreach(
         fun(#{name := Name}) ->
-            NameBin = list_to_binary(Name),
+            NameBin = normalize_class_source_key(Name),
             beamtalk_workspace_meta:set_class_source(NameBin, Source)
         end,
         ClassNames
@@ -509,7 +509,15 @@ load_recompiled_method(
     case code:load_binary(ModName, "", Binary) of
         {module, ModName} ->
             activate_module(ModName, Classes),
-            beamtalk_workspace_meta:set_class_source(ClassNameBin, CombinedSource),
+            %% Update all classes compiled in this module so sibling class entries
+            %% reflect the latest combined source and stay consistent for future >> calls.
+            lists:foreach(
+                fun(#{name := Name}) ->
+                    NameBin = normalize_class_source_key(Name),
+                    beamtalk_workspace_meta:set_class_source(NameBin, CombinedSource)
+                end,
+                Classes
+            ),
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
             {ok, Result, <<>>, AllWarnings, State};
         {error, LoadReason} ->

@@ -301,7 +301,8 @@ handle_call({get_class_source, ClassName}, _From, State) ->
 handle_call({set_class_source, ClassName, Source}, _From, State) ->
     Sources = State#state.class_sources,
     State2 = State#state{class_sources = maps:put(ClassName, Source, Sources)},
-    {reply, ok, State2};
+    store_state_in_ets(State2),
+    {reply, ok, schedule_persist(State2)};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -459,13 +460,33 @@ load_metadata_from_disk(State) ->
                             _ -> State#state.project_path
                         end,
 
+                    %% Restore class sources map (binary class name → source string).
+                    ClassSourcesRaw = maps:get(<<"class_sources">>, Map, #{}),
+                    ClassSources =
+                        case is_map(ClassSourcesRaw) of
+                            true ->
+                                maps:fold(
+                                    fun
+                                        (K, V, Acc) when is_binary(K), is_binary(V) ->
+                                            maps:put(K, binary_to_list(V), Acc);
+                                        (_, _, Acc) ->
+                                            Acc
+                                    end,
+                                    #{},
+                                    ClassSourcesRaw
+                                );
+                            false ->
+                                #{}
+                        end,
+
                     State#state{
                         project_path = ProjectPath,
                         created_at = CreatedAt,
                         last_activity = LastActive,
                         % Always start fresh
                         supervised_actors = [],
-                        loaded_modules = maps:from_list(ModuleAtoms)
+                        loaded_modules = maps:from_list(ModuleAtoms),
+                        class_sources = ClassSources
                     }
             catch
                 % Failed to parse, use default
@@ -522,7 +543,22 @@ persist_metadata_to_disk(State) ->
                     end
             }
          || {M, S} <- maps:to_list(State#state.loaded_modules)
-        ]
+        ],
+        <<"class_sources">> => maps:fold(
+            fun(ClassName, Source, Acc) ->
+                SourceBin =
+                    case unicode:characters_to_binary(Source) of
+                        Bin when is_binary(Bin) -> Bin;
+                        _ -> null
+                    end,
+                case SourceBin of
+                    null -> Acc;
+                    _ -> maps:put(ClassName, SourceBin, Acc)
+                end
+            end,
+            #{},
+            State#state.class_sources
+        )
     },
 
     %% Write to disk
