@@ -200,6 +200,18 @@ fn find_hover_in_declarations(
             if offset >= state.name.span.start() && offset < state.name.span.end() {
                 return Some(state_declaration_hover_info(state));
             }
+            if let Some(type_annotation) = &state.type_annotation {
+                let type_span = type_annotation.span();
+                if offset >= type_span.start() && offset < type_span.end() {
+                    return Some(HoverInfo::new(
+                        format!(
+                            "Type annotation: `{}`",
+                            type_annotation_label(type_annotation)
+                        ),
+                        type_span,
+                    ));
+                }
+            }
         }
     }
 

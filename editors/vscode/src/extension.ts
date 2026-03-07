@@ -121,8 +121,9 @@ function lspIsOnPath(): Promise<boolean> {
  */
 async function resolveServerPath(context: vscode.ExtensionContext): Promise<ResolvedServerPath> {
   const config = vscode.workspace.getConfiguration("beamtalk");
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
-  const expandVars = (s: string) => s.replace(/\$\{workspaceFolder\}/g, workspaceRoot);
+  const projectRoot = findProjectRoot();
+  const expandVars = (s: string) =>
+    projectRoot ? s.replace(/\$\{workspaceFolder\}/g, projectRoot) : s;
   const override = expandVars(config.get<string>("server.path", "").trim());
   const beamtalkBin = expandVars(config.get<string>("binary.path", "").trim()) || "beamtalk";
   let warning: string | undefined;
@@ -564,8 +565,10 @@ function replCommand(): string {
   // VS Code does not expand ${workspaceFolder} in settings values, only in
   // launch.json/tasks.json. Expand it here so users can write paths like
   // "${workspaceFolder}/target/debug/beamtalk" in their settings.
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
-  beamtalkBin = beamtalkBin.replace(/\$\{workspaceFolder\}/g, workspaceRoot);
+  const projectRoot = findProjectRoot();
+  if (projectRoot) {
+    beamtalkBin = beamtalkBin.replace(/\$\{workspaceFolder\}/g, projectRoot);
+  }
   // Quote the binary path in case it contains spaces (e.g. "/path/to my/beamtalk").
   const quoted = beamtalkBin.includes(" ") ? `"${beamtalkBin}"` : beamtalkBin;
   return ephemeral ? `${quoted} repl -e` : `${quoted} repl`;
