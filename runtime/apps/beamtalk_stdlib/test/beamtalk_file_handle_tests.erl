@@ -21,7 +21,8 @@
 
 %% @doc Build a FileHandle map backed by a real open file descriptor.
 with_temp_handle(Contents, Fun) ->
-    TmpPath = "/tmp/beamtalk_file_handle_test_" ++ integer_to_list(erlang:unique_integer([positive])),
+    TmpPath =
+        "/tmp/beamtalk_file_handle_test_" ++ integer_to_list(erlang:unique_integer([positive])),
     ok = file:write_file(TmpPath, Contents),
     {ok, Fd} = file:open(TmpPath, [read, binary]),
     Handle = #{'$beamtalk_class' => 'FileHandle', fd => Fd},
