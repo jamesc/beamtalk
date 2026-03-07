@@ -62,7 +62,7 @@ impl CoreErlangGenerator {
         let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
 
         // BT-524: Add is_list guard for non-list collection types.
-        // Convert non-list receivers to a list via beamtalk_collection_ops:to_list/1
+        // Convert non-list receivers to a list via beamtalk_collection:to_list/1
         // so that state mutations are properly threaded through lists:foldl.
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -114,7 +114,7 @@ impl CoreErlangGenerator {
                     " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
                      <'true'> when 'true' -> {list_var} \
                      <'false'> when 'true' -> \
-                     call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                     call 'beamtalk_collection':'to_list'({list_var}) end \
                      in let {lambda_var} = fun ({item_var}, StateAcc) -> "
                 ),
             ]);
@@ -157,7 +157,7 @@ impl CoreErlangGenerator {
                 " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
                  <'true'> when 'true' -> {list_var} \
                  <'false'> when 'true' -> \
-                 call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                 call 'beamtalk_collection':'to_list'({list_var}) end \
                  in let {lambda_var} = fun ({item_var}, StateAcc) -> "
             ),
         ]];
@@ -420,7 +420,7 @@ impl CoreErlangGenerator {
                     " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
                      <'true'> when 'true' -> {list_var} \
                      <'false'> when 'true' -> \
-                     call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                     call 'beamtalk_collection':'to_list'({list_var}) end \
                      in let {lambda_var} = fun ({item_var}, {acc_state_var}) -> \
                      let AccList = call 'erlang':'element'(1, {acc_state_var}) in \
                      let StateAcc = call 'erlang':'element'(2, {acc_state_var}) in "
@@ -712,7 +712,7 @@ impl CoreErlangGenerator {
                     " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
                      <'true'> when 'true' -> {list_var} \
                      <'false'> when 'true' -> \
-                     call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                     call 'beamtalk_collection':'to_list'({list_var}) end \
                      in let {lambda_var} = fun ({item_var}, {acc_state_var}) -> \
                      let AccList = call 'erlang':'element'(1, {acc_state_var}) in \
                      let StateAcc = call 'erlang':'element'(2, {acc_state_var}) in "
@@ -1033,7 +1033,7 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Simple case: no mutations, delegate to beamtalk_collection_ops:inject_into
+        // Simple case: no mutations, delegate to beamtalk_collection:inject_into
         // which wraps the block to call Block(Acc, Elem) matching Beamtalk convention.
         // BT-820: lists:foldl calls Fun(Elem, Acc) but Beamtalk convention is Block(Acc, Elem).
         let recv_code = self.expression_doc(receiver)?;
@@ -1041,7 +1041,7 @@ impl CoreErlangGenerator {
         let body_code = self.expression_doc(body)?;
 
         Ok(docvec![
-            "call 'beamtalk_collection_ops':'inject_into'(",
+            "call 'beamtalk_collection':'inject_into'(",
             recv_code,
             ", ",
             init_code,
@@ -1066,7 +1066,7 @@ impl CoreErlangGenerator {
         let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
 
         // BT-524: Add is_list guard for non-list collection types.
-        // Convert non-list receivers to a list via beamtalk_collection_ops:to_list/1
+        // Convert non-list receivers to a list via beamtalk_collection:to_list/1
         // so that state mutations are properly threaded through lists:foldl.
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -1107,7 +1107,7 @@ impl CoreErlangGenerator {
                     " in let {safe_list_var} = case call 'erlang':'is_list'({list_var}) of \
                      <'true'> when 'true' -> {list_var} \
                      <'false'> when 'true' -> \
-                     call 'beamtalk_collection_ops':'to_list'({list_var}) end \
+                     call 'beamtalk_collection':'to_list'({list_var}) end \
                      in let {init_var} = "
                 ),
                 init_code,
@@ -1316,14 +1316,14 @@ mod tests {
 
     #[test]
     fn test_list_inject_into_generates_collection_ops_wrapper() {
-        // inject:into: (no mutations) delegates to beamtalk_collection_ops:inject_into
+        // inject:into: (no mutations) delegates to beamtalk_collection:inject_into
         // which adapts the Erlang lists:foldl(Fun, Acc, List) argument order to
         // Beamtalk's Block(Acc, Elem) convention (BT-820).
         let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items inject: 0 into: [:acc :item | acc + item]\n";
         let code = codegen(src);
         assert!(
-            code.contains("'beamtalk_collection_ops':'inject_into'"),
-            "inject:into: should delegate to beamtalk_collection_ops:inject_into. Got:\n{code}"
+            code.contains("'beamtalk_collection':'inject_into'"),
+            "inject:into: should delegate to beamtalk_collection:inject_into. Got:\n{code}"
         );
     }
 

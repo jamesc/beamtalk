@@ -22,7 +22,7 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
         "at:" => {
             let p0 = params.first()?;
             Some(docvec![
-                "call 'beamtalk_tuple_ops':'at'(Self, ",
+                "call 'beamtalk_tuple':'at'(Self, ",
                 p0.clone(),
                 ")"
             ])
@@ -33,11 +33,11 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
         "isError" => Some(Document::Str(
             "case Self of <{'error', _Reason}> when 'true' -> 'true' <_> when 'true' -> 'false' end",
         )),
-        "unwrap" => Some(Document::Str("call 'beamtalk_tuple_ops':'unwrap'(Self)")),
+        "unwrap" => Some(Document::Str("call 'beamtalk_tuple':'unwrap'(Self)")),
         "unwrapOr:" => {
             let p0 = params.first()?;
             Some(docvec![
-                "call 'beamtalk_tuple_ops':'unwrap_or'(Self, ",
+                "call 'beamtalk_tuple':'unwrap_or'(Self, ",
                 p0.clone(),
                 ")",
             ])
@@ -45,16 +45,16 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
         "unwrapOrElse:" => {
             let p0 = params.first()?;
             Some(docvec![
-                "call 'beamtalk_tuple_ops':'unwrap_or_else'(Self, ",
+                "call 'beamtalk_tuple':'unwrap_or_else'(Self, ",
                 p0.clone(),
                 ")",
             ])
         }
-        "asString" => Some(Document::Str("call 'beamtalk_tuple_ops':'as_string'(Self)")),
+        "asString" => Some(Document::Str("call 'beamtalk_tuple':'as_string'(Self)")),
         "do:" => {
             let p0 = param(params, 0, "_Block");
             Some(docvec![
-                "call 'beamtalk_tuple_ops':'do'(Self, ",
+                "call 'beamtalk_tuple':'do'(Self, ",
                 p0.to_string(),
                 ")"
             ])
@@ -118,23 +118,23 @@ pub(crate) fn generate_object_bif(
 /// Set primitive implementations (BT-73).
 ///
 /// Sets are represented as tagged maps: `#{'$beamtalk_class' => 'Set', elements => OrdsetData}`.
-/// Operations delegate to `beamtalk_set_ops` helper module which wraps Erlang `ordsets`.
+/// Operations delegate to `beamtalk_set` helper module which wraps Erlang `ordsets`.
 pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         "fromList:" | "withAll:" => {
             let p0 = param(params, 0, "_List");
             Some(docvec![
-                "call 'beamtalk_set_ops':'from_list'(",
+                "call 'beamtalk_set':'from_list'(",
                 p0.to_string(),
                 ")"
             ])
         }
-        "size" => Some(Document::Str("call 'beamtalk_set_ops':'size'(Self)")),
-        "isEmpty" => Some(Document::Str("call 'beamtalk_set_ops':'is_empty'(Self)")),
+        "size" => Some(Document::Str("call 'beamtalk_set':'size'(Self)")),
+        "isEmpty" => Some(Document::Str("call 'beamtalk_set':'is_empty'(Self)")),
         "includes:" => {
             let p0 = param(params, 0, "_Element");
             Some(docvec![
-                "call 'beamtalk_set_ops':'includes'(Self, ",
+                "call 'beamtalk_set':'includes'(Self, ",
                 p0.to_string(),
                 ")"
             ])
@@ -142,7 +142,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
         "add:" => {
             let p0 = param(params, 0, "_Element");
             Some(docvec![
-                "call 'beamtalk_set_ops':'add'(Self, ",
+                "call 'beamtalk_set':'add'(Self, ",
                 p0.to_string(),
                 ")"
             ])
@@ -150,7 +150,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
         "remove:" => {
             let p0 = param(params, 0, "_Element");
             Some(docvec![
-                "call 'beamtalk_set_ops':'remove'(Self, ",
+                "call 'beamtalk_set':'remove'(Self, ",
                 p0.to_string(),
                 ")"
             ])
@@ -158,7 +158,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
         "union:" => {
             let p0 = param(params, 0, "_Other");
             Some(docvec![
-                "call 'beamtalk_set_ops':'union'(Self, ",
+                "call 'beamtalk_set':'union'(Self, ",
                 p0.to_string(),
                 ")"
             ])
@@ -166,7 +166,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
         "intersection:" => {
             let p0 = param(params, 0, "_Other");
             Some(docvec![
-                "call 'beamtalk_set_ops':'intersection'(Self, ",
+                "call 'beamtalk_set':'intersection'(Self, ",
                 p0.to_string(),
                 ")",
             ])
@@ -174,7 +174,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
         "difference:" => {
             let p0 = param(params, 0, "_Other");
             Some(docvec![
-                "call 'beamtalk_set_ops':'difference'(Self, ",
+                "call 'beamtalk_set':'difference'(Self, ",
                 p0.to_string(),
                 ")"
             ])
@@ -182,16 +182,16 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
         "isSubsetOf:" => {
             let p0 = param(params, 0, "_Other");
             Some(docvec![
-                "call 'beamtalk_set_ops':'is_subset_of'(Self, ",
+                "call 'beamtalk_set':'is_subset_of'(Self, ",
                 p0.to_string(),
                 ")",
             ])
         }
-        "asList" => Some(Document::Str("call 'beamtalk_set_ops':'as_list'(Self)")),
+        "asList" => Some(Document::Str("call 'beamtalk_set':'as_list'(Self)")),
         "do:" => {
             let p0 = param(params, 0, "_Block");
             Some(docvec![
-                "call 'beamtalk_set_ops':'do'(Self, ",
+                "call 'beamtalk_set':'do'(Self, ",
                 p0.to_string(),
                 ")"
             ])

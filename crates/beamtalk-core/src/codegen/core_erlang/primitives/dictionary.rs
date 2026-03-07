@@ -28,7 +28,7 @@ pub(crate) fn generate_dictionary_bif(
             let p0 = param(params, 0, "_Key");
             let p1 = param(params, 1, "_Block");
             Some(docvec![
-                "call 'beamtalk_map_ops':'at_if_absent'(Self, ",
+                "call 'beamtalk_map':'at_if_absent'(Self, ",
                 p0.to_string(),
                 ", ",
                 p1.to_string(),
@@ -61,7 +61,7 @@ pub(crate) fn generate_dictionary_bif(
         "doWithKey:" => {
             let p0 = param(params, 0, "_Block");
             Some(docvec![
-                "call 'beamtalk_map_ops':'do_with_key'(Self, ",
+                "call 'beamtalk_map':'do_with_key'(Self, ",
                 p0.to_string(),
                 ")",
             ])
@@ -69,7 +69,7 @@ pub(crate) fn generate_dictionary_bif(
         "do:" => {
             let p0 = param(params, 0, "_Block");
             Some(docvec![
-                "call 'beamtalk_map_ops':'do'(Self, ",
+                "call 'beamtalk_map':'do'(Self, ",
                 p0.to_string(),
                 ")"
             ])
@@ -77,13 +77,13 @@ pub(crate) fn generate_dictionary_bif(
         "includes:" => {
             let p0 = param(params, 0, "_Element");
             Some(docvec![
-                "call 'beamtalk_map_ops':'includes'(Self, ",
+                "call 'beamtalk_map':'includes'(Self, ",
                 p0.to_string(),
                 ")"
             ])
         }
         "printString" => Some(Document::Str(
-            "call 'beamtalk_map_ops':'print_string'(Self)",
+            "call 'beamtalk_map':'print_string'(Self)",
         )),
         _ => None,
     }

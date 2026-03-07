@@ -19,40 +19,40 @@ module 'stdlib_class_set' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'includes:'/
 
 
 'size'/1 = fun (Self) ->
-call 'beamtalk_set_ops':'size'(Self)
+call 'beamtalk_set':'size'(Self)
 
 'isEmpty'/1 = fun (Self) ->
-call 'beamtalk_set_ops':'is_empty'(Self)
+call 'beamtalk_set':'is_empty'(Self)
 
 'includes:'/2 = fun (Self, _element1) ->
-call 'beamtalk_set_ops':'includes'(Self, _element1)
+call 'beamtalk_set':'includes'(Self, _element1)
 
 'add:'/2 = fun (Self, _element2) ->
-call 'beamtalk_set_ops':'add'(Self, _element2)
+call 'beamtalk_set':'add'(Self, _element2)
 
 'remove:'/2 = fun (Self, _element3) ->
-call 'beamtalk_set_ops':'remove'(Self, _element3)
+call 'beamtalk_set':'remove'(Self, _element3)
 
 'union:'/2 = fun (Self, _other4) ->
-call 'beamtalk_set_ops':'union'(Self, _other4)
+call 'beamtalk_set':'union'(Self, _other4)
 
 'intersection:'/2 = fun (Self, _other5) ->
-call 'beamtalk_set_ops':'intersection'(Self, _other5)
+call 'beamtalk_set':'intersection'(Self, _other5)
 
 'difference:'/2 = fun (Self, _other6) ->
-call 'beamtalk_set_ops':'difference'(Self, _other6)
+call 'beamtalk_set':'difference'(Self, _other6)
 
 'isSubsetOf:'/2 = fun (Self, _other7) ->
-call 'beamtalk_set_ops':'is_subset_of'(Self, _other7)
+call 'beamtalk_set':'is_subset_of'(Self, _other7)
 
 'asList'/1 = fun (Self) ->
-call 'beamtalk_set_ops':'as_list'(Self)
+call 'beamtalk_set':'as_list'(Self)
 
 'fromList:'/2 = fun (Self, _list8) ->
-call 'beamtalk_set_ops':'from_list'(_list8)
+call 'beamtalk_set':'from_list'(_list8)
 
 'do:'/2 = fun (Self, _block9) ->
-call 'beamtalk_set_ops':'do'(Self, _block9)
+call 'beamtalk_set':'do'(Self, _block9)
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of

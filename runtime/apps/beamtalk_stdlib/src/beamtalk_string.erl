@@ -11,7 +11,7 @@
 %%%
 %%% All operations are grapheme-aware and handle UTF-8 correctly.
 
--module(beamtalk_string_ops).
+-module(beamtalk_string).
 -export([
     at/2,
     capitalize/1,

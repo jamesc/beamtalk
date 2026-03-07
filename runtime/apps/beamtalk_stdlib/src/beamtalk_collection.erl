@@ -14,7 +14,7 @@
 %% Erlang helpers.
 %%
 %%% **DDD Context:** Object System Context
--module(beamtalk_collection_ops).
+-module(beamtalk_collection).
 
 -export([
     inject_into/3,

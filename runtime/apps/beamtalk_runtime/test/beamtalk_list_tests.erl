@@ -7,8 +7,8 @@
 %% Tests compiled dispatch via 'bt@stdlib@list':dispatch/3 (List.bt BIF mappings)
 %% and beamtalk_primitive:send/3 integration for the List class.
 %%
-%% For direct beamtalk_list_ops module tests (at, detect, reject, etc.),
-%% see beamtalk_list_ops_tests.erl.
+%% For direct beamtalk_list module tests (at, detect, reject, etc.),
+%% see beamtalk_list_tests.erl.
 -module(beamtalk_list_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
