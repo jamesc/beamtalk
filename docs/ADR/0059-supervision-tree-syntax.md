@@ -27,7 +27,7 @@ The runtime has two hand-written OTP supervisors:
 - `beamtalk_runtime_sup` — one_for_one, supervises bootstrap/stdlib/instances + `beamtalk_subprocess_sup`
 - `beamtalk_subprocess_sup` — simple_one_for_one/temporary, started by `beamtalk_actor.erl`'s `start_link_supervised/3`
 
-There is no way to define a user-level supervision tree from `.bt` files.
+There is no way to define a user-level supervision tree from `.bt` files, neither static (children known at startup) nor dynamic (children added at runtime).
 
 ### How Class-Level Declarations Work Today (ClassBuilder, ADR 0038)
 
@@ -55,6 +55,10 @@ CB name: 'Counter';
 
 ## Decision
 
+### Scope
+
+This ADR covers both **static supervision** (children known at compile time) and **dynamic supervision** (children added and removed at runtime). The two share the same `Supervisor subclass:` syntax; the difference is the strategy.
+
 ### Core Design: Option B — `Supervisor subclass:` with Actor-Side Defaults
 
 Two complementary declarations:
@@ -78,10 +82,12 @@ Class-level declarations in the supervisor body:
 
 | Declaration | OTP mapping | Default |
 |---|---|---|
-| `strategy: Symbol` | `SupFlags.strategy` — `#oneForOne`, `#oneForAll`, `#restForOne` | `#oneForOne` |
-| `maxRestarts: Integer` | `SupFlags.intensity` | `10` |
-| `restartWindow: Integer` (seconds) | `SupFlags.period` | `60` |
-| `children: ArrayLiteral` | `ChildSpecs` list | required |
+| `strategy: Symbol` | `SupFlags.strategy` — `#oneForOne`, `#oneForAll`, `#restForOne`, `#dynamic` | `#oneForOne` |
+| `maxRestarts: Integer` | `SupFlags.intensity` (static only) | `10` |
+| `restartWindow: Integer` (seconds) | `SupFlags.period` (static only) | `60` |
+| `children: ArrayLiteral` | `ChildSpecs` list (static only, required unless `strategy: #dynamic`) | — |
+| `childClass: ClassName` | dynamic child spec template (`simple_one_for_one`) | — |
+| `childRestart: Symbol` | `restart` in dynamic child spec | `#temporary` |
 
 Children are Actor class references. Each entry is either a bare class name (uses `supervisionPolicy:` default from that class) or a class name with a `restart:` override:
 
@@ -129,6 +135,80 @@ Actor subclass: HTTPRouter
 Valid values: `#permanent` (always restart), `#transient` (restart on abnormal exit only), `#temporary` (never restart). These map directly to OTP child spec `restart` values.
 
 `supervisionPolicy:` is a class-level declaration, not an instance variable. It compiles to a ClassBuilder message and is stored as class metadata, readable via `ClassName supervisionPolicy`.
+
+### Dynamic Supervision — `strategy: #dynamic`
+
+When the set of children is not known at compile time (worker pools, per-request handlers, connection managers), use `strategy: #dynamic` with a `childClass:` declaration instead of `children:`:
+
+```beamtalk
+Supervisor subclass: WorkerPool
+  strategy: #dynamic
+  childClass: Worker
+  childRestart: #temporary
+```
+
+`childClass:` names the Actor class to spawn for each dynamic child. `childRestart:` is optional (defaults to `#temporary` for dynamic supervisors, matching OTP's `DynamicSupervisor` default). No `children:` array is declared — the supervisor starts with no children.
+
+Dynamic supervisor instances gain `startChild:` and `terminateChild:` messages:
+
+```beamtalk
+pool := WorkerPool supervise.
+
+// Start children on demand
+w1 := pool startChild: #{config: "db-a"}.
+w2 := pool startChild: #{config: "db-b"}.
+
+pool children.              // => #(Worker Worker)
+pool count.                 // => 2
+
+// Terminate a specific child
+pool terminateChild: w1.
+pool count.                 // => 1
+```
+
+`startChild:` accepts a config dictionary passed to `Worker spawnWith:`. It returns the new Actor instance. `terminateChild:` accepts an actor instance or pid.
+
+For parameterless children, `startChild` (no argument) calls `Worker spawn`:
+
+```beamtalk
+Supervisor subclass: RequestPool
+  strategy: #dynamic
+  childClass: RequestHandler
+
+pool := RequestPool supervise.
+handler := pool startChild.
+```
+
+**Codegen:** `strategy: #dynamic` generates an OTP `DynamicSupervisor`-style module (`supervisor` behaviour with `simple_one_for_one` strategy). The generated `init/1` declares a single child spec template from `childClass:`. `startChild:` calls `supervisor:start_child/2`; `terminateChild:` calls `supervisor:terminate_child/2` then `supervisor:delete_child/2`.
+
+```erlang
+%% Generated: bt@workerpool.erl
+init([]) ->
+    SupFlags = #{strategy => simple_one_for_one, intensity => 10, period => 60},
+    ChildSpec = #{
+        id => 'Worker',
+        start => {'bt@worker', 'spawnWith:', []},
+        restart => temporary,
+        shutdown => 5000,
+        type => worker,
+        modules => ['bt@worker']
+    },
+    {ok, {SupFlags, [ChildSpec]}}.
+
+'startChild:'(Self, Config) ->
+    Pid = element(4, Self),
+    case supervisor:start_child(Pid, [Config]) of
+        {ok, ChildPid} -> {'beamtalk_object', 'Worker', 'bt@worker', ChildPid};
+        {error, Reason} -> beamtalk_error:raise(...)
+    end.
+```
+
+**Constraint:** Dynamic supervisors may not declare `strategy: #oneForOne` / `#oneForAll` / `#restForOne` alongside `childClass:`. The compiler errors if both are present:
+
+```
+error: dynamic supervisor 'WorkerPool' cannot declare 'strategy: #oneForOne'
+  use 'strategy: #dynamic' with 'childClass:', or use a static 'children:' declaration
+```
 
 ### Starting and Inspecting Supervisors
 
@@ -210,6 +290,7 @@ The ClassBuilder on_load for `WebApp` registers it as a `Supervisor` subclass. C
 
 ### REPL Session
 
+Static supervisor:
 ```
 > app := WebApp supervise.
 #Supervisor<WebApp, <0.200.0>>
@@ -228,6 +309,30 @@ The ClassBuilder on_load for `WebApp` registers it as a `Supervisor` subclass. C
 
 > HTTPRouter supervisionPolicy.
 #transient
+```
+
+Dynamic supervisor:
+```
+> pool := WorkerPool supervise.
+#Supervisor<WorkerPool, <0.210.0>>
+
+> pool count.
+0
+
+> w1 := pool startChild: #{config: "primary"}.
+#Actor<Worker, <0.211.0>>
+
+> w2 := pool startChild: #{config: "replica"}.
+#Actor<Worker, <0.212.0>>
+
+> pool count.
+2
+
+> pool terminateChild: w1.
+ok
+
+> pool count.
+1
 ```
 
 ### Error Cases
@@ -540,10 +645,10 @@ No new syntax. Users invoke Erlang supervision APIs via BEAM interop:
 ### Negative
 
 - `Supervisor` joins the bootstrap class hierarchy: `ProtoObject → Object → Actor → [user actors]` and `ProtoObject → Object → Supervisor → [user supervisors]`. One more class to bootstrap before user modules load.
-- New class-level declaration keywords: `strategy:`, `maxRestarts:`, `restartWindow:`, `children:`, `supervisionPolicy:` must be added to the parser's class body grammar and to ClassBuilder.
+- New class-level declaration keywords: `strategy:`, `maxRestarts:`, `restartWindow:`, `children:`, `childClass:`, `childRestart:`, `supervisionPolicy:` must be added to the parser's class body grammar and to ClassBuilder.
 - Cross-file compile dependency: to compile `WebApp.bt`, the compiler must know the `supervisionPolicy:` of each listed child class (to fill in restart defaults). This is a new dependency in the compilation graph. If the child class hasn't been compiled yet, the compiler uses `#temporary` and emits a warning.
 - `shutdown:` per-child configuration is not in scope for this ADR. The default of `5000ms` is used for all children. Production systems needing custom shutdown timeouts must use BEAM interop.
-- No dynamic supervisor (no equivalent of `supervisor:start_child/2` at runtime from Beamtalk syntax). Adding children dynamically is deferred.
+- `strategy: #dynamic` supervisors use OTP's `simple_one_for_one` — all dynamic children are the same class. Mixed-class dynamic supervisors require Erlang FFI.
 
 ### Neutral
 
@@ -573,7 +678,8 @@ Add `Supervisor` as a new base class in the bootstrap sequence:
 
 **AST (`crates/beamtalk-core/src/ast.rs`):**
 - `ClassDefinition` gains `supervision_spec: Option<SupervisionSpec>` field
-- `SupervisionSpec { strategy, max_restarts, restart_window, children: Vec<ChildEntry> }`
+- `SupervisionSpec { strategy, max_restarts, restart_window, children: Vec<ChildEntry> }` (static)
+- `DynamicSupervisionSpec { child_class, child_restart }` (dynamic, `strategy: #dynamic`)
 - `ChildEntry { class_name, restart_override: Option<Symbol> }`
 - `ActorClass` gains `supervision_policy: Option<Symbol>` field
 
@@ -585,22 +691,25 @@ Add `Supervisor` as a new base class in the bootstrap sequence:
 - Validate `strategy:` is one of `#oneForOne`, `#oneForAll`, `#restForOne`
 - Validate `children:` is non-empty
 - Validate each child class exists in the class hierarchy and is an `Actor subclass:` or `Supervisor subclass:`
+- For `strategy: #dynamic`: validate `childClass:` is present, `children:` is absent; validate `childClass` is an `Actor subclass:`
+- Error if both `children:` and `childClass:` are declared on the same class
 - Validate `supervisionPolicy:` is one of `#permanent`, `#transient`, `#temporary`
 - Warn if a child Actor has no `supervisionPolicy:` and no override in the children list (default `#temporary`)
 
 ### Phase 2 — Supervisor Codegen (L)
 
 **Codegen (`crates/beamtalk-core/src/codegen/core_erlang/`):**
-- New `supervisor_codegen.rs` — generates OTP `supervisor` behaviour modules:
+- New `supervisor_codegen.rs` — generates OTP `supervisor` behaviour modules for both static and dynamic supervisors:
   - `start_link/0` — `supervisor:start_link(?MODULE, [])`
   - `init/1` — returns `{ok, {SupFlags, ChildSpecs}}` built from the `SupervisionSpec`
   - `supervise/0` class-side method — calls `start_link/0`, wraps result as `beamtalk_object`
-  - Inspection methods: `children/1`, `restartCount:/2`, `which:/2`, `terminate:/2`
+  - Static inspection methods: `children/1`, `restartCount:/2`, `which:/2`, `terminate:/2`
+  - Dynamic management methods: `startChild:/1`, `startChild/0`, `terminateChild:/1`, `count/1`
 - Child spec resolution: for each child in `children:`, look up `supervisionPolicy:` from the child class's compiled metadata; use override if present
 - `beamtalk-core/src/codegen/core_erlang/actor_codegen.rs` — detect `Supervisor` superclass in `ClassDefinition` and branch to `supervisor_codegen.rs`
 
 **Affected components (full list):**
-- `crates/beamtalk-core/src/source_analysis/lexer.rs` — lex `strategy`, `maxRestarts`, `restartWindow`, `children`, `supervisionPolicy` as class-body keyword tokens
+- `crates/beamtalk-core/src/source_analysis/lexer.rs` — lex `strategy`, `maxRestarts`, `restartWindow`, `children`, `childClass`, `childRestart`, `supervisionPolicy` as class-body keyword tokens
 - `crates/beamtalk-core/src/source_analysis/parser/` — parse new class-level declarations
 - `crates/beamtalk-core/src/ast.rs` — `SupervisionSpec`, `ChildEntry`, `supervision_policy` on actor class
 - `crates/beamtalk-core/src/semantic_analysis/` — validation pass for supervision spec
