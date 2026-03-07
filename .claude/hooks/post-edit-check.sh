@@ -22,20 +22,30 @@ print(d.get('tool_input', {}).get('file_path', ''))
 
 case "$FILE_PATH" in
   *.rs)
-    OUTPUT=$(cargo check --quiet 2>&1) && exit 0
-    echo "cargo check failed after editing $(basename "$FILE_PATH"):"
-    echo "$OUTPUT" | head -30
+    OUTPUT=$(cargo check --quiet 2>&1)
+    RC=$?
+    if [[ $RC -ne 0 ]]; then
+      echo "cargo check failed after editing $(basename "$FILE_PATH"):"
+      echo "$OUTPUT" | head -30
+    else
+      # Surface warnings even on success (cargo check --quiet still emits them)
+      WARNS=$(echo "$OUTPUT" | grep -E "^warning:" | head -10)
+      if [[ -n "$WARNS" ]]; then
+        echo "Rust warnings after editing $(basename "$FILE_PATH"):"
+        echo "$WARNS"
+      fi
+    fi
     ;;
 
   *.erl|*.hrl)
-    RUNTIME_DIR="${CLAUDE_PROJECT_DIR}/runtime"
+    RUNTIME_DIR="${CLAUDE_PROJECT_DIR:-$(pwd)}/runtime"
     OUTPUT=$(cd "$RUNTIME_DIR" && rebar3 compile 2>&1)
     RC=$?
 
     if [[ $RC -ne 0 ]]; then
       echo "rebar3 compile failed after editing $(basename "$FILE_PATH"):"
-      # Surface errors and the immediate context lines
-      echo "$OUTPUT" | grep -E "(error:|ERROR|==)" | head -20
+      # Print first 30 lines of output — erlc errors include file:line context
+      echo "$OUTPUT" | head -30
     else
       # Warn on any new warnings (rebar3 prefixes them with the app name)
       WARNS=$(echo "$OUTPUT" | grep -E "^(warning:|.*\.erl:[0-9]+: Warning:)" | head -10)

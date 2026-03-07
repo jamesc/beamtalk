@@ -12,9 +12,9 @@ Beamtalk is a Smalltalk/Newspeak-inspired language compiling to BEAM via Rust. T
 - **Erlang logging:** Use OTP logger macros (`?LOG_ERROR`, etc.), never `io:format` or `logger:error()`.
 - **License headers:** All source **code** files (`.rs`, `.erl`, `.bt`, `.hrl`) need `Copyright 2026 James Casey` / `SPDX-License-Identifier: Apache-2.0`. Do **not** add license headers to `.md` files.
 - **Implicit returns:** Use `^` ONLY for early returns, never on last expression.
-- **Block returns:** `^` inside a block returns from the **block only** — it is NOT a non-local return from the enclosing method. `someFlag ifFalse: [^nil]` returns nil from the block; the method continues executing.
+- **Block returns (`^`):** `^` inside a block is a **non-local return** — it exits the *enclosing method* immediately with that value, not just the block. This is standard Smalltalk semantics, implemented via a throw/catch token in codegen.
 - **Type annotations:** Beamtalk uses `::` (double-colon) for type annotations, never single `:`. Examples: `state: x :: Integer = 0`, `param :: Type -> ReturnType =>`.
-- **DNU:** `doesNotUnderstand:` returns `false` by default. Unrecognized message sends silently return `false` — not an error. Never treat a `false` result as proof that a method exists and returned correctly.
+- **DNU:** Sending an unrecognised message raises a `does_not_understand` error (`#beamtalk_error{}`). Use `respondsTo:` to check whether a method exists before calling it.
 - **Generated files:** Before editing `.app.src` or other generated artifacts, check if a build step owns them. `build_stdlib.rs` generates `beamtalk_stdlib.app.src` — edit the generator, not the output.
 - **Worktree stale builds:** After entering or creating a worktree, run `just build` before running tests. Stale BEAM artifacts from another build cause false failures.
 - **REPL output:** Before changing any REPL display value, prompt format, or output behaviour, confirm with the user — existing output is usually intentional and covered by e2e tests. Do not "fix" output that looks wrong without checking first.

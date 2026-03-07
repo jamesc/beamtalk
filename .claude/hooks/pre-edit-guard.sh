@@ -37,8 +37,10 @@ case "$REL" in
       "crates/beamtalk-cli/src/commands/build_stdlib.rs (see generate_app_src fn)"
     ;;
 
-  # Anything inside _build/ is BEAM compiler output.
-  _build/*)
+  # Anything inside a _build/ directory (at any depth) is BEAM compiler output.
+  # In bash case, * matches across /, so _build/* catches all of _build/
+  # and */_build/* catches nested trees like runtime/_build/default/...
+  _build/* | */_build/*)
     block \
       "'$REL' is inside _build/ which is compiler output." \
       "Edit the corresponding source file in runtime/apps/ or stdlib/src/ instead."

@@ -208,27 +208,25 @@ catch most of these, but they waste time:
 | Trailing `.` on every statement | Newline is the separator | `.` is optional; use it only to disambiguate cascades |
 | `"this is a comment"` | `// this is a comment` | Double-quoted strings are data, not comments |
 | `^value` on last expression | Just write `value` | `^` is early-return only; last expr is implicitly returned |
-| `^expr` in a block (non-local return) | Use `ifTrue:` guard pattern | `^` in a block returns from the **block**, not the enclosing method |
 | Left-to-right binary (`2+3*4=20`) | Standard math precedence (`2+3*4=14`) | `*` binds tighter than `+` |
 | `'hello', name` concatenation | `"hello {name}"` interpolation | `++` also works: `"hello" ++ name` |
 | `[:x \| \|temp\| temp := x]` block locals | `[:x \| temp := x]` | No block-local declarations |
 | `:` for type annotations | `::` (double-colon) | `state: x :: Integer = 0`, `param :: Type -> ReturnType =>` |
-| Unknown message raises an error | Returns `false` silently | DNU returns `false` by default — not an exception |
+| Unknown message raises error | Same — DNU raises `does_not_understand` error | Use `respondsTo:` to check before sending |
 
-**`^` in blocks returns from the block, not the method:**
+**`^` in blocks is a non-local return (exits the enclosing method):**
 
 ```beamtalk
-// ^ exits the block — method continues after ifFalse:
-self.flag ifFalse: [^nil].   // nil returned from block; method goes on
-// To guard the whole test body, wrap the assertions:
-self.flag ifTrue: [
-  // all assertions here
-]
+// ^ inside a block exits the METHOD, not just the block:
+firstPositive: items =>
+  items do: [:x | x > 0 ifTrue: [^x]].   // ^ returns from firstPositive:
+  nil   // reached only if no positive element found
 ```
 
-**DNU (doesNotUnderstand) returns `false` silently.** If you send a message
-a class doesn't implement, you get `false` back — not an error. Use `docs`
-in the live workspace to confirm a method exists before calling it.
+**DNU raises a `does_not_understand` error.** Sending a message a class
+doesn't implement raises a structured error — not a silent `false`. Use
+`respondsTo:` or `docs` in the live workspace to confirm a method exists
+before calling it.
 
 **Implicit return rule:** the last expression of a method body is always its
 return value. Never write `^` on the last line — only use it for early exits
