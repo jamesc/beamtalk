@@ -1397,13 +1397,40 @@ impl CoreErlangGenerator {
                 })
                 .collect();
 
+            // BT-1202: Detect if method body has ^ inside blocks (needs NLR).
+            let needs_nlr = method
+                .body
+                .iter()
+                .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
+
+            let nlr_token_var = if needs_nlr {
+                let token_var = self.fresh_temp_var("NlrToken");
+                self.current_nlr_token = Some(token_var.clone());
+                Some(token_var)
+            } else {
+                None
+            };
+
             // Generate body as Document, render to string for embedding
+            let has_class_vars = !class.class_variables.is_empty();
             let body_str = if method.body.is_empty() {
+                self.current_nlr_token = None;
                 // Empty class method body returns self (ClassSelf)
                 "ClassSelf".to_string()
             } else {
                 let body_doc = self.generate_class_method_body(method, &class.class_variables)?;
-                body_doc.to_pretty_string()
+                self.current_nlr_token = None;
+                if let Some(ref token_var) = nlr_token_var {
+                    // BT-1202: Wrap body in try/catch to catch NLR throws from ^ inside blocks.
+                    let wrapped = self.wrap_class_method_body_with_nlr_catch(
+                        body_doc,
+                        token_var,
+                        has_class_vars,
+                    );
+                    wrapped.to_pretty_string()
+                } else {
+                    body_doc.to_pretty_string()
+                }
             };
 
             // Build function header with params

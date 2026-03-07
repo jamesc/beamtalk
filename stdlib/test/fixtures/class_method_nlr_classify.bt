@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1202: Fixture for non-local return (^) in both branches of ifTrue:ifFalse:
+// in a class method.
+
+Object subclass: ClassMethodNlrClassify
+
+  class classify: x =>
+    x > 0 ifTrue: [^"positive"] ifFalse: [^"non-positive"]
+    "unreachable"

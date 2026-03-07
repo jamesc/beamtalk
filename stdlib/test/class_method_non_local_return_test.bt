@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1202: Tests non-local return (^) inside block arguments in class methods.
+// Regression: ^ inside a block in a class method was not returning from the method;
+// execution continued to the next statement, returning the last expression instead.
+
+TestCase subclass: ClassMethodNonLocalReturnTest
+
+  testNlrFromClassMethodIfTrue =>
+    // ^ inside ifTrue: block should return from the class method
+    self assert: (ClassMethodNlrCheck check: 42) equals: 99
+
+  testNlrFromClassMethodIfTrueFallthrough =>
+    // When condition is false, ^ is not taken — method returns nil
+    self assert: (ClassMethodNlrCheck check: "hello") equals: nil
+
+  testNlrFromClassMethodBothBranches =>
+    // ^ in both branches of ifTrue:ifFalse:
+    self assert: (ClassMethodNlrClassify classify: 5) equals: "positive"
+    self assert: (ClassMethodNlrClassify classify: -1) equals: "non-positive"
+    self assert: (ClassMethodNlrClassify classify: 0) equals: "non-positive"
+
+  testNlrFromClassMethodDoBlock =>
+    // ^ inside do: block exits the class method immediately
+    self assert: (ClassMethodNlrEarly firstPositive: #(-1, -2, 3, 4)) equals: 3
+
+  testNlrFromClassMethodDoBlockNoMatch =>
+    // No positive element — falls through do:, returns nil
+    self assert: (ClassMethodNlrEarly firstPositive: #(-1, -2, -3)) equals: nil
+
+  testNlrFromClassMethodWithClassVars =>
+    // ^ in a class method that also mutates class vars:
+    // the class var mutation should be preserved when ^ fires via NLR.
+    self assert: (ClassMethodNlrClassVars check: 5) equals: "positive"
+    self assert: ClassMethodNlrClassVars flagValue equals: true
+
+  testNlrFromClassMethodWithClassVarsFallthrough =>
+    // When ^ is not taken, normal return also works
+    self assert: (ClassMethodNlrClassVars check: -1) equals: "negative"
