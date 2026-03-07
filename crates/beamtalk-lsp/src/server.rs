@@ -1087,7 +1087,7 @@ fn stdlib_hover_policy_note(
     if class.is_abstract {
         lines.push("- Defines protocol to be implemented by concrete subclasses.".to_string());
     }
-    if class.is_sealed && hover_markdown.contains("Method: `") {
+    if class.is_sealed && hover_markdown.contains("Resolved on `") {
         lines.push("- Confidence: high (static, sealed stdlib dispatch).".to_string());
     }
 
@@ -1396,21 +1396,20 @@ mod tests {
 
     #[test]
     fn extract_hover_class_name_from_class_hover() {
-        let text = "Class: `Integer` (module `integer`)";
+        let text = "Class: `Integer`";
         assert_eq!(extract_hover_class_name(text), Some("Integer"));
     }
 
     #[test]
     fn extract_hover_class_name_from_resolved_method_hover() {
-        let text =
-            "Method: `+` (instance-side, arity: 1)\n\nResolved on `Integer` (defined in `Integer`)";
+        let text = "```beamtalk\n+\n```\n\nResolved on `Integer` (defined in `Integer`)\n\n_instance-side, sealed_";
         assert_eq!(extract_hover_class_name(text), Some("Integer"));
     }
 
     #[test]
     fn stdlib_policy_note_for_sealed_class() {
         let service = SimpleLanguageService::new();
-        let note = stdlib_hover_policy_note(&service, "Class: `Integer` (module `integer`)");
+        let note = stdlib_hover_policy_note(&service, "Class: `Integer`");
         assert!(note.is_some());
         let note = note.unwrap();
         assert!(note.contains("Stdlib Profile"));
@@ -1426,14 +1425,14 @@ mod tests {
             "Object subclass: Counter\n  increment => 1".to_string(),
         );
 
-        let note = stdlib_hover_policy_note(&service, "Class: `Counter` (module `counter`)");
+        let note = stdlib_hover_policy_note(&service, "Class: `Counter`");
         assert!(note.is_none());
     }
 
     #[test]
     fn stdlib_policy_note_for_abstract_class() {
         let service = SimpleLanguageService::new();
-        let note = stdlib_hover_policy_note(&service, "Class: `Boolean` (module `boolean`)");
+        let note = stdlib_hover_policy_note(&service, "Class: `Boolean`");
         assert!(note.is_some());
         let note = note.unwrap();
         assert!(note.contains("abstract"));
@@ -1442,8 +1441,7 @@ mod tests {
     #[test]
     fn stdlib_policy_note_marks_high_confidence_for_sealed_method_hover() {
         let service = SimpleLanguageService::new();
-        let hover =
-            "Method: `+` (instance-side, arity: 1)\n\nResolved on `Integer` (defined in `Integer`)";
+        let hover = "```beamtalk\n+\n```\n\nResolved on `Integer` (defined in `Integer`)\n\n_instance-side, sealed_";
         let note = stdlib_hover_policy_note(&service, hover);
         assert!(note.is_some());
         let note = note.unwrap();
@@ -1454,7 +1452,7 @@ mod tests {
     #[test]
     fn stdlib_policy_note_does_not_mark_high_confidence_for_class_hover() {
         let service = SimpleLanguageService::new();
-        let note = stdlib_hover_policy_note(&service, "Class: `Integer` (module `integer`)");
+        let note = stdlib_hover_policy_note(&service, "Class: `Integer`");
         assert!(note.is_some());
         assert!(!note.unwrap().contains("Confidence: high"));
     }
@@ -1462,8 +1460,9 @@ mod tests {
     #[test]
     fn policy_note_works_for_resolved_method_hover_markdown() {
         let service = SimpleLanguageService::new();
-        let hover = HoverInfo::new("Method: `+` (instance-side, arity: 1)", Span::new(0, 1))
-            .with_documentation("Resolved on `Integer` (defined in `Integer`)");
+        let hover = HoverInfo::new("```beamtalk\n+\n```", Span::new(0, 1)).with_documentation(
+            "Resolved on `Integer` (defined in `Integer`)\n\n_instance-side, sealed_",
+        );
         let markdown = format!(
             "{}\n\n{}",
             hover.contents,

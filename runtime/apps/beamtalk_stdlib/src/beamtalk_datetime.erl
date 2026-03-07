@@ -34,7 +34,10 @@
 -export(['addSeconds:'/2, 'addDays:'/2, 'diffSeconds:'/2]).
 -export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2]).
 
--export([has_method/1]).
+%% FFI shims for (Erlang beamtalk_datetime) dispatch
+-export([year/3, year/6, fromTimestamp/1, fromString/1]).
+-export([addSeconds/2, addDays/2, diffSeconds/2]).
+-export([lt/2, gt/2, lte/2, gte/2, eql/2, neq/2]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -242,29 +245,51 @@ second(#{second := V}) -> V.
     raise_type_error('/=', <<"Argument must be a DateTime">>).
 
 %%% ============================================================================
-%%% has_method/1
+%%% FFI Shims — (Erlang beamtalk_datetime) dispatch
 %%% ============================================================================
+%%
+%% selector_to_function/1 extracts the first keyword segment as the function name.
+%% These shims bridge camelCase/short FFI names to the existing colon-suffix
+%% and operator-named implementations.
 
--spec has_method(atom()) -> boolean().
-has_method('year') -> true;
-has_method('month') -> true;
-has_method('day') -> true;
-has_method('hour') -> true;
-has_method('minute') -> true;
-has_method('second') -> true;
-has_method('asTimestamp') -> true;
-has_method('asString') -> true;
-has_method('printString') -> true;
-has_method('addSeconds:') -> true;
-has_method('addDays:') -> true;
-has_method('diffSeconds:') -> true;
-has_method('<') -> true;
-has_method('>') -> true;
-has_method('=<') -> true;
-has_method('>=') -> true;
-has_method('=:=') -> true;
-has_method('/=') -> true;
-has_method(_) -> false.
+%% `year:month:day:` → strips to `year`, arity 3
+year(Y, Mo, D) -> 'year:month:day:'(Y, Mo, D).
+
+%% `year:month:day:hour:minute:second:` → strips to `year`, arity 6
+year(Y, Mo, D, H, Mi, S) -> 'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S).
+
+%% `fromTimestamp:` → strips to `fromTimestamp`, arity 1
+fromTimestamp(Ts) -> 'fromTimestamp:'(Ts).
+
+%% `fromString:` → strips to `fromString`, arity 1
+fromString(Str) -> 'fromString:'(Str).
+
+%% `addSeconds:secs:` → strips to `addSeconds`, arity 2
+addSeconds(Self, Secs) -> 'addSeconds:'(Self, Secs).
+
+%% `addDays:days:` → strips to `addDays`, arity 2
+addDays(Self, Days) -> 'addDays:'(Self, Days).
+
+%% `diffSeconds:with:` → strips to `diffSeconds`, arity 2
+diffSeconds(Self, Other) -> 'diffSeconds:'(Self, Other).
+
+%% `lt:with:` → strips to `lt`, arity 2
+lt(Self, Other) -> '<'(Self, Other).
+
+%% `gt:with:` → strips to `gt`, arity 2
+gt(Self, Other) -> '>'(Self, Other).
+
+%% `lte:with:` → strips to `lte`, arity 2
+lte(Self, Other) -> '=<'(Self, Other).
+
+%% `gte:with:` → strips to `gte`, arity 2
+gte(Self, Other) -> '>='(Self, Other).
+
+%% `eql:with:` → strips to `eql`, arity 2
+eql(Self, Other) -> '=:='(Self, Other).
+
+%% `neq:with:` → strips to `neq`, arity 2
+neq(Self, Other) -> '/='(Self, Other).
 
 %%% ============================================================================
 %%% Internal Functions
