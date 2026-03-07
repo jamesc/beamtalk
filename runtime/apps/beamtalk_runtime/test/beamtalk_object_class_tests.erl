@@ -109,7 +109,8 @@ teardown(_) ->
             beamtalk_class_StdlibShadowTest,
             beamtalk_class_MultiShadowInteger,
             beamtalk_class_MultiShadowHelper,
-            beamtalk_class_SelfCallTestClass
+            beamtalk_class_SelfCallTestClass,
+            beamtalk_class_BT1185StaleSuper
         ]
     ),
     %% Clean up ETS hierarchy table entries
@@ -1378,3 +1379,87 @@ class_method_self_call_class_name_in_error_test() ->
     after 2000 ->
         ?assert(false)
     end.
+
+%%====================================================================
+%% ADR 0057: apply_class_info/2 superclass correction tests
+%%====================================================================
+
+%% Regression test: apply_class_info/2 must update the gen_server superclass
+%% field and the ETS hierarchy table when Meta contains a corrected superclass.
+%% This simulates the bootstrap stub → compiled stdlib module transition:
+%% the stub registers 'BT1185StaleSuper' with placeholder superclass 'Object',
+%% then update_class is called carrying meta => #{superclass => 'Behaviour'}
+%% (as the compiled module's on-load hook would do).
+apply_class_info_corrects_stale_superclass_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Register with placeholder superclass (simulates bootstrap stub)
+                BootstrapInfo = #{
+                    name => 'BT1185StaleSuper',
+                    module => test_module_v1,
+                    superclass => 'Object',
+                    instance_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('BT1185StaleSuper', BootstrapInfo),
+
+                %% Sanity: placeholder is in effect before update
+                ?assertEqual('Object', gen_server:call(Pid, superclass)),
+                ?assertEqual(
+                    {ok, 'Object'},
+                    beamtalk_class_hierarchy_table:lookup('BT1185StaleSuper')
+                ),
+
+                %% Simulate compiled stdlib module on-load: update_class with
+                %% corrected superclass in meta (as __beamtalk_meta/0 provides)
+                UpdateInfo = #{
+                    name => 'BT1185StaleSuper',
+                    module => test_module_v1,
+                    meta => #{superclass => 'Behaviour'}
+                },
+                {ok, _} = beamtalk_object_class:update_class('BT1185StaleSuper', UpdateInfo),
+
+                %% gen_server state must now hold the corrected superclass
+                ?assertEqual('Behaviour', gen_server:call(Pid, superclass)),
+
+                %% ETS hierarchy table must also be updated
+                ?assertEqual(
+                    {ok, 'Behaviour'},
+                    beamtalk_class_hierarchy_table:lookup('BT1185StaleSuper')
+                )
+            end)
+        ]
+    end}.
+
+%% Dynamic classes (no compiled module, Meta = #{}) must be unaffected:
+%% apply_class_info must preserve their existing superclass unchanged.
+apply_class_info_preserves_dynamic_class_superclass_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Register dynamic class (no meta)
+                DynInfo = #{
+                    name => 'BT1185StaleSuper',
+                    module => test_module_dyn,
+                    superclass => 'Actor',
+                    instance_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('BT1185StaleSuper', DynInfo),
+
+                %% Update without meta key — simulates dynamic class reload
+                UpdateInfo = #{
+                    name => 'BT1185StaleSuper',
+                    module => test_module_dyn,
+                    instance_methods => #{greet => #{arity => 0}}
+                },
+                {ok, _} = beamtalk_object_class:update_class('BT1185StaleSuper', UpdateInfo),
+
+                %% Superclass must be unchanged
+                ?assertEqual('Actor', gen_server:call(Pid, superclass)),
+                ?assertEqual(
+                    {ok, 'Actor'},
+                    beamtalk_class_hierarchy_table:lookup('BT1185StaleSuper')
+                )
+            end)
+        ]
+    end}.
