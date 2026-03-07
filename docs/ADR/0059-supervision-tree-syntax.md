@@ -89,7 +89,16 @@ Class-level declarations in the supervisor body:
 | `childClass: ClassName` | dynamic child spec template (used when `strategy: #dynamic`) | — |
 | `childRestart: Symbol` | `restart` in dynamic child spec (used when `strategy: #dynamic`) | `#temporary` |
 
-Children are Actor class references. Each entry is either a bare class name (uses `supervisionPolicy:` default from that class) or a class name with a `restart:` override:
+Children are Actor class references. Each entry supports three forms:
+
+| Form | OTP mapping |
+|---|---|
+| `ClassName` | `id = ClassName`, args = `[]`, restart from `supervisionPolicy:` |
+| `ClassName restart: Symbol` | `id = ClassName`, args = `[]`, restart overridden |
+| `#id -> ClassName startArgs: Dict` | `id = id`, args = `[Dict]`, restart from `supervisionPolicy:` |
+| `#id -> ClassName startArgs: Dict restart: Symbol` | `id = id`, args = `[Dict]`, restart overridden |
+
+The `#id ->` prefix sets the OTP child spec `id` atom and is required when the same class appears more than once (e.g., two database pools):
 
 ```beamtalk
 Supervisor subclass: WebApp
@@ -102,6 +111,19 @@ Supervisor subclass: WebApp
     MetricsCollector restart: #temporary   // override for this supervisor
   )
 ```
+
+When two children are the same class, use named entries with `startArgs:`:
+
+```beamtalk
+Supervisor subclass: DBSup
+  strategy: #oneForOne
+  children: #(
+    #primary -> DatabasePool startArgs: #{#dsn => "postgres://primary/app"},
+    #replica -> DatabasePool startArgs: #{#dsn => "postgres://replica/app"} restart: #transient
+  )
+```
+
+`startArgs:` maps to the args list in the OTP child spec `start` MFA: `{bt@databasepool, spawn, [#{dsn => <<"postgres://primary/app">>}]}`. The actor receives the dict via `spawnWith:` on first start and each restart.
 
 Supervisor classes support class-side methods in the body like any other class:
 
@@ -639,7 +661,7 @@ No new syntax. Users invoke Erlang supervision APIs via BEAM interop:
 ### Negative
 
 - `Supervisor` joins the bootstrap class hierarchy: `ProtoObject → Object → Actor → [user actors]` and `ProtoObject → Object → Supervisor → [user supervisors]`. One more class to bootstrap before user modules load.
-- New class-level declaration keywords: `strategy:`, `maxRestarts:`, `restartWindow:`, `children:`, `childClass:`, `childRestart:`, `supervisionPolicy:` must be added to the parser's class body grammar and to ClassBuilder.
+- New class-level declaration keywords: `strategy:`, `maxRestarts:`, `restartWindow:`, `children:`, `childClass:`, `childRestart:`, `supervisionPolicy:` must be added to the parser's class body grammar and to ClassBuilder. Child entry modifiers `restart:` and `startArgs:` are parsed as part of the `children:` list grammar, not class-body declarations.
 - Cross-file compile dependency: to compile `WebApp.bt`, the compiler must know the `supervisionPolicy:` of each listed child class (to fill in restart defaults). This is a new dependency in the compilation graph. If the child class hasn't been compiled yet, the compiler uses `#temporary` and emits a warning.
 - `shutdown:` per-child configuration is not in scope for this ADR. The default of `5000ms` is used for all children. Production systems needing custom shutdown timeouts must use BEAM interop.
 - `strategy: #dynamic` supervisors use OTP's `simple_one_for_one` — all dynamic children are the same class. Mixed-class dynamic supervisors require Erlang FFI.
@@ -668,13 +690,13 @@ Add `Supervisor` as a new base class in the bootstrap sequence:
 **Parser (`crates/beamtalk-core/src/source_analysis/parser/`):**
 - Add `strategy:`, `maxRestarts:`, `restartWindow:`, `children:` as new class-level declaration forms in the grammar (alongside `state:`)
 - Add `supervisionPolicy:` as a new class-level declaration form for `Actor subclass:` bodies
-- Parse the `children:` array — each element is either a bare class name or a `ClassName restart: Symbol` keyword message
+- Parse the `children:` list — four element forms: bare `ClassName`; `ClassName restart: Symbol`; `#id -> ClassName startArgs: Dict`; `#id -> ClassName startArgs: Dict restart: Symbol`. The `#id ->` prefix is required when the same class appears more than once.
 
 **AST (`crates/beamtalk-core/src/ast.rs`):**
 - `ClassDefinition` gains `supervision_spec: Option<SupervisionSpec>` field
 - `SupervisionSpec { strategy, max_restarts, restart_window, children: Vec<ChildEntry> }` (static)
 - `DynamicSupervisionSpec { child_class, child_restart }` (dynamic, `strategy: #dynamic`)
-- `ChildEntry { class_name, restart_override: Option<Symbol> }`
+- `ChildEntry { id: Option<Symbol>, class_name, restart_override: Option<Symbol>, start_args: Option<DictLiteral> }` — `id` defaults to `class_name` when absent; `start_args` maps to OTP child spec MFA args list
 - `ActorClass` gains `supervision_policy: Option<Symbol>` field
 
 **ClassBuilder (`stdlib/src/ClassBuilder.bt`, `beamtalk_class_builder.erl`):**
@@ -687,6 +709,8 @@ Add `Supervisor` as a new base class in the bootstrap sequence:
 - Validate each child class exists in the class hierarchy and is an `Actor subclass:` or `Supervisor subclass:`
 - For `strategy: #dynamic`: validate `childClass:` is present, `children:` is absent; validate `childClass` is an `Actor subclass:`
 - Error if both `children:` and `childClass:` are declared on the same class
+- Error if the same child id appears more than once (duplicate ids in the children list)
+- Error if the same class name appears more than once without explicit `#id ->` prefixes
 - Validate `supervisionPolicy:` is one of `#permanent`, `#transient`, `#temporary`
 - Warn if a child Actor has no `supervisionPolicy:` and no override in the children list (default `#temporary`)
 
