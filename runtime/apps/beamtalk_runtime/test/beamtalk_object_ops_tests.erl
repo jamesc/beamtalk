@@ -115,8 +115,8 @@ test_print_string() ->
 test_inspect() ->
     State = counter_state(),
     {reply, Str, _} = beamtalk_object_ops:dispatch(inspect, [], self_ref(), State),
-    %% Should start with "a Counter" and include the value field
-    ?assert(binary:match(Str, <<"a Counter">>) =/= nomatch),
+    %% BT-1167: New format is "Counter(value: 0)" instead of "a Counter (value: 0)"
+    ?assert(binary:match(Str, <<"Counter(">>) =/= nomatch),
     ?assert(binary:match(Str, <<"value">>) =/= nomatch).
 
 %%% ============================================================================

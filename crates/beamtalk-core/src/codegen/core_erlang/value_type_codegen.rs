@@ -1696,9 +1696,6 @@ impl CoreErlangGenerator {
                 "            let <PsStr4> = call 'erlang':'iolist_to_binary'([{a_space_binary}|[call 'erlang':'atom_to_binary'(PsClass4, 'utf8')]]) in\n"
             ),
             "            {'reply', PsStr4, State}\n",
-            // --- inspect ---
-            "        <'inspect'> when 'true' ->\n",
-            "            {'reply', call 'beamtalk_reflection':'inspect_string'(State), State}\n",
             // --- perform: ---
             "        <'perform:'> when 'true' ->\n",
             "            case Args of\n",

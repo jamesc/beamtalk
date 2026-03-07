@@ -100,14 +100,25 @@ dispatch('displayString', [], Self, State) ->
     {reply, Str, State};
 dispatch(inspect, [], Self, State) ->
     %% BT-753: For class objects (State is #{}), use Self for identity.
-    %% For actors with state, use detailed inspect_string showing fields.
+    %% BT-1167: For actor instances, produce ClassName(field: inspect(value), ...) format.
     case map_size(State) =:= 0 of
         true ->
+            %% Class objects — keep legacy "a ClassName" format.
             DisplayName = class_display_name(Self, State),
             Str = iolist_to_binary([<<"a ">>, DisplayName]),
             {reply, Str, State};
         false ->
-            Str = beamtalk_reflection:inspect_string(State),
+            ClassName = class_display_name(Self, State),
+            UserFields = beamtalk_reflection:field_names(State),
+            FieldStrs = [
+                iolist_to_binary([
+                    atom_to_binary(K, utf8),
+                    <<": ">>,
+                    beamtalk_primitive:send(maps:get(K, State), inspect, [])
+                ])
+             || K <- UserFields
+            ],
+            Str = iolist_to_binary([ClassName, <<"(">>, lists:join(<<", ">>, FieldStrs), <<")">>]),
             {reply, Str, State}
     end;
 %% --- Utility methods ---
