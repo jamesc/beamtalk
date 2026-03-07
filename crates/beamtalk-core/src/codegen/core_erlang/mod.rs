@@ -1405,28 +1405,30 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates the `dispatch/3` function that delegates to the primitives module.
+    /// Generates the `dispatch/3` function that delegates to the actor's own Erlang module.
     ///
     /// For actor classes with `@primitive` methods, the compiled dispatch/4 calls
     /// `Module:dispatch(Selector, Args, Self)` (3-arity) for primitive method bodies.
-    /// This function provides that 3-arity entry point, delegating to the corresponding
-    /// `beamtalk_{snake_case}_primitives` module which implements the actual Erlang logic.
+    /// This function provides that 3-arity entry point, delegating to the actor's
+    /// main Erlang module (e.g. `beamtalk_subprocess`) which exports `dispatch/3`.
     ///
     /// # Generated Code
     ///
     /// ```erlang
     /// 'dispatch'/3 = fun (Selector, Args, Self) ->
-    ///     call 'beamtalk_my_class_primitives':'dispatch'(Selector, Args, Self)
+    ///     call 'beamtalk_subprocess':'dispatch'(Selector, Args, Self)
     /// ```
     fn generate_primitive_dispatch_3_doc(&self) -> Document<'static> {
-        // Build primitives module name: `beamtalk_{snake}_primitives`.
+        // Call dispatch/3 on the actor's own Erlang module (same name as the backing
+        // gen_server, e.g. `beamtalk_subprocess`). The actor module is responsible
+        // for exporting `dispatch/3` to handle class-side @primitive methods.
         // If `to_module_name` already emits a `beamtalk_` prefix (e.g.
-        // `BeamtalkInterface` → `beamtalk_interface`), avoid doubling it.
+        // `BeamtalkInterface` → `beamtalk_interface`), use it as-is.
         let snake_name = to_module_name(&self.class_name());
-        let primitives_module = if snake_name.starts_with("beamtalk_") {
-            format!("{snake_name}_primitives")
+        let actor_module: Document<'static> = if snake_name.starts_with("beamtalk_") {
+            Document::String(snake_name)
         } else {
-            format!("beamtalk_{snake_name}_primitives")
+            docvec!["beamtalk_", Document::String(snake_name)]
         };
         docvec![
             "'dispatch'/3 = fun (Selector, Args, Self) ->",
@@ -1434,11 +1436,7 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    docvec![
-                        "call '",
-                        Document::String(primitives_module),
-                        "':'dispatch'(Selector, Args, Self)",
-                    ],
+                    docvec!["call '", actor_module, "':'dispatch'(Selector, Args, Self)",],
                 ]
             ),
             "\n\n",

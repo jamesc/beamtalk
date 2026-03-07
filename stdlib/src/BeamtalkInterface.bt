@@ -30,7 +30,7 @@ sealed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk allClasses
   /// ```
-  allClasses -> List => (Erlang beamtalk_interface_primitives) allClasses
+  allClasses -> List => (Erlang beamtalk_interface) allClasses
 
   /// Look up a class by name (symbol).
   ///
@@ -39,7 +39,7 @@ sealed Object subclass: BeamtalkInterface
   /// Beamtalk classNamed: #Integer
   /// ```
   classNamed: className :: Symbol -> Object =>
-    (Erlang beamtalk_interface_primitives) findClass: className
+    (Erlang beamtalk_interface) findClass: className
 
   /// Return the global namespace as a Dictionary populated from the class registry.
   ///
@@ -47,7 +47,7 @@ sealed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk globals
   /// ```
-  globals -> Dictionary => (Erlang beamtalk_interface_primitives) globals
+  globals -> Dictionary => (Erlang beamtalk_interface) globals
 
   /// Show class documentation: name, superclass, and method signatures.
   ///
@@ -56,7 +56,7 @@ sealed Object subclass: BeamtalkInterface
   /// Beamtalk help: Counter
   /// ```
   sealed help: aClass :: Object -> String =>
-    (Erlang beamtalk_interface_primitives) help: aClass
+    (Erlang beamtalk_interface) help: aClass
 
   /// Show detailed documentation for a specific method on a class.
   ///
@@ -65,7 +65,7 @@ sealed Object subclass: BeamtalkInterface
   /// Beamtalk help: Counter selector: #increment
   /// ```
   sealed help: aClass :: Object selector: aSelector :: Symbol -> String =>
-    (Erlang beamtalk_interface_primitives) help: aClass selector: aSelector
+    (Erlang beamtalk_interface) help: aClass selector: aSelector
 
   /// Return the Beamtalk version string.
   ///
@@ -73,4 +73,4 @@ sealed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk version
   /// ```
-  version -> String => (Erlang beamtalk_interface_primitives) version
+  version -> String => (Erlang beamtalk_interface) version

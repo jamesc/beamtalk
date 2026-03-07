@@ -58,12 +58,12 @@ init([ProjectPath]) ->
     %% would be deleted when that worker exits (ETS tables are deleted on owner
     %% process exit unless an heir is specified).
     beamtalk_workspace_interface_primitives:create_bindings_table(),
-    %% Ensure beamtalk_interface_primitives is loaded so that all its exported
+    %% Ensure beamtalk_interface is loaded so that all its exported
     %% function names (e.g. findClass, allClasses) are in the atom table.
     %% The sealed-Object BeamtalkInterface dispatches via beamtalk_message_dispatch
     %% which uses list_to_existing_atom to resolve selector→function name; if
     %% the module is not yet loaded, the atom won't exist and dispatch fails.
-    _ = code:ensure_loaded(beamtalk_interface_primitives),
+    _ = code:ensure_loaded(beamtalk_interface),
     State = bootstrap_all(#state{}),
     %% Activate project modules synchronously before returning so that
     %% beamtalk_repl_server (the next child) does not write the port file

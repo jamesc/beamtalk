@@ -87,14 +87,14 @@ system_dictionary_loaded_after_start_test() ->
     Result = start_runtime(),
 
     %% The BeamtalkInterface class provides system reflection (allClasses, classNamed:, etc.).
-    %% The primitives are dispatched via beamtalk_interface_primitives (Phase 2).
+    %% The primitives are dispatched via beamtalk_interface (Phase 2).
     %% Verify the dispatch module is available and can handle allClasses (selector with no args).
     ?assertEqual(
-        {module, beamtalk_interface_primitives},
-        code:ensure_loaded(beamtalk_interface_primitives)
+        {module, beamtalk_interface},
+        code:ensure_loaded(beamtalk_interface)
     ),
     %% Verify that allClasses is a valid selector (dispatch doesn't raise)
-    ClassList = beamtalk_interface_primitives:dispatch(allClasses, [], undefined),
+    ClassList = beamtalk_interface:dispatch(allClasses, [], undefined),
     ?assert(is_list(ClassList)),
 
     %% Clean up only if we started it

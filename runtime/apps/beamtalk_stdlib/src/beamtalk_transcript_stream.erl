@@ -38,7 +38,7 @@
 -export([has_method/1, class_info/0]).
 -export([ensure_utf8/1]).
 -export([subscribe/1, unsubscribe/1]).
-%% Primitive dispatch — called by bt@stdlib@transcript_stream via the primitives shim.
+%% Primitive dispatch — called directly by bt@stdlib@transcript_stream.
 %% Runs inside the compiled actor's gen_server process; state is in the process dictionary.
 -export([dispatch/3]).
 
