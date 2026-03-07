@@ -458,6 +458,7 @@ fuzz DURATION="60":
 # Regenerate cover_excl_mods and dialyzer exclude_mods in runtime/rebar.config
 # from the actual bt@stdlib@*.beam files produced by build-stdlib.
 # Run this after adding or removing Beamtalk stdlib classes.
+[unix]
 update-stdlib-excludes: build-stdlib
     python3 scripts/gen-stdlib-excludes.py
 

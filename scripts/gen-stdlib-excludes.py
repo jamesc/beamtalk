@@ -71,7 +71,7 @@ def update_section(content, section_name, new_lines, close_indent=""):
     replacement = r"\g<1>\n" + ",\n".join(new_lines) + r"\n" + close_indent + r"\g<2>"
     new_content, count = pattern.subn(replacement, content)
     if count == 0:
-        print(f"warning: section '{section_name}' not found in rebar.config", file=sys.stderr)
+        raise ValueError(f"section '{section_name}' not found in rebar.config")
     return new_content
 
 
