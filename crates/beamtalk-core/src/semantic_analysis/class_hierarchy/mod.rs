@@ -1157,8 +1157,16 @@ fn format_default_value(expr: &Expression) -> String {
     match expr {
         Expression::Literal(lit, _) => match lit {
             Literal::Integer(n) => n.to_string(),
-            Literal::Float(f) => f.to_string(),
-            Literal::String(s) => format!("\"{s}\""),
+            Literal::Float(f) => {
+                let rendered = f.to_string();
+                // Preserve decimal point so 1.0 stays as "1.0" not "1"
+                if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
+                    rendered
+                } else {
+                    format!("{rendered}.0")
+                }
+            }
+            Literal::String(s) => format!("{s:?}"),
             Literal::Symbol(s) => format!("#{s}"),
             Literal::Character(c) => format!("${c}"),
             Literal::List(_) => "...".to_string(),
