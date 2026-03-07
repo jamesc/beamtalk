@@ -155,7 +155,7 @@ find_exec_binary_dev() ->
         {ok, Path} ->
             Path;
         error ->
-            %% Use ExeName so Windows finds "beamtalk-exec.exe" via PATHEXT.
+            %% Use ExeName (includes ".exe" on Windows) when searching PATH.
             case os:find_executable(ExeName) of
                 false ->
                     error({exec_not_found, "beamtalk-exec binary not found"});
