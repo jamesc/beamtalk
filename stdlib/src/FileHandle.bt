@@ -30,7 +30,7 @@ sealed Object subclass: FileHandle
   ///   handle lines do: [:line | Transcript show: line].
   /// ].
   /// ```
-  lines -> Stream => @primitive "lines"
+  lines -> Stream => (Erlang beamtalk_file) handleLines: self
 
   /// Return a developer-readable string representation.
   ///
@@ -40,4 +40,4 @@ sealed Object subclass: FileHandle
   /// handle printString.
   /// // => "a FileHandle"
   /// ```
-  printString -> String => @primitive "printString"
+  printString -> String => "a FileHandle"

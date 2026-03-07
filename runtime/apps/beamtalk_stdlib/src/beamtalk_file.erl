@@ -71,7 +71,8 @@
     delete/1,
     deleteAll/1,
     rename/2,
-    absolutePath/1
+    absolutePath/1,
+    handleLines/1
 ]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -725,7 +726,8 @@ handle_has_method(_) -> false.
 %%%   (Erlang beamtalk_file) delete: path          → delete/1
 %%%   (Erlang beamtalk_file) deleteAll: path       → deleteAll/1
 %%%   (Erlang beamtalk_file) rename: from to: to   → rename/2
-%%%   (Erlang beamtalk_file) absolutePath: path    → absolutePath/1
+%%%   (Erlang beamtalk_file) absolutePath: path     → absolutePath/1
+%%%   (Erlang beamtalk_file) handleLines: handle   → handleLines/1
 %%%   (Erlang beamtalk_file) tempDirectory         → 'tempDirectory'/0 (direct)
 %%% ============================================================================
 
@@ -743,6 +745,7 @@ delete(Path) -> 'delete:'(Path).
 deleteAll(Path) -> 'deleteAll:'(Path).
 rename(From, To) -> 'rename:to:'(From, To).
 absolutePath(Path) -> 'absolutePath:'(Path).
+handleLines(Handle) -> handle_lines(Handle).
 
 %%% ============================================================================
 %%% Internal Helpers
