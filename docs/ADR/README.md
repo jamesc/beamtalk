@@ -85,6 +85,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Proposed | 2026-03-06 |
 | [0057](0057-authoritative-superclass-source.md) | Authoritative Superclass Source for Abstract Stdlib Classes | Accepted | 2026-03-07 |
 | [0058](0058-platform-security-model.md) | Platform Security Model | Accepted | 2026-03-07 |
+| [0059](0059-supervision-tree-syntax.md) | Supervision Tree Syntax | Accepted | 2026-03-07 |
 
 ## Creating New ADRs
 
