@@ -1,13 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_timer module (BT-1121).
+%%% @doc EUnit tests for beamtalk_timer module (BT-1121, BT-1165).
 %%%
 %%% **DDD Context:** Object System Context
 %%%
 %%% Tests class methods (after:do:, every:do:, sleep:), instance methods
 %%% (cancel, isActive, printString), the ack-based cancel protocol,
-%%% has_method/1, and error paths.
+%%% FFI shims (after/2, every/2, sleep/1), and error paths.
 
 -module(beamtalk_timer_tests).
 
@@ -190,14 +190,36 @@ print_string_inactive_test() ->
     ?assertEqual(<<"a Timer(inactive)">>, beamtalk_timer:'printString'(T)).
 
 %%% ============================================================================
-%%% has_method/1
+%%% FFI shims (BT-1165)
 %%% ============================================================================
 
-has_method_known_test() ->
-    ?assert(beamtalk_timer:has_method(cancel)),
-    ?assert(beamtalk_timer:has_method('isActive')),
-    ?assert(beamtalk_timer:has_method('printString')).
+ffi_shim_after_returns_timer_test() ->
+    T = beamtalk_timer:'after'(10000, fun() -> ok end),
+    ?assertEqual('Timer', maps:get('$beamtalk_class', T)),
+    beamtalk_timer:cancel(T).
 
-has_method_unknown_test() ->
-    ?assertNot(beamtalk_timer:has_method('after:do:')),
-    ?assertNot(beamtalk_timer:has_method(frobnicateWidget)).
+ffi_shim_every_returns_timer_test() ->
+    T = beamtalk_timer:every(10000, fun() -> ok end),
+    ?assertEqual('Timer', maps:get('$beamtalk_class', T)),
+    beamtalk_timer:cancel(T).
+
+ffi_shim_sleep_returns_nil_test() ->
+    ?assertEqual(nil, beamtalk_timer:sleep(1)).
+
+ffi_shim_after_error_propagates_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_timer:'after'(-1, fun() -> ok end)
+    ).
+
+ffi_shim_every_error_propagates_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_timer:every(0, fun() -> ok end)
+    ).
+
+ffi_shim_sleep_error_propagates_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_timer:sleep(-1)
+    ).
