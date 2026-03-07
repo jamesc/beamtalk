@@ -58,7 +58,7 @@
 
 %% Public API
 -export([start_link/1, start/1]).
-%% Class-side @primitive dispatch (called from compiled bt@stdlib@reactivesubprocess)
+%% Class-side @primitive dispatch (called from compiled bt@stdlib@reactive_subprocess)
 -export([dispatch/3]).
 
 %% gen_server callbacks
@@ -89,7 +89,7 @@
 
 %% @doc Dispatch a class-side @primitive method call for ReactiveSubprocess.
 %%
-%% Called by the compiled `bt@stdlib@reactivesubprocess:dispatch/3` for
+%% Called by the compiled `bt@stdlib@reactive_subprocess:dispatch/3` for
 %% class-side `@primitive` annotations: `open:args:notify:` and
 %% `open:args:env:dir:notify:`.
 -spec dispatch(atom(), list(), term()) -> term().
@@ -188,7 +188,7 @@ init(Config) ->
     ?LOG_INFO("ReactiveSubprocess spawned", #{executable => Executable, child_id => ChildId}),
     SelfRef = #beamtalk_object{
         class = 'ReactiveSubprocess',
-        class_mod = 'bt@stdlib@reactivesubprocess',
+        class_mod = 'bt@stdlib@reactive_subprocess',
         pid = self()
     },
     State = #{
@@ -213,7 +213,15 @@ handle_call({close, []}, _From, State) ->
     handle_close(State);
 handle_call(Msg, _From, State) ->
     ?LOG_WARNING("Unknown call", #{message => Msg}),
-    {reply, {error, unknown_call}, State}.
+    Err0 = beamtalk_error:new(does_not_understand, 'ReactiveSubprocess'),
+    Err1 =
+        case Msg of
+            {Selector, _Args} when is_atom(Selector) ->
+                beamtalk_error:with_selector(Err0, Selector);
+            _ ->
+                Err0
+        end,
+    {reply, {error, Err1}, State}.
 
 %% @doc Ignore casts.
 -spec handle_cast(term(), map()) -> {noreply, map()}.
@@ -286,10 +294,24 @@ handle_writeLine(Data, State) ->
             Err = beamtalk_error:new(port_closed, 'ReactiveSubprocess', 'writeLine:'),
             {reply, {error, Err}, State};
         false ->
-            Bin = iolist_to_binary(Data),
-            Line = <<Bin/binary, $\n>>,
-            beamtalk_subprocess_port:write_stdin(Port, ChildId, Line),
-            {reply, nil, State}
+            try iolist_to_binary(Data) of
+                Bin ->
+                    Line = <<Bin/binary, $\n>>,
+                    try
+                        beamtalk_subprocess_port:write_stdin(Port, ChildId, Line),
+                        {reply, nil, State}
+                    catch
+                        _:_ ->
+                            Err = beamtalk_error:new(
+                                port_closed, 'ReactiveSubprocess', 'writeLine:'
+                            ),
+                            {reply, {error, Err}, State#{port_closed => true}}
+                    end
+            catch
+                error:badarg ->
+                    Err = beamtalk_error:new(type_error, 'ReactiveSubprocess', 'writeLine:'),
+                    {reply, {error, Err}, State}
+            end
     end.
 
 %% @private Kill subprocess and close the exec port.

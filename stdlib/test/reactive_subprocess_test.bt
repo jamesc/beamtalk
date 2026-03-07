@@ -114,9 +114,13 @@ TestCase subclass: ReactiveSubprocessTest
     self.isUnix
       ifTrue: [
         delegate := StubDelegate spawn
-        proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "printf 'done'") env: #{} dir: "/tmp" notify: delegate
+        // Print the env var and the working directory to verify both are passed through
+        proc := ReactiveSubprocess open: "/bin/sh" args: #("-c", "echo $BT_TEST_SEED; pwd") env: #{
+          "BT_TEST_SEED" => "hello1187"
+        } dir: "/tmp" notify: delegate
         self waitForExit: delegate from: proc
-        self assert: delegate stdoutLines equals: #("done")
+        self assert: (delegate stdoutLines includes: "hello1187")
+        self assert: (delegate stdoutLines includes: "/tmp")
         self assert: delegate stop equals: #ok
         self assert: proc stop equals: #ok
       ]
