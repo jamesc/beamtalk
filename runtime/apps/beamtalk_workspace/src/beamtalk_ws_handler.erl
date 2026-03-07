@@ -202,7 +202,7 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
         peer => Peer
     }),
     %% Unsubscribe from Transcript push messages (ADR 0017)
-    beamtalk_transcript_stream_primitives:unsubscribe('Transcript'),
+    beamtalk_transcript_stream:unsubscribe('Transcript'),
     %% Unsubscribe from actor lifecycle push messages (BT-690)
     beamtalk_repl_actors:unsubscribe(),
     %% Unsubscribe from class-loaded push messages (BT-1020)
@@ -309,7 +309,7 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                         peer => State#ws_state.peer
                     }),
                     beamtalk_workspace_meta:update_activity(),
-                    beamtalk_transcript_stream_primitives:subscribe('Transcript'),
+                    beamtalk_transcript_stream:subscribe('Transcript'),
                     beamtalk_repl_actors:subscribe(),
                     beamtalk_class_events:subscribe(),
                     beamtalk_bindings_events:subscribe(),
@@ -360,7 +360,7 @@ create_session(SessionId, State) ->
                 peer => State#ws_state.peer
             }),
             beamtalk_workspace_meta:update_activity(),
-            beamtalk_transcript_stream_primitives:subscribe('Transcript'),
+            beamtalk_transcript_stream:subscribe('Transcript'),
             beamtalk_repl_actors:subscribe(),
             beamtalk_class_events:subscribe(),
             beamtalk_bindings_events:subscribe(),

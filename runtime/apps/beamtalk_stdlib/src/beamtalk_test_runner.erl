@@ -17,7 +17,7 @@
 %%% ```
 
 -module(beamtalk_test_runner).
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([
     %% TestRunner class-side primitives

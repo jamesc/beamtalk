@@ -12,7 +12,7 @@
 %%% Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
 
 -module(beamtalk_test_case).
--include("beamtalk.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -export([

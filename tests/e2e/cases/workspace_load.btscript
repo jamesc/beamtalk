@@ -62,7 +62,7 @@ initialClasses := Workspace classes
 
 // Load counter fixture
 Workspace load: "tests/e2e/fixtures/counter.bt"
-// => nil
+// => ["Counter"]
 
 // After loading, Workspace classes includes Counter
 afterLoadClasses := Workspace classes
@@ -73,7 +73,7 @@ afterLoadClasses includes: Counter
 
 // Load the CounterTest fixture
 Workspace load: "tests/e2e/fixtures/counter_test.bt"
-// => nil
+// => ["CounterTest"]
 
 // ===========================================================================
 // WORKSPACE TEST CLASSES

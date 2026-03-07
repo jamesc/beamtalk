@@ -1,16 +1,16 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Primitive implementations for the BeamtalkInterface sealed Object.
+%%% @doc Method implementations for the BeamtalkInterface sealed Object.
 %%%
 %%% **DDD Context:** Object System Context
 %%%
 %%% Implements methods for the BeamtalkInterface class. BeamtalkInterface is
 %%% a `sealed Object subclass:` (value type, no gen_server process). Methods
 %%% are called via Erlang FFI from the compiled Beamtalk module using the
-%%% ErlangModule proxy pattern: `(Erlang beamtalk_interface_primitives) fn: arg`.
+%%% ErlangModule proxy pattern: `(Erlang beamtalk_interface) fn: arg`.
 %%%
-%%% The legacy `dispatch/3` is retained for backward compatibility.
+%%% The `dispatch/3` function is used by EUnit tests and runtime bootstrap.
 %%%
 %%% All methods are stateless reads from the class registry; no process
 %%% dictionary or ETS state is required.
@@ -26,7 +26,7 @@
 %%% | `help:selector:'  | Formatted method documentation                    |
 %%% | `version'         | Beamtalk runtime version string                   |
 
--module(beamtalk_interface_primitives).
+-module(beamtalk_interface).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -74,13 +74,13 @@ dispatch(Selector, _Args, _Self) ->
 %%% ============================================================================
 
 %% @doc Return list of all registered class names.
-%% Called via `(Erlang beamtalk_interface_primitives) allClasses`.
+%% Called via `(Erlang beamtalk_interface) allClasses`.
 -spec allClasses() -> [atom()].
 allClasses() ->
     [Name || {Name, _Mod, _Pid} <- beamtalk_class_registry:live_class_entries()].
 
 %% @doc Look up a class by name (atom or binary).
-%% Called via `(Erlang beamtalk_interface_primitives) classNamed: className`.
+%% Called via `(Erlang beamtalk_interface) classNamed: className`.
 -spec classNamed(binary() | atom() | term()) -> tuple() | 'nil'.
 classNamed(ClassName) ->
     case handle_class_named(ClassName) of
@@ -98,13 +98,13 @@ findClass(ClassName) ->
     end.
 
 %% @doc Return class registry snapshot as a map from class name to class object.
-%% Called via `(Erlang beamtalk_interface_primitives) globals`.
+%% Called via `(Erlang beamtalk_interface) globals`.
 -spec globals() -> map().
 globals() ->
     handle_globals().
 
 %% @doc Format class documentation (help: aClass).
-%% Called via `(Erlang beamtalk_interface_primitives) help: aClass`.
+%% Called via `(Erlang beamtalk_interface) help: aClass`.
 -spec help(term()) -> binary().
 help(ClassArg) ->
     case handle_help(ClassArg) of
@@ -113,7 +113,7 @@ help(ClassArg) ->
     end.
 
 %% @doc Format method documentation (help: aClass selector: aSelector).
-%% Called via `(Erlang beamtalk_interface_primitives) help: aClass selector: aSelector`.
+%% Called via `(Erlang beamtalk_interface) help: aClass selector: aSelector`.
 -spec help(term(), atom()) -> binary().
 help(ClassArg, SelectorArg) ->
     case handle_help_selector(ClassArg, SelectorArg) of
@@ -122,7 +122,7 @@ help(ClassArg, SelectorArg) ->
     end.
 
 %% @doc Return the Beamtalk runtime version string.
-%% Called via `(Erlang beamtalk_interface_primitives) version`.
+%% Called via `(Erlang beamtalk_interface) version`.
 -spec version() -> binary().
 version() ->
     case application:get_key(beamtalk_runtime, vsn) of
