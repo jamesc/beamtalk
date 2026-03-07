@@ -32,7 +32,8 @@ sealed Object subclass: System
   /// System getEnv: "NONEXISTENT_VAR_12345"
   /// // => nil
   /// ```
-  class sealed getEnv: name :: String -> String | Nil => @primitive "getEnv:"
+  class sealed getEnv: name :: String -> String | Nil =>
+    (Erlang beamtalk_system) getEnv: name
 
   /// Read an environment variable with a default fallback.
   ///
@@ -44,7 +45,7 @@ sealed Object subclass: System
   /// // => "8080"
   /// ```
   class sealed getEnv: name :: String default: fallback :: String -> String =>
-    @primitive "getEnv:default:"
+    (Erlang beamtalk_system) getEnv: name default: fallback
 
   /// Return the OS platform name: "linux", "darwin", or "win32".
   ///
@@ -53,7 +54,7 @@ sealed Object subclass: System
   /// System osPlatform
   /// // => _
   /// ```
-  class sealed osPlatform -> String => @primitive "osPlatform"
+  class sealed osPlatform -> String => (Erlang beamtalk_system) osPlatform
 
   /// Return the OS family: "unix" or "win32".
   ///
@@ -62,7 +63,7 @@ sealed Object subclass: System
   /// System osFamily
   /// // => _
   /// ```
-  class sealed osFamily -> String => @primitive "osFamily"
+  class sealed osFamily -> String => (Erlang beamtalk_system) osFamily
 
   /// Return the system architecture string (e.g., "x86_64-pc-linux-gnu").
   ///
@@ -71,7 +72,7 @@ sealed Object subclass: System
   /// System architecture
   /// // => _
   /// ```
-  class sealed architecture -> String => @primitive "architecture"
+  class sealed architecture -> String => (Erlang beamtalk_system) architecture
 
   /// Return the hostname of the current machine.
   ///
@@ -80,7 +81,7 @@ sealed Object subclass: System
   /// System hostname
   /// // => _
   /// ```
-  class sealed hostname -> String => @primitive "hostname"
+  class sealed hostname -> String => (Erlang beamtalk_system) hostname
 
   /// Return the OTP/Erlang version string (e.g., "27").
   ///
@@ -89,7 +90,7 @@ sealed Object subclass: System
   /// System erlangVersion
   /// // => _
   /// ```
-  class sealed erlangVersion -> String => @primitive "erlangVersion"
+  class sealed erlangVersion -> String => (Erlang beamtalk_system) erlangVersion
 
   /// Return the OS process ID as an Integer.
   ///
@@ -98,4 +99,4 @@ sealed Object subclass: System
   /// System pid
   /// // => _
   /// ```
-  class sealed pid -> Integer => @primitive "pid"
+  class sealed pid -> Integer => (Erlang beamtalk_system) pid

@@ -7,7 +7,7 @@
 %%%
 %%% Tests getEnv:/1, getEnv:default:/2, osPlatform/0, osFamily/0,
 %%% architecture/0, hostname/0, erlangVersion/0, pid/0,
-%%% has_method/1, and type error paths.
+%%% and type error paths.
 
 -module(beamtalk_system_tests).
 
@@ -137,19 +137,29 @@ pid_positive_test() ->
     ?assert(V > 0).
 
 %%% ============================================================================
-%%% has_method/1
+%%% getEnv/1 and getEnv/2 shims (FFI dispatch via first selector keyword)
 %%% ============================================================================
 
-has_method_known_test() ->
-    ?assert(beamtalk_system:has_method('getEnv:')),
-    ?assert(beamtalk_system:has_method('getEnv:default:')),
-    ?assert(beamtalk_system:has_method(osPlatform)),
-    ?assert(beamtalk_system:has_method(osFamily)),
-    ?assert(beamtalk_system:has_method(architecture)),
-    ?assert(beamtalk_system:has_method(hostname)),
-    ?assert(beamtalk_system:has_method(erlangVersion)),
-    ?assert(beamtalk_system:has_method(pid)).
+get_env_shim_set_variable_test() ->
+    os:putenv("BT_TEST_ENV_SHIM", "shim_value"),
+    try
+        ?assertEqual(<<"shim_value">>, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM">>))
+    after
+        os:unsetenv("BT_TEST_ENV_SHIM")
+    end.
 
-has_method_unknown_test() ->
-    ?assertNot(beamtalk_system:has_method(frobnicateWidget)),
-    ?assertNot(beamtalk_system:has_method('putEnv:')).
+get_env_shim_unset_returns_nil_test() ->
+    os:unsetenv("BT_TEST_UNSET_SHIM"),
+    ?assertEqual(nil, beamtalk_system:getEnv(<<"BT_TEST_UNSET_SHIM">>)).
+
+get_env_shim_default_set_variable_test() ->
+    os:putenv("BT_TEST_ENV_SHIM2", "value2"),
+    try
+        ?assertEqual(<<"value2">>, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM2">>, <<"fallback">>))
+    after
+        os:unsetenv("BT_TEST_ENV_SHIM2")
+    end.
+
+get_env_shim_default_unset_returns_default_test() ->
+    os:unsetenv("BT_TEST_UNSET_SHIM2"),
+    ?assertEqual(<<"fallback">>, beamtalk_system:getEnv(<<"BT_TEST_UNSET_SHIM2">>, <<"fallback">>)).

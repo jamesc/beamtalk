@@ -26,7 +26,7 @@
 -export(['getEnv:'/1, 'getEnv:default:'/2]).
 -export([osPlatform/0, osFamily/0, architecture/0, hostname/0]).
 -export([erlangVersion/0, pid/0]).
--export([has_method/1]).
+-export([getEnv/1, getEnv/2]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -124,17 +124,18 @@ erlangVersion() ->
 pid() ->
     list_to_integer(os:getpid()).
 
-%% @doc Check if System responds to the given selector.
--spec has_method(atom()) -> boolean().
-has_method('getEnv:') -> true;
-has_method('getEnv:default:') -> true;
-has_method(osPlatform) -> true;
-has_method(osFamily) -> true;
-has_method(architecture) -> true;
-has_method(hostname) -> true;
-has_method(erlangVersion) -> true;
-has_method(pid) -> true;
-has_method(_) -> false.
+%% @doc Shims for (Erlang beamtalk_system) FFI dispatch.
+%% The Erlang FFI proxy (beamtalk_erlang_proxy) maps any keyword selector to
+%% its first keyword before calling direct_call/3, so `getEnv:` → `getEnv`
+%% and `getEnv:default:` → `getEnv`. These shims exist so the Beamtalk
+%% selectors `(Erlang beamtalk_system) getEnv: name` and
+%% `(Erlang beamtalk_system) getEnv: name default: fallback` dispatch to
+%% getEnv/1 and getEnv/2 respectively, delegating to the canonical forms.
+-spec getEnv(binary()) -> binary() | 'nil'.
+getEnv(Name) -> 'getEnv:'(Name).
+
+-spec getEnv(binary(), binary()) -> binary().
+getEnv(Name, Default) -> 'getEnv:default:'(Name, Default).
 
 %%% ============================================================================
 %%% Internal Functions

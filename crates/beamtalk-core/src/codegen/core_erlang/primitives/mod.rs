@@ -73,7 +73,6 @@ pub fn generate_primitive_bif(
         "TestResult" => value_types::generate_test_result_bif(selector, params),
         "Stream" => system::generate_stream_bif(selector, params),
         "Random" => system::generate_random_bif(selector, params),
-        "System" => system::generate_system_bif(selector, params),
         "DateTime" => system::generate_datetime_bif(selector, params),
         "Timer" => system::generate_timer_bif(selector, params),
         "Collection" => collection::generate_collection_bif(selector, params),
