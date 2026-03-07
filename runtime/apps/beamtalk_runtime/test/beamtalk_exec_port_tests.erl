@@ -47,7 +47,10 @@ find_in_project_finds_dev_binary_test() ->
         end,
     case beamtalk_exec_port:find_in_project(ExeName) of
         error ->
-            throw({skip, "beamtalk-exec not found under project root; available only via PATH/BEAMTALK_EXEC_PORT_BIN"});
+            throw(
+                {skip,
+                    "beamtalk-exec not found under project root; available only via PATH/BEAMTALK_EXEC_PORT_BIN"}
+            );
         {ok, Path} ->
             ?assert(filelib:is_regular(Path))
     end.
