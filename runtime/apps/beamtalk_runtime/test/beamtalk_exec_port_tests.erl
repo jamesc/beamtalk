@@ -62,9 +62,16 @@ find_in_project_nonexistent_name_returns_error_test() ->
 find_in_project_no_cargo_toml_returns_error_test() ->
     %% When there is no Cargo.toml ancestor, find_in_project/1 should not crash.
     %% We temporarily cd into a fresh temp dir with no Cargo.toml and expect error.
+    %% Use the system temp dir (outside the project tree) so that walking up from
+    %% TmpDirStr never reaches the repo's Cargo.toml.
     {ok, Cwd} = file:get_cwd(),
     Unique = erlang:unique_integer([positive, monotonic]),
-    TmpDirStr = lists:flatten(filename:join(Cwd, io_lib:format("bt_no_cargo_~p", [Unique]))),
+    SysTmp =
+        case os:type() of
+            {win32, _} -> os:getenv("TEMP", "C:\\Temp");
+            _ -> "/tmp"
+        end,
+    TmpDirStr = lists:flatten(filename:join(SysTmp, io_lib:format("bt_no_cargo_~p", [Unique]))),
     ok = file:make_dir(TmpDirStr),
     ExeName =
         case os:type() of
