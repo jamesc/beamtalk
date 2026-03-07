@@ -869,9 +869,12 @@ apply_class_info(State, ClassInfo) ->
     %% and their existing superclass is preserved unchanged.
     NewSuperclass =
         case maps:find(superclass, Meta) of
-            error -> State#class_state.superclass;   %% key absent — keep existing
-            {ok, nil} -> none;                       %% root class (codegen emits 'nil')
-            {ok, S} -> S                             %% corrected value from compiled module
+            %% key absent — keep existing
+            error -> State#class_state.superclass;
+            %% root class (codegen emits 'nil')
+            {ok, nil} -> none;
+            %% corrected value from compiled module
+            {ok, S} -> S
         end,
     beamtalk_class_hierarchy_table:insert(State#class_state.name, NewSuperclass),
 
