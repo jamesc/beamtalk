@@ -38,6 +38,23 @@ Actor subclass: ConditionalMutationCounter
   // Conditional as last expression (no trailing self.count)
   conditionalLast: flag => flag ifTrue: [self.count := self.count + 5]
 
+  // BT-1225: Local var assigned inside ifTrue: block, then used in same block
+  // Exercises the __local__ prefix key consistency fix
+  incrementViaLocalVar: flag =>
+    flag ifTrue: [
+      y := self.count + 1.
+      self.count := y
+    ].
+    self.count
+
+  // BT-1225: Same pattern for ifFalse:
+  decrementViaLocalVar: flag =>
+    flag ifFalse: [
+      y := self.count - 1.
+      self.count := y
+    ].
+    self.count
+
   getCount => self.count
 
   reset => self.count := 0
