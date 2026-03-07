@@ -66,16 +66,24 @@ impl MethodValidatorRegistry {
     fn register_builtins(&mut self) {
         // Allow variable (identifier) arguments for dynamic dispatch use cases.
         // classNamed: retains strict literal-only enforcement.
-        let reflection = Box::new(ReflectionMethodValidator { allow_identifier: true });
+        let reflection = Box::new(ReflectionMethodValidator {
+            allow_identifier: true,
+        });
         self.validators.insert("respondsTo:", reflection);
 
-        let reflection = Box::new(ReflectionMethodValidator { allow_identifier: true });
+        let reflection = Box::new(ReflectionMethodValidator {
+            allow_identifier: true,
+        });
         self.validators.insert("fieldAt:", reflection);
 
-        let reflection = Box::new(ReflectionMethodValidator { allow_identifier: true });
+        let reflection = Box::new(ReflectionMethodValidator {
+            allow_identifier: true,
+        });
         self.validators.insert("fieldAt:put:", reflection);
 
-        let reflection = Box::new(ReflectionMethodValidator { allow_identifier: false });
+        let reflection = Box::new(ReflectionMethodValidator {
+            allow_identifier: false,
+        });
         self.validators.insert("classNamed:", reflection);
 
         // Block arity validators (1-parameter block)
@@ -665,7 +673,9 @@ mod tests {
 
     #[test]
     fn test_symbol_literal_is_valid() {
-        let validator = ReflectionMethodValidator { allow_identifier: true };
+        let validator = ReflectionMethodValidator {
+            allow_identifier: true,
+        };
         let args = vec![Expression::Literal(
             Literal::Symbol("increment".into()),
             test_span(),
@@ -678,7 +688,9 @@ mod tests {
     #[test]
     fn test_identifier_allowed_for_responds_to() {
         // respondsTo: allows identifier args (dynamic dispatch use case)
-        let validator = ReflectionMethodValidator { allow_identifier: true };
+        let validator = ReflectionMethodValidator {
+            allow_identifier: true,
+        };
         let args = vec![Expression::Identifier(Identifier::new(
             "sel",
             Span::new(15, 18),
@@ -690,7 +702,9 @@ mod tests {
     #[test]
     fn test_identifier_produces_error_for_class_named() {
         // classNamed: is strict: identifiers are rejected
-        let validator = ReflectionMethodValidator { allow_identifier: false };
+        let validator = ReflectionMethodValidator {
+            allow_identifier: false,
+        };
         let args = vec![Expression::Identifier(Identifier::new(
             "increment",
             Span::new(15, 24),
@@ -706,7 +720,9 @@ mod tests {
 
     #[test]
     fn test_class_reference_produces_error() {
-        let validator = ReflectionMethodValidator { allow_identifier: false };
+        let validator = ReflectionMethodValidator {
+            allow_identifier: false,
+        };
         let args = vec![Expression::ClassReference {
             name: Identifier::new("Counter", Span::new(12, 19)),
             span: Span::new(12, 19),
@@ -725,7 +741,9 @@ mod tests {
 
     #[test]
     fn test_integer_literal_produces_error() {
-        let validator = ReflectionMethodValidator { allow_identifier: true };
+        let validator = ReflectionMethodValidator {
+            allow_identifier: true,
+        };
         let args = vec![Expression::Literal(Literal::Integer(42), test_span())];
 
         let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());
@@ -735,7 +753,9 @@ mod tests {
 
     #[test]
     fn test_empty_arguments_no_error() {
-        let validator = ReflectionMethodValidator { allow_identifier: true };
+        let validator = ReflectionMethodValidator {
+            allow_identifier: true,
+        };
         let diagnostics = validator.validate(&responds_to_selector(), &[], None, test_span());
         assert!(diagnostics.is_empty());
     }
@@ -767,7 +787,9 @@ mod tests {
     #[test]
     fn test_hint_contains_fix_suggestion() {
         // Strict mode (classNamed:): identifier should produce a hint
-        let validator = ReflectionMethodValidator { allow_identifier: false };
+        let validator = ReflectionMethodValidator {
+            allow_identifier: false,
+        };
         let args = vec![Expression::Identifier(Identifier::new(
             "increment",
             test_span(),
@@ -813,7 +835,9 @@ mod tests {
 
     #[test]
     fn test_inst_var_at_put_symbol_is_valid() {
-        let validator = ReflectionMethodValidator { allow_identifier: true };
+        let validator = ReflectionMethodValidator {
+            allow_identifier: true,
+        };
         let selector = MessageSelector::Keyword(vec![
             KeywordPart::new("fieldAt:", test_span()),
             KeywordPart::new("put:", test_span()),
@@ -829,7 +853,9 @@ mod tests {
     #[test]
     fn test_inst_var_at_put_identifier_allowed() {
         // fieldAt:put: now allows identifier (variable) arguments
-        let validator = ReflectionMethodValidator { allow_identifier: true };
+        let validator = ReflectionMethodValidator {
+            allow_identifier: true,
+        };
         let selector = MessageSelector::Keyword(vec![
             KeywordPart::new("fieldAt:", test_span()),
             KeywordPart::new("put:", test_span()),
@@ -845,9 +871,10 @@ mod tests {
     #[test]
     fn test_field_at_identifier_allowed() {
         // fieldAt: now allows identifier (variable) arguments
-        let validator = ReflectionMethodValidator { allow_identifier: true };
-        let selector =
-            MessageSelector::Keyword(vec![KeywordPart::new("fieldAt:", test_span())]);
+        let validator = ReflectionMethodValidator {
+            allow_identifier: true,
+        };
+        let selector = MessageSelector::Keyword(vec![KeywordPart::new("fieldAt:", test_span())]);
         let args = vec![Expression::Identifier(Identifier::new(
             "name",
             Span::new(10, 14),
