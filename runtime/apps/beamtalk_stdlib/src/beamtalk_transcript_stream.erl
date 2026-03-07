@@ -163,7 +163,7 @@ unsubscribe(TranscriptRef) ->
 -spec dispatch(atom(), list(), term()) -> term().
 dispatch('show:', [Value], Self) ->
     prim_ensure_initialized(),
-    Text = prim_to_string(Value),
+    Text = beamtalk_primitive:display_string(Value),
     prim_buffer_text(Text),
     prim_push_to_subscribers(Text),
     Self;
@@ -285,31 +285,6 @@ prim_caller_from_future(FuturePid) when is_pid(FuturePid) ->
     end;
 prim_caller_from_future(_Other) ->
     self().
-
-%% @private Convert a value to its string representation for display.
--spec prim_to_string(term()) -> binary().
-prim_to_string(Value) when is_binary(Value) ->
-    ensure_utf8(Value);
-prim_to_string(Value) when is_integer(Value) ->
-    integer_to_binary(Value);
-prim_to_string(Value) when is_float(Value) ->
-    float_to_binary(Value, [{decimals, 10}, compact]);
-prim_to_string(Value) when is_atom(Value) ->
-    atom_to_binary(Value, utf8);
-prim_to_string(Value) when is_list(Value) ->
-    try unicode:characters_to_binary(Value) of
-        Bin when is_binary(Bin) -> Bin;
-        {error, _, _} -> list_to_binary(io_lib:format("~p", [Value]));
-        {incomplete, _, _} -> list_to_binary(io_lib:format("~p", [Value]))
-    catch
-        _:_ -> list_to_binary(io_lib:format("~p", [Value]))
-    end;
-prim_to_string(#beamtalk_object{class = Class}) ->
-    <<"a ", (atom_to_binary(Class, utf8))/binary>>;
-prim_to_string(Value) when is_map(Value) ->
-    beamtalk_tagged_map:format_for_display(Value);
-prim_to_string(Value) ->
-    list_to_binary(io_lib:format("~p", [Value])).
 
 %%% ============================================================================
 %%% gen_server callbacks

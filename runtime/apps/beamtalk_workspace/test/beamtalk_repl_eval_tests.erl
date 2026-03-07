@@ -785,14 +785,26 @@ handle_method_definition_with_source_compile_fail_test() ->
     %% Test the path where class source exists but recompilation fails.
     %% BT-911: compile_for_method_reload wraps compiler exits — must return {error, ...},
     %% never propagate as an exit that would kill the REPL process.
-    State0 = beamtalk_repl_state:new(undefined, 0),
-    State1 = beamtalk_repl_state:set_class_source(
-        <<"TestClass">>, "Object subclass: TestClass", State0
-    ),
+    %% BT-1174: class source is now stored in workspace_meta.
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        OldPid ->
+            gen_server:stop(OldPid),
+            timer:sleep(10)
+    end,
+    {ok, WsPid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => <<"eval_test_ws">>,
+        project_path => undefined,
+        created_at => erlang:system_time(second)
+    }),
+    ok = beamtalk_workspace_meta:set_class_source(<<"TestClass">>, "Object subclass: TestClass"),
+    State = beamtalk_repl_state:new(undefined, 0),
     MethodInfo = #{class_name => <<"TestClass">>, selector => <<"doStuff">>},
     Result = beamtalk_repl_eval:handle_method_definition(
-        MethodInfo, [], "doStuff [] := 42", State1
+        MethodInfo, [], "doStuff [] := 42", State
     ),
+    gen_server:stop(WsPid),
     ?assertMatch({error, {compile_error, _}, <<>>, [], _}, Result).
 
 %% ===================================================================

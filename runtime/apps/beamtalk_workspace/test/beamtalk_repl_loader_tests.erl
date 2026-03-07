@@ -400,17 +400,17 @@ maybe_add_loaded_module_already_present_test() ->
 store_file_class_sources_single_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     Classes = [#{name => "MyClass", superclass => "Object"}],
+    %% Source is written to workspace_meta (not started, so no-op); State returned unchanged.
     NewState = beamtalk_repl_loader:store_file_class_sources(
         Classes, "Object subclass: MyClass [\n]\n", State
     ),
-    ?assertNotEqual(undefined, beamtalk_repl_state:get_class_source(<<"MyClass">>, NewState)).
+    ?assertEqual(State, NewState).
 
 store_file_class_sources_multiple_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     Classes = [#{name => "A", superclass => "Object"}, #{name => "B", superclass => "Object"}],
     NewState = beamtalk_repl_loader:store_file_class_sources(Classes, "source", State),
-    ?assertNotEqual(undefined, beamtalk_repl_state:get_class_source(<<"A">>, NewState)),
-    ?assertNotEqual(undefined, beamtalk_repl_state:get_class_source(<<"B">>, NewState)).
+    ?assertEqual(State, NewState).
 
 store_file_class_sources_empty_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
@@ -424,22 +424,20 @@ store_file_class_sources_empty_test() ->
 store_class_sources_empty_classes_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     {Name, NewState} = beamtalk_repl_loader:store_class_sources([], my_fallback_mod, "expr", State),
-    %% Falls back to module name as class name
+    %% Falls back to module name as class name; State is unchanged (source goes to workspace_meta).
     ?assertEqual(<<"my_fallback_mod">>, Name),
-    ?assertNotEqual(
-        undefined, beamtalk_repl_state:get_class_source(<<"my_fallback_mod">>, NewState)
-    ).
+    ?assertEqual(State, NewState).
 
 store_class_sources_with_classes_binary_name_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     Classes = [#{name => <<"Counter">>, superclass => <<"Object">>}],
     {Name, NewState} = beamtalk_repl_loader:store_class_sources(Classes, some_mod, "expr", State),
     ?assertEqual(<<"Counter">>, Name),
-    ?assertNotEqual(undefined, beamtalk_repl_state:get_class_source(<<"Counter">>, NewState)).
+    ?assertEqual(State, NewState).
 
 store_class_sources_with_classes_list_name_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     Classes = [#{name => "MyActor", superclass => "Actor"}],
     {Name, NewState} = beamtalk_repl_loader:store_class_sources(Classes, some_mod, "expr", State),
     ?assertEqual(<<"MyActor">>, Name),
-    ?assertNotEqual(undefined, beamtalk_repl_state:get_class_source(<<"MyActor">>, NewState)).
+    ?assertEqual(State, NewState).

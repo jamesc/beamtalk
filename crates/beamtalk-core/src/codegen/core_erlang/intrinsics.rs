@@ -345,7 +345,7 @@ impl CoreErlangGenerator {
     ///
     /// **BT-416**: This intrinsic now checks the receiver type to avoid intercepting
     /// String primitive methods. String literals use `@primitive` codegen that delegates
-    /// to `beamtalk_string_ops`, not `lists:map/filter`.
+    /// to `beamtalk_string`, not `lists:map/filter`.
     ///
     /// - Returns `Ok(Some(doc))` if the message was a List method and code was generated
     /// - Returns `Ok(None)` if the message is NOT a List method (caller should continue)
@@ -365,7 +365,7 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         // String has its own @primitive implementations (collect:, select:, etc.)
-        // that delegate to beamtalk_string_ops, not lists:map/filter.
+        // that delegate to beamtalk_string, not lists:map/filter.
         if matches!(receiver, Expression::Literal(Literal::String(_), _)) {
             return Ok(None);
         }

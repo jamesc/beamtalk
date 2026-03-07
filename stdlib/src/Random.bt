@@ -43,7 +43,7 @@ sealed Object subclass: Random
   /// ```beamtalk
   /// Random next                  // => a Float between 0.0 and 1.0
   /// ```
-  class sealed next -> Float => @primitive "next"
+  class sealed next -> Float => (Erlang beamtalk_random) next
 
   /// Return a random integer between 1 and max (inclusive).
   ///
@@ -55,7 +55,7 @@ sealed Object subclass: Random
   /// Random nextInteger: 100      // => 1..100
   /// ```
   class sealed nextInteger: max :: Integer -> Integer =>
-    @primitive "nextInteger:"
+    (Erlang beamtalk_random) nextInteger: max
 
   /// Create a new Random instance with an auto-generated seed.
   ///
@@ -66,7 +66,7 @@ sealed Object subclass: Random
   /// rng := Random new
   /// rng next                     // => 0.0..1.0
   /// ```
-  class sealed new -> Random => @primitive "new"
+  class sealed new -> Random => (Erlang beamtalk_random) new
 
   /// Create a new Random instance with a specific seed for reproducibility.
   ///
@@ -78,7 +78,8 @@ sealed Object subclass: Random
   /// rng := Random seed: 42
   /// rng next                     // => deterministic value
   /// ```
-  class sealed seed: seed :: Integer -> Random => @primitive "seed:"
+  class sealed seed: seed :: Integer -> Random =>
+    (Erlang beamtalk_random) seed: seed
 
   /// Return a random float from the instance state.
   ///
@@ -91,7 +92,7 @@ sealed Object subclass: Random
   /// rng := Random new
   /// rng next                     // => 0.0..1.0
   /// ```
-  next -> Float => @primitive "instanceNext"
+  next -> Float => (Erlang beamtalk_random) instanceNext: self
 
   /// Return a random integer between 1 and max from the instance state.
   ///
@@ -104,4 +105,5 @@ sealed Object subclass: Random
   /// rng := Random new
   /// rng nextInteger: 6           // => 1..6
   /// ```
-  nextInteger: max :: Integer -> Integer => @primitive "instanceNextInteger:"
+  nextInteger: max :: Integer -> Integer =>
+    (Erlang beamtalk_random) instanceNextInteger: self with: max

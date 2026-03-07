@@ -2,7 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
-%%% @doc EUnit tests for beamtalk_list_ops (BT-708).
+%%% @doc EUnit tests for beamtalk_list (BT-708).
 %%%
 %%% Tests list operations: at, detect, detect_if_none, do, reject,
 %%% zip, group_by, partition, intersperse, take, drop, sort_with,
@@ -11,7 +11,7 @@
 %%% Note: index_of/2 and each_with_index/2 were removed in BT-816
 %%% (self-hosted in pure Beamtalk in List.bt).
 
--module(beamtalk_list_ops_tests).
+-module(beamtalk_list_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -20,13 +20,13 @@
 %%% ============================================================================
 
 at_valid_index_test() ->
-    ?assertEqual(b, beamtalk_list_ops:at([a, b, c], 2)).
+    ?assertEqual(b, beamtalk_list:at([a, b, c], 2)).
 
 at_first_test() ->
-    ?assertEqual(1, beamtalk_list_ops:at([1, 2, 3], 1)).
+    ?assertEqual(1, beamtalk_list:at([1, 2, 3], 1)).
 
 at_last_test() ->
-    ?assertEqual(3, beamtalk_list_ops:at([1, 2, 3], 3)).
+    ?assertEqual(3, beamtalk_list:at([1, 2, 3], 3)).
 
 at_out_of_bounds_test() ->
     ?assertException(
@@ -39,7 +39,7 @@ at_out_of_bounds_test() ->
                 selector = 'at:'
             }
         },
-        beamtalk_list_ops:at([1, 2, 3], 10)
+        beamtalk_list:at([1, 2, 3], 10)
     ).
 
 at_zero_index_test() ->
@@ -53,7 +53,7 @@ at_zero_index_test() ->
                 selector = 'at:'
             }
         },
-        beamtalk_list_ops:at([1, 2, 3], 0)
+        beamtalk_list:at([1, 2, 3], 0)
     ).
 
 at_negative_index_test() ->
@@ -67,7 +67,7 @@ at_negative_index_test() ->
                 selector = 'at:'
             }
         },
-        beamtalk_list_ops:at([1, 2, 3], -1)
+        beamtalk_list:at([1, 2, 3], -1)
     ).
 
 at_non_integer_test() ->
@@ -81,7 +81,7 @@ at_non_integer_test() ->
                 selector = 'at:'
             }
         },
-        beamtalk_list_ops:at([1, 2, 3], foo)
+        beamtalk_list:at([1, 2, 3], foo)
     ).
 
 %%% ============================================================================
@@ -91,7 +91,7 @@ at_non_integer_test() ->
 detect_found_test() ->
     ?assertEqual(
         4,
-        beamtalk_list_ops:detect(
+        beamtalk_list:detect(
             [1, 2, 3, 4, 5],
             fun(X) -> X > 3 end
         )
@@ -100,7 +100,7 @@ detect_found_test() ->
 detect_first_match_test() ->
     ?assertEqual(
         2,
-        beamtalk_list_ops:detect(
+        beamtalk_list:detect(
             [1, 2, 3, 4],
             fun(X) -> X rem 2 =:= 0 end
         )
@@ -117,7 +117,7 @@ detect_not_found_test() ->
                 selector = 'detect:'
             }
         },
-        beamtalk_list_ops:detect(
+        beamtalk_list:detect(
             [1, 2, 3],
             fun(X) -> X > 10 end
         )
@@ -134,7 +134,7 @@ detect_invalid_block_test() ->
                 selector = 'detect:'
             }
         },
-        beamtalk_list_ops:detect([1, 2, 3], not_a_function)
+        beamtalk_list:detect([1, 2, 3], not_a_function)
     ).
 
 %%% ============================================================================
@@ -144,7 +144,7 @@ detect_invalid_block_test() ->
 detect_if_none_found_test() ->
     ?assertEqual(
         4,
-        beamtalk_list_ops:detect_if_none(
+        beamtalk_list:detect_if_none(
             [1, 2, 3, 4, 5],
             fun(X) -> X > 3 end,
             default
@@ -154,7 +154,7 @@ detect_if_none_found_test() ->
 detect_if_none_not_found_value_test() ->
     ?assertEqual(
         default,
-        beamtalk_list_ops:detect_if_none(
+        beamtalk_list:detect_if_none(
             [1, 2, 3],
             fun(X) -> X > 10 end,
             default
@@ -164,7 +164,7 @@ detect_if_none_not_found_value_test() ->
 detect_if_none_not_found_block_test() ->
     ?assertEqual(
         42,
-        beamtalk_list_ops:detect_if_none(
+        beamtalk_list:detect_if_none(
             [1, 2, 3],
             fun(X) -> X > 10 end,
             fun() -> 42 end
@@ -182,7 +182,7 @@ detect_if_none_invalid_block_test() ->
                 selector = 'detect:ifNone:'
             }
         },
-        beamtalk_list_ops:detect_if_none(
+        beamtalk_list:detect_if_none(
             [1, 2, 3],
             not_a_function,
             default
@@ -196,7 +196,7 @@ detect_if_none_invalid_block_test() ->
 do_iterates_test() ->
     Ref = make_ref(),
     Self = self(),
-    beamtalk_list_ops:do([1, 2, 3], fun(X) -> Self ! {Ref, X} end),
+    beamtalk_list:do([1, 2, 3], fun(X) -> Self ! {Ref, X} end),
     ?assertEqual(
         {Ref, 1},
         receive
@@ -220,10 +220,10 @@ do_iterates_test() ->
     ).
 
 do_returns_nil_test() ->
-    ?assertEqual(nil, beamtalk_list_ops:do([1, 2], fun(_) -> ok end)).
+    ?assertEqual(nil, beamtalk_list:do([1, 2], fun(_) -> ok end)).
 
 do_empty_list_test() ->
-    ?assertEqual(nil, beamtalk_list_ops:do([], fun(_) -> ok end)).
+    ?assertEqual(nil, beamtalk_list:do([], fun(_) -> ok end)).
 
 do_invalid_block_test() ->
     ?assertException(
@@ -236,7 +236,7 @@ do_invalid_block_test() ->
                 selector = 'do:'
             }
         },
-        beamtalk_list_ops:do([1, 2, 3], not_a_function)
+        beamtalk_list:do([1, 2, 3], not_a_function)
     ).
 
 %%% ============================================================================
@@ -246,7 +246,7 @@ do_invalid_block_test() ->
 reject_test() ->
     ?assertEqual(
         [1, 3, 5],
-        beamtalk_list_ops:reject(
+        beamtalk_list:reject(
             [1, 2, 3, 4, 5],
             fun(X) -> X rem 2 =:= 0 end
         )
@@ -255,7 +255,7 @@ reject_test() ->
 reject_none_test() ->
     ?assertEqual(
         [1, 2, 3],
-        beamtalk_list_ops:reject(
+        beamtalk_list:reject(
             [1, 2, 3],
             fun(X) -> X > 10 end
         )
@@ -264,7 +264,7 @@ reject_none_test() ->
 reject_all_test() ->
     ?assertEqual(
         [],
-        beamtalk_list_ops:reject(
+        beamtalk_list:reject(
             [1, 2, 3],
             fun(_) -> true end
         )
@@ -281,7 +281,7 @@ reject_invalid_block_test() ->
                 selector = 'reject:'
             }
         },
-        beamtalk_list_ops:reject([1, 2, 3], not_a_function)
+        beamtalk_list:reject([1, 2, 3], not_a_function)
     ).
 
 %%% ============================================================================
@@ -289,13 +289,13 @@ reject_invalid_block_test() ->
 %%% ============================================================================
 
 take_test() ->
-    ?assertEqual([1, 2], beamtalk_list_ops:take([1, 2, 3, 4], 2)).
+    ?assertEqual([1, 2], beamtalk_list:take([1, 2, 3, 4], 2)).
 
 take_zero_test() ->
-    ?assertEqual([], beamtalk_list_ops:take([1, 2, 3], 0)).
+    ?assertEqual([], beamtalk_list:take([1, 2, 3], 0)).
 
 take_more_than_length_test() ->
-    ?assertEqual([1, 2, 3], beamtalk_list_ops:take([1, 2, 3], 10)).
+    ?assertEqual([1, 2, 3], beamtalk_list:take([1, 2, 3], 10)).
 
 take_negative_test() ->
     ?assertException(
@@ -308,7 +308,7 @@ take_negative_test() ->
                 selector = 'take:'
             }
         },
-        beamtalk_list_ops:take([1, 2, 3], -1)
+        beamtalk_list:take([1, 2, 3], -1)
     ).
 
 take_non_integer_test() ->
@@ -322,7 +322,7 @@ take_non_integer_test() ->
                 selector = 'take:'
             }
         },
-        beamtalk_list_ops:take([1, 2, 3], foo)
+        beamtalk_list:take([1, 2, 3], foo)
     ).
 
 %%% ============================================================================
@@ -330,13 +330,13 @@ take_non_integer_test() ->
 %%% ============================================================================
 
 drop_test() ->
-    ?assertEqual([3, 4], beamtalk_list_ops:drop([1, 2, 3, 4], 2)).
+    ?assertEqual([3, 4], beamtalk_list:drop([1, 2, 3, 4], 2)).
 
 drop_zero_test() ->
-    ?assertEqual([1, 2, 3], beamtalk_list_ops:drop([1, 2, 3], 0)).
+    ?assertEqual([1, 2, 3], beamtalk_list:drop([1, 2, 3], 0)).
 
 drop_more_than_length_test() ->
-    ?assertEqual([], beamtalk_list_ops:drop([1, 2, 3], 10)).
+    ?assertEqual([], beamtalk_list:drop([1, 2, 3], 10)).
 
 drop_negative_test() ->
     ?assertException(
@@ -349,7 +349,7 @@ drop_negative_test() ->
                 selector = 'drop:'
             }
         },
-        beamtalk_list_ops:drop([1, 2, 3], -1)
+        beamtalk_list:drop([1, 2, 3], -1)
     ).
 
 drop_non_integer_test() ->
@@ -363,7 +363,7 @@ drop_non_integer_test() ->
                 selector = 'drop:'
             }
         },
-        beamtalk_list_ops:drop([1, 2, 3], foo)
+        beamtalk_list:drop([1, 2, 3], foo)
     ).
 
 %%% ============================================================================
@@ -373,7 +373,7 @@ drop_non_integer_test() ->
 sort_with_ascending_test() ->
     ?assertEqual(
         [1, 2, 3],
-        beamtalk_list_ops:sort_with(
+        beamtalk_list:sort_with(
             [3, 1, 2],
             fun(A, B) -> A =< B end
         )
@@ -382,14 +382,14 @@ sort_with_ascending_test() ->
 sort_with_descending_test() ->
     ?assertEqual(
         [3, 2, 1],
-        beamtalk_list_ops:sort_with(
+        beamtalk_list:sort_with(
             [1, 3, 2],
             fun(A, B) -> A >= B end
         )
     ).
 
 sort_with_empty_test() ->
-    ?assertEqual([], beamtalk_list_ops:sort_with([], fun(A, B) -> A =< B end)).
+    ?assertEqual([], beamtalk_list:sort_with([], fun(A, B) -> A =< B end)).
 
 sort_with_invalid_block_test() ->
     ?assertException(
@@ -402,7 +402,7 @@ sort_with_invalid_block_test() ->
                 selector = 'sort:'
             }
         },
-        beamtalk_list_ops:sort_with([1, 2], not_a_function)
+        beamtalk_list:sort_with([1, 2], not_a_function)
     ).
 
 sort_with_non_list_test() ->
@@ -416,7 +416,7 @@ sort_with_non_list_test() ->
                 selector = 'sort:'
             }
         },
-        beamtalk_list_ops:sort_with(not_a_list, fun(A, B) -> A >= B end)
+        beamtalk_list:sort_with(not_a_list, fun(A, B) -> A >= B end)
     ).
 
 %%% ============================================================================
@@ -424,15 +424,15 @@ sort_with_non_list_test() ->
 %%% ============================================================================
 
 zip_equal_test() ->
-    Result = beamtalk_list_ops:zip([a, b], [1, 2]),
+    Result = beamtalk_list:zip([a, b], [1, 2]),
     ?assertEqual([[a, 1], [b, 2]], Result).
 
 zip_unequal_test() ->
-    Result = beamtalk_list_ops:zip([a, b, c], [1, 2]),
+    Result = beamtalk_list:zip([a, b, c], [1, 2]),
     ?assertEqual([[a, 1], [b, 2]], Result).
 
 zip_empty_test() ->
-    ?assertEqual([], beamtalk_list_ops:zip([], [1, 2])).
+    ?assertEqual([], beamtalk_list:zip([], [1, 2])).
 
 zip_invalid_arg_test() ->
     ?assertException(
@@ -445,7 +445,7 @@ zip_invalid_arg_test() ->
                 selector = 'zip:'
             }
         },
-        beamtalk_list_ops:zip([1, 2], not_a_list)
+        beamtalk_list:zip([1, 2], not_a_list)
     ).
 
 %%% ============================================================================
@@ -453,7 +453,7 @@ zip_invalid_arg_test() ->
 %%% ============================================================================
 
 group_by_test() ->
-    Result = beamtalk_list_ops:group_by(
+    Result = beamtalk_list:group_by(
         [1, 2, 3, 4, 5],
         fun(X) -> X rem 2 end
     ),
@@ -461,7 +461,7 @@ group_by_test() ->
     ?assertEqual([2, 4], maps:get(0, Result)).
 
 group_by_empty_test() ->
-    ?assertEqual(#{}, beamtalk_list_ops:group_by([], fun(X) -> X end)).
+    ?assertEqual(#{}, beamtalk_list:group_by([], fun(X) -> X end)).
 
 group_by_invalid_block_test() ->
     ?assertException(
@@ -474,7 +474,7 @@ group_by_invalid_block_test() ->
                 selector = 'groupBy:'
             }
         },
-        beamtalk_list_ops:group_by([1, 2], not_a_function)
+        beamtalk_list:group_by([1, 2], not_a_function)
     ).
 
 %%% ============================================================================
@@ -482,7 +482,7 @@ group_by_invalid_block_test() ->
 %%% ============================================================================
 
 partition_test() ->
-    Result = beamtalk_list_ops:partition(
+    Result = beamtalk_list:partition(
         [1, 2, 3, 4, 5],
         fun(X) -> X > 3 end
     ),
@@ -490,7 +490,7 @@ partition_test() ->
     ?assertEqual([1, 2, 3], maps:get(<<"nonMatching">>, Result)).
 
 partition_none_match_test() ->
-    Result = beamtalk_list_ops:partition(
+    Result = beamtalk_list:partition(
         [1, 2, 3],
         fun(X) -> X > 10 end
     ),
@@ -508,7 +508,7 @@ partition_invalid_block_test() ->
                 selector = 'partition:'
             }
         },
-        beamtalk_list_ops:partition([1, 2], not_a_function)
+        beamtalk_list:partition([1, 2], not_a_function)
     ).
 
 %%% ============================================================================
@@ -518,14 +518,14 @@ partition_invalid_block_test() ->
 intersperse_test() ->
     ?assertEqual(
         [1, 0, 2, 0, 3],
-        beamtalk_list_ops:intersperse([1, 2, 3], 0)
+        beamtalk_list:intersperse([1, 2, 3], 0)
     ).
 
 intersperse_single_test() ->
-    ?assertEqual([1], beamtalk_list_ops:intersperse([1], 0)).
+    ?assertEqual([1], beamtalk_list:intersperse([1], 0)).
 
 intersperse_empty_test() ->
-    ?assertEqual([], beamtalk_list_ops:intersperse([], 0)).
+    ?assertEqual([], beamtalk_list:intersperse([], 0)).
 
 %%% ============================================================================
 %%% from_to/3 tests
@@ -534,19 +534,19 @@ intersperse_empty_test() ->
 from_to_test() ->
     ?assertEqual(
         [2, 3, 4],
-        beamtalk_list_ops:from_to([1, 2, 3, 4, 5], 2, 4)
+        beamtalk_list:from_to([1, 2, 3, 4, 5], 2, 4)
     ).
 
 from_to_single_test() ->
     ?assertEqual(
         [3],
-        beamtalk_list_ops:from_to([1, 2, 3, 4, 5], 3, 3)
+        beamtalk_list:from_to([1, 2, 3, 4, 5], 3, 3)
     ).
 
 from_to_end_before_start_test() ->
     ?assertEqual(
         [],
-        beamtalk_list_ops:from_to([1, 2, 3], 3, 1)
+        beamtalk_list:from_to([1, 2, 3], 3, 1)
     ).
 
 from_to_non_integer_start_test() ->
@@ -560,7 +560,7 @@ from_to_non_integer_start_test() ->
                 selector = 'from:to:'
             }
         },
-        beamtalk_list_ops:from_to([1, 2, 3], foo, 2)
+        beamtalk_list:from_to([1, 2, 3], foo, 2)
     ).
 
 from_to_non_integer_end_test() ->
@@ -574,7 +574,7 @@ from_to_non_integer_end_test() ->
                 selector = 'from:to:'
             }
         },
-        beamtalk_list_ops:from_to([1, 2, 3], 1, foo)
+        beamtalk_list:from_to([1, 2, 3], 1, foo)
     ).
 
 from_to_negative_start_test() ->
@@ -588,5 +588,5 @@ from_to_negative_start_test() ->
                 selector = 'from:to:'
             }
         },
-        beamtalk_list_ops:from_to([1, 2, 3], -1, 2)
+        beamtalk_list:from_to([1, 2, 3], -1, 2)
     ).

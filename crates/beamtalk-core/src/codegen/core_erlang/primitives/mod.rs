@@ -72,9 +72,7 @@ pub fn generate_primitive_bif(
         "TestRunner" => value_types::generate_test_runner_bif(selector, params),
         "TestResult" => value_types::generate_test_result_bif(selector, params),
         "Stream" => system::generate_stream_bif(selector, params),
-        "Random" => system::generate_random_bif(selector, params),
         "DateTime" => system::generate_datetime_bif(selector, params),
-        "Timer" => system::generate_timer_bif(selector, params),
         "Collection" => collection::generate_collection_bif(selector, params),
         "Behaviour" => behaviour::generate_behaviour_bif(selector, params),
         "Class" => behaviour::generate_class_bif(selector, params),
@@ -400,7 +398,7 @@ mod tests {
         ));
         assert_eq!(
             result,
-            Some("call 'beamtalk_list_ops':'from_to'(Self, Start, End)".to_string())
+            Some("call 'beamtalk_list':'from_to'(Self, Start, End)".to_string())
         );
     }
 

@@ -24,6 +24,9 @@ pub fn generate_metaclass_bif(selector: &str, params: &[String]) -> Option<Docum
         "metaclassSuperclass" => Some(docvec![
             "call 'beamtalk_behaviour_intrinsics':'metaclassSuperclass'(Self)"
         ]),
+        "metaclassAllMethods" => Some(docvec![
+            "call 'beamtalk_behaviour_intrinsics':'metaclassAllMethods'(Self)"
+        ]),
         "metaclassClassMethods" => Some(docvec![
             "call 'beamtalk_behaviour_intrinsics':'metaclassClassMethods'(Self)"
         ]),
@@ -70,6 +73,15 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_behaviour_intrinsics':'metaclassSuperclass'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_metaclass_all_methods() {
+        let result = doc_to_string(generate_metaclass_bif("metaclassAllMethods", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'metaclassAllMethods'(Self)".to_string())
         );
     }
 

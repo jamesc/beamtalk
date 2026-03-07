@@ -19,7 +19,7 @@
 %%%
 %%% See: BT-417, ADR 0007
 
--module(beamtalk_tuple_ops).
+-module(beamtalk_tuple).
 -export([at/2, as_string/1, do/2]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").

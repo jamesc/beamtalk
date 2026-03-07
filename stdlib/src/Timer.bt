@@ -24,7 +24,7 @@ sealed Object subclass: Timer
   /// t class    // => Timer
   /// ```
   class sealed after: ms :: Integer do: block :: Block -> Timer =>
-    @primitive "after:do:"
+    (Erlang beamtalk_timer) after: ms do: block
 
   /// Evaluate `block` every `ms` milliseconds. Returns a cancellable Timer.
   ///
@@ -35,7 +35,7 @@ sealed Object subclass: Timer
   /// t cancel   // => true
   /// ```
   class sealed every: ms :: Integer do: block :: Block -> Timer =>
-    @primitive "every:do:"
+    (Erlang beamtalk_timer) every: ms do: block
 
   /// Block the current process for `ms` milliseconds.
   ///
@@ -43,7 +43,7 @@ sealed Object subclass: Timer
   /// ```beamtalk
   /// Timer sleep: 10    // => nil
   /// ```
-  class sealed sleep: ms :: Integer -> Nil => @primitive "sleep:"
+  class sealed sleep: ms :: Integer -> Nil => (Erlang beamtalk_timer) sleep: ms
 
   // ===== Instance Methods =====
 
@@ -55,7 +55,7 @@ sealed Object subclass: Timer
   /// t cancel    // => true
   /// t cancel    // => false
   /// ```
-  cancel -> Boolean => @primitive "cancel"
+  cancel -> Boolean => (Erlang beamtalk_timer) cancel: self
 
   /// True if this timer is still scheduled to fire.
   ///
@@ -66,7 +66,7 @@ sealed Object subclass: Timer
   /// t cancel      // => true
   /// t isActive    // => false
   /// ```
-  isActive -> Boolean => @primitive "isActive"
+  isActive -> Boolean => (Erlang beamtalk_timer) isActive: self
 
   /// Human-readable representation.
-  printString -> String => @primitive "printString"
+  printString -> String => (Erlang beamtalk_timer) printString: self

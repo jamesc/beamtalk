@@ -299,16 +299,16 @@ impl CoreErlangGenerator {
 
     /// Generates code for an array literal: `#[1, 2, 3]`
     ///
-    /// Compiles to a call to `beamtalk_array_ops:from_list/1`:
+    /// Compiles to a call to `beamtalk_array:from_list/1`:
     /// ```erlang
-    /// call 'beamtalk_array_ops':'from_list'([1, 2, 3])
+    /// call 'beamtalk_array':'from_list'([1, 2, 3])
     /// ```
     pub(super) fn generate_array_literal(
         &mut self,
         elements: &[Expression],
     ) -> Result<Document<'static>> {
         let mut parts: Vec<Document<'static>> =
-            vec![Document::Str("call 'beamtalk_array_ops':'from_list'([")];
+            vec![Document::Str("call 'beamtalk_array':'from_list'([")];
         for (i, elem) in elements.iter().enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
@@ -1663,7 +1663,7 @@ mod tests {
         let doc = generator.generate_array_literal(&elements).unwrap();
         let output = doc.to_pretty_string();
         assert!(
-            output.contains("beamtalk_array_ops':'from_list'"),
+            output.contains("beamtalk_array':'from_list'"),
             "array should call from_list. Got: {output}"
         );
         assert!(
