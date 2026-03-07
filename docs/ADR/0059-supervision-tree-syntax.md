@@ -41,7 +41,7 @@ There is no way to define a user-level supervision tree from `.bt` files, neithe
 
 ### Core Design: `Supervisor` and `DynamicSupervisor`
 
-Supervision trees are expressed via a three-class hierarchy in the stdlib. There are no special class-body declaration keywords — everything is a method.
+Supervision trees are expressed via two abstract base classes in the stdlib (`Supervisor` and `DynamicSupervisor`), plus a `SupervisionSpec` value type for per-child configuration. There are no special class-body declaration keywords — everything is a method.
 
 The stdlib base classes:
 
