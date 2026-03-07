@@ -860,8 +860,24 @@ apply_class_info(State, ClassInfo) ->
         maps:get(class_methods, ClassInfo, State#class_state.class_methods)
     ),
 
+    %% ADR 0057: Fix stale superclass left by bootstrap stubs. Bootstrap stubs register
+    %% abstract stdlib classes with placeholder superclasses (e.g. 'Class' → 'Object').
+    %% When the compiled stdlib module loads and calls update_class, Meta now carries the
+    %% correct superclass from __beamtalk_meta/0. We update both the gen_server field and
+    %% the ETS hierarchy table so all hierarchy traversal code sees the right value.
+    %% Dynamic classes (no compiled module) have Meta = #{} so maps:find returns error
+    %% and their existing superclass is preserved unchanged.
+    NewSuperclass =
+        case maps:find(superclass, Meta) of
+            error -> State#class_state.superclass;   %% key absent — keep existing
+            {ok, nil} -> none;                       %% root class (codegen emits 'nil')
+            {ok, S} -> S                             %% corrected value from compiled module
+        end,
+    beamtalk_class_hierarchy_table:insert(State#class_state.name, NewSuperclass),
+
     State#class_state{
         module = NewModule,
+        superclass = NewSuperclass,
         instance_methods = NewInstanceMethods,
         class_methods = NewClassMethods,
         fields = maps:get(
