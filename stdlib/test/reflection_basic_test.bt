@@ -7,8 +7,32 @@
 // BT-924: fieldAt: on user-defined Value subclass: objects reads slots — see
 // value_subclass_test.bt. fieldAt: on primitive literals (42, "hello") still
 // raises immutable_value since primitives have no map slots
+// BT-1168: Variable (symbol) arguments to respondsTo:, fieldAt:, fieldAt:put:
 
 TestCase subclass: ReflectionBasicTest
+
+  testDynamicRespondsTo =>
+    // BT-1168: variable holding a symbol should work with respondsTo:
+    c := Counter spawn
+    sel := #increment
+    self assert: (c respondsTo: sel)
+    unknownSel := #nonExistent
+    self deny: (c respondsTo: unknownSel)
+
+  testDynamicFieldAt =>
+    // BT-1168: variable holding a field name should work with fieldAt:
+    c := Counter spawn
+    fieldName := #value
+    self assert: (c fieldAt: fieldName) equals: 0
+    c increment
+    self assert: (c fieldAt: fieldName) equals: 1
+
+  testDynamicFieldAtPut =>
+    // BT-1168: variable holding a field name should work with fieldAt:put:
+    c := Counter spawn
+    fieldName := #value
+    c fieldAt: fieldName put: 99
+    self assert: c getValue equals: 99
 
   testActorReflectionApi =>
     c := Counter spawn

@@ -1904,8 +1904,8 @@ mod tests {
     }
 
     #[test]
-    fn test_responds_to_with_identifier_emits_error() {
-        // counter respondsTo: increment — should error
+    fn test_responds_to_with_identifier_no_error() {
+        // BT-1168: counter respondsTo: sel — identifier arg is now allowed
         let expr = Expression::MessageSend {
             receiver: Box::new(Expression::Identifier(Identifier::new(
                 "counter",
@@ -1916,15 +1916,15 @@ mod tests {
                 test_span(),
             )]),
             arguments: vec![Expression::Identifier(Identifier::new(
-                "increment",
-                Span::new(20, 29),
+                "sel",
+                Span::new(20, 23),
             ))],
             is_cast: false,
             span: test_span(),
         };
 
         let module = Module::new(vec![bare(expr)], test_span());
-        let result = analyse_with_known_vars(&module, &["counter"]);
+        let result = analyse_with_known_vars(&module, &["counter", "sel"]);
 
         let symbol_errors: Vec<_> = result
             .diagnostics
@@ -1934,24 +1934,10 @@ mod tests {
 
         assert_eq!(
             symbol_errors.len(),
-            1,
-            "Expected 1 symbol literal error, got: {:?}",
+            0,
+            "identifier arg to respondsTo: should not produce symbol literal error, got: {:?}",
             result.diagnostics
         );
-        assert!(
-            symbol_errors[0]
-                .message
-                .contains("expects a symbol literal")
-        );
-        assert!(
-            symbol_errors[0]
-                .message
-                .contains("checks if an object understands a message")
-        );
-        assert_eq!(symbol_errors[0].span, Span::new(20, 29));
-        // Fix suggestion is in the hint field
-        let hint = symbol_errors[0].hint.as_ref().unwrap();
-        assert!(hint.contains("#increment"));
     }
 
     #[test]
@@ -2065,8 +2051,8 @@ mod tests {
     }
 
     #[test]
-    fn test_cascade_responds_to_with_identifier_emits_error() {
-        // counter respondsTo: increment; size — cascade should also validate
+    fn test_cascade_responds_to_with_identifier_no_error() {
+        // BT-1168: counter respondsTo: sel; size — identifier arg is now allowed in cascade
         let cascade = Expression::Cascade {
             receiver: Box::new(Expression::Identifier(Identifier::new(
                 "counter",
@@ -2079,8 +2065,8 @@ mod tests {
                         test_span(),
                     )]),
                     vec![Expression::Identifier(Identifier::new(
-                        "increment",
-                        Span::new(20, 29),
+                        "sel",
+                        Span::new(20, 23),
                     ))],
                     test_span(),
                 ),
@@ -2094,7 +2080,7 @@ mod tests {
         };
 
         let module = Module::new(vec![bare(cascade)], test_span());
-        let result = analyse_with_known_vars(&module, &["counter"]);
+        let result = analyse_with_known_vars(&module, &["counter", "sel"]);
 
         let symbol_errors: Vec<_> = result
             .diagnostics
@@ -2104,8 +2090,8 @@ mod tests {
 
         assert_eq!(
             symbol_errors.len(),
-            1,
-            "Cascade messages should trigger symbol validation, got: {:?}",
+            0,
+            "identifier arg to respondsTo: in cascade should not produce symbol literal error, got: {:?}",
             result.diagnostics
         );
     }

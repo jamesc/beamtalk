@@ -37,11 +37,11 @@
 
 // --- Reflection method validators ---
 
-// respondsTo: expects a symbol literal, not a bare identifier
-myVar := 42
-// => 42
+// BT-1168: respondsTo: now accepts variable (identifier) arguments
+myVar := #increment
+// => increment
 42 respondsTo: myVar
-// => ERROR: expects a symbol literal
+// => false
 
 // --- Control flow blocks work without errors ---
 
