@@ -59,6 +59,15 @@ init([]) ->
             shutdown => 5000,
             type => supervisor,
             modules => [beamtalk_subprocess_sup]
+        },
+        %% Supervisor for ReactiveSubprocess gen_servers (simple_one_for_one, temporary)
+        #{
+            id => beamtalk_reactive_subprocess_sup,
+            start => {beamtalk_reactive_subprocess_sup, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => supervisor,
+            modules => [beamtalk_reactive_subprocess_sup]
         }
     ],
 

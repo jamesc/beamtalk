@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// StubDelegate — collects subprocessLine:from:, subprocessStderrLine:from:,
+// and subprocessExit:from: casts from a ReactiveSubprocess for BUnit testing.
+
+Actor subclass: StubDelegate
+  state: stdoutLines = #()
+  state: stderrLines = #()
+  state: exitCode = nil
+  state: exitReceived = false
+
+  subprocessLine: line from: _proc =>
+    self.stdoutLines := self.stdoutLines add: line
+
+  subprocessStderrLine: line from: _proc =>
+    self.stderrLines := self.stderrLines add: line
+
+  subprocessExit: code from: _proc =>
+    self.exitCode := code
+    self.exitReceived := true
+
+  stdoutLines => self.stdoutLines
+
+  stderrLines => self.stderrLines
+
+  exitCode => self.exitCode
+
+  exitReceived => self.exitReceived

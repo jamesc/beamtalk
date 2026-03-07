@@ -137,39 +137,19 @@ start_subprocess(Config, Selector) ->
     end.
 
 %% @private Convert a Beamtalk Array (tagged map or plain list) to an Erlang list.
-%%
-%% Array literals in Beamtalk method call arguments compile to plain Erlang lists.
-%% Array values returned from collection operations are tagged maps.
 -spec bt_array_to_list(term(), atom()) -> list().
-bt_array_to_list(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Selector) ->
-    case array:is_array(Arr) of
-        true ->
-            array:to_list(Arr);
-        false ->
-            Err = beamtalk_error:new(type_error, 'Subprocess', Selector),
-            beamtalk_error:raise(Err)
-    end;
-bt_array_to_list(List, _Selector) when is_list(List) ->
-    List;
-bt_array_to_list(_Other, Selector) ->
-    Err = beamtalk_error:new(type_error, 'Subprocess', Selector),
-    beamtalk_error:raise(Err).
+bt_array_to_list(Args, Selector) ->
+    beamtalk_subprocess_port:bt_array_to_list('Subprocess', Args, Selector).
 
 %% @private Raise type_error if any element of Args is not a binary.
 -spec ensure_binary_args(list(), atom()) -> ok.
 ensure_binary_args(Args, Selector) ->
-    case lists:all(fun erlang:is_binary/1, Args) of
-        true -> ok;
-        false -> beamtalk_error:raise(beamtalk_error:new(type_error, 'Subprocess', Selector))
-    end.
+    beamtalk_subprocess_port:ensure_binary_args('Subprocess', Args, Selector).
 
 %% @private Raise type_error if any key or value in Env is not a binary.
 -spec ensure_binary_env(map(), atom()) -> ok.
 ensure_binary_env(Env, Selector) ->
-    case lists:all(fun({K, V}) -> is_binary(K) andalso is_binary(V) end, maps:to_list(Env)) of
-        true -> ok;
-        false -> beamtalk_error:raise(beamtalk_error:new(type_error, 'Subprocess', Selector))
-    end.
+    beamtalk_subprocess_port:ensure_binary_env('Subprocess', Env, Selector).
 
 %%% ============================================================================
 %%% Public API
@@ -397,8 +377,7 @@ buffer_and_maybe_reply(Channel, Data, State) ->
     WaitKey = {Channel, waiting},
     Buffer = maps:get(BufKey, State),
     Pending = maps:get(PendKey, State, <<>>),
-    Combined = <<Pending/binary, Data/binary>>,
-    {Lines, Remainder} = split_lines(Combined),
+    {Lines, Remainder} = beamtalk_subprocess_port:flush_and_collect(Pending, Data),
     NewBuffer = queue:join(Buffer, queue:from_list(Lines)),
     case maps:get(WaitKey, State, undefined) of
         undefined ->
@@ -417,20 +396,6 @@ buffer_and_maybe_reply(Channel, Data, State) ->
                     %% Data arrived but no complete lines yet — keep waiting
                     {noreply, State#{BufKey => NewBuffer, PendKey => Remainder}}
             end
-    end.
-
-%% @private Split binary data on newlines.
-%% Returns {CompleteLines, PartialRemainder}.
--spec split_lines(binary()) -> {[binary()], binary()}.
-split_lines(Data) ->
-    case binary:split(Data, <<"\n">>, [global]) of
-        [Remainder] ->
-            %% No newlines — entire data is a partial line
-            {[], Remainder};
-        Parts ->
-            %% Last element is the remainder after the last newline (may be <<>>)
-            {Lines, [Remainder]} = lists:split(length(Parts) - 1, Parts),
-            {Lines, Remainder}
     end.
 
 %% @private Flush any partial line from the pending buffer into the line queue.
