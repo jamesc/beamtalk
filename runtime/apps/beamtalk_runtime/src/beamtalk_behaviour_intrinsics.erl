@@ -528,7 +528,7 @@ classReload(Self) ->
         SourcePath ->
             SourcePathStr = binary_to_list(SourcePath),
             try erlang:apply(beamtalk_repl_eval, reload_class_file, [SourcePathStr, ClassName]) of
-                ok ->
+                {ok, _Classes} ->
                     Self;
                 {error, {class_not_found, _, Path, Defined}} ->
                     Error0 = beamtalk_error:new(reload_failed, ClassName),

@@ -118,7 +118,7 @@ wsClasses includes: Counter
 
 // Load using native Workspace load: message send
 Workspace load: "tests/e2e/fixtures/reload_counter.bt"
-// => nil
+// => ["ReloadCounter"]
 
 // After loading, the class is available and has a sourceFile
 ReloadCounter sourceFile

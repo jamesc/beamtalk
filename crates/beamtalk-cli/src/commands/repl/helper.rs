@@ -84,7 +84,15 @@ impl ReplHelper {
     /// `session_id` is the ID of the main REPL session whose variable bindings
     /// should be used for context-aware completions.
     pub(crate) fn new(host: &str, port: u16, cookie: &str, session_id: Option<&str>) -> Self {
-        let client = ProtocolClient::connect(host, port, cookie, Some(COMPLETION_TIMEOUT)).ok();
+        let client = ProtocolClient::connect(host, port, cookie, Some(COMPLETION_TIMEOUT))
+            .ok()
+            .map(|mut c| {
+                // Suppress transcript printing: the completion client receives the same
+                // transcript push messages as the main REPL connection (both subscribe on
+                // connect), but must not re-print them when reading completion responses.
+                c.set_print_transcript(false);
+                c
+            });
         Self {
             completion_client: RefCell::new(client),
             host: host.to_string(),
@@ -118,7 +126,11 @@ impl ReplHelper {
                 &self.cookie,
                 Some(COMPLETION_TIMEOUT),
             )
-            .ok();
+            .ok()
+            .map(|mut c| {
+                c.set_print_transcript(false);
+                c
+            });
         }
 
         let Some(client) = client_ref.as_mut() else {
@@ -144,6 +156,48 @@ impl ReplHelper {
             Vec::new()
         }
     }
+}
+
+/// REPL commands whose argument is a class name or Beamtalk expression.
+///
+/// When the user types one of these followed by a partial argument, we strip the
+/// command prefix and pass only the argument to the backend completer so it can
+/// perform the same receiver-aware completion it does for bare expressions.
+const CLASS_EXPR_COMMANDS: &[&str] = &[
+    ":help ",
+    ":h ",
+    ":? ",
+    ":test ",
+    ":t ",
+    ":show-codegen ",
+    ":sc ",
+];
+
+/// If `line` starts with a REPL class/expression command, return the byte offset
+/// where the argument begins so the caller can strip the prefix.
+fn parse_class_expr_command_prefix(line: &str) -> Option<usize> {
+    CLASS_EXPR_COMMANDS
+        .iter()
+        .find_map(|prefix| line.strip_prefix(prefix).map(|_| prefix.len()))
+}
+
+/// Detect if `line` is `:reload`/`:r` followed by a class-name argument
+/// (i.e. the first non-whitespace character after the command is uppercase).
+///
+/// When true, we do class-name completion rather than file-path completion.
+/// `:reload src/counter.bt` (arg starts lowercase / `/`) is left for
+/// `parse_load_prefix` to handle as a file path.
+fn parse_reload_class_prefix(line: &str) -> Option<usize> {
+    for prefix in &[":reload ", ":r "] {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            let ws_len = rest.len() - rest.trim_start().len();
+            let trimmed = &rest[ws_len..];
+            if trimmed.starts_with(|c: char| c.is_ascii_uppercase()) {
+                return Some(prefix.len() + ws_len);
+            }
+        }
+    }
+    None
 }
 
 /// Detect if the line-so-far is a `:load`/`:l`/`:reload`/`:r` command and extract the path.
@@ -254,7 +308,34 @@ impl Completer for ReplHelper {
             return Ok((0, candidates));
         }
 
-        // File path completion for :load/:l/:reload/:r commands
+        // Class/expression completion for commands that take a class name or Beamtalk
+        // expression argument: :h, :help, :?, :test, :t, :sc, :show-codegen.
+        // Strip the command prefix and query the backend with only the argument so
+        // it can perform the same receiver-aware completion as for bare expressions.
+        let class_expr_arg_start = parse_class_expr_command_prefix(line_to_pos)
+            .or_else(|| parse_reload_class_prefix(line_to_pos));
+
+        if let Some(arg_start) = class_expr_arg_start {
+            let arg = &line_to_pos[arg_start..];
+            let completions = self.backend_complete(arg, arg.len());
+            // Find the word boundary within the argument portion.
+            let arg_word_start = arg
+                .char_indices()
+                .rev()
+                .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '_' && c != ':')
+                .map_or(0, |(i, c)| i + c.len_utf8());
+            let candidates: Vec<Pair> = completions
+                .into_iter()
+                .map(|c| Pair {
+                    display: c.clone(),
+                    replacement: c,
+                })
+                .collect();
+            return Ok((arg_start + arg_word_start, candidates));
+        }
+
+        // File path completion for :load/:l/:reload/:r commands (file-path arguments).
+        // Note: :reload with an uppercase class-name arg is handled above.
         if let Some((quoted, partial, path_start)) = parse_load_prefix(line_to_pos) {
             let candidates = complete_path(partial, quoted);
             return Ok((path_start, candidates));
@@ -794,5 +875,82 @@ mod tests {
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted, "completions should be sorted alphabetically");
+    }
+
+    // === parse_class_expr_command_prefix tests ===
+
+    #[test]
+    fn test_class_expr_prefix_help_short() {
+        assert_eq!(parse_class_expr_command_prefix(":h Counter"), Some(3));
+    }
+
+    #[test]
+    fn test_class_expr_prefix_help_long() {
+        assert_eq!(parse_class_expr_command_prefix(":help Counter"), Some(6));
+    }
+
+    #[test]
+    fn test_class_expr_prefix_question_mark() {
+        assert_eq!(parse_class_expr_command_prefix(":? Counter"), Some(3));
+    }
+
+    #[test]
+    fn test_class_expr_prefix_test() {
+        assert_eq!(parse_class_expr_command_prefix(":test Coun"), Some(6));
+        assert_eq!(parse_class_expr_command_prefix(":t Coun"), Some(3));
+    }
+
+    #[test]
+    fn test_class_expr_prefix_show_codegen_short() {
+        assert_eq!(parse_class_expr_command_prefix(":sc Counter"), Some(4));
+    }
+
+    #[test]
+    fn test_class_expr_prefix_show_codegen_long() {
+        assert_eq!(
+            parse_class_expr_command_prefix(":show-codegen Counter"),
+            Some(14)
+        );
+    }
+
+    #[test]
+    fn test_class_expr_prefix_no_match_for_load() {
+        assert_eq!(parse_class_expr_command_prefix(":load foo.bt"), None);
+        assert_eq!(parse_class_expr_command_prefix(":reload Counter"), None);
+        assert_eq!(parse_class_expr_command_prefix("Counter spawn"), None);
+    }
+
+    // === parse_reload_class_prefix tests ===
+
+    #[test]
+    fn test_reload_class_prefix_uppercase_arg() {
+        assert_eq!(parse_reload_class_prefix(":reload Counter"), Some(8));
+        assert_eq!(parse_reload_class_prefix(":r Counter"), Some(3));
+    }
+
+    #[test]
+    fn test_reload_class_prefix_partial_uppercase() {
+        assert_eq!(parse_reload_class_prefix(":reload Coun"), Some(8));
+    }
+
+    #[test]
+    fn test_reload_class_prefix_extra_spaces() {
+        // Multiple spaces after command: offset skips all whitespace
+        assert_eq!(parse_reload_class_prefix(":reload  Counter"), Some(9));
+        assert_eq!(parse_reload_class_prefix(":r  Counter"), Some(4));
+    }
+
+    #[test]
+    fn test_reload_class_no_match_file_path() {
+        // File paths start lowercase or with / . ~ — should not match
+        assert_eq!(parse_reload_class_prefix(":reload src/counter.bt"), None);
+        assert_eq!(parse_reload_class_prefix(":reload ./counter.bt"), None);
+        assert_eq!(parse_reload_class_prefix(":r src/foo.bt"), None);
+    }
+
+    #[test]
+    fn test_reload_class_no_match_non_reload_command() {
+        assert_eq!(parse_reload_class_prefix(":load Counter"), None);
+        assert_eq!(parse_reload_class_prefix("Counter reload"), None);
     }
 }

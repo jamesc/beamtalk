@@ -127,11 +127,11 @@ handle_load_source(SourceBin, Label, State) ->
     beamtalk_repl_loader:handle_load_source(SourceBin, Label, State).
 
 %% @doc Compile and load a source file without REPL session state (BT-845).
--spec reload_class_file(string()) -> ok | {error, term()}.
+-spec reload_class_file(string()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path) ->
     beamtalk_repl_loader:reload_class_file(Path).
 
--spec reload_class_file(string(), atom()) -> ok | {error, term()}.
+-spec reload_class_file(string(), atom()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path, ExpectedClassName) ->
     beamtalk_repl_loader:reload_class_file(Path, ExpectedClassName).
 

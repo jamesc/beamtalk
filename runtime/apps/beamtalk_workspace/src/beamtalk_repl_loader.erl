@@ -186,12 +186,12 @@ trigger_hot_reload(ModuleName, Classes) ->
 %%
 %% Called from beamtalk_behaviour_intrinsics:classReload/1 via erlang:apply/3
 %% to avoid a compile-time dependency from beamtalk_runtime to beamtalk_workspace.
--spec reload_class_file(string()) -> ok | {error, term()}.
+-spec reload_class_file(string()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path) ->
     reload_class_file_impl(Path, undefined).
 
 %% BT-868: ExpectedClassName (atom) is verified against the compiled class list.
--spec reload_class_file(string(), atom()) -> ok | {error, term()}.
+-spec reload_class_file(string(), atom()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path, ExpectedClassName) ->
     reload_class_file_impl(Path, ExpectedClassName).
 
@@ -401,7 +401,7 @@ fetch_instance_vars(ClassName) ->
     end.
 
 %% Reload a class file without REPL session state.
--spec reload_class_file_impl(string(), atom() | undefined) -> ok | {error, term()}.
+-spec reload_class_file_impl(string(), atom() | undefined) -> {ok, [map()]} | {error, term()}.
 reload_class_file_impl(Path, ExpectedClassName) ->
     case filelib:is_file(Path) of
         false ->
@@ -420,7 +420,7 @@ reload_class_file_impl(Path, ExpectedClassName) ->
 %% Compile and load a file for stateless reload.
 -spec reload_compile_and_load(
     string(), string(), binary() | undefined, atom() | undefined
-) -> ok | {error, term()}.
+) -> {ok, [map()]} | {error, term()}.
 reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
     StdlibMode = is_stdlib_path(Path),
     case beamtalk_repl_compiler:compile_file(Source, Path, StdlibMode, ModuleNameOverride) of
@@ -430,7 +430,7 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
                     case code:load_binary(ModuleName, Path, Binary) of
                         {module, ModuleName} ->
                             activate_module(ModuleName, ClassNames, Path),
-                            ok;
+                            {ok, ClassNames};
                         {error, Reason} ->
                             {error, {load_error, Reason}}
                     end;
