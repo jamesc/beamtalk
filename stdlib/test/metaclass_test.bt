@@ -82,6 +82,31 @@ TestCase subclass: MetaclassTest
   // BT-803: Metaclass new raises error
   testNewRaisesError => self should: [Metaclass new] raise: #user_error
 
+  // BT-1169: allMethods includes class-side 'new' inherited from Actor
+  testAllMethodsIncludesNew =>
+    methods := Counter class allMethods
+    self assert: (methods includes: #new)
+
+  // BT-1169: allMethods includes Behaviour protocol 'reload'
+  testAllMethodsIncludesReload =>
+    methods := Counter class allMethods
+    self assert: (methods includes: #reload)
+
+  // BT-1169: allMethods includes Behaviour protocol 'superclass'
+  testAllMethodsIncludesSuperclass =>
+    methods := Counter class allMethods
+    self assert: (methods includes: #superclass)
+
+  // BT-1169: allMethods is non-empty
+  testAllMethodsNonEmpty =>
+    methods := Counter class allMethods
+    self deny: methods isEmpty
+
+  // BT-1169: localClassMethods unchanged — Counter has no local class-side methods
+  testLocalClassMethodsUnchanged =>
+    localMethods := Counter class localClassMethods
+    self deny: (localMethods includes: #reload)
+
   // Class identity tests for domain classes
   testClassIdentityForDomainClasses =>
     // Random class isMeta returns true (BT-802 / ADR 0036)

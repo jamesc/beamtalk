@@ -985,6 +985,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![] },
                 MethodInfo { selector: "superclass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: None, param_types: vec![] },
+                MethodInfo { selector: "allMethods".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: Some("List".into()), param_types: vec![] },
                 MethodInfo { selector: "classMethods".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: Some("List".into()), param_types: vec![] },
                 MethodInfo { selector: "localClassMethods".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: Some("List".into()), param_types: vec![] },
                 MethodInfo { selector: "classIncludesSelector:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Metaclass".into(), is_sealed: true, return_type: Some("Boolean".into()), param_types: vec![None] },

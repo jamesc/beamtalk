@@ -98,6 +98,23 @@ sealed Class subclass: Metaclass
   /// ```
   sealed superclass => @primitive "metaclassSuperclass"
 
+  // --- Method introspection ---
+
+  /// Return all selectors callable on the receiver (class-side + Behaviour protocol).
+  ///
+  /// Combines user-defined class-side methods (via `classMethods`) with the
+  /// Behaviour protocol inherited through the Class hierarchy (`reload`,
+  /// `superclass`, `allMethods`, `subclasses`, etc.). Result is deduplicated
+  /// and sorted.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter class allMethods includes: #new        // => true
+  /// Counter class allMethods includes: #reload     // => true
+  /// Counter class allMethods includes: #superclass // => true
+  /// ```
+  sealed allMethods -> List => @primitive "metaclassAllMethods"
+
   // --- Class-side method introspection ---
 
   /// Return all class-side selectors of the described class (includes inherited).
