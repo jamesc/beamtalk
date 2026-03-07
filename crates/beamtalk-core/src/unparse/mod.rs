@@ -656,7 +656,7 @@ fn unparse_literal(lit: &Literal) -> Document<'static> {
         Literal::String(s) => {
             // The lexer unescapes doubled delimiters ("" → ") in the AST.
             // We re-escape any bare " using the Beamtalk convention: double it ("").
-            docvec!["\"", Document::String(escape_string_quotes(s)), "\""]
+            docvec!["\"", Document::String(escape_string_literal(s)), "\""]
         }
         Literal::Symbol(s) => {
             // Symbols: #name or #'name with spaces'
@@ -700,11 +700,11 @@ fn format_float(f: f64) -> String {
     }
 }
 
-/// Escape characters that would be misinterpreted when re-lexed as a string literal.
+/// Escape string contents for output as a Beamtalk string literal.
 ///
 /// - `"` is doubled (`""`) — the Beamtalk doubled-delimiter convention.
 /// - `{` is escaped as `\{` — otherwise it would start interpolation.
-fn escape_string_quotes(s: &str) -> String {
+fn escape_string_literal(s: &str) -> String {
     let mut result = String::with_capacity(s.len() + 4);
     for c in s.chars() {
         match c {
@@ -1212,7 +1212,7 @@ fn unparse_string_interpolation(segments: &[StringSegment]) -> Document<'static>
         match seg {
             StringSegment::Literal(s) => {
                 // Literal segments may contain bare " from doubled-delimiter unescaping.
-                inner.push(Document::String(escape_string_quotes(s)));
+                inner.push(Document::String(escape_string_literal(s)));
             }
             StringSegment::Interpolation(expr) => {
                 inner.push(Document::Str("{"));

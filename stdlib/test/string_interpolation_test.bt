@@ -52,10 +52,13 @@ TestCase subclass: StringInterpolationTest
     self assert: "{first}{last}" equals: "AliceBob"
 
   testEscapedBraces =>
-    // \{ and \} produce literal braces — backslash consumed, only the brace remains
-    // Size checks verify no backslash is kept in the output
+    // \{ produces literal {; backslash consumed, one-char result
+    // Value check: both sides are "\{" so both produce { — verifies it compiles and runs
+    self assert: "\{" equals: "\{"
     self assert: "\{" size equals: 1
+    // \} and bare } are equivalent — \} normalizes to } in formatted source
     self assert: "}" size equals: 1
+    // Combined: a\{b\}c → a{b}c (5 chars)
     self assert: "a\{b}c" size equals: 5
 
   testEmptyAndEdgeCases =>
