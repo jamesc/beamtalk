@@ -64,16 +64,18 @@ impl MethodValidatorRegistry {
     }
 
     fn register_builtins(&mut self) {
-        let reflection = Box::new(ReflectionMethodValidator);
+        // Allow variable (identifier) arguments for dynamic dispatch use cases.
+        // classNamed: retains strict literal-only enforcement.
+        let reflection = Box::new(ReflectionMethodValidator { allow_identifier: true });
         self.validators.insert("respondsTo:", reflection);
 
-        let reflection = Box::new(ReflectionMethodValidator);
+        let reflection = Box::new(ReflectionMethodValidator { allow_identifier: true });
         self.validators.insert("fieldAt:", reflection);
 
-        let reflection = Box::new(ReflectionMethodValidator);
+        let reflection = Box::new(ReflectionMethodValidator { allow_identifier: true });
         self.validators.insert("fieldAt:put:", reflection);
 
-        let reflection = Box::new(ReflectionMethodValidator);
+        let reflection = Box::new(ReflectionMethodValidator { allow_identifier: false });
         self.validators.insert("classNamed:", reflection);
 
         // Block arity validators (1-parameter block)
@@ -143,7 +145,13 @@ impl MethodValidatorRegistry {
 /// Methods like `respondsTo:`, `fieldAt:`, and `classNamed:` expect
 /// symbol literals (e.g., `#increment`). When users pass bare identifiers,
 /// this validator produces a helpful diagnostic suggesting `#symbol` syntax.
-struct ReflectionMethodValidator;
+///
+/// When `allow_identifier` is `true`, variable (identifier) arguments are
+/// accepted — the runtime handles symbol values correctly. Only `classNamed:`
+/// retains strict literal-only enforcement (`allow_identifier: false`).
+struct ReflectionMethodValidator {
+    allow_identifier: bool,
+}
 
 impl MethodValidator for ReflectionMethodValidator {
     fn validate(
@@ -164,7 +172,10 @@ impl MethodValidator for ReflectionMethodValidator {
             // Symbol literal is correct usage
             Expression::Literal(Literal::Symbol(_), _) => vec![],
 
-            // Bare identifier - most common mistake
+            // Bare identifier — allowed when the validator permits dynamic use
+            Expression::Identifier(_) if self.allow_identifier => vec![],
+
+            // Bare identifier - most common mistake (strict mode only)
             Expression::Identifier(id) => {
                 let message = format!(
                     "{selector_name} expects a symbol literal, not an identifier\n\
@@ -654,7 +665,7 @@ mod tests {
 
     #[test]
     fn test_symbol_literal_is_valid() {
-        let validator = ReflectionMethodValidator;
+        let validator = ReflectionMethodValidator { allow_identifier: true };
         let args = vec![Expression::Literal(
             Literal::Symbol("increment".into()),
             test_span(),
@@ -665,30 +676,37 @@ mod tests {
     }
 
     #[test]
-    fn test_identifier_produces_error() {
-        let validator = ReflectionMethodValidator;
+    fn test_identifier_allowed_for_responds_to() {
+        // respondsTo: allows identifier args (dynamic dispatch use case)
+        let validator = ReflectionMethodValidator { allow_identifier: true };
+        let args = vec![Expression::Identifier(Identifier::new(
+            "sel",
+            Span::new(15, 18),
+        ))];
+        let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_identifier_produces_error_for_class_named() {
+        // classNamed: is strict: identifiers are rejected
+        let validator = ReflectionMethodValidator { allow_identifier: false };
         let args = vec![Expression::Identifier(Identifier::new(
             "increment",
             Span::new(15, 24),
         ))];
 
-        let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());
+        let diagnostics = validator.validate(&class_named_selector(), &args, None, test_span());
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("expects a symbol literal"));
-        assert!(
-            diagnostics[0]
-                .message
-                .contains("checks if an object understands a message")
-        );
         assert_eq!(diagnostics[0].span, Span::new(15, 24));
-        // Fix suggestion is in the hint field only (not duplicated in message)
         let hint = diagnostics[0].hint.as_ref().unwrap();
         assert!(hint.contains("#increment"));
     }
 
     #[test]
     fn test_class_reference_produces_error() {
-        let validator = ReflectionMethodValidator;
+        let validator = ReflectionMethodValidator { allow_identifier: false };
         let args = vec![Expression::ClassReference {
             name: Identifier::new("Counter", Span::new(12, 19)),
             span: Span::new(12, 19),
@@ -707,7 +725,7 @@ mod tests {
 
     #[test]
     fn test_integer_literal_produces_error() {
-        let validator = ReflectionMethodValidator;
+        let validator = ReflectionMethodValidator { allow_identifier: true };
         let args = vec![Expression::Literal(Literal::Integer(42), test_span())];
 
         let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());
@@ -717,7 +735,7 @@ mod tests {
 
     #[test]
     fn test_empty_arguments_no_error() {
-        let validator = ReflectionMethodValidator;
+        let validator = ReflectionMethodValidator { allow_identifier: true };
         let diagnostics = validator.validate(&responds_to_selector(), &[], None, test_span());
         assert!(diagnostics.is_empty());
     }
@@ -748,13 +766,14 @@ mod tests {
 
     #[test]
     fn test_hint_contains_fix_suggestion() {
-        let validator = ReflectionMethodValidator;
+        // Strict mode (classNamed:): identifier should produce a hint
+        let validator = ReflectionMethodValidator { allow_identifier: false };
         let args = vec![Expression::Identifier(Identifier::new(
             "increment",
             test_span(),
         ))];
 
-        let diagnostics = validator.validate(&responds_to_selector(), &args, None, test_span());
+        let diagnostics = validator.validate(&class_named_selector(), &args, None, test_span());
         assert_eq!(diagnostics.len(), 1);
         let hint = diagnostics[0].hint.as_ref().unwrap();
         assert!(hint.contains("#increment"));
@@ -794,7 +813,7 @@ mod tests {
 
     #[test]
     fn test_inst_var_at_put_symbol_is_valid() {
-        let validator = ReflectionMethodValidator;
+        let validator = ReflectionMethodValidator { allow_identifier: true };
         let selector = MessageSelector::Keyword(vec![
             KeywordPart::new("fieldAt:", test_span()),
             KeywordPart::new("put:", test_span()),
@@ -808,8 +827,9 @@ mod tests {
     }
 
     #[test]
-    fn test_inst_var_at_put_identifier_produces_error() {
-        let validator = ReflectionMethodValidator;
+    fn test_inst_var_at_put_identifier_allowed() {
+        // fieldAt:put: now allows identifier (variable) arguments
+        let validator = ReflectionMethodValidator { allow_identifier: true };
         let selector = MessageSelector::Keyword(vec![
             KeywordPart::new("fieldAt:", test_span()),
             KeywordPart::new("put:", test_span()),
@@ -819,10 +839,21 @@ mod tests {
             Expression::Literal(Literal::Integer(99), test_span()),
         ];
         let diagnostics = validator.validate(&selector, &args, None, test_span());
-        assert_eq!(diagnostics.len(), 1);
-        assert!(diagnostics[0].message.contains("expects a symbol literal"));
-        let hint = diagnostics[0].hint.as_ref().unwrap();
-        assert!(hint.contains("#x"));
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_field_at_identifier_allowed() {
+        // fieldAt: now allows identifier (variable) arguments
+        let validator = ReflectionMethodValidator { allow_identifier: true };
+        let selector =
+            MessageSelector::Keyword(vec![KeywordPart::new("fieldAt:", test_span())]);
+        let args = vec![Expression::Identifier(Identifier::new(
+            "name",
+            Span::new(10, 14),
+        ))];
+        let diagnostics = validator.validate(&selector, &args, None, test_span());
+        assert!(diagnostics.is_empty());
     }
 
     // ── Primitive instantiation validator tests ──────────────────────────
