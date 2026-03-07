@@ -18,7 +18,8 @@
 //!
 //! The `ReflectionMethodValidator` checks that reflection methods like
 //! `respondsTo:`, `fieldAt:`, `fieldAt:put:`, and `classNamed:` receive
-//! symbol literal arguments rather than bare identifiers.
+//! symbol arguments. `classNamed:` requires a symbol literal; the others
+//! also accept identifier (variable) arguments for dynamic dispatch.
 
 use crate::ast::{Expression, Literal, MessageSelector};
 use crate::semantic_analysis::type_checker::InferredType;
