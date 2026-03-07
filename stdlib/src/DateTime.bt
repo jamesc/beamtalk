@@ -28,7 +28,8 @@ sealed Value subclass: DateTime
   /// ```beamtalk
   /// DateTime now                                   // => a DateTime(...)
   /// ```
-  class sealed now -> DateTime => @primitive "now"
+  class sealed now -> DateTime =>
+    (Erlang beamtalk_datetime) now
 
   /// Monotonic clock value in nanoseconds (for measuring intervals).
   /// Returns an Integer, not a DateTime.
@@ -39,7 +40,8 @@ sealed Value subclass: DateTime
   /// // ... do work ...
   /// elapsed := DateTime monotonicNow - start       // nanoseconds
   /// ```
-  class sealed monotonicNow -> Integer => @primitive "monotonicNow"
+  class sealed monotonicNow -> Integer =>
+    (Erlang beamtalk_datetime) monotonicNow
 
   /// Construct from year, month, day (time defaults to 00:00:00).
   ///
@@ -49,7 +51,7 @@ sealed Value subclass: DateTime
   /// // => a DateTime(2026-02-18T00:00:00Z)
   /// ```
   class sealed year: y :: Integer month: m :: Integer day: d :: Integer -> DateTime =>
-    @primitive "year:month:day:"
+    (Erlang beamtalk_datetime) year: y month: m day: d
 
   /// Construct from year, month, day, hour, minute, second.
   ///
@@ -59,7 +61,7 @@ sealed Value subclass: DateTime
   /// // => a DateTime(2026-02-18T10:30:00Z)
   /// ```
   class sealed year: y :: Integer month: m :: Integer day: d :: Integer hour: h :: Integer minute: mi :: Integer second: s :: Integer -> DateTime =>
-    @primitive "year:month:day:hour:minute:second:"
+    (Erlang beamtalk_datetime) year: y month: m day: d hour: h minute: mi second: s
 
   /// Construct from Unix epoch timestamp (seconds).
   ///
@@ -69,7 +71,7 @@ sealed Value subclass: DateTime
   /// // => a DateTime(1970-01-01T00:00:00Z)
   /// ```
   class sealed fromTimestamp: ts :: Integer -> DateTime =>
-    @primitive "fromTimestamp:"
+    (Erlang beamtalk_datetime) fromTimestamp: ts
 
   /// Parse an ISO 8601 string.
   ///
@@ -78,32 +80,33 @@ sealed Value subclass: DateTime
   /// DateTime fromString: '2026-02-18T10:30:00Z'
   /// // => a DateTime(2026-02-18T10:30:00Z)
   /// ```
-  class sealed fromString: str :: String -> DateTime => @primitive "fromString:"
+  class sealed fromString: str :: String -> DateTime =>
+    (Erlang beamtalk_datetime) fromString: str
 
   // ===== Instance Methods — Accessors =====
 
   /// Year component.
-  year -> Integer => @primitive "year"
+  year -> Integer => (Erlang beamtalk_datetime) year: self
 
   /// Month component (1-12).
-  month -> Integer => @primitive "month"
+  month -> Integer => (Erlang beamtalk_datetime) month: self
 
   /// Day component (1-31).
-  day -> Integer => @primitive "day"
+  day -> Integer => (Erlang beamtalk_datetime) day: self
 
   /// Hour component (0-23).
-  hour -> Integer => @primitive "hour"
+  hour -> Integer => (Erlang beamtalk_datetime) hour: self
 
   /// Minute component (0-59).
-  minute -> Integer => @primitive "minute"
+  minute -> Integer => (Erlang beamtalk_datetime) minute: self
 
   /// Second component (0-59).
-  second -> Integer => @primitive "second"
+  second -> Integer => (Erlang beamtalk_datetime) second: self
 
   // ===== Instance Methods — Conversion =====
 
   /// Convert to Unix epoch timestamp (seconds).
-  asTimestamp -> Integer => @primitive "asTimestamp"
+  asTimestamp -> Integer => (Erlang beamtalk_datetime) asTimestamp: self
 
   /// Format as ISO 8601 string.
   ///
@@ -112,10 +115,10 @@ sealed Value subclass: DateTime
   /// (DateTime year: 2026 month: 2 day: 18) asString
   /// // => "2026-02-18T00:00:00Z"
   /// ```
-  asString -> String => @primitive "asString"
+  asString -> String => (Erlang beamtalk_datetime) asString: self
 
   /// Human-readable representation.
-  printString -> String => @primitive "printString"
+  printString -> String => (Erlang beamtalk_datetime) printString: self
 
   // ===== Instance Methods — Arithmetic =====
 
@@ -126,7 +129,8 @@ sealed Value subclass: DateTime
   /// (DateTime year: 2026 month: 1 day: 1) addSeconds: 3600
   /// // => a DateTime(2026-01-01T01:00:00Z)
   /// ```
-  addSeconds: secs :: Integer -> DateTime => @primitive "addSeconds:"
+  addSeconds: secs :: Integer -> DateTime =>
+    (Erlang beamtalk_datetime) addSeconds: self secs: secs
 
   /// Add days, return new DateTime.
   ///
@@ -135,7 +139,8 @@ sealed Value subclass: DateTime
   /// (DateTime year: 2026 month: 1 day: 1) addDays: 7
   /// // => a DateTime(2026-01-08T00:00:00Z)
   /// ```
-  addDays: days :: Integer -> DateTime => @primitive "addDays:"
+  addDays: days :: Integer -> DateTime =>
+    (Erlang beamtalk_datetime) addDays: self days: days
 
   /// Difference in seconds between this and another DateTime.
   ///
@@ -145,7 +150,8 @@ sealed Value subclass: DateTime
   /// b := DateTime year: 2026 month: 1 day: 1
   /// a diffSeconds: b                               // => 86400
   /// ```
-  diffSeconds: other :: DateTime -> Integer => @primitive "diffSeconds:"
+  diffSeconds: other :: DateTime -> Integer =>
+    (Erlang beamtalk_datetime) diffSeconds: self with: other
 
   // ===== Instance Methods — Comparison =====
 
@@ -155,7 +161,8 @@ sealed Value subclass: DateTime
   /// ```beamtalk
   /// (DateTime year: 2025 month: 1 day: 1) < (DateTime year: 2026 month: 1 day: 1)  // => true
   /// ```
-  < other :: DateTime -> Boolean => @primitive "<"
+  < other :: DateTime -> Boolean =>
+    (Erlang beamtalk_datetime) lt: self with: other
 
   /// True if this DateTime is later than `other`.
   ///
@@ -163,7 +170,8 @@ sealed Value subclass: DateTime
   /// ```beamtalk
   /// (DateTime year: 2026 month: 1 day: 1) > (DateTime year: 2025 month: 1 day: 1)  // => true
   /// ```
-  > other :: DateTime -> Boolean => @primitive ">"
+  > other :: DateTime -> Boolean =>
+    (Erlang beamtalk_datetime) gt: self with: other
 
   /// True if this DateTime is earlier than or equal to `other`.
   ///
@@ -171,7 +179,8 @@ sealed Value subclass: DateTime
   /// ```beamtalk
   /// (DateTime year: 2026 month: 1 day: 1) <= (DateTime year: 2026 month: 1 day: 1)  // => true
   /// ```
-  <= other :: DateTime -> Boolean => @primitive "<="
+  <= other :: DateTime -> Boolean =>
+    (Erlang beamtalk_datetime) lte: self with: other
 
   /// True if this DateTime is later than or equal to `other`.
   ///
@@ -179,7 +188,8 @@ sealed Value subclass: DateTime
   /// ```beamtalk
   /// (DateTime year: 2026 month: 1 day: 1) >= (DateTime year: 2026 month: 1 day: 1)  // => true
   /// ```
-  >= other :: DateTime -> Boolean => @primitive ">="
+  >= other :: DateTime -> Boolean =>
+    (Erlang beamtalk_datetime) gte: self with: other
 
   /// True if this DateTime represents the same instant as `other`.
   ///
@@ -187,7 +197,8 @@ sealed Value subclass: DateTime
   /// ```beamtalk
   /// dt =:= dt    // => true
   /// ```
-  =:= other :: DateTime -> Boolean => @primitive "=:="
+  =:= other :: DateTime -> Boolean =>
+    (Erlang beamtalk_datetime) eql: self with: other
 
   /// True if this DateTime does not represent the same instant as `other`.
   ///
@@ -195,4 +206,5 @@ sealed Value subclass: DateTime
   /// ```beamtalk
   /// (DateTime year: 2026 month: 1 day: 1) /= (DateTime year: 2026 month: 1 day: 2)  // => true
   /// ```
-  /= other :: DateTime -> Boolean => @primitive "/="
+  /= other :: DateTime -> Boolean =>
+    (Erlang beamtalk_datetime) neq: self with: other

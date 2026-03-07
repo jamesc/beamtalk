@@ -27,7 +27,6 @@ mod list;
 mod metaclass;
 mod reflection;
 mod string;
-mod system;
 mod value_types;
 
 use super::document::Document;
@@ -70,7 +69,6 @@ pub fn generate_primitive_bif(
         "TestCase" => value_types::generate_test_case_bif(selector, params),
         "TestRunner" => value_types::generate_test_runner_bif(selector, params),
         "TestResult" => value_types::generate_test_result_bif(selector, params),
-        "DateTime" => system::generate_datetime_bif(selector, params),
         "Collection" => collection::generate_collection_bif(selector, params),
         "Behaviour" => behaviour::generate_behaviour_bif(selector, params),
         "Class" => behaviour::generate_class_bif(selector, params),
