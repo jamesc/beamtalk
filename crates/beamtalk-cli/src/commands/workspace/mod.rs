@@ -1035,10 +1035,10 @@ mod tests {
     /// 60 s, no extra code paths), and wraps it in a `NodeGuard` for automatic
     /// cleanup. Returns all three for use in the test body.
     ///
-    /// Retries up to 3 times with exponential backoff to handle transient WebSocket
+    /// Retries up to 3 times with linear backoff (1 s, 2 s) to handle transient WebSocket
     /// health check timeouts on slow CI runners (BT-1175). Between retries, any
-    /// partially-started node is killed and epmd deregistration is awaited so the
-    /// next attempt gets a clean slate.
+    /// partially-started node is killed (best-effort) and epmd deregistration is awaited
+    /// (best-effort) so the next attempt gets a clean slate.
     fn start_test_node(prefix: &str) -> (TestWorkspace, NodeInfo, NodeGuard) {
         let tw = TestWorkspace::new(prefix);
         let project_path = std::env::current_dir().unwrap();
@@ -1047,21 +1047,33 @@ mod tests {
         // Derive the node name the same way start_detached_node does, for epmd cleanup.
         let node_name = format!("beamtalk_workspace_{}@localhost", tw.id);
 
+        // Best-effort cleanup of a partially-started node (passed TCP check but timed out
+        // on WS health check, so the BEAM process is still running). Errors are logged and
+        // ignored — cleanup is advisory; the next start_detached_node call cleans up stale
+        // files via remove_stale_runtime_files.
+        let cleanup_partial_node = |attempt: usize| {
+            let pid_path = workspace_dir(&tw.id).unwrap().join("pid");
+            if let Ok(contents) = fs::read_to_string(&pid_path) {
+                if let Ok(pid) = contents.trim().parse::<u32>() {
+                    if let Err(e) = force_kill_process(pid) {
+                        eprintln!("start_test_node: best-effort kill of PID {pid} failed: {e}");
+                    }
+                }
+            }
+            if let Err(e) = wait_for_epmd_deregistration(&node_name, 5) {
+                eprintln!(
+                    "start_test_node: best-effort epmd deregistration wait for {node_name} \
+                     failed: {e}"
+                );
+            }
+            // Linear backoff: 1 s, 2 s.
+            std::thread::sleep(std::time::Duration::from_secs(attempt as u64));
+        };
+
         let mut last_err = None;
         for attempt in 0..3_usize {
             if attempt > 0 {
-                // Kill any partially-started node before retrying (the node passed the TCP
-                // check but timed out on the WS health check, so it is still running).
-                let pid_path = workspace_dir(&tw.id).unwrap().join("pid");
-                if let Ok(contents) = fs::read_to_string(&pid_path) {
-                    if let Ok(pid) = contents.trim().parse::<u32>() {
-                        let _ = force_kill_process(pid);
-                    }
-                }
-                // Wait for epmd deregistration so the retry can reuse the same node name.
-                let _ = wait_for_epmd_deregistration(&node_name, 5);
-                // Linear backoff: 1 s, 2 s.
-                std::thread::sleep(std::time::Duration::from_secs(attempt as u64));
+                cleanup_partial_node(attempt);
             }
             match start_detached_node(&tw.id, 0, &paths, &[], false, Some(60), None, None, None) {
                 Ok(node_info) => {
@@ -1074,6 +1086,8 @@ mod tests {
                 }
             }
         }
+        // All attempts exhausted — clean up any node left running by the final attempt.
+        cleanup_partial_node(0);
         panic!("start_test_node failed after 3 attempts: {last_err:?}");
     }
 
