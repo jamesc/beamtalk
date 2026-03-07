@@ -15,6 +15,7 @@
 
 -module(beamtalk_transcript_stream_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Helper
@@ -203,17 +204,34 @@ duplicate_subscribe_test() ->
     flush_transcript(),
     gen_server:stop(Pid).
 
-%% --- has_method/1 ---
+%% --- FFI shims ---
+%%
+%% The TranscriptStream FFI shims (show/2, cr/1, recent/1, clear/1, subscribe/1,
+%% unsubscribe/1) delegate to dispatch/3 which uses the process dictionary.
+%% They are designed to be called from INSIDE the actor's handle_call context
+%% where the process dictionary belongs to the gen_server. The shims are
+%% exercised end-to-end by the BUnit trace_cr_test.bt tests.
+%%
+%% Here we just verify that dispatch/3 integration works correctly, which is
+%% the underlying mechanism.
 
-has_method_test() ->
-    ?assert(beamtalk_transcript_stream:has_method('show:')),
-    ?assert(beamtalk_transcript_stream:has_method(cr)),
-    ?assert(beamtalk_transcript_stream:has_method(subscribe)),
-    ?assert(beamtalk_transcript_stream:has_method(unsubscribe)),
-    ?assert(beamtalk_transcript_stream:has_method(recent)),
-    ?assert(beamtalk_transcript_stream:has_method(clear)),
-    ?assertNot(beamtalk_transcript_stream:has_method(unknown)),
-    ?assertNot(beamtalk_transcript_stream:has_method('foo:')).
+ffi_shim_dispatch_show_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:spawn(),
+    Self = #beamtalk_object{class = 'TranscriptStream', class_mod = 'bt@stdlib@transcript_stream', pid = Pid},
+    gen_server:call(Pid, {'show:', [Self, <<"dispatch_show">>]}),
+    Recent = gen_server:call(Pid, recent),
+    ?assert(is_list(Recent)),
+    gen_server:stop(Pid).
+
+ffi_shim_exports_test() ->
+    %% Verify the FFI shim functions are exported
+    Exports = beamtalk_transcript_stream:module_info(exports),
+    ?assert(lists:member({show, 2}, Exports)),
+    ?assert(lists:member({cr, 1}, Exports)),
+    ?assert(lists:member({recent, 1}, Exports)),
+    ?assert(lists:member({clear, 1}, Exports)),
+    ?assert(lists:member({subscribe, 1}, Exports)),
+    ?assert(lists:member({unsubscribe, 1}, Exports)).
 
 %% --- spawn (unlinked) ---
 

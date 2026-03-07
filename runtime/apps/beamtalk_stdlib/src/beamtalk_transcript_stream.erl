@@ -35,9 +35,11 @@
 
 %% API
 -export([start_link/0, start_link/1, start_link/2, spawn/0, spawn/1]).
--export([has_method/1, class_info/0]).
+-export([class_info/0]).
 -export([ensure_utf8/1]).
 -export([subscribe/1, unsubscribe/1]).
+%% FFI shims for (Erlang beamtalk_transcript_stream) dispatch
+-export([show/2, cr/1, recent/1, clear/1]).
 %% Primitive dispatch — called directly by bt@stdlib@transcript_stream.
 %% Runs inside the compiled actor's gen_server process; state is in the process dictionary.
 -export([dispatch/3]).
@@ -91,16 +93,6 @@ spawn() ->
 spawn(MaxBuffer) ->
     gen_server:start(?MODULE, [MaxBuffer], []).
 
-%% @doc Check if TranscriptStream responds to the given selector.
--spec has_method(atom()) -> boolean().
-has_method('show:') -> true;
-has_method(cr) -> true;
-has_method(subscribe) -> true;
-has_method(unsubscribe) -> true;
-has_method(recent) -> true;
-has_method(clear) -> true;
-has_method(_) -> false.
-
 %% @doc Return class registration metadata for TranscriptStream.
 %%
 %% Used by beamtalk_stdlib to register this singleton's class.
@@ -127,15 +119,47 @@ class_info() ->
 %%% Module-level subscribe/unsubscribe API
 %%% ============================================================================
 
+%%% ============================================================================
+%%% FFI Shims — (Erlang beamtalk_transcript_stream) dispatch
+%%% ============================================================================
+%%
+%% selector_to_function/1 extracts the first keyword segment as the function name.
+%%
+%% TranscriptStream method bodies are called from INSIDE the gen_server's handle_call
+%% (via actor method dispatch). Using gen_server:call/sync_send from within handle_call
+%% would deadlock — instead delegate to dispatch/3 which uses the process dictionary
+%% of the gen_server process, the same model as the legacy @primitive path.
+
+%% `show:value:` → strips to `show`, arity 2
+show(Self, Value) -> dispatch('show:', [Value], Self).
+
+%% `cr:` → strips to `cr`, arity 1
+cr(Self) -> dispatch(cr, [], Self).
+
+%% `recent:` → strips to `recent`, arity 1
+recent(Self) -> dispatch(recent, [], Self).
+
+%% `clear:` → strips to `clear`, arity 1
+clear(Self) -> dispatch(clear, [], Self).
+
+%%% ============================================================================
+%%% Module-level subscribe/unsubscribe API
+%%% ============================================================================
+
 %% @doc Subscribe a process to Transcript push messages.
 %% The subscriber will receive `{transcript_output, Text}' messages.
-%% The Transcript must be a named process (e.g. registered as 'Transcript').
--spec subscribe(pid() | atom()) -> ok.
+%% When called with a #beamtalk_object{} (FFI shim path), subscribes the caller
+%% via actor sync_send. When called with a pid/atom (external API path), casts.
+-spec subscribe(#beamtalk_object{} | pid() | atom()) -> ok.
+subscribe(#beamtalk_object{} = Self) ->
+    dispatch(subscribe, [], Self);
 subscribe(TranscriptRef) ->
     gen_server:cast(TranscriptRef, {subscribe, self()}).
 
 %% @doc Unsubscribe a process from Transcript push messages.
--spec unsubscribe(pid() | atom()) -> ok.
+-spec unsubscribe(#beamtalk_object{} | pid() | atom()) -> ok.
+unsubscribe(#beamtalk_object{} = Self) ->
+    dispatch(unsubscribe, [], Self);
 unsubscribe(TranscriptRef) ->
     gen_server:cast(TranscriptRef, {unsubscribe, self()}).
 
