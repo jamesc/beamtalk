@@ -44,7 +44,7 @@ Object subclass: Value
   /// ValuePoint new              inspect   // => "ValuePoint(x: 0, y: 0)"
   /// ```
   inspect -> String =>
-    parts := self fieldNames collect: [:name |
+    parts := self fieldNames sort collect: [:name |
       name asString ++ ": " ++ (self fieldAt: name) inspect
     ]
     self class name asString ++ "(" ++ (parts join: ", ") ++ ")"

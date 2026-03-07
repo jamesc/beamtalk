@@ -109,12 +109,14 @@ dispatch(inspect, [], Self, State) ->
             {reply, Str, State};
         false ->
             ClassName = class_display_name(Self, State),
-            UserFields = beamtalk_reflection:field_names(State),
+            %% Sort field names for deterministic output (map key order is unstable).
+            UserFields = lists:sort(beamtalk_reflection:field_names(State)),
+            SelfPid = actor_pid(Self),
             FieldStrs = [
                 iolist_to_binary([
                     atom_to_binary(K, utf8),
                     <<": ">>,
-                    beamtalk_primitive:send(maps:get(K, State), inspect, [])
+                    inspect_field(maps:get(K, State), SelfPid)
                 ])
              || K <- UserFields
             ],
@@ -231,6 +233,23 @@ class_name_for_responds_to(Self, State) when is_record(Self, beamtalk_object) ->
     end;
 class_name_for_responds_to(_Self, State) ->
     beamtalk_tagged_map:class_of(State).
+
+%% @private
+%% @doc Extract the pid from Self if it is an actor reference, else undefined.
+-spec actor_pid(term()) -> pid() | undefined.
+actor_pid(#beamtalk_object{pid = Pid}) when is_pid(Pid) -> Pid;
+actor_pid(_) -> undefined.
+
+%% @private
+%% @doc Inspect a field value, guarding against actor self-references that
+%% would deadlock (the gen_server is already mid-call for inspect).
+%% Any actor reference whose pid matches SelfPid uses printString instead.
+-spec inspect_field(term(), pid() | undefined) -> binary().
+inspect_field(#beamtalk_object{pid = Pid} = V, SelfPid) when Pid =:= SelfPid ->
+    %% Self-reference: avoid re-entering the same gen_server.
+    beamtalk_primitive:print_string(V);
+inspect_field(V, _SelfPid) ->
+    beamtalk_primitive:send(V, inspect, []).
 
 %% @private
 normalize_dispatch_result({error, Error}, State) ->
