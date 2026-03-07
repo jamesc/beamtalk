@@ -678,7 +678,6 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "lines".into(), arity: 0, kind: MethodKind::Primary, defined_in: "FileHandle".into(), is_sealed: false, return_type: Some("Stream".into()), param_types: vec![], doc: Some("Return a lazy Stream of lines from this file handle.\n\nThe Stream reads lines one at a time. It must be consumed within the\n`File open:do:` block — the Stream must not escape the block.\n\n## Examples\n\n```beamtalk\nFile open: \"data.csv\" do: [:handle |\n  handle lines do: [:line | Transcript show: line].\n].\n```".into()) },
-                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "FileHandle".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n\n```beamtalk\nhandle printString.\n// => \"a FileHandle\"\n```".into()) },
             ],
             class_methods: vec![],
             class_variables: vec![],
