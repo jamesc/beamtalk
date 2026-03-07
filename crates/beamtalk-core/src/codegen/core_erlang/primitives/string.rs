@@ -56,9 +56,7 @@ fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Do
         "lowercase" => Some(Document::Str(
             "call 'unicode':'characters_to_binary'(call 'string':'lowercase'(Self))",
         )),
-        "capitalize" => Some(Document::Str(
-            "call 'beamtalk_string':'capitalize'(Self)",
-        )),
+        "capitalize" => Some(Document::Str("call 'beamtalk_string':'capitalize'(Self)")),
         "trim" => Some(Document::Str(
             "call 'unicode':'characters_to_binary'(call 'string':'trim'(Self, 'both'))",
         )),

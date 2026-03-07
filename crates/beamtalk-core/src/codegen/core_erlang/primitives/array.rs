@@ -70,9 +70,7 @@ pub(crate) fn generate_array_bif(selector: &str, params: &[String]) -> Option<Do
             p0.to_string(),
             ")"
         ]),
-        "printString" => Some(Document::Str(
-            "call 'beamtalk_array':'print_string'(Self)",
-        )),
+        "printString" => Some(Document::Str("call 'beamtalk_array':'print_string'(Self)")),
         _ => None,
     }
 }

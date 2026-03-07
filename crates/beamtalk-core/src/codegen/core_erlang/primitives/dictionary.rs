@@ -82,9 +82,7 @@ pub(crate) fn generate_dictionary_bif(
                 ")"
             ])
         }
-        "printString" => Some(Document::Str(
-            "call 'beamtalk_map':'print_string'(Self)",
-        )),
+        "printString" => Some(Document::Str("call 'beamtalk_map':'print_string'(Self)")),
         _ => None,
     }
 }
