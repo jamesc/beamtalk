@@ -100,12 +100,12 @@ sealed Class subclass: Metaclass
 
   // --- Method introspection ---
 
-  /// Return all selectors callable on the receiver (class-side + Behaviour protocol).
+  /// Return all selectors callable on the described class object (class-side + Behaviour protocol).
   ///
-  /// Combines user-defined class-side methods (via `classMethods`) with the
-  /// Behaviour protocol inherited through the Class hierarchy (`reload`,
-  /// `superclass`, `allMethods`, `subclasses`, etc.). Result is deduplicated
-  /// and sorted.
+  /// Combines user-defined class-side methods of the described class (via
+  /// `classMethods`) with the Behaviour protocol inherited through the Class
+  /// hierarchy (`reload`, `superclass`, `allMethods`, `subclasses`, etc.).
+  /// Result is deduplicated and sorted.
   ///
   /// ## Examples
   /// ```beamtalk

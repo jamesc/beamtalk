@@ -596,12 +596,12 @@ metaclassSuperclass(Self) ->
             end
     end.
 
-%% @doc Return all selectors callable on the receiver (class-side + Behaviour protocol).
+%% @doc Return all selectors callable on the described class object (class-side + Behaviour protocol).
 %%
 %% BT-1169: Backs `@primitive "metaclassAllMethods"` in Metaclass.bt.
-%% Combines class-side selectors (via metaclassClassMethods/1) with all instance
-%% methods of the 'Class' hierarchy (Behaviour protocol: reload, superclass, etc.).
-%% Result is deduplicated and sorted.
+%% Combines class-side selectors of the described class (via metaclassClassMethods/1)
+%% with all instance methods of the 'Class' hierarchy (Behaviour protocol: reload,
+%% superclass, etc.). Result is deduplicated and sorted.
 %%
 %% We walk the instance method chain of 'Class' directly in Erlang to avoid
 %% dispatching through the Metaclass chain (which would recurse into this method).
@@ -615,10 +615,11 @@ metaclassSuperclass(Self) ->
 -spec metaclassAllMethods(#beamtalk_object{}) -> [atom()].
 metaclassAllMethods(Self) ->
     ClassMethods = metaclassClassMethods(Self),
-    BehaviourMethods = ordsets:to_list(
-        collect_instance_methods_via_meta('Class', ordsets:new(), 0)
-    ),
-    lists:usort(ClassMethods ++ BehaviourMethods).
+    BehaviourMethodsOrdset =
+        collect_instance_methods_via_meta('Class', ordsets:new(), 0),
+    ordsets:to_list(
+        ordsets:union(BehaviourMethodsOrdset, ordsets:from_list(ClassMethods))
+    ).
 
 %% @doc Return all class-side method selectors (full inheritance chain).
 %%
@@ -694,7 +695,11 @@ collect_instance_methods_via_meta(none, Acc, _Depth) ->
     Acc;
 collect_instance_methods_via_meta(nil, Acc, _Depth) ->
     Acc;
-collect_instance_methods_via_meta(_ClassName, Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+collect_instance_methods_via_meta(ClassName, Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    ?LOG_WARNING(
+        "collect_instance_methods_via_meta: max hierarchy depth ~p exceeded at ~p",
+        [?MAX_HIERARCHY_DEPTH, ClassName]
+    ),
     Acc;
 collect_instance_methods_via_meta(ClassName, Acc, Depth) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
