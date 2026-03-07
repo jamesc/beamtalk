@@ -466,6 +466,15 @@ Once Phases 1-4 land and correctness is established, a follow-up ADR covers Opti
 
 Phase 5 is tracked separately. It does not block Phases 1-4.
 
+## Implementation Tracking
+
+**Epic:** [BT-1184](https://linear.app/beamtalk/issue/BT-1184)
+**Issues:**
+- [BT-1185](https://linear.app/beamtalk/issue/BT-1185) — Fix `apply_class_info/2` + regression test (Phases 1 + 3)
+- [BT-1186](https://linear.app/beamtalk/issue/BT-1186) — Remove workarounds from `beamtalk_behaviour_intrinsics.erl` (Phases 2 + 4)
+
+**Status:** Planned
+
 ## References
 
 - Related issues: BT-1169 (immediate trigger — `Counter class allMethods` bug)
