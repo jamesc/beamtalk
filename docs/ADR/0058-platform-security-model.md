@@ -71,7 +71,7 @@ The boundary is the authentication layer defined in ADR 0020:
 
 - **Local connections:** loopback binding (`127.0.0.1`) + cookie handshake. The OS filesystem ACL (`chmod 600` on the cookie file) is the actual authentication gate.
 - **Remote connections:** mTLS (`ssl_dist`) or a network overlay (Tailscale/WireGuard) provides transport-level identity before the cookie check.
-- **Browser access:** Origin validation + cookie handshake. Reverse proxy (Caddy/nginx) handles TLS termination.
+- **Browser access:** Origin validation + cookie handshake. Reverse proxy (Caddy/Nginx) handles TLS termination.
 
 **Inside the boundary** (authenticated): full execution privilege. No further access controls apply. `Erlang os cmd: "rm -rf /"` is a valid Beamtalk expression that will execute if typed by an authenticated user. This is intentional.
 
@@ -265,7 +265,7 @@ Operators deploying Beamtalk for remote access must follow ADR 0020 Layer 3 (mTL
 beamtalk tls init                    # Generate per-workspace mTLS certs
 beamtalk workspace create --tls      # Workspace uses ssl_dist
 beamtalk attach prod@host --tls      # mTLS on Erlang distribution
-# Add Caddy/nginx reverse proxy for browser TLS termination
+# Add Caddy/Nginx reverse proxy for browser TLS termination
 # Configure Tailscale ACLs for access control
 ```
 
@@ -373,13 +373,13 @@ Keep no sandbox but add specific mitigations: a denylist/allowlist for FFI modul
 
 - This ADR documents the current behavior; it does not change any code.
 - OTP's process isolation (each actor in its own process, crash isolation via supervisor) provides a form of compartmentalization that is weaker than a sandbox but stronger than a single-threaded interpreter. This is not a security boundary, but it limits accidental damage.
-- The Erlang distribution cookie (`--setcookie`) is a distinct mechanism from the Beamtalk WebSocket cookie. The distribution cookie (MD5 challenge-response) governs Erlang node-to-node communication; the WebSocket cookie governs REPL client authentication. Both are per-workspace; neither is the global `~/.erlang.cookie`.
+- The Erlang distribution cookie (`--setcookie`) and the Beamtalk WebSocket cookie are two distinct protocols that currently share one secret value. The distribution cookie (MD5 challenge-response) governs Erlang node-to-node communication; the WebSocket cookie governs REPL client authentication. Both are per-workspace and neither is the global `~/.erlang.cookie`. See Part 1 of the Decision section for the accepted risk this conflation introduces.
 
 ## Implementation
 
 This ADR is primarily a documentation and principles decision. No behavioral code changes are required.
 
-### Phase 0: Documentation (Required)
+### Phase 0: Documentation (Required — follow-up to this ADR)
 
 1. **Create `docs/security/threat-model.md`** — a user-facing security guide that:
    - States the trust model: "Beamtalk evaluates code with your user's full OS permissions."
@@ -389,7 +389,7 @@ This ADR is primarily a documentation and principles decision. No behavioral cod
    - Includes: "Treat the workspace cookie like an SSH private key — do not share it."
 
 2. **Update getting-started documentation** — add a security callout after the first `beamtalk repl` example:
-   ```
+   ```text
    Security note: The REPL evaluates code with your user account's full permissions.
    The workspace cookie at ~/.beamtalk/workspaces/{id}/cookie authenticates connections.
    Treat it like an SSH private key — do not share it.
@@ -419,7 +419,7 @@ Note: this is not a sandbox — an authenticated user with `--no-subprocess` can
 ## References
 
 - Related issues: BT-214 (Research: End-to-End Security Review of Beamtalk Platform)
-- Related ADRs: [ADR 0020 — Connection Security](0020-connection-security.md), [ADR 0028 — BEAM Interop Strategy](0028-beam-interop-strategy.md), [ADR 0051 — Subprocess Execution](0051-subprocess-execution.md), [ADR 0004 — Persistent Workspace Management](0004-persistent-workspace-management.md)
+- Related ADRs: [ADR 0020 — Connection Security](0020-connection-security.md), [ADR 0022 — Embedded Compiler via OTP Port](0022-embedded-compiler-via-otp-port.md), [ADR 0028 — BEAM Interop Strategy](0028-beam-interop-strategy.md), [ADR 0051 — Subprocess Execution](0051-subprocess-execution.md), [ADR 0004 — Persistent Workspace Management](0004-persistent-workspace-management.md)
 - Erlang/OTP cookie documentation: https://www.erlang.org/doc/reference_manual/distributed.html#security
 - Erlang `ssl_dist` (mTLS for distribution): https://www.erlang.org/doc/apps/ssl/ssl_distribution.html
 - Jupyter security model: https://jupyter-notebook.readthedocs.io/en/stable/security.html
