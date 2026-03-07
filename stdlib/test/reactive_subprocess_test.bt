@@ -78,8 +78,10 @@ TestCase subclass: ReactiveSubprocessTest
         delegate := StubDelegate spawn
         proc := ReactiveSubprocess open: "/bin/cat" args: #() notify: delegate
         proc writeLine: "hello"
-        // Give cat time to echo back
-        Timer sleep: 300
+        // Poll up to 5 s (50 × 100 ms) for cat to echo back
+        50 timesRepeat: [
+          (delegate stdoutLines includes: "hello") ifFalse: [Timer sleep: 100]
+        ]
         self assert: (delegate stdoutLines includes: "hello")
         proc close
         self assert: delegate stop equals: #ok

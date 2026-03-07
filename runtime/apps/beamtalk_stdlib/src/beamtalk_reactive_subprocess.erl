@@ -141,7 +141,7 @@ start_subprocess(Config, Selector) ->
         {ok, Pid} ->
             #beamtalk_object{
                 class = 'ReactiveSubprocess',
-                class_mod = 'bt@stdlib@reactivesubprocess',
+                class_mod = 'bt@stdlib@reactive_subprocess',
                 pid = Pid
             };
         {error, Reason} ->

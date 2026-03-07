@@ -81,12 +81,12 @@ flush_and_collect(Pending, Data) ->
 %% lists; Array values returned from collection operations are tagged maps.
 %% Raises `type_error` via `beamtalk_error` on invalid input.
 -spec bt_array_to_list(atom(), term(), atom()) -> list().
-bt_array_to_list(_Class, #{'$beamtalk_class' := 'Array', 'data' := Arr}, Selector) ->
+bt_array_to_list(Class, #{'$beamtalk_class' := 'Array', 'data' := Arr}, Selector) ->
     case array:is_array(Arr) of
         true ->
             array:to_list(Arr);
         false ->
-            Err = beamtalk_error:new(type_error, _Class, Selector),
+            Err = beamtalk_error:new(type_error, Class, Selector),
             beamtalk_error:raise(Err)
     end;
 bt_array_to_list(_Class, List, _Selector) when is_list(List) ->

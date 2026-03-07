@@ -143,6 +143,8 @@ exit_notification_cast_after_data_test() ->
             %% Exit event must appear after stdout line event
             LinePos = first_position('subprocessLine:from:', Events),
             ExitPos = first_position('subprocessExit:from:', Events),
+            ?assert(is_integer(LinePos)),
+            ?assert(is_integer(ExitPos)),
             ?assert(LinePos < ExitPos),
             %% Exit code should be 0
             [{_, ExitArgs} | _] = [E || {'subprocessExit:from:', _} = E <- Events],
@@ -208,6 +210,29 @@ writeLine_writes_and_returns_nil_test() ->
             LineEvents = [E || {'subprocessLine:from:', _} = E <- Events],
             Lines = [hd(Args) || {'subprocessLine:from:', Args} <- LineEvents],
             ?assert(lists:member(<<"ping">>, Lines));
+        _ ->
+            {skip, "Unix-only test"}
+    end.
+
+%%% ============================================================================
+%%% writeLine: after close returns port_closed error
+%%% ============================================================================
+
+writeLine_after_close_returns_error_test() ->
+    case os:type() of
+        {unix, _} ->
+            {Notify, Collector} = make_collector(),
+            {ok, Pid} = beamtalk_reactive_subprocess:start(#{
+                executable => <<"/bin/cat">>,
+                args => [],
+                notify => Notify
+            }),
+            ?assertEqual(nil, gen_server:call(Pid, {close, []})),
+            %% After close, writeLine: should return {error, #beamtalk_error{}} with kind port_closed
+            Reply = gen_server:call(Pid, {'writeLine:', [<<"hello">>]}),
+            ?assertMatch({error, #beamtalk_error{kind = port_closed}}, Reply),
+            Collector ! stop,
+            gen_server:stop(Pid);
         _ ->
             {skip, "Unix-only test"}
     end.
