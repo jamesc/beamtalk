@@ -477,20 +477,31 @@ loaded_class_objects(ClassNames) ->
     Objects = lists:filtermap(
         fun
             (#{name := Name}) when is_list(Name) ->
-                try
-                    Atom = list_to_existing_atom(Name),
-                    case beamtalk_runtime_api:whereis_class(Atom) of
-                        undefined ->
-                            false;
-                        ClassPid ->
-                            Mod = beamtalk_runtime_api:module_name(ClassPid),
-                            Tag = beamtalk_runtime_api:class_object_tag(Atom),
-                            {true, #beamtalk_object{class = Tag, class_mod = Mod, pid = ClassPid}}
-                    end
+                try list_to_existing_atom(Name) of
+                    Atom ->
+                        case beamtalk_runtime_api:whereis_class(Atom) of
+                            undefined ->
+                                ?LOG_WARNING(
+                                    "loaded_class_objects: class ~p not found in registry after load",
+                                    [Name]
+                                ),
+                                false;
+                            ClassPid ->
+                                Mod = beamtalk_runtime_api:module_name(ClassPid),
+                                Tag = beamtalk_runtime_api:class_object_tag(Atom),
+                                {true, #beamtalk_object{
+                                    class = Tag, class_mod = Mod, pid = ClassPid
+                                }}
+                        end
                 catch
-                    _:_ -> false
+                    error:badarg ->
+                        ?LOG_WARNING(
+                            "loaded_class_objects: class name ~p is not a known atom", [Name]
+                        ),
+                        false
                 end;
-            (_) ->
+            (Entry) ->
+                ?LOG_WARNING("loaded_class_objects: unexpected entry shape ~p", [Entry]),
                 false
         end,
         ClassNames
