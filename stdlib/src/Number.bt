@@ -85,3 +85,7 @@ abstract typed Value subclass: Number
   /// ```
   between: min :: Number and: max :: Number -> Boolean =>
     (self >= min) and: [self <= max]
+
+  /// BT-1167: Override inspect to use printString rather than the field-based
+  /// format defined in Value. Numbers are primitives, not map-based value objects.
+  inspect -> String => self printString

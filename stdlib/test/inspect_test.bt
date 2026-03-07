@@ -1,0 +1,68 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1167: Tests for inspect output format on user-defined classes.
+// Target format: ClassName(field: inspectValue, ...)
+// Value subclasses use the Beamtalk inspect method in Value.bt.
+// Actor subclasses use the Erlang inspect dispatch in beamtalk_object_ops.
+//
+// Fixtures:
+//   fixtures/empty_value.bt  — Value subclass with no state
+//   fixtures/named_item.bt   — Value subclass with a String state field
+//   fixtures/inspect_pair.bt — Value subclass with left/right fields
+//   fixtures/value_point.bt  — Value subclass with x, y integer fields
+//   fixtures/counter.bt      — Actor subclass with value integer field
+
+TestCase subclass: InspectTest
+
+  // --- Value subclass: with fields ---
+  testValueSubclassWithFieldsProducesNameAndFields =>
+    p := ValuePoint x: 3 y: 4
+    self assert: p inspect equals: "ValuePoint(x: 3, y: 4)"
+
+  testValueSubclassDefaultValuesProducesZeros =>
+    p := ValuePoint new
+    self assert: p inspect equals: "ValuePoint(x: 0, y: 0)"
+
+  testValueSubclassPartialInitShowsDefaults =>
+    p := ValuePoint new: #{#x => 7}
+    self assert: p inspect equals: "ValuePoint(x: 7, y: 0)"
+
+  // --- Value subclass: with no fields ---
+  testValueSubclassWithNoFieldsProducesEmptyParens =>
+    ev := EmptyValue new
+    self assert: ev inspect equals: "EmptyValue()"
+
+  // --- String field values are quoted ---
+  testStringFieldValueIsQuoted =>
+    item := NamedItem new: #{#name => "today"}
+    self assert: item inspect equals: "NamedItem(name: ""today"")"
+
+  // --- Primitive inspect still works ---
+  testIntegerInspectReturnsPrintString => self assert: 42 inspect equals: "42"
+
+  testStringInspectReturnsPrintString =>
+    self assert: "hello" inspect equals: """hello"""
+
+  testNilInspectReturnsPrintString => self assert: nil inspect equals: "nil"
+
+  testBooleanInspectReturnsPrintString =>
+    self assert: true inspect equals: "true"
+    self assert: false inspect equals: "false"
+
+  // --- Actor subclass with fields ---
+  testActorSubclassWithFieldsProducesNameAndFields =>
+    c := Counter spawn
+    self assert: c inspect equals: "Counter(value: 0)"
+
+  testActorSubclassAfterMutationShowsUpdatedValue =>
+    c := Counter spawn
+    c increment
+    c increment
+    self assert: c inspect equals: "Counter(value: 2)"
+
+  // --- Nested value objects use recursive inspect ---
+  testNestedValueObjectUsesRecursiveInspect =>
+    inner := ValuePoint x: 1 y: 2
+    p := InspectPair new: #{#left => inner, #right => 42}
+    self assert: p inspect equals: "InspectPair(left: ValuePoint(x: 1, y: 2), right: 42)"
