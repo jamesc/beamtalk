@@ -27,7 +27,7 @@
 ///
 /// See examples/repl-tutorial.md for a full beginner's guide
 Actor subclass: Counter
-  state: value = 0
+  state: value :: Integer = 0
 
   /// Increase the counter by one.
   ///
@@ -37,7 +37,7 @@ Actor subclass: Counter
   /// c increment
   /// c getValue              // => 1
   /// ```
-  increment => self.value := self.value + 1
+  increment -> Integer => self.value := self.value + 1
 
   /// Decrease the counter by one.
   ///
@@ -47,7 +47,7 @@ Actor subclass: Counter
   /// c decrement
   /// c getValue              // => -1
   /// ```
-  decrement => self.value := self.value - 1
+  decrement -> Integer => self.value := self.value - 1
 
   /// Return the current counter value.
   ///
