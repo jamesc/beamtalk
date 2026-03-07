@@ -488,6 +488,7 @@ fn run_eunit_tests(
          pg:start_link(), \
          beamtalk_bootstrap:start_link(), \
          beamtalk_subprocess_sup:start_link(), \
+         beamtalk_reactive_subprocess_sup:start_link(), \
          beamtalk_stdlib:init(), \
          {package_load_cmd}\
          {fixture_load_cmd}\

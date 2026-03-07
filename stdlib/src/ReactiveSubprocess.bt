@@ -1,0 +1,92 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ReactiveSubprocess — Actor for push-mode subprocess delivery (BT-1187).
+///
+/// Unlike `Subprocess` (pull model), ReactiveSubprocess delivers each stdout and
+/// stderr line to a registered `notify` actor via async cast as data arrives.
+/// The orchestrating actor stays fully responsive during subprocess execution —
+/// it never blocks waiting on `readLine`.
+///
+/// The `notify` actor must implement the SubprocessDelegate protocol:
+///
+/// ```beamtalk
+/// subprocessLine: line :: String from: proc :: ReactiveSubprocess -> Nil
+/// subprocessStderrLine: line :: String from: proc :: ReactiveSubprocess -> Nil
+/// subprocessExit: code :: Object from: proc :: ReactiveSubprocess -> Nil
+/// ```
+///
+/// ## Basic usage
+///
+/// ```beamtalk
+/// Actor subclass: MyDelegate
+///   subprocessLine: line from: proc =>
+///     Transcript show: line
+///   subprocessStderrLine: line from: proc =>
+///     Transcript show: "[err] " ++ line
+///   subprocessExit: code from: proc =>
+///     Transcript show: "done: " ++ code printString
+///
+/// delegate := MyDelegate spawn
+/// proc := ReactiveSubprocess open: "echo" args: #("hello") notify: delegate
+/// ```
+///
+/// ## With environment and working directory
+///
+/// ```beamtalk
+/// proc := ReactiveSubprocess
+///   open: "make"
+///   args: #("test")
+///   env: #{#"CI" => #"true"}
+///   dir: #"/path/to/project"
+///   notify: delegate
+/// ```
+Actor subclass: ReactiveSubprocess
+
+  /// Open a subprocess in push mode, delivering lines to `notify`.
+  ///
+  /// The `notify` actor receives async casts for each stdout line, stderr line,
+  /// and the final exit code.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// proc := ReactiveSubprocess open: "echo" args: #("hello") notify: delegate
+  /// ```
+  class open: command args: args notify: notify =>
+    @primitive "open:args:notify:"
+
+  /// Open a subprocess with environment and working directory, delivering lines to `notify`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// proc := ReactiveSubprocess
+  ///   open: "make" args: #("test")
+  ///   env: #{#"CI" => #"true"} dir: #"/tmp"
+  ///   notify: delegate
+  /// ```
+  class open: command args: args env: env dir: dir notify: notify =>
+    @primitive "open:args:env:dir:notify:"
+
+  /// Write a line to the subprocess's stdin (appends newline).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// proc writeLine: "{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
+  /// ```
+  writeLine: data -> Nil => @primitive "writeLine:"
+
+  /// Get the exit code. Returns nil if the subprocess is still running.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// proc exitCode.   // => 0
+  /// ```
+  exitCode -> Object => @primitive "exitCode"
+
+  /// Force-close the subprocess (sends kill to process group).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// proc close.
+  /// ```
+  close -> Nil => @primitive "close"
