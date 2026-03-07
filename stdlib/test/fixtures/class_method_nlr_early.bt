@@ -7,5 +7,5 @@
 Object subclass: ClassMethodNlrEarly
 
   class firstPositive: arr =>
-    arr do: [:x | x > 0 ifTrue: [^x]].
+    arr do: [:x | x > 0 ifTrue: [^x]]
     nil

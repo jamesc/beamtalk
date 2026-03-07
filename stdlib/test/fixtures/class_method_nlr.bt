@@ -7,5 +7,5 @@
 Object subclass: ClassMethodNlrCheck
 
   class check: val =>
-    (val class) =:= Integer ifTrue: [^99].
+    (val class) =:= Integer ifTrue: [^99]
     nil
