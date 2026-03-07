@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1202: Fixture for non-local return (^) inside do: block in a class method.
+// Early return from class method by iterating an array.
+
+Object subclass: ClassMethodNlrEarly
+
+  class firstPositive: arr =>
+    arr do: [:x | x > 0 ifTrue: [^x]].
+    nil

@@ -1248,6 +1248,84 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-1202: Wraps a class method body with NLR (non-local return) try/catch.
+    ///
+    /// Class method NLR uses a 4-element throw tuple `{$bt_nlr, Token, Value, ClassVars}` and
+    /// catches it to return `NlrVal` directly (no class vars) or
+    /// `{class_var_result, NlrVal, NlrState}` (with class vars).
+    pub(super) fn wrap_class_method_body_with_nlr_catch(
+        &mut self,
+        body_doc: Document<'static>,
+        token_var: &str,
+        has_class_vars: bool,
+    ) -> Document<'static> {
+        let result_var = self.fresh_temp_var("NlrResult");
+        let cls_var = self.fresh_temp_var("NlrCls");
+        let err_var = self.fresh_temp_var("NlrErr");
+        let stk_var = self.fresh_temp_var("NlrStk");
+        let ctk_var = self.fresh_temp_var("CatchTok");
+        let val_var = self.fresh_temp_var("NlrVal");
+        let state_var = self.fresh_temp_var("NlrState");
+        let ot_pair_var = self.fresh_temp_var("OtherPair");
+
+        let nlr_arm_result = if has_class_vars {
+            format!("{{'class_var_result', {val_var}, {state_var}}}")
+        } else {
+            val_var.clone()
+        };
+
+        docvec![
+            "let ",
+            token_var.to_string(),
+            " = call 'erlang':'make_ref'() in\n",
+            "try\n",
+            body_doc,
+            "\n",
+            "of ",
+            result_var.clone(),
+            " -> ",
+            result_var,
+            "\n",
+            "catch <",
+            cls_var.clone(),
+            ", ",
+            err_var.clone(),
+            ", ",
+            stk_var.clone(),
+            "> ->\n",
+            "  case {",
+            cls_var.clone(),
+            ", ",
+            err_var.clone(),
+            "} of\n",
+            "    <{'throw', {'$bt_nlr', ",
+            ctk_var.clone(),
+            ", ",
+            val_var,
+            ", ",
+            state_var,
+            "}}> ",
+            "when call 'erlang':'=:='(",
+            ctk_var,
+            ", ",
+            token_var.to_string(),
+            ") -> ",
+            nlr_arm_result,
+            "\n",
+            "    <",
+            ot_pair_var,
+            "> when 'true' -> ",
+            "primop 'raw_raise'(",
+            cls_var,
+            ", ",
+            err_var,
+            ", ",
+            stk_var,
+            ")\n",
+            "  end",
+        ]
+    }
+
     /// BT-764/BT-854: Wraps a value type method body with NLR (non-local return) try/catch.
     ///
     /// Value type NLR uses a 4-element throw tuple `{$bt_nlr, Token, Value, State}`
@@ -1530,7 +1608,10 @@ impl CoreErlangGenerator {
                     // Actor methods use the current gen_server state; value type
                     // methods use the latest Self{N} snapshot so field mutations
                     // accumulated before the ^ are preserved.
-                    let state = if self.context == CodeGenContext::Actor {
+                    // BT-1202: Class methods use the current ClassVars snapshot.
+                    let state = if self.in_class_method {
+                        self.current_class_var()
+                    } else if self.context == CodeGenContext::Actor {
                         self.current_state_var()
                     } else {
                         self.current_self_var()

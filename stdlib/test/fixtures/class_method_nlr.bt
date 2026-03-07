@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1202: Fixture for non-local return (^) inside blocks in class methods.
+// Simple ifTrue: early return from a class method.
+
+Object subclass: ClassMethodNlrCheck
+
+  class check: val =>
+    (val class) =:= Integer ifTrue: [^99].
+    nil
