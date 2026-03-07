@@ -230,6 +230,7 @@ fn parse_method_infos_from_map(
                 is_sealed: false,
                 return_type,
                 param_types,
+                doc: None,
             })
         })
         .collect()

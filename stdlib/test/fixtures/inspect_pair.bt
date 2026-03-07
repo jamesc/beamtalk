@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for BT-1167: Value subclass with left/right fields.
+// Used to test that inspect recursively inspects nested value objects.
+
+Value subclass: InspectPair
+  state: left = nil
+  state: right = nil

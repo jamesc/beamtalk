@@ -882,17 +882,20 @@ fn resolved_selector_hover_info(
     let typed_sig = method_info_signature(&method);
     let summary = format!("```beamtalk\n{typed_sig}\n```");
 
-    let mut doc_parts = vec![format!(
+    let resolution_context = format!(
         "Resolved on `{receiver_class}` (defined in `{}`)",
         method.defined_in
-    )];
+    );
     let mut meta = dispatch.to_string();
     if method.is_sealed {
         meta.push_str(", sealed");
     }
-    doc_parts.push(format!("_{meta}_"));
-
-    Some(HoverInfo::new(summary, span).with_documentation(doc_parts.join("\n\n")))
+    let meta_line = format!("_{meta}_");
+    let doc = match method.doc.as_deref() {
+        Some(existing) => format!("{existing}\n\n{resolution_context}\n\n{meta_line}"),
+        None => format!("{resolution_context}\n\n{meta_line}"),
+    };
+    Some(HoverInfo::new(summary, span).with_documentation(doc))
 }
 
 /// Formats a `MethodInfo` from the hierarchy as a typed signature string.

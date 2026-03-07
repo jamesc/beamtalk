@@ -73,9 +73,10 @@ const READINESS_READ_TIMEOUT_MS: u64 = 10_000;
 /// After Phase 1 (TCP) succeeds the cowboy WS handler may still be initialising
 /// — TCP accepts immediately once the listener socket is bound, but the WS
 /// upgrade can fail until cowboy's request-handling pipeline is fully up.
-/// 30 retries × (up to `READINESS_READ_TIMEOUT_MS` + `READINESS_PROBE_DELAY_MS`)
-/// gives a generous window for the handler to become ready.
-const WS_HEALTH_RETRIES: usize = 30;
+/// CI observations (BT-1175) show cowboy can take up to ~8 s to register WS
+/// routes after the TCP listener binds. 90 retries × `READINESS_PROBE_DELAY_MS`
+/// (200 ms) gives an 18 s budget, providing ~10 s of headroom on slow runners.
+const WS_HEALTH_RETRIES: usize = 90;
 
 /// Number of TCP readiness probe attempts between BEAM liveness checks.
 ///

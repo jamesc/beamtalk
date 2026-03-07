@@ -31,3 +31,20 @@
 ///
 /// @see Object (for reference types / actors)
 Object subclass: Value
+
+  /// Return a developer-readable string representation showing fields.
+  ///
+  /// Produces `ClassName(field: value, ...)`. Field values are recursively
+  /// inspected — strings are quoted, nested objects show their own inspect.
+  /// A class with no fields produces `ClassName()`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ValuePoint x: 3 y: 4        inspect   // => "ValuePoint(x: 3, y: 4)"
+  /// ValuePoint new              inspect   // => "ValuePoint(x: 0, y: 0)"
+  /// ```
+  inspect -> String =>
+    parts := self fieldNames sort collect: [:name |
+      name asString ++ ": " ++ (self fieldAt: name) inspect
+    ]
+    self class name asString ++ "(" ++ (parts join: ", ") ++ ")"
