@@ -469,10 +469,9 @@ base_class_name(Tag) ->
         error:badarg -> Tag
     end.
 
-%% @private Resolve loaded ClassNames maps to Beamtalk class object(s).
-%% Returns the single class object for a one-class file, a list for multiple,
-%% and nil when no classes could be resolved (e.g. class not yet registered).
--spec loaded_class_objects([map()]) -> term().
+%% @private Resolve loaded ClassNames maps to a Beamtalk List of class objects.
+%% Always returns a List (possibly empty) so callers have a uniform type.
+-spec loaded_class_objects([map()]) -> list().
 loaded_class_objects(ClassNames) ->
     Objects = lists:filtermap(
         fun
@@ -506,11 +505,7 @@ loaded_class_objects(ClassNames) ->
         end,
         ClassNames
     ),
-    case Objects of
-        [] -> nil;
-        [Obj] -> Obj;
-        _ -> Objects
-    end.
+    Objects.
 
 %% @private Return a human-readable type name for an Erlang/Beamtalk value.
 -spec value_type_name(term()) -> binary().

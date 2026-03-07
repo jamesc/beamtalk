@@ -82,14 +82,14 @@ sealed Object subclass: WorkspaceInterface
     (Erlang beamtalk_workspace_interface_primitives) globals
 
   /// Compile and load a .bt file, registering the class.
-  /// Returns the loaded class (or a list of classes for multi-class files).
+  /// Returns a List of loaded class objects (empty if none resolved).
   /// Returns a structured error if path is not a String or the file cannot be loaded.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace load: "examples/counter.bt"  // => Counter
+  /// Workspace load: "examples/counter.bt"  // => [Counter]
   /// ```
-  load: path :: String -> Object =>
+  load: path :: String -> List =>
     (Erlang beamtalk_workspace_interface_primitives) load: path
 
   /// Run all loaded test classes and return a TestResult.

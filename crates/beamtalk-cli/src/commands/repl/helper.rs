@@ -190,8 +190,10 @@ fn parse_class_expr_command_prefix(line: &str) -> Option<usize> {
 fn parse_reload_class_prefix(line: &str) -> Option<usize> {
     for prefix in &[":reload ", ":r "] {
         if let Some(rest) = line.strip_prefix(prefix) {
-            if rest.starts_with(|c: char| c.is_ascii_uppercase()) {
-                return Some(prefix.len());
+            let ws_len = rest.len() - rest.trim_start().len();
+            let trimmed = &rest[ws_len..];
+            if trimmed.starts_with(|c: char| c.is_ascii_uppercase()) {
+                return Some(prefix.len() + ws_len);
             }
         }
     }
@@ -929,6 +931,13 @@ mod tests {
     #[test]
     fn test_reload_class_prefix_partial_uppercase() {
         assert_eq!(parse_reload_class_prefix(":reload Coun"), Some(8));
+    }
+
+    #[test]
+    fn test_reload_class_prefix_extra_spaces() {
+        // Multiple spaces after command: offset skips all whitespace
+        assert_eq!(parse_reload_class_prefix(":reload  Counter"), Some(9));
+        assert_eq!(parse_reload_class_prefix(":r  Counter"), Some(4));
     }
 
     #[test]
