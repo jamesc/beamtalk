@@ -27,7 +27,8 @@
 //! - LSP specification: Language Server Protocol hover requests
 
 use crate::ast::{
-    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module, to_module_name,
+    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module,
+    StateDeclaration,
 };
 use crate::language_service::{HoverInfo, Position};
 use crate::queries::enrich_hierarchy_with_inferred_returns;
@@ -115,7 +116,7 @@ pub fn compute_hover(
     // Also search inside class method bodies
     for class in &module.classes {
         for method in &class.methods {
-            if let Some(hover) = find_hover_on_method_signature(method, source, offset_val) {
+            if let Some(hover) = find_hover_on_method_signature(method, source, offset_val, false) {
                 return Some(hover);
             }
             for body_stmt in &method.body {
@@ -131,7 +132,7 @@ pub fn compute_hover(
             }
         }
         for method in &class.class_methods {
-            if let Some(hover) = find_hover_on_method_signature(method, source, offset_val) {
+            if let Some(hover) = find_hover_on_method_signature(method, source, offset_val, true) {
                 return Some(hover);
             }
             for body_stmt in &method.body {
@@ -150,7 +151,9 @@ pub fn compute_hover(
 
     // Also search standalone method definitions (Tonel-style)
     for smd in &module.method_definitions {
-        if let Some(hover) = find_hover_on_method_signature(&smd.method, source, offset_val) {
+        if let Some(hover) =
+            find_hover_on_method_signature(&smd.method, source, offset_val, smd.is_class_method)
+        {
             return Some(hover);
         }
         for body_stmt in &smd.method.body {
@@ -193,6 +196,11 @@ fn find_hover_in_declarations(
                 ));
             }
         }
+        for state in &class.state {
+            if offset >= state.name.span.start() && offset < state.name.span.end() {
+                return Some(state_declaration_hover_info(state));
+            }
+        }
     }
 
     for smd in &module.method_definitions {
@@ -215,6 +223,7 @@ fn find_hover_on_method_signature(
     method: &MethodDefinition,
     source: &str,
     offset: u32,
+    is_class_method: bool,
 ) -> Option<HoverInfo> {
     for parameter in &method.parameters {
         let parameter_span = parameter_name_span_in_signature(parameter.name.span, source);
@@ -261,6 +270,7 @@ fn find_hover_on_method_signature(
         Some(method_declaration_selector_hover_info(
             method,
             selector_span,
+            is_class_method,
         ))
     } else {
         None
@@ -268,9 +278,15 @@ fn find_hover_on_method_signature(
 }
 
 /// Creates hover info for a method declaration selector with signature + docs.
-fn method_declaration_selector_hover_info(method: &MethodDefinition, span: Span) -> HoverInfo {
+fn method_declaration_selector_hover_info(
+    method: &MethodDefinition,
+    span: Span,
+    is_class_method: bool,
+) -> HoverInfo {
     let signature = method_signature(method);
-    let mut hover = HoverInfo::new(format!("Method: `{signature}`"), span);
+    let mut hover = HoverInfo::new(format!("```beamtalk\n{signature}\n```"), span);
+
+    let mut doc_parts: Vec<String> = Vec::new();
 
     if let Some(doc_comment) = method
         .doc_comment
@@ -278,15 +294,49 @@ fn method_declaration_selector_hover_info(method: &MethodDefinition, span: Span)
         .map(str::trim)
         .filter(|doc| !doc.is_empty())
     {
-        hover = hover.with_documentation(doc_comment.to_string());
+        doc_parts.push(doc_comment.to_string());
     } else {
-        hover = hover.with_documentation(format!(
+        doc_parts.push(format!(
             "Selector: `{}` (arity: {})",
             method.selector.name(),
             method.selector.arity()
         ));
     }
 
+    let side = if is_class_method {
+        "class-side"
+    } else {
+        "instance-side"
+    };
+    let mut meta = side.to_string();
+    if method.is_sealed {
+        meta.push_str(", sealed");
+    }
+    doc_parts.push(format!("_{meta}_"));
+
+    hover = hover.with_documentation(doc_parts.join("\n\n"));
+    hover
+}
+
+fn state_declaration_hover_info(state: &StateDeclaration) -> HoverInfo {
+    let title = if let Some(ty) = &state.type_annotation {
+        format!("`{}` :: {}", state.name.name, type_annotation_label(ty))
+    } else {
+        format!("`{}`", state.name.name)
+    };
+    let mut hover = HoverInfo::new(title, state.name.span);
+
+    let mut doc_parts: Vec<String> = Vec::new();
+    if let Some(doc) = state
+        .doc_comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        doc_parts.push(doc.to_string());
+    }
+    doc_parts.push("_state variable_".to_string());
+    hover = hover.with_documentation(doc_parts.join("\n\n"));
     hover
 }
 
@@ -331,7 +381,7 @@ fn selector_with_parameters(
 fn parameter_signature(parameter: &crate::ast::ParameterDefinition) -> String {
     let mut text = parameter.name.name.to_string();
     if let Some(type_annotation) = &parameter.type_annotation {
-        text.push_str(": ");
+        text.push_str(" :: ");
         text.push_str(&type_annotation_label(type_annotation));
     }
     text
@@ -631,11 +681,14 @@ fn find_hover_in_expr(
                     _ => None,
                 };
                 let contents = if let Some(ty) = field_type {
-                    format!("Field: `{}` — Type: {ty}", field.name)
+                    format!("`{}` :: {ty}", field.name)
                 } else {
-                    format!("Field: `{}`", field.name)
+                    format!("`{}`", field.name)
                 };
-                Some(HoverInfo::new(contents, field.span))
+                Some(
+                    HoverInfo::new(contents, field.span)
+                        .with_documentation("_state variable_".to_string()),
+                )
             } else {
                 find_hover_in_expr(receiver, offset, context, hierarchy, type_map)
             }
@@ -827,12 +880,19 @@ fn resolved_selector_hover_info(
         "instance-side"
     };
     let typed_sig = method_info_signature(&method);
-    let summary = format!("Method: `{typed_sig}` ({dispatch})");
+    let summary = format!("```beamtalk\n{typed_sig}\n```");
 
-    Some(HoverInfo::new(summary, span).with_documentation(format!(
+    let mut doc_parts = vec![format!(
         "Resolved on `{receiver_class}` (defined in `{}`)",
         method.defined_in
-    )))
+    )];
+    let mut meta = dispatch.to_string();
+    if method.is_sealed {
+        meta.push_str(", sealed");
+    }
+    doc_parts.push(format!("_{meta}_"));
+
+    Some(HoverInfo::new(summary, span).with_documentation(doc_parts.join("\n\n")))
 }
 
 /// Formats a `MethodInfo` from the hierarchy as a typed signature string.
@@ -960,8 +1020,7 @@ fn class_reference_hover_info(
     span: Span,
     hierarchy: &ClassHierarchy,
 ) -> HoverInfo {
-    let module_name = to_module_name(class_name);
-    let mut info = format!("Class: `{class_name}` (module `{module_name}`)");
+    let mut info = format!("Class: `{class_name}`");
 
     if let Some(class_info) = hierarchy.get_class(class_name.as_str()) {
         use std::fmt::Write;
@@ -1093,7 +1152,7 @@ mod tests {
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(
-            hover.contents.contains("Binary message") || hover.contents.contains("Method:"),
+            hover.contents.contains("Binary message") || hover.contents.contains("```beamtalk"),
             "Unexpected hover contents: {}",
             hover.contents
         );
@@ -1127,7 +1186,7 @@ mod tests {
         assert!(hover.is_some(), "Should hover call-site selector");
         let hover = hover.unwrap();
         assert!(
-            hover.contents.contains("Method:") || hover.contents.contains("Unary message"),
+            hover.contents.contains("```beamtalk") || hover.contents.contains("Unary message"),
             "Unexpected hover contents: {}",
             hover.contents
         );
@@ -1140,7 +1199,6 @@ mod tests {
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(hover.contents.contains("Class: `Counter`"));
-        assert!(hover.contents.contains("module `counter`"));
     }
 
     #[test]
@@ -1150,10 +1208,6 @@ mod tests {
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(hover.contents.contains("Class: `MyCounterActor`"));
-        // Verify proper CamelCase → snake_case conversion
-        assert!(hover.contents.contains("module `my_counter_actor`"));
-        // Ensure it's NOT using naive to_lowercase
-        assert!(!hover.contents.contains("module `mycounteractor`"));
     }
 
     #[test]
@@ -1269,6 +1323,76 @@ mod tests {
             hover.contents.contains("State: count"),
             "Should show state variables, got: {}",
             hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_state_declaration_name() {
+        let source = "Object subclass: Counter\n  /// The current count\n  state: count :: Integer = 0\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.find("count ::").unwrap();
+        let pos = Position::from_offset(source, offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy);
+
+        assert!(hover.is_some(), "Should hover state declaration name");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("`count` :: Integer"),
+            "Should show name and type, got: {}",
+            hover.contents
+        );
+        assert!(
+            hover
+                .documentation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("The current count"),
+            "Should show doc comment, got: {:?}",
+            hover.documentation
+        );
+        assert!(
+            hover
+                .documentation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("state variable"),
+            "Should show state variable label, got: {:?}",
+            hover.documentation
+        );
+    }
+
+    #[test]
+    fn hover_on_state_declaration_name_no_doc() {
+        let source = "Object subclass: Counter\n  state: count = 0\n  increment => self.count := self.count + 1";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.find("count =").unwrap();
+        let pos = Position::from_offset(source, offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy);
+
+        assert!(
+            hover.is_some(),
+            "Should hover undocumented state declaration"
+        );
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("`count`"),
+            "Should show name, got: {}",
+            hover.contents
+        );
+        assert!(
+            hover
+                .documentation
+                .as_deref()
+                .unwrap_or_default()
+                .contains("state variable"),
+            "Should show state variable label, got: {:?}",
+            hover.documentation
         );
     }
 
@@ -1405,8 +1529,7 @@ mod tests {
         assert!(hover.is_some(), "Should hover method declaration selector");
         let hover = hover.unwrap();
         assert!(
-            hover.contents.contains("Method: `increment`")
-                || hover.contents.contains("Method: `increment ->"),
+            hover.contents.contains("increment"),
             "Unexpected hover contents: {}",
             hover.contents
         );
@@ -1425,11 +1548,6 @@ mod tests {
 
         assert!(hover.is_some(), "Should hover keyword declaration selector");
         let hover = hover.unwrap();
-        assert!(
-            hover.contents.contains("Method:"),
-            "Unexpected hover contents: {}",
-            hover.contents
-        );
         assert!(
             hover.contents.contains("at: index put: value"),
             "Unexpected hover contents: {}",
@@ -1505,7 +1623,7 @@ mod tests {
         assert!(hover.is_some(), "Should hover declaration selector");
         let hover = hover.unwrap();
         assert!(
-            hover.contents.contains("Method: `increment -> Integer`"),
+            hover.contents.contains("increment -> Integer"),
             "Unexpected hover contents: {}",
             hover.contents
         );
