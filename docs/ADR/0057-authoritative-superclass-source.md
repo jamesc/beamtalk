@@ -97,8 +97,9 @@ with incorrect placeholder superclasses that the compiled stdlib would later cor
 ## Decision
 
 Patch `apply_class_info/2` in `beamtalk_object_class.erl` to update the `superclass`
-field when a non-`none` superclass is available from `Meta` (i.e. `__beamtalk_meta/0`
-via `ClassInfo`). Simultaneously update the ETS hierarchy table entry.
+field when `Meta` explicitly provides a `superclass` entry (i.e. via
+`__beamtalk_meta/0` in `ClassInfo`). Simultaneously update the ETS hierarchy table
+entry.
 
 The logic:
 
@@ -295,7 +296,7 @@ blocking on any other work.
 
 - **Option B vs Option A (bootstrap risk)**: The strongest case for B over A is
   bootstrap safety — Option A touches `apply_class_info` which runs during startup,
-  Option B is purely additive. Option A wins because the `none` guard makes the
+  Option B is purely additive. Option A wins because the `error` guard in `maps:find/2` makes the
   change safe-by-default, and Option B's per-hop `__beamtalk_meta/0` calls leave
   `sys:get_state` permanently wrong.
 - **Option C vs Option A (structural impossibility)**: The strongest case for C over
