@@ -1,7 +1,7 @@
 # ADR 0059: Supervision Tree Syntax
 
 ## Status
-Proposed (2026-03-07)
+Accepted (2026-03-07)
 
 ## Context
 
