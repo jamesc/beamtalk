@@ -1268,10 +1268,17 @@ impl CoreErlangGenerator {
         let state_var = self.fresh_temp_var("NlrState");
         let ot_pair_var = self.fresh_temp_var("OtherPair");
 
-        let nlr_arm_result = if has_class_vars {
-            format!("{{'class_var_result', {val_var}, {state_var}}}")
+        // BT-875: Use Document/docvec! — never format!() for Core Erlang fragments.
+        let nlr_arm_result: Document<'static> = if has_class_vars {
+            docvec![
+                "{'class_var_result', ",
+                Document::String(val_var.clone()),
+                ", ",
+                Document::String(state_var.clone()),
+                "}",
+            ]
         } else {
-            val_var.clone()
+            Document::String(val_var.clone())
         };
 
         docvec![
@@ -1301,9 +1308,9 @@ impl CoreErlangGenerator {
             "    <{'throw', {'$bt_nlr', ",
             ctk_var.clone(),
             ", ",
-            val_var,
+            Document::String(val_var),
             ", ",
-            state_var,
+            Document::String(state_var),
             "}}> ",
             "when call 'erlang':'=:='(",
             ctk_var,
