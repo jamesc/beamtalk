@@ -128,12 +128,12 @@ load_class_module(ClassInfo, Expression, State) ->
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 reload_method_definition(MethodInfo, Warnings, Expression, State) ->
     #{class_name := ClassNameBin, selector := SelectorBin} = MethodInfo,
-    ExistingSource = beamtalk_repl_state:get_class_source(ClassNameBin, State),
+    ExistingSource = beamtalk_workspace_meta:get_class_source(ClassNameBin),
     case ExistingSource of
         undefined ->
             ErrorMsg =
-                <<"Class not found: ", ClassNameBin/binary,
-                    ". Define the class first before adding methods.">>,
+                <<"Class source not available for ", ClassNameBin/binary,
+                    " - is the file readable?">>,
             {error, {compile_error, ErrorMsg}, <<>>, Warnings, State};
         ClassSource ->
             recompile_with_method(
@@ -262,8 +262,8 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
             activate_module(ModuleName, ClassNames, SourcePath),
             NewState1 = maybe_add_loaded_module(ModuleName, State),
             NewState2 = track_module_source(ModuleName, SourcePath, NewState1),
-            NewState3 = store_file_class_sources(ClassNames, Source, NewState2),
-            {ok, ClassNames, NewState3};
+            store_file_class_sources(ClassNames, Source, NewState2),
+            {ok, ClassNames, NewState2};
         {error, Reason} ->
             ClassAtoms = class_name_atoms(ClassNames),
             case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
@@ -292,33 +292,37 @@ track_module_source(ModuleName, SourcePath, State) ->
     beamtalk_repl_state:set_module_tracker(NewTracker, State).
 
 %% Store class source for later method patching (file load case).
+%% Writes to workspace_meta; State is returned unchanged.
 -spec store_file_class_sources([map()], string(), beamtalk_repl_state:state()) ->
     beamtalk_repl_state:state().
 store_file_class_sources(ClassNames, Source, State) ->
-    lists:foldl(
-        fun(#{name := Name}, AccState) ->
+    lists:foreach(
+        fun(#{name := Name}) ->
             NameBin = list_to_binary(Name),
-            beamtalk_repl_state:set_class_source(NameBin, Source, AccState)
+            beamtalk_workspace_meta:set_class_source(NameBin, Source)
         end,
-        State,
         ClassNames
-    ).
+    ),
+    State.
 
 %% Store class source for later method patching (inline class definition case).
+%% Writes to workspace_meta; State is returned unchanged.
 -spec store_class_sources([map()], atom(), string(), beamtalk_repl_state:state()) ->
     {term(), beamtalk_repl_state:state()}.
 store_class_sources([], ClassModName, Expression, State) ->
     FallbackName = atom_to_binary(ClassModName, utf8),
-    NewState = beamtalk_repl_state:set_class_source(FallbackName, Expression, State),
-    {FallbackName, NewState};
+    beamtalk_workspace_meta:set_class_source(FallbackName, Expression),
+    {FallbackName, State};
 store_class_sources(Classes, _ClassModName, Expression, State) ->
-    StoreFun = fun(#{name := Name}, AccState) ->
-        NameBin = normalize_class_source_key(Name),
-        beamtalk_repl_state:set_class_source(NameBin, Expression, AccState)
-    end,
+    lists:foreach(
+        fun(#{name := Name}) ->
+            NameBin = normalize_class_source_key(Name),
+            beamtalk_workspace_meta:set_class_source(NameBin, Expression)
+        end,
+        Classes
+    ),
     [#{name := FirstName} | _] = Classes,
-    NewState = lists:foldl(StoreFun, State, Classes),
-    {normalize_class_source_key(FirstName), NewState}.
+    {normalize_class_source_key(FirstName), State}.
 
 -spec normalize_class_source_key(atom() | binary() | list()) -> binary().
 normalize_class_source_key(Name) when is_binary(Name) -> Name;
@@ -505,11 +509,9 @@ load_recompiled_method(
     case code:load_binary(ModName, "", Binary) of
         {module, ModName} ->
             activate_module(ModName, Classes),
-            NewState = beamtalk_repl_state:set_class_source(
-                ClassNameBin, CombinedSource, State
-            ),
+            beamtalk_workspace_meta:set_class_source(ClassNameBin, CombinedSource),
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
-            {ok, Result, <<>>, AllWarnings, NewState};
+            {ok, Result, <<>>, AllWarnings, State};
         {error, LoadReason} ->
             ClassAtoms = class_name_atoms(Classes),
             case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of

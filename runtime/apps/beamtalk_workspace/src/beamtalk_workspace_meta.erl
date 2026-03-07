@@ -23,6 +23,7 @@
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, loaded_modules/0]).
+-export([set_class_source/2, get_class_source/1]).
 -export([get_package_name/0]).
 % Alias for get_metadata/0
 -export([get/0]).
@@ -51,6 +52,7 @@
     repl_port :: inet:port_number() | undefined,
     supervised_actors :: [pid()],
     loaded_modules :: #{atom() => string() | undefined},
+    class_sources :: #{binary() => string()},
     metadata_path :: string(),
     persist_timer :: reference() | undefined,
     monitor_refs :: #{pid() => reference()}
@@ -183,6 +185,26 @@ loaded_modules() ->
             {error, not_started}
     end.
 
+%% @doc Store source text for a class (for later method patching via >>).
+-spec set_class_source(binary(), string()) -> ok.
+set_class_source(ClassName, Source) when is_binary(ClassName) ->
+    try
+        gen_server:cast(?MODULE, {set_class_source, ClassName, Source})
+    catch
+        exit:{noproc, _} ->
+            ok
+    end.
+
+%% @doc Get stored source text for a class. Returns undefined if not found or server not started.
+-spec get_class_source(binary()) -> string() | undefined.
+get_class_source(ClassName) when is_binary(ClassName) ->
+    try
+        gen_server:call(?MODULE, {get_class_source, ClassName})
+    catch
+        exit:{noproc, _} ->
+            undefined
+    end.
+
 %%% gen_server callbacks
 
 %% @private
@@ -237,6 +259,7 @@ init(InitialMetadata) ->
         repl_port = ReplPort,
         supervised_actors = [],
         loaded_modules = #{},
+        class_sources = #{},
         metadata_path = MetadataPath,
         persist_timer = undefined,
         monitor_refs = #{}
@@ -272,6 +295,9 @@ handle_call(supervised_actors, _From, State) ->
     {reply, {ok, State#state.supervised_actors}, State};
 handle_call(loaded_modules, _From, State) ->
     {reply, {ok, maps:to_list(State#state.loaded_modules)}, State};
+handle_call({get_class_source, ClassName}, _From, State) ->
+    Result = maps:get(ClassName, State#state.class_sources, undefined),
+    {reply, Result, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -301,6 +327,10 @@ handle_cast({unregister_actor, Pid}, State) ->
     State2 = remove_actor(Pid, State),
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
+handle_cast({set_class_source, ClassName, Source}, State) ->
+    Sources = State#state.class_sources,
+    State2 = State#state{class_sources = maps:put(ClassName, Source, Sources)},
+    {noreply, State2};
 handle_cast({register_module, Module, NewSource}, State) ->
     Modules = State#state.loaded_modules,
     %% Preserve an existing non-undefined source if the new registration has none.

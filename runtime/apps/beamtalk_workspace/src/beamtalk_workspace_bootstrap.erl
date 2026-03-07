@@ -424,12 +424,46 @@ activate_project_module(ModuleName) ->
             try_register_class(ModuleName),
             SourcePath = extract_source_path(ModuleName),
             beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
+            store_bootstrap_class_source(ModuleName, SourcePath),
             ?LOG_DEBUG("Bootstrap: activated project module", #{module => ModuleName});
         {error, Reason} ->
             ?LOG_WARNING(
                 "Bootstrap: failed to load project module",
                 #{module => ModuleName, reason => Reason}
             )
+    end.
+
+%% @private Read source file content and store per-class in workspace_meta so
+%% that `ClassName >> method => body` works for bootstrap-loaded classes (BT-1174).
+-spec store_bootstrap_class_source(module(), string() | undefined) -> ok.
+store_bootstrap_class_source(_ModuleName, undefined) ->
+    ok;
+store_bootstrap_class_source(ModuleName, SourcePath) ->
+    case file:read_file(SourcePath) of
+        {ok, Binary} ->
+            Source = binary_to_list(Binary),
+            ClassNames = extract_module_class_names(ModuleName),
+            lists:foreach(
+                fun(ClassName) ->
+                    beamtalk_workspace_meta:set_class_source(
+                        atom_to_binary(ClassName, utf8), Source
+                    )
+                end,
+                ClassNames
+            );
+        {error, _Reason} ->
+            ok
+    end.
+
+%% @private Extract class name atoms from a loaded module's beamtalk_class attribute.
+-spec extract_module_class_names(module()) -> [atom()].
+extract_module_class_names(ModuleName) ->
+    try
+        Attrs = erlang:get_module_info(ModuleName, attributes),
+        Classes = proplists:get_value(beamtalk_class, Attrs, []),
+        [ClassName || {ClassName, _Superclass} <- Classes]
+    catch
+        _:_ -> []
     end.
 
 %% @private Extract the .bt source file path from the module's beamtalk_source attribute.
