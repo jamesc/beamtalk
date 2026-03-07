@@ -79,6 +79,8 @@ The boundary is the authentication layer defined in ADR 0020:
 
 The boundary is **not** about which Erlang modules can be called, which OS commands can be run, or what the HTTP client can reach. Those decisions were made in ADR 0028 and ADR 0051 respectively, and this ADR does not change them.
 
+**Note on the workspace cookie and Erlang distribution cookie:** The workspace uses a single cookie for both the WebSocket authentication handshake and the Erlang distribution protocol (`--setcookie`). These are two distinct trust contexts sharing one secret. A process that obtains the cookie gains both REPL access and the ability to join the workspace's Erlang distribution cluster. This conflation is accepted for simplicity; a future hardening ADR could use separate secrets. For now, cookie compromise implies full workspace compromise via either vector.
+
 #### Part 2: Specify Point Mitigations for the Highest-Risk Surfaces
 
 The trust model does not mean "ignore all risks." Within the trust model, we adopt targeted mitigations for attacks that can affect the workspace owner themselves (not third parties):
@@ -119,6 +121,8 @@ SSRF via the HTTP client is **not mitigated** — an authenticated user can send
 
 The workspace cookie is written with `chmod 600` (ADR 0020). `metadata.json` and `node.info` contain no secrets and have standard permissions. No additional filesystem controls are required.
 
+**Acknowledged limitation:** On systems where the workspace owner is `root` (e.g., Docker containers running as root, common in CI environments), `chmod 600` provides no protection — root can read any file. In these environments, the loopback binding is the primary protection. Operators using containerized CI should treat the workspace cookie as unprotected and isolate the container's loopback interface accordingly.
+
 **2d. Subprocess: No restrictions on spawnable commands**
 
 `beamtalk_subprocess.erl` does not restrict which executables can be spawned. Shell injection is the user's responsibility (ADR 0051). This is accepted — restricting spawnable commands would break scripting and orchestration use cases.
@@ -141,7 +145,7 @@ New features that touch security must be evaluated against these principles:
 
 5. **New network services bind to loopback by default.** Any future service that opens a TCP or UDP port must bind to `127.0.0.1` by default. An explicit `--bind` flag is required for any other binding.
 
-6. **Beamtalk is single-user per workspace.** If someone asks "can multiple users share a Beamtalk workspace?", the answer is "each user should have their own workspace." Beamtalk is not designed as a multi-user server.
+6. **Beamtalk is single-user per workspace.** A workspace is owned by one developer. Multiple concurrent connections (e.g., multiple browser tabs, ADR 0017) from the same authenticated user are permitted — they share the same cookie and the same actor state intentionally. What is not permitted is sharing a workspace between two developers as a multi-user service, as that collapses the auth boundary to a shared secret. Each developer should have their own workspace.
 
 ### What This ADR Does Not Do
 
@@ -190,6 +194,16 @@ The Erlang cookie mechanism is the direct ancestor of Beamtalk's cookie. The OTP
 Beamtalk inherits this honest framing. The workspace cookie (used on the WebSocket protocol) is stronger than the Erlang cookie (`~/.erlang.cookie`) — it is a 256-bit random secret stored per-workspace with `chmod 600`, not a global atom in a user's home directory. For network-exposed remote access, mTLS (not cookies) provides the security property.
 
 **What we adopted:** The cookie-per-workspace pattern. The OTP `ssl_dist` mTLS path for remote.
+
+### Python Interactive Interpreter and IPython
+
+Python's interactive interpreter (`python3`) and IPython have the same model: a REPL that executes arbitrary code with the launching user's full privilege. There is no sandbox. Calling `subprocess.run(["rm", "-rf", "/"])` from a Python session is valid code that will execute. The Python docs do not document a security model for the interactive interpreter — it is assumed to run trusted code in a trusted environment.
+
+The Python/IPython model is widely understood and accepted by developers. No Python developer is surprised that their interactive session can delete files. This precedent supports Beamtalk's position: a developer REPL that executes code with user privilege is the expectation, not an anomaly.
+
+**What we adopted:** The same implicit understanding that a developer REPL has full privilege, and the same approach of not engineering around it for the local single-user case.
+
+**What differs:** Beamtalk adds explicit network authentication (the cookie handshake) that Python's local interpreter does not need. Python relies entirely on the OS providing a terminal; network-accessible REPL is not a built-in Python feature. Beamtalk's network-first architecture (ADR 0017) means authentication is mandatory even locally.
 
 ### Pharo Smalltalk
 
@@ -348,8 +362,12 @@ Keep no sandbox but add specific mitigations: a denylist/allowlist for FFI modul
 
 - **Not suitable for multi-tenant execution:** A Beamtalk workspace cannot safely run code from multiple users with different trust levels. This limits addressable use cases (no "code playground," no "shared team workspace" with role-based access).
 - **No blast-radius reduction for FFI:** A bug in user code that calls `Erlang erlang halt: 0` terminates the workspace. Resilience against user mistakes is lower than it could be with Option C mitigations.
+- **Hot-reload persistence survives cookie rotation:** An authenticated session can hot-reload code into a running actor. That code persists in the process after the session ends and after the cookie is rotated. Cookie rotation is not sufficient remediation for a compromised session that hot-reloaded malicious code — the workspace must be stopped and restarted to fully evict injected code.
 - **Auditors may not be satisfied:** Organizations with strict compliance requirements ("no tool may spawn OS processes without explicit configuration") cannot use Beamtalk in scripting contexts without additional operational controls.
+- **No eval audit trail:** Authenticated eval operations are not logged — there is no record of what code was evaluated in a session. Connection events and auth failures are logged (ADR 0020), but not the code itself. Production operators cannot perform forensics on "what ran" without additional tooling.
 - **Security research burden is on the operator:** Evaluating Beamtalk for a given deployment requires reading ADR 0020, ADR 0028, ADR 0051, and this ADR. A consolidated `docs/security/threat-model.md` is required.
+- **Plugin system requires revisiting this ADR:** Any plugin API that loads third-party code into the workspace node immediately inherits full RCE capability via the `Erlang` global (ADR 0028). A plugin system cannot be safely designed under this security model without also addressing the FFI boundary — this ADR must be revisited before a plugin system is designed.
+- **Cloud playground / multi-tenant evaluation is foreclosed architecturally:** Accepting the unrestricted `erlang:apply/3` FFI (ADR 0028) means a sandboxed evaluation mode requires either removing the `Erlang` global or running untrusted code in a separate BEAM node communicating via message passing. This is a major architectural change, not an incremental addition. This decision should be understood as a strategic choice: Beamtalk is not a cloud playground, and making it one requires a different architecture.
 
 ### Neutral
 
@@ -408,3 +426,11 @@ Note: this is not a sandbox — an authenticated user with `--no-subprocess` can
 - Livebook security (GitHub README): https://github.com/livebook-dev/livebook
 - nREPL security documentation: https://nrepl.org/nrepl/usage/server.html
 - Newspeak object-capability model: https://bracha.org/newspeak-modules.pdf
+
+### Implementation Hardening Notes (follow-up issues, not in scope of this ADR)
+
+The following implementation concerns were identified during review and should be tracked as separate issues:
+
+- **Cookie timing-safety:** `beamtalk_ws_handler.erl` performs a byte-length check before `crypto:hash_equals/2`, breaking the constant-time guarantee. The length check should be removed or absorbed into `hash_equals`.
+- **CSPRNG documentation:** `generate_cookie()` in `storage.rs` relies on `rand::rng()` being a CSPRNG. This should be made explicit (use `rand::rngs::OsRng` directly) so future changes cannot accidentally weaken it.
+- **`/proc` cmdline exposure:** If the Erlang VM expands `-args_file` into its own argv, the workspace cookie may be visible in `/proc/<pid>/cmdline` on Linux despite the args file being `chmod 600`. This should be investigated; if confirmed, the cookie should be passed via a file descriptor rather than command-line arguments.
