@@ -24,16 +24,25 @@
 %%% If the timer process has already exited (fired), a process monitor DOWN
 %%% message arrives instead and cancel/1 returns false. A 100 ms fallback
 %%% timeout guards against unexpected stalls.
+%%%
+%%% ## FFI Shims
+%%%
+%%% The `beamtalk_erlang_proxy:direct_call/3` dispatch derives the Erlang function
+%%% name from the first keyword of the Beamtalk selector (stripping the trailing
+%%% colon). The colon-free shims (`after/2`, `every/2`, `sleep/1`) bridge the
+%%% gap so that `(Erlang beamtalk_timer) after: ms do: block` dispatches correctly
+%%% to the canonical `'after:do:'/2` implementation.
 
 -module(beamtalk_timer).
 
-%% Class methods
+%% Class methods (canonical colon forms — used by EUnit tests)
 -export(['after:do:'/2, 'every:do:'/2, 'sleep:'/1]).
 
 %% Instance methods
 -export([cancel/1, 'isActive'/1, 'printString'/1]).
 
--export([has_method/1]).
+%% FFI shims for (Erlang beamtalk_timer) dispatch
+-export(['after'/2, every/2, sleep/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -121,14 +130,32 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
     end.
 
 %%% ============================================================================
-%%% has_method/1
+%%% FFI Shims
+%%%
+%%% The (Erlang beamtalk_timer) FFI uses beamtalk_erlang_proxy:direct_call/3,
+%%% which derives the Erlang function name from the first keyword of the
+%%% Beamtalk selector (stripping the trailing colon). These shims provide
+%%% the colon-free entry points that the proxy calls:
+%%%
+%%%   (Erlang beamtalk_timer) after: ms do: block  → 'after'/2
+%%%   (Erlang beamtalk_timer) every: ms do: block  → every/2
+%%%   (Erlang beamtalk_timer) sleep: ms            → sleep/1
+%%%   (Erlang beamtalk_timer) cancel: self         → cancel/1  (direct)
+%%%   (Erlang beamtalk_timer) isActive: self       → isActive/1 (direct)
+%%%   (Erlang beamtalk_timer) printString: self    → printString/1 (direct)
 %%% ============================================================================
 
--spec has_method(atom()) -> boolean().
-has_method('cancel') -> true;
-has_method('isActive') -> true;
-has_method('printString') -> true;
-has_method(_) -> false.
+%% @doc FFI shim: `(Erlang beamtalk_timer) after: ms do: block`
+-spec 'after'(integer(), function()) -> map().
+'after'(Ms, Block) -> 'after:do:'(Ms, Block).
+
+%% @doc FFI shim: `(Erlang beamtalk_timer) every: ms do: block`
+-spec every(integer(), function()) -> map().
+every(Ms, Block) -> 'every:do:'(Ms, Block).
+
+%% @doc FFI shim: `(Erlang beamtalk_timer) sleep: ms`
+-spec sleep(integer()) -> 'nil'.
+sleep(Ms) -> 'sleep:'(Ms).
 
 %%% ============================================================================
 %%% Internal Functions

@@ -1,13 +1,13 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc EUnit tests for beamtalk_random module.
+%%% @doc EUnit tests for beamtalk_random module (BT-1165).
 %%%
 %%% **DDD Context:** Object System Context
 %%%
 %%% Tests class-side methods (next, nextInteger:, new, seed:),
 %%% instance methods (instanceNext, instanceNextInteger:),
-%%% collection integration (atRandom), has_method/1, and error paths.
+%%% collection integration (atRandom), FFI shims, and error paths.
 
 -module(beamtalk_random_tests).
 
@@ -212,17 +212,46 @@ at_random_empty_tuple_test() ->
     ).
 
 %%% ============================================================================
-%%% has_method/1
+%%% FFI shims (BT-1165)
 %%% ============================================================================
 
-has_method_known_test() ->
-    ?assert(beamtalk_random:has_method('next')),
-    ?assert(beamtalk_random:has_method('nextInteger:')),
-    ?assert(beamtalk_random:has_method('new')),
-    ?assert(beamtalk_random:has_method('seed:')),
-    ?assert(beamtalk_random:has_method('instanceNext')),
-    ?assert(beamtalk_random:has_method('instanceNextInteger:')).
+ffi_shim_next_integer_returns_integer_test() ->
+    V = beamtalk_random:nextInteger(10),
+    ?assert(is_integer(V)),
+    ?assert(V >= 1),
+    ?assert(V =< 10).
 
-has_method_unknown_test() ->
-    ?assertNot(beamtalk_random:has_method('atRandom')),
-    ?assertNot(beamtalk_random:has_method(frobnicateWidget)).
+ffi_shim_next_integer_error_propagates_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_random:nextInteger(0)
+    ).
+
+ffi_shim_seed_returns_random_map_test() ->
+    R = beamtalk_random:seed(42),
+    ?assertEqual('Random', maps:get('$beamtalk_class', R)).
+
+ffi_shim_seed_deterministic_test() ->
+    R1 = beamtalk_random:seed(42),
+    R2 = beamtalk_random:seed(42),
+    ?assertEqual(maps:get(state, R1), maps:get(state, R2)).
+
+ffi_shim_seed_error_propagates_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_random:seed(<<"bad">>)
+    ).
+
+ffi_shim_instance_next_integer_returns_integer_test() ->
+    R = beamtalk_random:'seed:'(42),
+    V = beamtalk_random:instanceNextInteger(R, 100),
+    ?assert(is_integer(V)),
+    ?assert(V >= 1),
+    ?assert(V =< 100).
+
+ffi_shim_instance_next_integer_error_propagates_test() ->
+    R = beamtalk_random:'seed:'(1),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_random:instanceNextInteger(R, 0)
+    ).
