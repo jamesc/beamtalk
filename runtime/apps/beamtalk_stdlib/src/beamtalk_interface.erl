@@ -26,7 +26,7 @@
 %%% | `help:selector:'  | Formatted method documentation                    |
 %%% | `version'         | Beamtalk runtime version string                   |
 
--module(beamtalk_interface_primitives).
+-module(beamtalk_interface).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").

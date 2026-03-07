@@ -54,6 +54,8 @@
 
 %% Public API
 -export([start_link/1, start/1]).
+%% Class-side @primitive dispatch (called from compiled bt@stdlib@subprocess)
+-export([dispatch/3]).
 
 %% gen_server callbacks
 -export([
@@ -77,6 +79,79 @@
     env => #{binary() => binary()},
     dir => binary()
 }.
+
+
+%%% ============================================================================
+%%% Class-side @primitive dispatch — called from bt@stdlib@subprocess:dispatch/3
+%%% ============================================================================
+
+%% @doc Dispatch a class-side @primitive method call for Subprocess.
+%%
+%% Called by the compiled `bt@stdlib@subprocess:dispatch/3` for class-side
+%% `@primitive` annotations: `open:args:` and `open:args:env:dir:`.
+%% Instance method calls go directly to the gen_server via `beamtalk_actor:sync_send/3`.
+-spec dispatch(atom(), list(), term()) -> term().
+
+dispatch('open:args:', [Command, Args], _ClassSelf) when is_binary(Command) ->
+    ArgsList = bt_array_to_list(Args),
+    start_subprocess(#{executable => Command, args => ArgsList}, 'open:args:');
+dispatch('open:args:', [_Command, _Args], _ClassSelf) ->
+    Err = beamtalk_error:new(type_error, 'Subprocess', 'open:args:'),
+    beamtalk_error:raise(Err);
+dispatch('open:args:env:dir:', [Command, Args, Env, Dir], _ClassSelf) when
+    is_binary(Command), is_binary(Dir), is_map(Env)
+->
+    ArgsList = bt_array_to_list(Args),
+    EnvMap = maps:without([''], Env),
+    start_subprocess(
+        #{executable => Command, args => ArgsList, env => EnvMap, dir => Dir},
+        'open:args:env:dir:'
+    );
+dispatch('open:args:env:dir:', [_Command, _Args, _Env, _Dir], _ClassSelf) ->
+    Err = beamtalk_error:new(type_error, 'Subprocess', 'open:args:env:dir:'),
+    beamtalk_error:raise(Err);
+dispatch(Selector, _Args, _Self) ->
+    Err0 = beamtalk_error:new(does_not_understand, 'Subprocess'),
+    Err1 = beamtalk_error:with_selector(Err0, Selector),
+    beamtalk_error:raise(Err1).
+
+%% @private Start a supervised beamtalk_subprocess gen_server and return a beamtalk_object.
+-spec start_subprocess(map(), atom()) -> #beamtalk_object{}.
+start_subprocess(Config, Selector) ->
+    case beamtalk_subprocess_sup:start_child(Config) of
+        {ok, Pid} ->
+            #beamtalk_object{
+                class = 'Subprocess',
+                class_mod = 'bt@stdlib@subprocess',
+                pid = Pid
+            };
+        {error, Reason} ->
+            Err0 = beamtalk_error:new(runtime_error, 'Subprocess', Selector),
+            Err1 = beamtalk_error:with_message(
+                Err0,
+                iolist_to_binary(io_lib:format("Failed to start subprocess: ~p", [Reason]))
+            ),
+            beamtalk_error:raise(Err1)
+    end.
+
+%% @private Convert a Beamtalk Array (tagged map or plain list) to an Erlang list.
+%%
+%% Array literals in Beamtalk method call arguments compile to plain Erlang lists.
+%% Array values returned from collection operations are tagged maps.
+-spec bt_array_to_list(term()) -> list().
+bt_array_to_list(#{'' := 'Array', 'data' := Arr}) ->
+    case array:is_array(Arr) of
+        true ->
+            array:to_list(Arr);
+        false ->
+            Err = beamtalk_error:new(type_error, 'Subprocess'),
+            beamtalk_error:raise(Err)
+    end;
+bt_array_to_list(List) when is_list(List) ->
+    List;
+bt_array_to_list(_Other) ->
+    Err = beamtalk_error:new(type_error, 'Subprocess'),
+    beamtalk_error:raise(Err).
 
 %%% ============================================================================
 %%% Public API

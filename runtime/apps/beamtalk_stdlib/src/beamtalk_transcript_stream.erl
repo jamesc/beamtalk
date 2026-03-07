@@ -124,6 +124,18 @@ class_info() ->
     }.
 
 %%% ============================================================================
+%%% Class-side @primitive dispatch — BT-1163: shim delegating to primitives module
+%%% until the full implementation is merged here
+%%% ============================================================================
+
+%% @doc Dispatch a class-side @primitive method call for TranscriptStream.
+%%
+%% Delegates to `beamtalk_transcript_stream_primitives:dispatch/3` pending BT-1163.
+-spec dispatch(atom(), list(), term()) -> term().
+dispatch(Selector, Args, Self) ->
+    beamtalk_transcript_stream_primitives:dispatch(Selector, Args, Self).
+
+%%% ============================================================================
 %%% Module-level subscribe/unsubscribe API
 %%% ============================================================================
 
