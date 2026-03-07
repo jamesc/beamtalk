@@ -1071,8 +1071,7 @@ list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
                     InstanceSelectors = lists:sort(
                         beamtalk_runtime_api:local_instance_methods(Pid)
                     ),
-                    ClassMethodsMap = beamtalk_runtime_api:local_class_methods_map(Pid),
-                    ClassSelectors = lists:sort(maps:keys(ClassMethodsMap)),
+                    ClassSelectors = lists:sort(beamtalk_runtime_api:local_class_methods(Pid)),
                     InstanceEntries = [
                         #{
                             <<"name">> => atom_to_binary(S, utf8),

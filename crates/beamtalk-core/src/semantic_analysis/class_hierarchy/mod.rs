@@ -1374,6 +1374,29 @@ mod tests {
             !selectors.contains(&"isAlive"),
             "isAlive must NOT be in class_methods"
         );
+
+        // Synthesized Actor class methods carry generated doc strings
+        let spawn = class_methods.iter().find(|m| m.selector == "spawn").unwrap();
+        let spawn_doc = spawn.doc.as_deref().unwrap();
+        assert!(
+            spawn_doc.contains("*(compiler-generated)*"),
+            "spawn doc missing tag: {spawn_doc}"
+        );
+
+        let spawn_with = class_methods
+            .iter()
+            .find(|m| m.selector == "spawnWith:")
+            .unwrap();
+        assert!(
+            spawn_with.doc.as_deref().unwrap().contains("*(compiler-generated)*"),
+            "spawnWith: doc missing tag"
+        );
+
+        let new = class_methods.iter().find(|m| m.selector == "new").unwrap();
+        assert!(
+            new.doc.as_deref().unwrap().contains("spawn"),
+            "new error-guard doc should mention spawn"
+        );
     }
 
     #[test]
@@ -2906,6 +2929,73 @@ mod tests {
         assert!(
             class_sels.contains(&"x:y:"),
             "keyword constructor x:y: missing: {class_sels:?}"
+        );
+    }
+
+    #[test]
+    fn value_subclass_auto_methods_have_generated_docs() {
+        use crate::ast::{Expression, Literal};
+        let state = vec![StateDeclaration::with_default(
+            Identifier::new("x", test_span()),
+            Expression::Literal(Literal::Integer(0), test_span()),
+            test_span(),
+        )];
+        let class = ClassDefinition {
+            name: Identifier::new("Point", test_span()),
+            superclass: Some(Identifier::new("Value", test_span())),
+            class_kind: ClassKind::Value,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state,
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        };
+        let module = Module {
+            classes: vec![class],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let (Ok(h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+        let info = h.get_class("Point").expect("Point should be registered");
+
+        // Getter doc contains field name, default, and compiler-generated tag
+        let getter = info.methods.iter().find(|m| m.selector == "x").unwrap();
+        let getter_doc = getter.doc.as_deref().unwrap();
+        assert!(getter_doc.contains("`x`"), "getter doc missing field name");
+        assert!(getter_doc.contains("`0`"), "getter doc missing default value");
+        assert!(
+            getter_doc.contains("*(compiler-generated)*"),
+            "getter doc missing tag"
+        );
+
+        // Setter doc mentions class name and field name
+        let setter = info.methods.iter().find(|m| m.selector == "withX:").unwrap();
+        let setter_doc = setter.doc.as_deref().unwrap();
+        assert!(setter_doc.contains("`Point`"), "setter doc missing class name");
+        assert!(setter_doc.contains("`x`"), "setter doc missing field name");
+        assert!(
+            setter_doc.contains("*(compiler-generated)*"),
+            "setter doc missing tag"
+        );
+
+        // Keyword constructor doc mentions class name and field arg with default
+        let ctor = info.class_methods.iter().find(|m| m.selector == "x:").unwrap();
+        let ctor_doc = ctor.doc.as_deref().unwrap();
+        assert!(ctor_doc.contains("`Point`"), "ctor doc missing class name");
+        assert!(ctor_doc.contains("x (default: 0)"), "ctor doc missing arg desc");
+        assert!(
+            ctor_doc.contains("*(compiler-generated)*"),
+            "ctor doc missing tag"
         );
     }
 
