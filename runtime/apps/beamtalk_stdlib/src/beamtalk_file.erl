@@ -54,7 +54,25 @@
     'absolutePath:'/1,
     'tempDirectory'/0
 ]).
--export([handle_lines/1, has_method/1, handle_has_method/1]).
+-export([handle_lines/1, handle_has_method/1]).
+
+%% FFI shims for (Erlang beamtalk_file) dispatch
+-export([
+    exists/1,
+    readAll/1,
+    writeAll/2,
+    lines/1,
+    open/2,
+    isDirectory/1,
+    isFile/1,
+    mkdir/1,
+    mkdirAll/1,
+    listDirectory/1,
+    delete/1,
+    deleteAll/1,
+    rename/2,
+    absolutePath/1
+]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -183,25 +201,6 @@
     Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
     beamtalk_error:raise(Error2).
-
-%% @doc Check if File responds to the given selector.
--spec has_method(atom()) -> boolean().
-has_method('exists:') -> true;
-has_method('readAll:') -> true;
-has_method('writeAll:contents:') -> true;
-has_method('lines:') -> true;
-has_method('open:do:') -> true;
-has_method('isDirectory:') -> true;
-has_method('isFile:') -> true;
-has_method('mkdir:') -> true;
-has_method('mkdirAll:') -> true;
-has_method('listDirectory:') -> true;
-has_method('delete:') -> true;
-has_method('deleteAll:') -> true;
-has_method('rename:to:') -> true;
-has_method('absolutePath:') -> true;
-has_method('tempDirectory') -> true;
-has_method(_) -> false.
 
 %% @doc Check if FileHandle responds to the given selector.
 -spec handle_has_method(atom()) -> boolean().
@@ -704,6 +703,46 @@ handle_has_method(_) -> false.
                 V
         end,
     list_to_binary(Dir).
+
+%%% ============================================================================
+%%% FFI Shims
+%%%
+%%% The (Erlang beamtalk_file) FFI uses beamtalk_erlang_proxy:direct_call/3,
+%%% which derives the Erlang function name from the first keyword of the
+%%% Beamtalk selector (stripping the trailing colon). These shims provide
+%%% the colon-free entry points that the proxy calls:
+%%%
+%%%   (Erlang beamtalk_file) exists: path          → exists/1
+%%%   (Erlang beamtalk_file) readAll: path         → readAll/1
+%%%   (Erlang beamtalk_file) writeAll: p contents: t → writeAll/2
+%%%   (Erlang beamtalk_file) lines: path           → lines/1
+%%%   (Erlang beamtalk_file) open: path do: block  → open/2
+%%%   (Erlang beamtalk_file) isDirectory: path     → isDirectory/1
+%%%   (Erlang beamtalk_file) isFile: path          → isFile/1
+%%%   (Erlang beamtalk_file) mkdir: path           → mkdir/1
+%%%   (Erlang beamtalk_file) mkdirAll: path        → mkdirAll/1
+%%%   (Erlang beamtalk_file) listDirectory: path   → listDirectory/1
+%%%   (Erlang beamtalk_file) delete: path          → delete/1
+%%%   (Erlang beamtalk_file) deleteAll: path       → deleteAll/1
+%%%   (Erlang beamtalk_file) rename: from to: to   → rename/2
+%%%   (Erlang beamtalk_file) absolutePath: path    → absolutePath/1
+%%%   (Erlang beamtalk_file) tempDirectory         → 'tempDirectory'/0 (direct)
+%%% ============================================================================
+
+exists(Path) -> 'exists:'(Path).
+readAll(Path) -> 'readAll:'(Path).
+writeAll(Path, Contents) -> 'writeAll:contents:'(Path, Contents).
+lines(Path) -> 'lines:'(Path).
+open(Path, Block) -> 'open:do:'(Path, Block).
+isDirectory(Path) -> 'isDirectory:'(Path).
+isFile(Path) -> 'isFile:'(Path).
+mkdir(Path) -> 'mkdir:'(Path).
+mkdirAll(Path) -> 'mkdirAll:'(Path).
+listDirectory(Path) -> 'listDirectory:'(Path).
+delete(Path) -> 'delete:'(Path).
+deleteAll(Path) -> 'deleteAll:'(Path).
+rename(From, To) -> 'rename:to:'(From, To).
+absolutePath(Path) -> 'absolutePath:'(Path).
 
 %%% ============================================================================
 %%% Internal Helpers

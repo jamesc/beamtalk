@@ -57,8 +57,7 @@ pub fn generate_primitive_bif(
         "Float" => float::generate_float_bif(selector, params),
         "String" => string::generate_string_bif(selector, params),
         "Block" => block::generate_block_bif(selector, params),
-        "File" => system::generate_file_bif(selector, params),
-        "Exception" => error_handling::generate_exception_bif(selector, params),
+"Exception" => error_handling::generate_exception_bif(selector, params),
         "Symbol" => reflection::generate_symbol_bif(selector, params),
         "Tuple" => value_types::generate_tuple_bif(selector, params),
         "List" => list::generate_list_bif(selector, params),
@@ -276,71 +275,6 @@ mod tests {
     fn test_float_as_integer() {
         let result = doc_to_string(generate_primitive_bif("Float", "asInteger", &[]));
         assert_eq!(result, Some("call 'erlang':'trunc'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_file_exists() {
-        let result = doc_to_string(generate_primitive_bif(
-            "File",
-            "exists:",
-            &["Path".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_file':'exists:'(Path)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_file_read_all() {
-        let result = doc_to_string(generate_primitive_bif(
-            "File",
-            "readAll:",
-            &["Path".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_file':'readAll:'(Path)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_file_write_all_contents() {
-        let result = doc_to_string(generate_primitive_bif(
-            "File",
-            "writeAll:contents:",
-            &["Path".to_string(), "Text".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_file':'writeAll:contents:'(Path, Text)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_file_lines() {
-        let result = doc_to_string(generate_primitive_bif(
-            "File",
-            "lines:",
-            &["Path".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_file':'lines:'(Path)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_file_open_do() {
-        let result = doc_to_string(generate_primitive_bif(
-            "File",
-            "open:do:",
-            &["Path".to_string(), "Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_file':'open:do:'(Path, Block)".to_string())
-        );
     }
 
     #[test]
