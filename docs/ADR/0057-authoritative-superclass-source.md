@@ -1,7 +1,7 @@
 # ADR 0057: Authoritative Superclass Source for Abstract Stdlib Classes
 
 ## Status
-Proposed (2026-03-07)
+Accepted (2026-03-07)
 
 ## Summary
 

@@ -83,7 +83,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0054](0054-communication-protocols.md) | Communication Protocols | Accepted \| Implemented | 2026-03-05 |
 | [0055](0055-erlang-backed-class-authoring-protocol.md) | Erlang-Backed Class Authoring Protocol | Accepted | 2026-03-06 |
 | [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Proposed | 2026-03-06 |
-| [0057](0057-authoritative-superclass-source.md) | Authoritative Superclass Source for Abstract Stdlib Classes | Proposed | 2026-03-07 |
+| [0057](0057-authoritative-superclass-source.md) | Authoritative Superclass Source for Abstract Stdlib Classes | Accepted | 2026-03-07 |
 
 ## Creating New ADRs
 
