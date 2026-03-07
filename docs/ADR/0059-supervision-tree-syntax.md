@@ -83,11 +83,11 @@ Class-level declarations in the supervisor body:
 | Declaration | OTP mapping | Default |
 |---|---|---|
 | `strategy: Symbol` | `SupFlags.strategy` — `#oneForOne`, `#oneForAll`, `#restForOne`, `#dynamic` | `#oneForOne` |
-| `maxRestarts: Integer` | `SupFlags.intensity` (static only) | `10` |
-| `restartWindow: Integer` (seconds) | `SupFlags.period` (static only) | `60` |
-| `children: ArrayLiteral` | `ChildSpecs` list (static only, required unless `strategy: #dynamic`) | — |
-| `childClass: ClassName` | dynamic child spec template (`simple_one_for_one`) | — |
-| `childRestart: Symbol` | `restart` in dynamic child spec | `#temporary` |
+| `maxRestarts: Integer` | `SupFlags.intensity` (static + dynamic) | `10` |
+| `restartWindow: Integer` (seconds) | `SupFlags.period` (static + dynamic) | `60` |
+| `children: ListLiteral` (`#(...)`) | static `ChildSpecs` list (required unless `strategy: #dynamic`) | — |
+| `childClass: ClassName` | dynamic child spec template (used when `strategy: #dynamic`) | — |
+| `childRestart: Symbol` | `restart` in dynamic child spec (used when `strategy: #dynamic`) | `#temporary` |
 
 Children are Actor class references. Each entry is either a bare class name (uses `supervisionPolicy:` default from that class) or a class name with a `restart:` override:
 
@@ -147,7 +147,7 @@ Supervisor subclass: WorkerPool
   childRestart: #temporary
 ```
 
-`childClass:` names the Actor class to spawn for each dynamic child. `childRestart:` is optional (defaults to `#temporary` for dynamic supervisors, matching OTP's `DynamicSupervisor` default). No `children:` array is declared — the supervisor starts with no children.
+`childClass:` names the Actor class to spawn for each dynamic child. `childRestart:` is optional (defaults to `#temporary` for dynamic supervisors, matching the default used by Elixir's `DynamicSupervisor`). No `children:` list is declared — the supervisor starts with no children.
 
 Dynamic supervisor instances gain `startChild:` and `terminateChild:` messages:
 
@@ -155,8 +155,8 @@ Dynamic supervisor instances gain `startChild:` and `terminateChild:` messages:
 pool := WorkerPool supervise.
 
 // Start children on demand
-w1 := pool startChild: #{config: "db-a"}.
-w2 := pool startChild: #{config: "db-b"}.
+w1 := pool startChild: #{#config => "db-a"}.
+w2 := pool startChild: #{#config => "db-b"}.
 
 pool children.              // => #(Worker Worker)
 pool count.                 // => 2
@@ -320,10 +320,10 @@ Dynamic supervisor:
 > pool count.
 0
 
-> w1 := pool startChild: #{config: "primary"}.
+> w1 := pool startChild: #{#config => "primary"}.
 #Actor<Worker, <0.211.0>>
 
-> w2 := pool startChild: #{config: "replica"}.
+> w2 := pool startChild: #{#config => "replica"}.
 #Actor<Worker, <0.212.0>>
 
 > pool count.
@@ -512,7 +512,7 @@ class WebApp extends Actor {
 | Declarative supervisor | ✅ class | ✅ init/1 | ❌ none | ✅ builder | **✅ class body** |
 | Child defaults from actor | ✅ child_spec/1 | ❌ all in supervisor | N/A | ❌ inline | **✅ supervisionPolicy:** |
 | Per-supervisor overrides | ✅ {Module, opts} | ✅ always explicit | N/A | ✅ inline | **✅ restart: in children:** |
-| Restart strategies | ✅ 3 strategies | ✅ 3 strategies | ❌ | ✅ 3 strategies | **✅ 3 strategies** |
+| Restart strategies | ✅ 3 strategies | ✅ 3 strategies | ❌ | ✅ 3 strategies | **✅ 4 strategies** |
 | REPL inspection | ✅ via Erlang | ✅ via Erlang | ❌ | ✅ via Erlang | **✅ message sends** |
 
 ## User Impact
