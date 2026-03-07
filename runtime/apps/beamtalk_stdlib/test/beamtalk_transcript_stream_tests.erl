@@ -220,9 +220,9 @@ ffi_shim_dispatch_show_test() ->
     Self = #beamtalk_object{
         class = 'TranscriptStream', class_mod = 'bt@stdlib@transcript_stream', pid = Pid
     },
-    gen_server:call(Pid, {'show:', [Self, <<"dispatch_show">>]}),
+    gen_server:call(Pid, {'show:', [<<"dispatch_show">>]}),
     Recent = gen_server:call(Pid, recent),
-    ?assert(is_list(Recent)),
+    ?assertEqual([<<"dispatch_show">>], Recent),
     gen_server:stop(Pid).
 
 ffi_shim_exports_test() ->
