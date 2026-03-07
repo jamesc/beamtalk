@@ -140,11 +140,13 @@ After this change:
 
 ### What Changes
 
-| Component | Change |
-|-----------|--------|
-| `beamtalk_object_class.erl` | `apply_class_info/2` — update superclass from Meta; update ETS table |
-| `beamtalk_behaviour_intrinsics.erl` | Remove `superclass_name_from_meta_or_state/1`; replace its call sites |
-| `beamtalk_behaviour_intrinsics_tests.erl` | Update test that exercises the workaround path |
+| Component | Change | Phase |
+|-----------|--------|-------|
+| `beamtalk_object_class.erl` | `apply_class_info/2` — update superclass from Meta; update ETS table | 1 |
+| `beamtalk_object_class_tests.erl` | Regression test: update_class corrects stale superclass | 3 |
+| `beamtalk_behaviour_intrinsics.erl` | Remove `superclass_name_from_meta_or_state/1`; revert `metaclassSuperclass/1` to direct gen_server call | 2 |
+| `beamtalk_behaviour_intrinsics.erl` | Replace `collect_instance_methods_via_meta/3` with `walk_hierarchy` call | 4 |
+| `beamtalk_behaviour_intrinsics_tests.erl` | Update tests for removed workaround helpers | 2, 4 |
 
 ### REPL Verification
 
@@ -163,7 +165,7 @@ Object class class superclass == ProtoObject class class   // => true
 And in Erlang (observable via `sys:get_state/1`):
 
 ```erlang
-{ok, Pid} = beamtalk_class_registry:whereis_class('Class'),
+Pid = beamtalk_class_registry:whereis_class('Class'),
 State = sys:get_state(Pid),
 'Behaviour' = State#class_state.superclass.   %% was 'Object' before this fix
 ```
@@ -185,6 +187,17 @@ match the module it runs**. The current Beamtalk bootstrap approach violates thi
 allowing process state to diverge after a module upgrade (bootstrap stub → compiled
 stdlib transition). This ADR restores OTP alignment: when the compiled module loads
 and calls `update_class`, the resulting state is fully in sync with the module.
+
+### Elixir Module Attributes
+
+Elixir stores structural metadata (module attributes, type specs, behaviour
+declarations) directly in the compiled `.beam` module via `__info__/1`. There is no
+separate process holding a copy of this data. When a module is recompiled and
+hot-reloaded, the new `__info__/1` is immediately authoritative. This is the same
+pattern as `__beamtalk_meta/0` — the compiled module is the source of structural
+truth. Beamtalk diverges by *also* caching this in a gen_server, which creates
+the dual-source problem. Phase 5 (Option C) would align Beamtalk with Elixir's
+model: compiled module for static facts, process state only for mutable runtime data.
 
 ### Erlang ETS as Authoritative Store
 
@@ -327,7 +340,7 @@ third was anticipated before the issue closed.
   always correct (set by the compiler, not a stub).
 - `superclass` is the only field currently set incorrectly by bootstrap stubs. The
   other ~9 static fields duplicated between `#class_state{}` and `__beamtalk_meta/0`
-  are correct but redundant — cleaning them up is the Phase 4 (Option C) migration.
+  are correct but redundant — cleaning them up is the Phase 5 (Option C) migration.
 
 ## Implementation
 
@@ -347,9 +360,29 @@ third was anticipated before the issue closed.
    `gen_server:call(Pid, superclass)`.
 3. Update the EUnit test that exercises the workaround path.
 
-### Phase 4 (follow-up ADR) — Migrate Static Metadata out of gen_server
+### Phase 3 — Add Regression Test (beamtalk_object_class_tests.erl)
 
-Once Phase 1-3 land and correctness is established, a follow-up ADR covers Option C:
+Add a test that:
+- Registers a class with a placeholder superclass (simulating bootstrap stub behaviour).
+- Calls `update_class` with a `ClassInfo` carrying `meta => #{superclass => 'Behaviour'}`.
+- Asserts `gen_server:call(Pid, superclass)` returns `'Behaviour'`.
+- Asserts `beamtalk_class_hierarchy_table:lookup(ClassName)` returns `{ok, 'Behaviour'}`.
+
+Run `just test` and `just test-stdlib` to verify the metaclass tower tests pass
+without the workaround.
+
+### Phase 4 — Simplify `collect_instance_methods_via_meta`
+
+With `walk_hierarchy/3` now producing correct results for all classes,
+`collect_instance_methods_via_meta/3` in `beamtalk_behaviour_intrinsics.erl` can be
+replaced by a `walk_hierarchy` call. This helper was introduced specifically to bypass
+the stale gen_server superclass; after Phase 1, its raison d'etre is gone. The
+method-collection logic can use the same `walk_hierarchy` + `gen_server:call` pattern
+as `metaclassClassMethods` and other intrinsics.
+
+### Phase 5 (follow-up ADR) — Migrate Static Metadata out of gen_server
+
+Once Phases 1-4 land and correctness is established, a follow-up ADR covers Option C:
 
 - Define the gen_server's role as **mutable runtime state only**: live method table
   (with hot-patch deltas), class variables, runtime-added docs.
@@ -360,22 +393,8 @@ Once Phase 1-3 land and correctness is established, a follow-up ADR covers Optio
   cache over it for dynamic classes).
 - Dynamic classes (no compiled module) populate the ETS cache at `register_class`
   time from `ClassInfo` — same data, different source.
-- Remove the now-redundant `superclass_name_from_meta_or_state` pattern entirely
-  (already done in Phase 2 above, but Phase 4 makes it structurally impossible to
-  reintroduce).
 
-Phase 4 is tracked separately. It does not block Phase 1-3.
-
-### Phase 3 — Add Regression Test (beamtalk_object_class_tests.erl)
-
-Add a test that:
-- Registers a class with a placeholder superclass (simulating bootstrap stub behaviour).
-- Calls `update_class` with a `ClassInfo` carrying `meta => #{superclass => 'Behaviour'}`.
-- Asserts `gen_server:call(Pid, superclass)` returns `'Behaviour'`.
-- Asserts `beamtalk_class_hierarchy_table:lookup(ClassName)` returns `'Behaviour'`.
-
-Run `just test` and `just test-stdlib` to verify the metaclass tower tests pass
-without the workaround.
+Phase 5 is tracked separately. It does not block Phases 1-4.
 
 ## References
 
