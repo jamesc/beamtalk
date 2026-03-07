@@ -389,7 +389,7 @@ Module {
                 value: StringInterpolation {
                     segments: [
                         Literal(
-                            "Literal braces: \\{ and \\}, variable: ",
+                            "Literal braces: { and }, variable: ",
                         ),
                         Interpolation(
                             Identifier(

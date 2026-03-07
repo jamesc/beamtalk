@@ -700,17 +700,23 @@ fn format_float(f: f64) -> String {
     }
 }
 
-/// Escape bare `"` characters in a string using Beamtalk's doubled-delimiter convention.
-/// The lexer unescapes `""` → `"` when building the AST, so the unparser must
-/// double any `"` in the string value to produce valid source.
+/// Escape characters that would be misinterpreted when re-lexed as a string literal.
+///
+/// - `"` is doubled (`""`) — the Beamtalk doubled-delimiter convention.
+/// - `{` is escaped as `\{` — otherwise it would start interpolation.
 fn escape_string_quotes(s: &str) -> String {
     let mut result = String::with_capacity(s.len() + 4);
     for c in s.chars() {
-        if c == '"' {
-            result.push('"');
-            result.push('"');
-        } else {
-            result.push(c);
+        match c {
+            '"' => {
+                result.push('"');
+                result.push('"');
+            }
+            '{' => {
+                result.push('\\');
+                result.push('{');
+            }
+            _ => result.push(c),
         }
     }
     result

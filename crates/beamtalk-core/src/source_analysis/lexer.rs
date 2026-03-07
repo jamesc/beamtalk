@@ -463,6 +463,7 @@ impl<'src> Lexer<'src> {
     /// Plain strings without `{expr}` produce a single `TokenKind::String`.
     /// Interpolated strings produce `StringStart`, expression tokens, optional
     /// `StringSegment`s, and `StringEnd`.
+    /// Literal braces are written as `\{` and `\}`, which produce `{` and `}` respectively.
     fn lex_string(&mut self) -> TokenKind {
         let string_start = self.current_position();
         self.advance(); // opening quote
@@ -498,9 +499,16 @@ impl<'src> Lexer<'src> {
                         let text = self.text_for(self.span_from(string_start));
                         return TokenKind::Error(EcoString::from(text));
                     }
-                    content_buf.push('\\');
-                    if let Some(c) = self.advance() {
-                        content_buf.push(c);
+                    if let Some('{' | '}') = self.peek_char() {
+                        // \{ and \} produce literal braces; backslash is consumed
+                        if let Some(c) = self.advance() {
+                            content_buf.push(c);
+                        }
+                    } else {
+                        content_buf.push('\\');
+                        if let Some(c) = self.advance() {
+                            content_buf.push(c);
+                        }
                     }
                 }
                 Some('{') => {
@@ -1150,12 +1158,12 @@ mod tests {
 
     #[test]
     fn lex_string_with_backslash_escapes() {
-        // Escaped braces produce plain string (no interpolation)
+        // \{ and \} produce literal braces (backslash consumed), no interpolation triggered
         assert_eq!(
             lex_kinds(r#""hello" "Hello, \{name\}!""#),
             vec![
                 TokenKind::String("hello".into()),
-                TokenKind::String("Hello, \\{name\\}!".into()),
+                TokenKind::String("Hello, {name}!".into()),
             ]
         );
     }
@@ -1220,19 +1228,20 @@ mod tests {
 
     #[test]
     fn lex_string_interpolation_escaped_braces() {
-        // Escaped braces are literal, no interpolation
+        // \{ and \} produce literal { and } — no interpolation, backslash consumed
         assert_eq!(
             lex_kinds(r#""\{not interpolated\}""#),
-            vec![TokenKind::String("\\{not interpolated\\}".into())]
+            vec![TokenKind::String("{not interpolated}".into())]
         );
     }
 
     #[test]
     fn lex_string_interpolation_mixed_escaped_and_real() {
+        // \{literal\} → literal braces; {x} → interpolation
         assert_eq!(
             lex_kinds(r#""\{literal\} {x}""#),
             vec![
-                TokenKind::StringStart("\\{literal\\} ".into()),
+                TokenKind::StringStart("{literal} ".into()),
                 TokenKind::Identifier("x".into()),
                 TokenKind::StringEnd("".into()),
             ]

@@ -52,8 +52,11 @@ TestCase subclass: StringInterpolationTest
     self assert: "{first}{last}" equals: "AliceBob"
 
   testEscapedBraces =>
-    // Escaped braces produce literal braces (backslash preserved in output)
-    self assert: "Literal: \{not interpolated\}" equals: "Literal: \{not interpolated\}"
+    // \{ and \} produce literal braces — backslash consumed, only the brace remains
+    // Size checks verify no backslash is kept in the output
+    self assert: "\{" size equals: 1
+    self assert: "}" size equals: 1
+    self assert: "a\{b}c" size equals: 5
 
   testEmptyAndEdgeCases =>
     // Empty string
