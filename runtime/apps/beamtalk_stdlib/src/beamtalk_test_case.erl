@@ -764,10 +764,18 @@ skipTest(Reason) ->
 
 %% Extract the bare class name atom from a class reference tuple.
 %% Element 2 of the tuple is 'ClassName class'; strip trailing " class" (6 chars).
+%% Uses list_to_existing_atom/1 to avoid leaking atoms from malformed input.
 -spec ffi_extract_class_name(tuple()) -> atom().
 ffi_extract_class_name(ClassRef) when is_tuple(ClassRef) ->
     Tag = element(2, ClassRef),
     TagStr = atom_to_list(Tag),
     Len = length(TagStr),
     NameStr = lists:sublist(TagStr, Len - 6),
-    list_to_atom(NameStr).
+    try
+        list_to_existing_atom(NameStr)
+    catch
+        error:badarg ->
+            Err0 = beamtalk_error:new(does_not_understand, 'TestCase'),
+            Msg = iolist_to_binary(io_lib:format("Unknown TestCase class: ~s", [NameStr])),
+            beamtalk_error:raise(beamtalk_error:with_message(Err0, Msg))
+    end.

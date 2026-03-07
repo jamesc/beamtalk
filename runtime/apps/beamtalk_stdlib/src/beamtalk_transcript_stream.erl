@@ -152,14 +152,16 @@ clear(Self) -> dispatch(clear, [], Self).
 %% via actor sync_send. When called with a pid/atom (external API path), casts.
 -spec subscribe(#beamtalk_object{} | pid() | atom()) -> ok.
 subscribe(#beamtalk_object{} = Self) ->
-    dispatch(subscribe, [], Self);
+    _ = dispatch(subscribe, [], Self),
+    ok;
 subscribe(TranscriptRef) ->
     gen_server:cast(TranscriptRef, {subscribe, self()}).
 
 %% @doc Unsubscribe a process from Transcript push messages.
 -spec unsubscribe(#beamtalk_object{} | pid() | atom()) -> ok.
 unsubscribe(#beamtalk_object{} = Self) ->
-    dispatch(unsubscribe, [], Self);
+    _ = dispatch(unsubscribe, [], Self),
+    ok;
 unsubscribe(TranscriptRef) ->
     gen_server:cast(TranscriptRef, {unsubscribe, self()}).
 
