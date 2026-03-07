@@ -22,7 +22,7 @@ metadata in process state at all.
 from `__beamtalk_meta/0` when the compiled module loads. One field, targeted fix,
 restores correctness immediately.
 
-**Phase 2 (follow-up):** Migrate static structural metadata out of the class
+**Phase 5 (follow-up):** Migrate static structural metadata out of the class
 gen_server entirely, making `__beamtalk_meta/0` the sole source for immutable facts
 and the gen_server responsible only for mutable runtime state (live method table,
 class variables, hot-patch state). `superclass` happens to be the only field that
