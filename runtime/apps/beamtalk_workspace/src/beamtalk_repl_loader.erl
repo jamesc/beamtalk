@@ -133,7 +133,7 @@ reload_method_definition(MethodInfo, Warnings, Expression, State) ->
         undefined ->
             ErrorMsg =
                 <<"Class source not available for ", ClassNameBin/binary,
-                    " - is the file readable?">>,
+                    " (source not recorded or workspace metadata unavailable)">>,
             {error, {compile_error, ErrorMsg}, <<>>, Warnings, State};
         ClassSource ->
             recompile_with_method(

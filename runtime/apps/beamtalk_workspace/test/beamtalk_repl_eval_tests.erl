@@ -799,7 +799,6 @@ handle_method_definition_with_source_compile_fail_test() ->
         created_at => erlang:system_time(second)
     }),
     ok = beamtalk_workspace_meta:set_class_source(<<"TestClass">>, "Object subclass: TestClass"),
-    timer:sleep(50),
     State = beamtalk_repl_state:new(undefined, 0),
     MethodInfo = #{class_name => <<"TestClass">>, selector => <<"doStuff">>},
     Result = beamtalk_repl_eval:handle_method_definition(

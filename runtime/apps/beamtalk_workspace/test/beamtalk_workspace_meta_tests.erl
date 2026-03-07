@@ -479,13 +479,11 @@ set_get_class_source_test() ->
     %% Store and retrieve source text
     Source = "Object subclass: Counter [\n  count := 0\n]\n",
     ok = beamtalk_workspace_meta:set_class_source(<<"Counter">>, Source),
-    timer:sleep(50),
     ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"Counter">>)),
 
     %% Overwrite with updated source
     Source2 = "Object subclass: Counter [\n  count := 0\n  increment => count := count + 1\n]\n",
     ok = beamtalk_workspace_meta:set_class_source(<<"Counter">>, Source2),
-    timer:sleep(50),
     ?assertEqual(Source2, beamtalk_workspace_meta:get_class_source(<<"Counter">>)),
 
     %% Other class names are still undefined

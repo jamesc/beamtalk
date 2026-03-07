@@ -189,7 +189,7 @@ loaded_modules() ->
 -spec set_class_source(binary(), string()) -> ok.
 set_class_source(ClassName, Source) when is_binary(ClassName) ->
     try
-        gen_server:cast(?MODULE, {set_class_source, ClassName, Source})
+        gen_server:call(?MODULE, {set_class_source, ClassName, Source})
     catch
         exit:{noproc, _} ->
             ok
@@ -298,6 +298,10 @@ handle_call(loaded_modules, _From, State) ->
 handle_call({get_class_source, ClassName}, _From, State) ->
     Result = maps:get(ClassName, State#state.class_sources, undefined),
     {reply, Result, State};
+handle_call({set_class_source, ClassName, Source}, _From, State) ->
+    Sources = State#state.class_sources,
+    State2 = State#state{class_sources = maps:put(ClassName, Source, Sources)},
+    {reply, ok, State2};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -327,10 +331,6 @@ handle_cast({unregister_actor, Pid}, State) ->
     State2 = remove_actor(Pid, State),
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
-handle_cast({set_class_source, ClassName, Source}, State) ->
-    Sources = State#state.class_sources,
-    State2 = State#state{class_sources = maps:put(ClassName, Source, Sources)},
-    {noreply, State2};
 handle_cast({register_module, Module, NewSource}, State) ->
     Modules = State#state.loaded_modules,
     %% Preserve an existing non-undefined source if the new registration has none.
