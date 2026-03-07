@@ -48,7 +48,8 @@
 -ifdef(TEST).
 -export([
     find_exec_binary/0,
-    find_project_root/0
+    find_project_root/0,
+    find_in_project/1
 ]).
 -endif.
 
@@ -145,30 +146,48 @@ find_exec_binary() ->
     end.
 
 find_exec_binary_dev() ->
-    ProjectRoot = find_project_root(),
     ExeName =
         case os:type() of
             {win32, _} -> "beamtalk-exec.exe";
             _ -> "beamtalk-exec"
         end,
-    DevPath = filename:join([ProjectRoot, "target", "debug", ExeName]),
-    case filelib:is_regular(DevPath) of
-        true ->
-            DevPath;
-        false ->
-            ReleasePath = filename:join([ProjectRoot, "target", "release", ExeName]),
-            case filelib:is_regular(ReleasePath) of
-                true ->
-                    ReleasePath;
+    case find_in_project(ExeName) of
+        {ok, Path} ->
+            Path;
+        error ->
+            %% Use ExeName so Windows finds "beamtalk-exec.exe" via PATHEXT.
+            case os:find_executable(ExeName) of
                 false ->
-                    %% Use ExeName so Windows finds "beamtalk-exec.exe" via PATHEXT.
-                    case os:find_executable(ExeName) of
-                        false ->
-                            error({exec_not_found, "beamtalk-exec binary not found"});
-                        Path ->
-                            Path
+                    error({exec_not_found, "beamtalk-exec binary not found"});
+                Path ->
+                    Path
+            end
+    end.
+
+%% @private Try to find the exec binary relative to the Beamtalk project root.
+%%
+%% Returns `{ok, Path}` if a dev or release build is found under the project
+%% root, or `error` if no Cargo.toml ancestor exists or neither build exists.
+%% Catching the project-root error lets `find_exec_binary_dev/0` fall through
+%% to a PATH lookup, enabling Beamtalk programs to run arbitrary OS executables
+%% outside the dev tree (BT-1221).
+-spec find_in_project(string()) -> {ok, string()} | error.
+find_in_project(ExeName) ->
+    try find_project_root() of
+        ProjectRoot ->
+            DevPath = filename:join([ProjectRoot, "target", "debug", ExeName]),
+            case filelib:is_regular(DevPath) of
+                true ->
+                    {ok, DevPath};
+                false ->
+                    ReleasePath = filename:join([ProjectRoot, "target", "release", ExeName]),
+                    case filelib:is_regular(ReleasePath) of
+                        true -> {ok, ReleasePath};
+                        false -> error
                     end
             end
+    catch
+        error:{exec_not_found, _} -> error
     end.
 
 %% @private Find the project root by walking up until Cargo.toml is found.

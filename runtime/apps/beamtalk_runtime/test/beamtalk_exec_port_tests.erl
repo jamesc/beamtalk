@@ -34,6 +34,26 @@ find_exec_binary_returns_existing_file_test() ->
     ?assert(filelib:is_regular(Binary)).
 
 %%% ============================================================================
+%%% find_in_project/1
+%%% ============================================================================
+
+find_in_project_finds_dev_binary_test() ->
+    %% When running tests from the project tree, find_in_project should succeed.
+    ExeName =
+        case os:type() of
+            {win32, _} -> "beamtalk-exec.exe";
+            _ -> "beamtalk-exec"
+        end,
+    Result = beamtalk_exec_port:find_in_project(ExeName),
+    ?assertMatch({ok, _}, Result),
+    {ok, Path} = Result,
+    ?assert(filelib:is_regular(Path)).
+
+find_in_project_nonexistent_name_returns_error_test() ->
+    %% A name that will never exist on disk returns error, not a crash.
+    ?assertEqual(error, beamtalk_exec_port:find_in_project("nonexistent-binary-bt-1221")).
+
+%%% ============================================================================
 %%% open/close
 %%% ============================================================================
 
