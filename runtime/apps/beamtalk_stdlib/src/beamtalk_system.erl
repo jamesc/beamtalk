@@ -124,10 +124,13 @@ erlangVersion() ->
 pid() ->
     list_to_integer(os:getpid()).
 
-%% @doc Colon-free shims for (Erlang beamtalk_system) FFI dispatch.
-%% The FFI proxy strips trailing colons from keyword selectors before calling
-%% erlang:apply/3, so `(Erlang beamtalk_system) getEnv: name` dispatches to
-%% getEnv/1 rather than 'getEnv:'/1. These shims delegate to the canonical forms.
+%% @doc Shims for (Erlang beamtalk_system) FFI dispatch.
+%% The Erlang FFI proxy (beamtalk_erlang_proxy) maps any keyword selector to
+%% its first keyword before calling direct_call/3, so `getEnv:` → `getEnv`
+%% and `getEnv:default:` → `getEnv`. These shims exist so the Beamtalk
+%% selectors `(Erlang beamtalk_system) getEnv: name` and
+%% `(Erlang beamtalk_system) getEnv: name default: fallback` dispatch to
+%% getEnv/1 and getEnv/2 respectively, delegating to the canonical forms.
 -spec getEnv(binary()) -> binary() | 'nil'.
 getEnv(Name) -> 'getEnv:'(Name).
 

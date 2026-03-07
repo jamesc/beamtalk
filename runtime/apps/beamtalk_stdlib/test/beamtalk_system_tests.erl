@@ -137,13 +137,16 @@ pid_positive_test() ->
     ?assert(V > 0).
 
 %%% ============================================================================
-%%% getEnv/1 and getEnv/2 shims (FFI dispatch colon-free aliases)
+%%% getEnv/1 and getEnv/2 shims (FFI dispatch via first selector keyword)
 %%% ============================================================================
 
 get_env_shim_set_variable_test() ->
     os:putenv("BT_TEST_ENV_SHIM", "shim_value"),
-    ?assertEqual(<<"shim_value">>, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM">>)),
-    os:unsetenv("BT_TEST_ENV_SHIM").
+    try
+        ?assertEqual(<<"shim_value">>, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM">>))
+    after
+        os:unsetenv("BT_TEST_ENV_SHIM")
+    end.
 
 get_env_shim_unset_returns_nil_test() ->
     os:unsetenv("BT_TEST_UNSET_SHIM"),
@@ -151,8 +154,11 @@ get_env_shim_unset_returns_nil_test() ->
 
 get_env_shim_default_set_variable_test() ->
     os:putenv("BT_TEST_ENV_SHIM2", "value2"),
-    ?assertEqual(<<"value2">>, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM2">>, <<"fallback">>)),
-    os:unsetenv("BT_TEST_ENV_SHIM2").
+    try
+        ?assertEqual(<<"value2">>, beamtalk_system:getEnv(<<"BT_TEST_ENV_SHIM2">>, <<"fallback">>))
+    after
+        os:unsetenv("BT_TEST_ENV_SHIM2")
+    end.
 
 get_env_shim_default_unset_returns_default_test() ->
     os:unsetenv("BT_TEST_UNSET_SHIM2"),
