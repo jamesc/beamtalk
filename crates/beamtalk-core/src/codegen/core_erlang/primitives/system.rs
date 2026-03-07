@@ -5,99 +5,11 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Contains BIF generators for system-related classes: `File`, `Stream`, `System`,
-//! `Random`, `DateTime`.
+//! Contains BIF generators for system-related classes: `DateTime`.
 
 use super::super::document::Document;
 use super::param;
 use crate::docvec;
-
-/// Stream primitive implementations (BT-511).
-///
-/// Class-side constructors delegate to `beamtalk_stream` module.
-/// Instance methods delegate to `beamtalk_stream` module with Self as first arg.
-pub(crate) fn generate_stream_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = param(params, 0, "_Arg0");
-    match selector {
-        // Class-side constructors
-        "from:" => Some(docvec![
-            "call 'beamtalk_stream':'from'(",
-            p0.to_string(),
-            ")"
-        ]),
-        "from:by:" => {
-            let p1 = param(params, 1, "_Arg1");
-            Some(docvec![
-                "call 'beamtalk_stream':'from_by'(",
-                p0.to_string(),
-                ", ",
-                p1.to_string(),
-                ")"
-            ])
-        }
-        "on:" => Some(docvec!["call 'beamtalk_stream':'on'(", p0.to_string(), ")"]),
-        // Lazy operations
-        "select:" => Some(docvec![
-            "call 'beamtalk_stream':'select'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "collect:" => Some(docvec![
-            "call 'beamtalk_stream':'collect'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "reject:" => Some(docvec![
-            "call 'beamtalk_stream':'reject'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "drop:" => Some(docvec![
-            "call 'beamtalk_stream':'drop'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        // Terminal operations
-        "take:" => Some(docvec![
-            "call 'beamtalk_stream':'take'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "do:" => Some(docvec![
-            "call 'beamtalk_stream':'do'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "inject:into:" => {
-            let p1 = param(params, 1, "_Arg1");
-            Some(docvec![
-                "call 'beamtalk_stream':'inject_into'(Self, ",
-                p0.to_string(),
-                ", ",
-                p1.to_string(),
-                ")",
-            ])
-        }
-        "detect:" => Some(docvec![
-            "call 'beamtalk_stream':'detect'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "asList" => Some(Document::Str("call 'beamtalk_stream':'as_list'(Self)")),
-        "anySatisfy:" => Some(docvec![
-            "call 'beamtalk_stream':'any_satisfy'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "allSatisfy:" => Some(docvec![
-            "call 'beamtalk_stream':'all_satisfy'(Self, ",
-            p0.to_string(),
-            ")"
-        ]),
-        "printString" => Some(Document::Str("call 'beamtalk_stream':'print_string'(Self)")),
-        _ => None,
-    }
-}
 
 /// `DateTime` primitive implementations (BT-710).
 ///

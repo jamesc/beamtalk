@@ -70,7 +70,6 @@ pub fn generate_primitive_bif(
         "TestCase" => value_types::generate_test_case_bif(selector, params),
         "TestRunner" => value_types::generate_test_runner_bif(selector, params),
         "TestResult" => value_types::generate_test_result_bif(selector, params),
-        "Stream" => system::generate_stream_bif(selector, params),
         "DateTime" => system::generate_datetime_bif(selector, params),
         "Collection" => collection::generate_collection_bif(selector, params),
         "Behaviour" => behaviour::generate_behaviour_bif(selector, params),
