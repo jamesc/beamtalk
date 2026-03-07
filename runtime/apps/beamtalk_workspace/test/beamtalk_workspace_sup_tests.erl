@@ -57,7 +57,7 @@ children_ids_test() ->
     %% they are NOT gen_server children of this supervisor.
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
-    ?assert(lists:member('bt@stdlib@transcript_stream', Ids)),
+    ?assert(lists:member(beamtalk_transcript_stream, Ids)),
     ?assertNot(lists:member('bt@stdlib@beamtalk_interface', Ids)),
     ?assertNot(lists:member('bt@stdlib@workspace_interface', Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)),
@@ -158,11 +158,11 @@ session_sup_spec_test() ->
 transcript_stream_spec_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == 'bt@stdlib@transcript_stream'],
+    [Spec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_transcript_stream],
     ?assertEqual(worker, maps:get(type, Spec)),
     ?assertEqual(permanent, maps:get(restart, Spec)),
     ?assertEqual(
-        {'bt@stdlib@transcript_stream', start_link, [{local, 'Transcript'}, #{}]},
+        {beamtalk_transcript_stream, start_link, [{local, 'Transcript'}, 1000]},
         maps:get(start, Spec)
     ).
 
@@ -179,7 +179,7 @@ singletons_after_metadata_test() ->
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     %% Actor singletons must come after workspace_meta (boot ordering)
     MetaIdx = index_of(beamtalk_workspace_meta, Ids),
-    TranscriptIdx = index_of('bt@stdlib@transcript_stream', Ids),
+    TranscriptIdx = index_of(beamtalk_transcript_stream, Ids),
     ?assert(TranscriptIdx > MetaIdx).
 
 %%% Bootstrap child spec tests (ADR 0019 Phase 2)
@@ -252,7 +252,7 @@ all_children_alive_test() ->
         %% BeamtalkInterface and WorkspaceInterface are value singletons — not children.
         ExpectedIds = [
             beamtalk_workspace_meta,
-            'bt@stdlib@transcript_stream',
+            beamtalk_transcript_stream,
             beamtalk_actor_registry,
             beamtalk_class_events,
             beamtalk_bindings_events,
@@ -393,7 +393,7 @@ singleton_specs_have_local_registration_test() ->
     %% Actor singletons use {local, Name} registration.
     %% BeamtalkInterface and WorkspaceInterface are value singletons — not children.
     SingletonIds = [
-        'bt@stdlib@transcript_stream'
+        beamtalk_transcript_stream
     ],
     lists:foreach(
         fun(Id) ->

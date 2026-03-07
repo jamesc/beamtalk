@@ -5,7 +5,7 @@
 %%%
 %%% Centralises the mapping between binding names (Transcript, Beamtalk, Workspace),
 %%% class names (TranscriptStream, BeamtalkInterface, WorkspaceInterface),
-%%% and Erlang modules (bt@stdlib@transcript_stream, etc.).
+%%% and Erlang modules (beamtalk_transcript_stream, etc.).
 %%%
 %%% Singletons are split into two categories:
 %%% - Actor singletons: `singletons/0` — started as gen_server children by the
@@ -56,8 +56,8 @@ singletons() ->
         #{
             binding_name => 'Transcript',
             class_name => 'TranscriptStream',
-            module => 'bt@stdlib@transcript_stream',
-            start_args => [#{}]
+            module => beamtalk_transcript_stream,
+            start_args => [1000]
         }
     ].
 

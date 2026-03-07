@@ -17,7 +17,7 @@
 %%% ```
 %%% beamtalk_workspace_sup
 %%%   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
-%%%   ├─ bt@stdlib@transcript_stream   % Transcript singleton (ADR 0010, Actor)
+%%%   ├─ beamtalk_transcript_stream    % Transcript singleton (ADR 0010, Actor)
 %%%   ├─ beamtalk_actor_registry       % Workspace-wide actor registry
 %%%   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
 %%%   │     (also initialises sealed Object singletons: BeamtalkInterface, WorkspaceInterface)

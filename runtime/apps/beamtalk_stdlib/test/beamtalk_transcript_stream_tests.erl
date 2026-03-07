@@ -353,3 +353,75 @@ ensure_utf8_incomplete_sequence_test() ->
 
 ensure_utf8_empty_binary_test() ->
     ?assertEqual(<<>>, beamtalk_transcript_stream:ensure_utf8(<<>>)).
+
+%%% ============================================================================
+%%% Sync handle_call tests (BT-1163: REPL dispatch path)
+%%% ============================================================================
+
+%% The REPL sends messages via gen_server:call(Pid, {Selector, Args}).
+%% These tests verify the new handle_call clauses for show:, cr, subscribe,
+%% and unsubscribe that were added to support the sync-by-default dispatch.
+
+sync_show_writes_to_buffer_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    SelfRef = gen_server:call(Pid, {'show:', [<<"SyncHello">>]}),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([<<"SyncHello">>], Result),
+    gen_server:stop(Pid).
+
+sync_show_converts_integer_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    _ = gen_server:call(Pid, {'show:', [99]}),
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([<<"99">>], Result),
+    gen_server:stop(Pid).
+
+sync_cr_writes_newline_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    SelfRef = gen_server:call(Pid, {cr, []}),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([<<"\n">>], Result),
+    gen_server:stop(Pid).
+
+sync_subscribe_unsubscribe_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    %% Subscribe via sync call
+    SelfRef = gen_server:call(Pid, {subscribe, []}),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
+    %% Should receive output after subscribing
+    gen_server:cast(Pid, {'show:', <<"sync_sub">>}),
+    receive
+        {transcript_output, <<"sync_sub">>} -> ok
+    after 500 ->
+        ?assert(false)
+    end,
+    %% Unsubscribe via sync call
+    _ = gen_server:call(Pid, {unsubscribe, []}),
+    %% Should NOT receive output after unsubscribing
+    gen_server:cast(Pid, {'show:', <<"after_unsub">>}),
+    _ = gen_server:call(Pid, recent),
+    receive
+        {transcript_output, <<"after_unsub">>} -> ?assert(false)
+    after 0 ->
+        ok
+    end,
+    flush_transcript(),
+    gen_server:stop(Pid).
+
+sync_show_then_recent_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    _ = gen_server:call(Pid, {'show:', [<<"first">>]}),
+    _ = gen_server:call(Pid, {'show:', [<<"second">>]}),
+    Result = gen_server:call(Pid, {recent, []}),
+    ?assertEqual([<<"first">>, <<"second">>], Result),
+    gen_server:stop(Pid).
+
+sync_show_then_clear_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    _ = gen_server:call(Pid, {'show:', [<<"data">>]}),
+    _ = gen_server:call(Pid, {clear, []}),
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([], Result),
+    gen_server:stop(Pid).
