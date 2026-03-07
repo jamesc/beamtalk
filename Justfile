@@ -455,6 +455,13 @@ fuzz DURATION="60":
 # Coverage
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Regenerate cover_excl_mods and dialyzer exclude_mods in runtime/rebar.config
+# from the actual bt@stdlib@*.beam files produced by build-stdlib.
+# Run this after adding or removing Beamtalk stdlib classes.
+[unix]
+update-stdlib-excludes: build-stdlib
+    python3 scripts/gen-stdlib-excludes.py
+
 # Unix-only: depends on coverage-runtime (Unix-only)
 # Generate coverage reports for both Rust and Erlang runtime
 [unix]
@@ -471,6 +478,8 @@ coverage-rust:
 
 # Unix-only: uses bash process substitution and piping
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
+# All three apps run in a single rebar3 eunit call so their cover data merges into
+# one session — separate calls overwrite eunit.coverdata, losing prior coverage.
 # Generate Erlang runtime coverage
 [unix]
 coverage-runtime:
@@ -478,15 +487,9 @@ coverage-runtime:
     set -euo pipefail
     cd runtime
     echo "📊 Generating Erlang runtime coverage..."
-    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace --cover 2>&1); then
+    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace,beamtalk_stdlib --cover 2>&1); then
         echo "$OUTPUT"
-        echo "❌ Runtime tests failed"
-        exit 1
-    fi
-    echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || true
-    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_stdlib --cover 2>&1); then
-        echo "$OUTPUT"
-        echo "❌ Stdlib tests failed"
+        echo "❌ EUnit tests failed"
         exit 1
     fi
     echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || true
