@@ -247,15 +247,22 @@ Change `walk_hierarchy/3` to use `superclass_name_from_meta_or_state` per hop.
 
 - **Newcomer**: "Works, but I don't care about internals."
 - **Smalltalk purist**: "Band-aid — the process state still lies."
-- **BEAM veteran**: "Adds a per-hop `__beamtalk_meta/0` call to every hierarchy
-  traversal. Silent performance regression. Also `sys:get_state` still wrong."
+- **BEAM veteran**: "This is the zero-risk option. `apply_class_info` runs during
+  bootstrap on every startup — touching it means touching the most sensitive
+  initialization code in the runtime. Option B is purely additive: `walk_hierarchy`
+  gets a smarter lookup, nothing in the init path changes. If bootstrap ordering
+  breaks in a subtle way, we haven't touched it."
 - **Operator**: "`sys:get_state` still shows the wrong superclass. Confusing."
 - **Language designer**: "Fixes the symptom in one place but leaves the root
   inconsistency. Every new caller of `gen_server:call(Pid, superclass)` will hit the
   same trap. Does not scale."
 
 **Rejected** because it perpetuates stale state and requires all future callers to
-defend against it independently.
+defend against it independently. The BEAM veteran's risk concern is real but
+addressed by the `none` guard clause in Option A's implementation: `apply_class_info`
+only overwrites `superclass` when `Meta` contains an explicit non-`none` value. If
+Meta is absent or empty, the existing value is preserved unchanged — the init path
+is not affected.
 
 ### Option C (Planned Phase 2): `__beamtalk_meta/0` as sole source for static metadata
 
@@ -267,8 +274,13 @@ module) use a separate lightweight in-memory store populated at `register_class`
 
 - **Newcomer**: "No visible difference."
 - **Smalltalk purist**: "More principled — the compiled module *is* the class."
-- **BEAM veteran**: "Larger surface area than Option A; worth doing once the gen_server
-  role is clearly scoped. Option A establishes correctness first."
+- **BEAM veteran**: "Option A just moves the problem — you still have a latent
+  `code_change` hazard. If a class gen_server process survives a hot-reload where the
+  compiled module changes its superclass, `apply_class_info` runs again and re-fixes
+  it. But if `apply_class_info` doesn't run for any reason (e.g. a class registered
+  dynamically before the module loaded, or a future bootstrap ordering change), you're
+  back to stale state with no warning. Option C makes stale state structurally
+  impossible — the process never holds the data, so there is nothing to go stale."
 - **Language designer**: "This is the destination. Option A is the first step — it
   makes gen_server state correct. Option C makes gen_server state *minimal*. The
   right sequence: fix correctness now, migrate to cleanliness later."
@@ -281,12 +293,20 @@ blocking on any other work.
 
 ### Tension Points
 
-- BEAM veterans and operators agree: gen_server state should be authoritative and
-  `sys:get_state` should tell the truth. Option A satisfies both.
-- Language designers see Option C as the long-term destination. Option A is a
-  stepping stone, not a detour.
-- Only dissent: Option A adds an ETS write per `update_class` call. This happens
-  once at startup for ~5 abstract stdlib classes and is negligible.
+- **Option B vs Option A (bootstrap risk)**: The strongest case for B over A is
+  bootstrap safety — Option A touches `apply_class_info` which runs during startup,
+  Option B is purely additive. Option A wins because the `none` guard makes the
+  change safe-by-default, and Option B's per-hop `__beamtalk_meta/0` calls leave
+  `sys:get_state` permanently wrong.
+- **Option C vs Option A (structural impossibility)**: The strongest case for C over
+  A is that Option A is still process-state-based — a future bootstrap change could
+  reintroduce stale state with no compiler warning. Option C makes it structurally
+  impossible. Option A wins for now because C's scope (auditing all 17+ callers of
+  `superclass/1`, defining a dynamic-class fallback) exceeds what's needed to fix
+  the active bugs. Option C is the planned Phase 5 follow-up precisely because this
+  argument is valid — the goal is to get there, just incrementally.
+- Language designers and cautious BEAM veterans both land on A+C sequenced: fix the
+  data now, eliminate the data duplication later.
 
 ## Alternatives Considered
 
