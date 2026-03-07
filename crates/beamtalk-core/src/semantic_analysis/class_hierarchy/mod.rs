@@ -13,7 +13,9 @@
 //!
 //! The hierarchy uses simple depth-first MRO (no multiple inheritance).
 
-use crate::ast::{ClassDefinition, ClassKind, MethodKind, Module, TypeAnnotation};
+use crate::ast::{
+    ClassDefinition, ClassKind, Expression, Literal, MethodKind, Module, TypeAnnotation,
+};
 use crate::semantic_analysis::SemanticError;
 use crate::source_analysis::Diagnostic;
 use ecow::EcoString;
@@ -42,6 +44,10 @@ pub struct MethodInfo {
     /// Parameter type annotations (e.g., `vec![Some("Number")]` for `+ other: Number`).
     /// Empty for unary methods. `None` elements mean the parameter type is unknown.
     pub param_types: Vec<Option<EcoString>>,
+    /// Documentation string for this method.
+    /// Populated for compiler-synthesized methods and stdlib methods with `///` doc comments;
+    /// `None` for user-written methods without doc comments.
+    pub doc: Option<EcoString>,
 }
 
 impl MethodInfo {
@@ -873,9 +879,16 @@ impl ClassHierarchy {
 
         for slot in &class.state {
             let slot_name = slot.name.name.as_str();
+            let default_str = slot
+                .default_value
+                .as_ref()
+                .map_or_else(|| "nil".to_string(), format_default_value);
 
             // Auto-getter: unary method returning the slot value
             if !user_instance_selectors.contains(slot_name) {
+                let getter_doc = format!(
+                    "Returns the `{slot_name}` field value. Default: `{default_str}`.\n\n*(compiler-generated)*"
+                );
                 instance_methods.push(MethodInfo {
                     selector: slot.name.name.clone(),
                     arity: 0,
@@ -884,6 +897,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     return_type: slot.type_annotation.as_ref().map(TypeAnnotation::type_name),
                     param_types: vec![],
+                    doc: Some(getter_doc.into()),
                 });
             }
 
@@ -899,6 +913,9 @@ impl ClassHierarchy {
                 }
             };
             if !user_instance_selectors.contains(&with_sel) {
+                let setter_doc = format!(
+                    "Returns a new `{class_name}` with `{slot_name}` set to the given value.\n\n*(compiler-generated)*"
+                );
                 instance_methods.push(MethodInfo {
                     selector: with_sel,
                     arity: 1,
@@ -907,6 +924,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None],
+                    doc: Some(setter_doc.into()),
                 });
             }
         }
@@ -924,6 +942,21 @@ impl ClassHierarchy {
             };
             let arity = class.state.len();
             if !user_class_selectors.contains(&kw_sel) {
+                let args_desc: String = class
+                    .state
+                    .iter()
+                    .map(|s| {
+                        let dv = s
+                            .default_value
+                            .as_ref()
+                            .map_or_else(|| "nil".to_string(), format_default_value);
+                        format!("{} (default: {})", s.name.name, dv)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let ctor_doc = format!(
+                    "Creates a new `{class_name}`. Args: {args_desc}.\n\n*(compiler-generated)*"
+                );
                 class_methods.push(MethodInfo {
                     selector: kw_sel,
                     arity,
@@ -932,6 +965,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     return_type: Some(class_name.clone()),
                     param_types: vec![None; arity],
+                    doc: Some(ctor_doc.into()),
                 });
             }
         }
@@ -979,6 +1013,7 @@ impl ClassHierarchy {
                         .iter()
                         .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
                         .collect(),
+                    doc: m.doc_comment.clone().map(Into::into),
                 })
                 .collect();
 
@@ -997,6 +1032,7 @@ impl ClassHierarchy {
                         .iter()
                         .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
                         .collect(),
+                    doc: m.doc_comment.clone().map(Into::into),
                 })
                 .collect();
 
@@ -1110,6 +1146,35 @@ impl ClassHierarchy {
 impl Default for ClassHierarchy {
     fn default() -> Self {
         Self::with_builtins()
+    }
+}
+
+/// Formats an AST expression as a compact string for use in generated doc comments.
+///
+/// Only handles simple literal values (integer, float, string, boolean, nil).
+/// Complex expressions fall back to `"..."`.
+fn format_default_value(expr: &Expression) -> String {
+    match expr {
+        Expression::Literal(lit, _) => match lit {
+            Literal::Integer(n) => n.to_string(),
+            Literal::Float(f) => {
+                let rendered = f.to_string();
+                // Preserve decimal point so 1.0 stays as "1.0" not "1"
+                if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
+                    rendered
+                } else {
+                    format!("{rendered}.0")
+                }
+            }
+            Literal::String(s) => format!("{s:?}"),
+            Literal::Symbol(s) => format!("#{s}"),
+            Literal::Character(c) => format!("${}", c.escape_default()),
+            Literal::List(_) => "...".to_string(),
+        },
+        Expression::Identifier(ident) if ident.name == "nil" => "nil".to_string(),
+        Expression::Identifier(ident) if ident.name == "true" => "true".to_string(),
+        Expression::Identifier(ident) if ident.name == "false" => "false".to_string(),
+        _ => "...".to_string(),
     }
 }
 
@@ -1316,6 +1381,33 @@ mod tests {
         assert!(
             !selectors.contains(&"isAlive"),
             "isAlive must NOT be in class_methods"
+        );
+
+        // Actor class methods carry doc strings from generated_builtins.rs
+        // (sourced from Actor.bt via build-stdlib)
+        let spawn = class_methods
+            .iter()
+            .find(|m| m.selector == "spawn")
+            .unwrap();
+        let spawn_doc = spawn.doc.as_deref().unwrap();
+        assert!(
+            spawn_doc.contains("actor process"),
+            "spawn doc should describe actor process creation: {spawn_doc}"
+        );
+
+        let spawn_with = class_methods
+            .iter()
+            .find(|m| m.selector == "spawnWith:")
+            .unwrap();
+        assert!(
+            spawn_with.doc.as_deref().unwrap().contains("actor"),
+            "spawnWith: doc should describe actor creation"
+        );
+
+        let new = class_methods.iter().find(|m| m.selector == "new").unwrap();
+        assert!(
+            new.doc.as_deref().unwrap().contains("spawn"),
+            "new error-guard doc should mention spawn"
         );
     }
 
@@ -2853,6 +2945,90 @@ mod tests {
     }
 
     #[test]
+    fn value_subclass_auto_methods_have_generated_docs() {
+        use crate::ast::{Expression, Literal};
+        let state = vec![StateDeclaration::with_default(
+            Identifier::new("x", test_span()),
+            Expression::Literal(Literal::Integer(0), test_span()),
+            test_span(),
+        )];
+        let class = ClassDefinition {
+            name: Identifier::new("Point", test_span()),
+            superclass: Some(Identifier::new("Value", test_span())),
+            class_kind: ClassKind::Value,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            state,
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            comments: CommentAttachment::default(),
+            doc_comment: None,
+            span: test_span(),
+        };
+        let module = Module {
+            classes: vec![class],
+            method_definitions: vec![],
+            expressions: vec![],
+            span: test_span(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        };
+        let (Ok(h), _) = ClassHierarchy::build(&module) else {
+            panic!("build should succeed");
+        };
+        let info = h.get_class("Point").expect("Point should be registered");
+
+        // Getter doc contains field name, default, and compiler-generated tag
+        let getter = info.methods.iter().find(|m| m.selector == "x").unwrap();
+        let getter_doc = getter.doc.as_deref().unwrap();
+        assert!(getter_doc.contains("`x`"), "getter doc missing field name");
+        assert!(
+            getter_doc.contains("`0`"),
+            "getter doc missing default value"
+        );
+        assert!(
+            getter_doc.contains("*(compiler-generated)*"),
+            "getter doc missing tag"
+        );
+
+        // Setter doc mentions class name and field name
+        let setter = info
+            .methods
+            .iter()
+            .find(|m| m.selector == "withX:")
+            .unwrap();
+        let setter_doc = setter.doc.as_deref().unwrap();
+        assert!(
+            setter_doc.contains("`Point`"),
+            "setter doc missing class name"
+        );
+        assert!(setter_doc.contains("`x`"), "setter doc missing field name");
+        assert!(
+            setter_doc.contains("*(compiler-generated)*"),
+            "setter doc missing tag"
+        );
+
+        // Keyword constructor doc mentions class name and field arg with default
+        let ctor = info
+            .class_methods
+            .iter()
+            .find(|m| m.selector == "x:")
+            .unwrap();
+        let ctor_doc = ctor.doc.as_deref().unwrap();
+        assert!(ctor_doc.contains("`Point`"), "ctor doc missing class name");
+        assert!(
+            ctor_doc.contains("x (default: 0)"),
+            "ctor doc missing arg desc"
+        );
+        assert!(
+            ctor_doc.contains("*(compiler-generated)*"),
+            "ctor doc missing tag"
+        );
+    }
+
+    #[test]
     fn value_subclass_auto_methods_respect_user_overrides() {
         let class = ClassDefinition {
             name: Identifier::new("Point", test_span()),
@@ -3039,6 +3215,7 @@ mod tests {
                 is_sealed: false,
                 return_type: Some(EcoString::from("Integer")),
                 param_types: vec![],
+                doc: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -3072,6 +3249,7 @@ mod tests {
                 is_sealed: false,
                 return_type: None,
                 param_types: vec![],
+                doc: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -3096,6 +3274,7 @@ mod tests {
                 is_sealed: false,
                 return_type: None,
                 param_types: vec![],
+                doc: None,
             }],
             class_methods: vec![],
             class_variables: vec![],

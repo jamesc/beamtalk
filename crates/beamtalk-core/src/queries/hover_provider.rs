@@ -829,10 +829,15 @@ fn resolved_selector_hover_info(
     let typed_sig = method_info_signature(&method);
     let summary = format!("Method: `{typed_sig}` ({dispatch})");
 
-    Some(HoverInfo::new(summary, span).with_documentation(format!(
+    let resolution_context = format!(
         "Resolved on `{receiver_class}` (defined in `{}`)",
         method.defined_in
-    )))
+    );
+    let doc = match method.doc.as_deref() {
+        Some(existing) => format!("{existing}\n\n{resolution_context}"),
+        None => resolution_context,
+    };
+    Some(HoverInfo::new(summary, span).with_documentation(doc))
 }
 
 /// Formats a `MethodInfo` from the hierarchy as a typed signature string.
