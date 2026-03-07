@@ -484,7 +484,7 @@ coverage-runtime:
         exit 1
     fi
     echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || true
-    if ! OUTPUT=$(rebar3 eunit --dir=apps/beamtalk_stdlib/test --cover 2>&1); then
+    if ! OUTPUT=$(rebar3 eunit --app=beamtalk_stdlib --cover 2>&1); then
         echo "$OUTPUT"
         echo "❌ Stdlib tests failed"
         exit 1
