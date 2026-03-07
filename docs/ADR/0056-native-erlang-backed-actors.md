@@ -1,7 +1,7 @@
 # ADR 0056: Native Erlang-Backed Actors — `native:` and `self delegate`
 
 ## Status
-Proposed (2026-03-07) — Revised from initial `@native` annotation design
+Accepted (2026-03-07) — Revised from initial `@native` annotation design
 
 ## Context
 
@@ -154,6 +154,19 @@ sealed delegate =>
 The method is `sealed` to prevent user-defined Actor subclasses from accidentally shadowing it with a business-logic method (e.g. a `DelegationManager` actor). Since `delegate` is a compiler-recognized pattern, shadowing it would silently break the `native:` mechanism.
 
 **Compiler recognition:** Only the literal unary send `self delegate` as the entire method body is recognized and transformed. Indirect forms (`x := self. x delegate`, `self perform: #delegate`) are not recognized — they compile normally and hit the `sealed delegate` fallback, which raises an error. The compiler or LSP should warn if a `native:` class has a method body that is neither `self delegate` nor a full Beamtalk expression.
+
+**Type annotations:** Full type annotations are recommended on all `native:` class methods, especially `self delegate` methods. Since the method body is opaque to the type checker and LSP, the type annotation is the only source of type information — it serves as the API contract between the `.bt` declaration and the Erlang implementation. The stub generator also uses return types to generate correct `{ok, Result}` wrapping. The compiler emits a warning if a `self delegate` method has no return type annotation:
+
+```text
+warning: native delegate method 'readLine:' has no return type annotation
+  --> Subprocess.bt:8
+  |
+8 |   readLine: timeout => self delegate
+  |   ^^^^^^^^^^^^^^^^^^
+  |
+  = help: add a return type: readLine: timeout -> Object => self delegate
+  = note: native delegate methods are opaque — the return type annotation is the only type information available
+```
 
 **Reflection:** `delegate` appears in `Actor localMethods` and `respondsTo: #delegate` returns `true` for all Actors. This is a visible implementation detail but consistent with Pharo's `ffiCall:` appearing in Object's method dictionary. The LSP should exclude `delegate` from autocompletion suggestions for non-`native:` actors.
 
@@ -695,7 +708,7 @@ The primary remaining Phase 0 deliverable is documentation: write and publish th
 
 **Note:** Removing entries from `generated_builtins.rs` requires Phase 1's `native:` keyword support so the compiler parses class metadata from the `.bt` file.
 
-**Issues:** BT-1155
+**Issues:** BT-1204
 
 ### Phase 1 — Compiler `native:` Support
 
@@ -705,12 +718,13 @@ The primary remaining Phase 0 deliverable is documentation: write and publish th
 - Recognize `self delegate` in the AST of `native:` classes → generate `sync_send` facade dispatch
 - Define `delegate` method on `Actor.bt` with error fallback
 - Validate: `state:` declarations on `native:` actors produce a compile error
+- Warn: `self delegate` methods without a return type annotation
 - Generate facade module: `spawn/1`, `spawnWith:`, `has_method/1`, dispatch functions for `self delegate` methods
 - Generate `__beamtalk_meta/0` with `native => true`, `backing_module => atom()`, and delegate method metadata (ADR 0050)
 - Full Beamtalk method bodies on `native:` actors compile normally (e.g. `open:args:`)
 - Remove `Subprocess` and `TranscriptStream` from `generated_builtins.rs`
 
-**Issues:** BT-1156, BT-1157
+**Issues:** BT-1205, BT-1206, BT-1207, BT-1208, BT-1209, BT-1210
 
 ### Phase 2 — Stdlib Migration
 
@@ -721,13 +735,15 @@ The primary remaining Phase 0 deliverable is documentation: write and publish th
 - **TranscriptStream deadlock safety:** The process-dictionary `dispatch/3` path in `beamtalk_transcript_stream.erl` exists because the current FFI shims run _inside_ the compiled actor's `handle_call` — calling `gen_server:call` back to the same process would deadlock. With `native:`, this architecture changes: the backing gen_server IS the process, and `self delegate` sends messages from the _caller's_ process via `sync_send`. The backing `handle_call/3` clauses (which already exist and are self-contained — they call internal functions like `buffer_text/2` directly, with no gen_server re-entry) handle requests without deadlock risk. The process-dictionary `dispatch/3` and FFI shims become dead code
 - Add integration tests covering `native:` spawn, sync dispatch, async/cast dispatch, deferred replies, and error propagation
 
-**Issues:** BT-1158, BT-1159
+**Issues:** BT-1211, BT-1212
 
 ### Phase 3 — Tooling
 
 - Implement `beamtalk gen-native` stub generation from `.bt` declarations
 - LSP: "go to Erlang implementation" for `self delegate` methods
 - LSP: mismatch detection between declared selectors and `handle_call` clauses
+
+**Issues:** BT-1214, BT-1215
 
 ### Affected Components
 
@@ -765,7 +781,8 @@ The Beamtalk API (message selectors and return types) does not change. Callers o
 
 ## References
 
-- Related issues: BT-1155, BT-1156, BT-1157, BT-1158, BT-1159
+- Epic: BT-1203
+- Related issues: BT-1204, BT-1205, BT-1206, BT-1207, BT-1208, BT-1209, BT-1210, BT-1211, BT-1212, BT-1214, BT-1215
 - Related ADRs: ADR 0005 (BEAM Object Model — Actor vs Value distinction), ADR 0028 (BEAM Interop Strategy — FFI mechanism), ADR 0038 (ClassBuilder Protocol — `native:` as ClassBuilder method), ADR 0042 (Immutable Value Objects and Actor-Only Mutable State), ADR 0043 (Sync-by-Default Actor Messaging — `sync_send/3` and `cast_send/3` protocols, `!` bang semantics), ADR 0048 (Class-Side Method Syntax Redesign), ADR 0050 (Incremental Compiler ClassHierarchy — `__beamtalk_meta/0` schema), ADR 0051 (Subprocess Execution — proof-of-concept), ADR 0055 (Erlang-Backed Class Authoring Protocol — `state:` and FFI for Value classes)
 - gen_server protocol: https://www.erlang.org/doc/man/gen_server.html
 - gen_statem protocol: https://www.erlang.org/doc/man/gen_statem.html
