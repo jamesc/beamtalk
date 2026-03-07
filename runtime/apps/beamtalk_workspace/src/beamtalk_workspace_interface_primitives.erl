@@ -114,7 +114,8 @@ classes() ->
 
 %% @doc Compile and load a .bt file.
 %% Called via `(Erlang beamtalk_workspace_interface_primitives) load: path`.
--spec load(term()) -> 'nil'.
+%% Returns the loaded class object (or a list of class objects for multi-class files).
+-spec load(term()) -> term().
 load(Path) ->
     case handle_load(Path) of
         {error, Err} -> beamtalk_error:raise(Err);
@@ -297,13 +298,14 @@ handle_classes() ->
     beamtalk_runtime_api:user_classes().
 
 %% @private Load a .bt file, compiling and registering the class.
--spec handle_load(term()) -> nil | {error, #beamtalk_error{}}.
+%% On success, returns the loaded class object(s) so the REPL displays what was loaded.
+-spec handle_load(term()) -> term() | {error, #beamtalk_error{}}.
 handle_load(Path) when is_binary(Path) ->
     handle_load(binary_to_list(Path));
 handle_load(Path) when is_list(Path) ->
     case beamtalk_repl_eval:reload_class_file(Path) of
-        ok ->
-            nil;
+        {ok, ClassNames} ->
+            loaded_class_objects(ClassNames);
         {error, {file_not_found, _}} ->
             Err0 = beamtalk_error:new(file_not_found, 'WorkspaceInterface'),
             Err1 = beamtalk_error:with_selector(Err0, 'load:'),
@@ -465,6 +467,38 @@ base_class_name(Tag) ->
         binary_to_existing_atom(Bin, utf8)
     catch
         error:badarg -> Tag
+    end.
+
+%% @private Resolve loaded ClassNames maps to Beamtalk class object(s).
+%% Returns the single class object for a one-class file, a list for multiple,
+%% and nil when no classes could be resolved (e.g. class not yet registered).
+-spec loaded_class_objects([map()]) -> term().
+loaded_class_objects(ClassNames) ->
+    Objects = lists:filtermap(
+        fun
+            (#{name := Name}) when is_list(Name) ->
+                try
+                    Atom = list_to_existing_atom(Name),
+                    case beamtalk_runtime_api:whereis_class(Atom) of
+                        undefined ->
+                            false;
+                        ClassPid ->
+                            Mod = beamtalk_runtime_api:module_name(ClassPid),
+                            Tag = beamtalk_runtime_api:class_object_tag(Atom),
+                            {true, #beamtalk_object{class = Tag, class_mod = Mod, pid = ClassPid}}
+                    end
+                catch
+                    _:_ -> false
+                end;
+            (_) ->
+                false
+        end,
+        ClassNames
+    ),
+    case Objects of
+        [] -> nil;
+        [Obj] -> Obj;
+        _ -> Objects
     end.
 
 %% @private Return a human-readable type name for an Erlang/Beamtalk value.

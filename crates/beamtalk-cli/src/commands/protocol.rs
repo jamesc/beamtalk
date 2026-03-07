@@ -60,6 +60,10 @@ pub struct ProtocolClient {
     /// Whether the transcript output cursor is at the beginning of a line.
     /// Used to insert the `│ ` gutter prefix only at line starts.
     transcript_bol: bool,
+    /// When `false`, transcript push messages are silently discarded instead of
+    /// being printed. Set to `false` for completion-only connections that must
+    /// not re-print transcript output already shown on the main connection.
+    print_transcript: bool,
 }
 
 impl ProtocolClient {
@@ -111,6 +115,7 @@ impl ProtocolClient {
             cookie: cookie.to_string(),
             read_timeout,
             transcript_bol: true,
+            print_transcript: true,
         };
 
         // Read auth-required message (pre-auth, no session yet)
@@ -198,6 +203,7 @@ impl ProtocolClient {
         // Swap in websocket and session id.
         // Reset transcript_bol: the display context is fresh regardless of
         // whether the session was resumed, so the next chunk always gets a prefix.
+        // Preserve print_transcript: the caller's intent doesn't change on reconnect.
         self.ws = new_client.ws;
         self.session_id.clone_from(&new_client.session_id);
         self.transcript_bol = true;
@@ -224,6 +230,14 @@ impl ProtocolClient {
             .into_diagnostic()
     }
 
+    /// Control whether transcript push messages are printed to stdout.
+    ///
+    /// Set to `false` for connections that must not re-display transcript output
+    /// already shown on the main REPL connection (e.g. the completion client).
+    pub fn set_print_transcript(&mut self, val: bool) {
+        self.print_transcript = val;
+    }
+
     /// Handle a server-initiated push message (ADR 0017).
     ///
     /// Transcript push messages are printed inline to stdout with a `│ `
@@ -239,7 +253,9 @@ impl ProtocolClient {
         if !is_push {
             return false;
         }
-        if parsed.get("push").and_then(|v| v.as_str()) == Some("transcript") {
+        if self.print_transcript
+            && parsed.get("push").and_then(|v| v.as_str()) == Some("transcript")
+        {
             if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
                 use std::io::Write;
                 let formatted = format_transcript_chunk(text, &mut self.transcript_bol);
