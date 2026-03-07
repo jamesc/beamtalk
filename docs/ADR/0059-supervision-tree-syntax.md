@@ -200,10 +200,9 @@ Supervisor subclass: DBSup
   strategy: #oneForOne
 
   class init =>
-    | primary replica |
     primary := System env: "PRIMARY_DSN" ifAbsent: ["postgres://localhost/app"].
     replica  := System env: "REPLICA_DSN" ifAbsent: ["postgres://localhost/app_replica"].
-    ^Array
+    Array
       with: (DatabasePool spawnSpec: #{#dsn => primary})
       with: ((DatabasePool spawnSpec: #{#dsn => replica}) withId: #replica withRestart: #transient)
 ```
