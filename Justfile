@@ -210,7 +210,12 @@ fmt-check-rust:
     cargo fmt --all -- --check
 
 # Check all code formatting
+[unix]
 fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js fmt-check-beamtalk
+
+# Windows: skip Erlang and JS format checks (platform-agnostic, covered by Linux CI)
+[windows]
+fmt-check: fmt-check-rust fmt-check-beamtalk
 
 # Format all Rust code
 fmt-rust:
