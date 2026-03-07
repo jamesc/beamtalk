@@ -2463,3 +2463,27 @@ fn test_class_method_local_var_assignment_of_self_class_method() {
         "Should generate class_b/2 function. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_class_method_local_var_after_class_var_mutation() {
+    // BT-1201 follow-up (reviewer feedback): a class var mutation (`self.cv := expr`) preceding
+    // a local var assignment (`x := plainExpr`) must NOT incorrectly treat the local var RHS as
+    // an open-scope expression. The stale `last_open_scope_result` from the field assignment
+    // must be cleared before processing the local var's RHS.
+    //
+    // Pattern: class a => self.cv := 1. x := self b. x
+    // Without the clear, x would be bound to the field-assignment's result var, not `self b`.
+    let src = "Object subclass: CVThenLocal\n  class cv = 0\n  class a =>\n    self.cv := 1.\n    x := self b.\n    x\n\n  class b => 99";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@cvthenlocal").with_workspace_mode(true),
+    );
+    assert!(result.is_ok(), "Codegen should succeed. Got: {result:?}");
+    let code = result.unwrap();
+    assert!(
+        !code.contains("in  in"),
+        "Should not contain doubled `in` keyword. Got:\n{code}"
+    );
+}

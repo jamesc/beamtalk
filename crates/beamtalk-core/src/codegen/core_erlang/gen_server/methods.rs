@@ -1619,6 +1619,9 @@ impl CoreErlangGenerator {
                         let core_var = self
                             .lookup_var(var_name)
                             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                        // BT-1201: Clear before expression_doc so we only see open-scope results
+                        // produced by THIS expression, not by a previous field assignment.
+                        self.last_open_scope_result = None;
                         let val_doc = self.expression_doc(value)?;
                         self.bind_var(var_name, &core_var);
                         // BT-1201: If the RHS produced an open scope (e.g., `x := self classMethod`),
