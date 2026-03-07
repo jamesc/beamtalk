@@ -9,7 +9,7 @@ Proposed (2026-03-07)
 from `__beamtalk_meta/0` when the compiled module loads. One field, targeted fix,
 restores correctness immediately.
 
-**Phase 2 (follow-up):** Migrate static structural metadata out of the class
+**Phase 5 (follow-up):** Migrate static structural metadata out of the class
 gen_server entirely, making `__beamtalk_meta/0` the sole source for immutable facts
 and the gen_server responsible only for mutable runtime state (live method table,
 class variables, hot-patch state). `superclass` happens to be the only field that
@@ -105,10 +105,10 @@ The logic:
 ```erlang
 %% In apply_class_info/2 — derive updated superclass from Meta:
 NewSuperclass =
-    case maps:get(superclass, Meta, none) of
-        nil  -> none;                           %% meta uses nil for root; normalise
-        none -> State#class_state.superclass;   %% no meta info — keep existing
-        S    -> S                               %% corrected value from compiled module
+    case maps:find(superclass, Meta) of
+        error      -> State#class_state.superclass; %% key absent — keep existing
+        {ok, nil}  -> none;                         %% root class (codegen emits 'nil')
+        {ok, S}    -> S                             %% corrected value from compiled module
     end,
 %% Keep ETS hierarchy table in sync:
 beamtalk_class_hierarchy_table:insert(State#class_state.name, NewSuperclass),
@@ -259,10 +259,10 @@ Change `walk_hierarchy/3` to use `superclass_name_from_meta_or_state` per hop.
 
 **Rejected** because it perpetuates stale state and requires all future callers to
 defend against it independently. The BEAM veteran's risk concern is real but
-addressed by the `none` guard clause in Option A's implementation: `apply_class_info`
-only overwrites `superclass` when `Meta` contains an explicit non-`none` value. If
-Meta is absent or empty, the existing value is preserved unchanged — the init path
-is not affected.
+addressed by the `error` guard in Option A's `maps:find/2` pattern: `apply_class_info`
+only overwrites `superclass` when `Meta` contains the key. If Meta is absent or the
+key is not present, the existing value is preserved unchanged — the init path is not
+affected.
 
 ### Option C (Planned Phase 2): `__beamtalk_meta/0` as sole source for static metadata
 
@@ -348,8 +348,8 @@ third was anticipated before the issue closed.
 - `apply_class_info/2` becomes slightly more complex (one new field assignment and
   one ETS write).
 - A small ordering risk: if `Meta` is empty (no `__beamtalk_meta/0` available),
-  `apply_class_info` must leave `superclass` unchanged. Handled by the `none` guard
-  clause in the decision — the existing value is preserved.
+  `apply_class_info` must leave `superclass` unchanged. Handled by the `error` clause
+  from `maps:find/2` — the existing value is preserved when the key is absent.
 
 ### Neutral
 
@@ -367,9 +367,9 @@ third was anticipated before the issue closed.
 ### Phase 1 — Fix `apply_class_info` (beamtalk_object_class.erl)
 
 1. After computing `Meta` in `apply_class_info/2`, derive `NewSuperclass`:
-   - `maps:get(superclass, Meta, none)` returns `nil` → normalise to `none`
-   - Returns `none` (key absent or explicitly none) → keep `State#class_state.superclass`
-   - Returns an atom → use it (overrides the bootstrap stub value)
+   - `maps:find(superclass, Meta)` returns `error` (key absent) → keep `State#class_state.superclass`
+   - Returns `{ok, nil}` → root class (codegen emits `nil`); normalise to `none`
+   - Returns `{ok, S}` → use `S` (overrides the bootstrap stub value)
 2. Call `beamtalk_class_hierarchy_table:insert(State#class_state.name, NewSuperclass)`.
 3. Include `superclass = NewSuperclass` in the returned `#class_state{}`.
 
