@@ -6,7 +6,7 @@
 %%% **DDD Context:** Object System Context
 %%%
 %%% Tests constructors, accessors, conversion, arithmetic, comparison,
-%%% has_method/1, and error paths.
+%%% FFI shims, and error paths.
 
 -module(beamtalk_datetime_tests).
 
@@ -324,32 +324,49 @@ comparison_type_error_ne_test() ->
     ).
 
 %%% ============================================================================
-%%% has_method/1
+%%% FFI shims
 %%% ============================================================================
 
-has_method_known_test() ->
-    ?assert(beamtalk_datetime:has_method(year)),
-    ?assert(beamtalk_datetime:has_method(month)),
-    ?assert(beamtalk_datetime:has_method(day)),
-    ?assert(beamtalk_datetime:has_method(hour)),
-    ?assert(beamtalk_datetime:has_method(minute)),
-    ?assert(beamtalk_datetime:has_method(second)),
-    ?assert(beamtalk_datetime:has_method('asTimestamp')),
-    ?assert(beamtalk_datetime:has_method('asString')),
-    ?assert(beamtalk_datetime:has_method('printString')),
-    ?assert(beamtalk_datetime:has_method('addSeconds:')),
-    ?assert(beamtalk_datetime:has_method('addDays:')),
-    ?assert(beamtalk_datetime:has_method('diffSeconds:')),
-    ?assert(beamtalk_datetime:has_method('<')),
-    ?assert(beamtalk_datetime:has_method('>')),
-    ?assert(beamtalk_datetime:has_method('=<')),
-    ?assert(beamtalk_datetime:has_method('>=')),
-    ?assert(beamtalk_datetime:has_method('=:=')),
-    ?assert(beamtalk_datetime:has_method('/=')).
+ffi_shim_year3_test() ->
+    Dt = beamtalk_datetime:year(2026, 3, 7),
+    ?assertEqual(2026, beamtalk_datetime:year(Dt)).
 
-has_method_unknown_test() ->
-    ?assertNot(beamtalk_datetime:has_method(frobnicateWidget)),
-    ?assertNot(beamtalk_datetime:has_method(new)).
+ffi_shim_year6_test() ->
+    Dt = beamtalk_datetime:year(2026, 3, 7, 10, 30, 0),
+    ?assertEqual(10, beamtalk_datetime:hour(Dt)).
+
+ffi_shim_fromTimestamp_test() ->
+    Dt = beamtalk_datetime:fromTimestamp(0),
+    ?assertEqual(1970, beamtalk_datetime:year(Dt)).
+
+ffi_shim_fromString_test() ->
+    Dt = beamtalk_datetime:fromString(<<"2026-03-07T00:00:00Z">>),
+    ?assertEqual(2026, beamtalk_datetime:year(Dt)).
+
+ffi_shim_addSeconds_test() ->
+    Dt0 = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
+    Dt1 = beamtalk_datetime:addSeconds(Dt0, 3600),
+    ?assertEqual(1, beamtalk_datetime:hour(Dt1)).
+
+ffi_shim_addDays_test() ->
+    Dt0 = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
+    Dt1 = beamtalk_datetime:addDays(Dt0, 7),
+    ?assertEqual(8, beamtalk_datetime:day(Dt1)).
+
+ffi_shim_diffSeconds_test() ->
+    Dt0 = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
+    Dt1 = beamtalk_datetime:'year:month:day:'(2026, 1, 2),
+    ?assertEqual(86400, beamtalk_datetime:diffSeconds(Dt1, Dt0)).
+
+ffi_shim_comparisons_test() ->
+    Dt1 = beamtalk_datetime:'year:month:day:'(2025, 1, 1),
+    Dt2 = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
+    ?assert(beamtalk_datetime:lt(Dt1, Dt2)),
+    ?assert(beamtalk_datetime:gt(Dt2, Dt1)),
+    ?assert(beamtalk_datetime:lte(Dt1, Dt1)),
+    ?assert(beamtalk_datetime:gte(Dt2, Dt2)),
+    ?assert(beamtalk_datetime:eql(Dt1, Dt1)),
+    ?assert(beamtalk_datetime:neq(Dt1, Dt2)).
 
 %%% ============================================================================
 %%% monotonicNow

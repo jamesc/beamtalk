@@ -40,7 +40,14 @@
     any_satisfy/2,
     all_satisfy/2,
     %% Display
-    print_string/1
+    print_string/1,
+    %% FFI shims for (Erlang beamtalk_stream) dispatch
+    from/2,
+    inject/3,
+    asList/1,
+    anySatisfy/2,
+    allSatisfy/2,
+    printString/1
 ]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -270,6 +277,31 @@ all_satisfy(_, _) ->
 -spec print_string(map()) -> binary().
 print_string(#{'$beamtalk_class' := 'Stream', description := Desc}) ->
     Desc.
+
+%%% ============================================================================
+%%% FFI Shims (Erlang beamtalk_stream) dispatch
+%%% ============================================================================
+%%
+%% selector_to_function/1 extracts the first keyword segment as the function name.
+%% These shims bridge camelCase FFI names to the snake_case implementations.
+
+%% `from:by:` → selector strips to `from`, arity 2
+from(Start, StepFun) -> from_by(Start, StepFun).
+
+%% `inject:init:into:` → selector strips to `inject`, arity 3
+inject(Self, Init, Block) -> inject_into(Self, Init, Block).
+
+%% `asList:` → selector strips to `asList`, arity 1
+asList(Self) -> as_list(Self).
+
+%% `anySatisfy:with:` → selector strips to `anySatisfy`, arity 2
+anySatisfy(Self, Pred) -> any_satisfy(Self, Pred).
+
+%% `allSatisfy:with:` → selector strips to `allSatisfy`, arity 2
+allSatisfy(Self, Pred) -> all_satisfy(Self, Pred).
+
+%% `printString:` → selector strips to `printString`, arity 1
+printString(Self) -> print_string(Self).
 
 %%% ============================================================================
 %%% Generator Constructors (internal)

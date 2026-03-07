@@ -110,6 +110,11 @@ dispatch(Selector, Args, Self) ->
                 {error, Error, _State} -> beamtalk_error:raise(Error)
             end;
         false ->
+            %% Ensure the module is loaded so its exported function atoms are
+            %% in the atom table before selector_to_function/1 calls
+            %% list_to_existing_atom/1. New FFI shim functions (e.g. isDirectory/1
+            %% in beamtalk_file) only enter the atom table when the module loads.
+            _ = code:ensure_loaded(Module),
             case selector_to_function(Selector) of
                 {ok, FunName} ->
                     validate_and_apply(Module, FunName, Args, Selector);

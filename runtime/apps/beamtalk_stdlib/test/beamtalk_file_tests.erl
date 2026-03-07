@@ -9,7 +9,8 @@
 %%% - File read/write operations and error paths
 %%% - Stream creation (lines:/1)
 %%% - Block-scoped handles (open:do:/2)
-%%% - has_method/1 and handle_has_method/1
+%%% - FFI shims (exists/1, readAll/1, etc.)
+%%% - handle_has_method/1
 %%% - strip_newline/1 edge cases
 %%% - Type error guards
 
@@ -32,59 +33,92 @@ with_temp_file(Name, Contents, Fun) ->
     end.
 
 %%% ============================================================================
-%%% has_method/1
+%%% FFI shims
 %%% ============================================================================
 
-has_method_exists_test() ->
-    ?assert(beamtalk_file:has_method('exists:')).
+ffi_shim_exists_nonexistent_test() ->
+    ?assertNot(beamtalk_file:exists(<<"_bt_shim_no_such_file.txt">>)).
 
-has_method_readAll_test() ->
-    ?assert(beamtalk_file:has_method('readAll:')).
+ffi_shim_exists_real_file_test() ->
+    with_temp_file("_bt_shim_exists.txt", <<"x">>, fun() ->
+        ?assert(beamtalk_file:exists(<<"_bt_shim_exists.txt">>))
+    end).
 
-has_method_writeAll_contents_test() ->
-    ?assert(beamtalk_file:has_method('writeAll:contents:')).
+ffi_shim_readAll_not_found_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = file_not_found}},
+        beamtalk_file:readAll(<<"_bt_shim_no_such_file.txt">>)
+    ).
 
-has_method_lines_test() ->
-    ?assert(beamtalk_file:has_method('lines:')).
+ffi_shim_writeAll_success_test() ->
+    FileName = "_bt_shim_write.txt",
+    try
+        ?assertEqual(nil, beamtalk_file:writeAll(list_to_binary(FileName), <<"hi">>)),
+        ?assertEqual({ok, <<"hi">>}, file:read_file(FileName))
+    after
+        file:delete(FileName)
+    end.
 
-has_method_open_do_test() ->
-    ?assert(beamtalk_file:has_method('open:do:')).
+ffi_shim_lines_not_found_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = file_not_found}},
+        beamtalk_file:lines(<<"_bt_shim_no_such_file.txt">>)
+    ).
 
-has_method_isDirectory_test() ->
-    ?assert(beamtalk_file:has_method('isDirectory:')).
+ffi_shim_open_not_found_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = file_not_found}},
+        beamtalk_file:open(<<"_bt_shim_no_such.txt">>, fun(_) -> ok end)
+    ).
 
-has_method_isFile_test() ->
-    ?assert(beamtalk_file:has_method('isFile:')).
+ffi_shim_isDirectory_false_test() ->
+    ?assertNot(beamtalk_file:isDirectory(<<"_bt_shim_no_such_dir">>)).
 
-has_method_mkdir_test() ->
-    ?assert(beamtalk_file:has_method('mkdir:')).
+ffi_shim_isFile_false_test() ->
+    ?assertNot(beamtalk_file:isFile(<<"_bt_shim_no_such_file.txt">>)).
 
-has_method_mkdirAll_test() ->
-    ?assert(beamtalk_file:has_method('mkdirAll:')).
+ffi_shim_mkdir_and_delete_test() ->
+    Dir = "_bt_shim_mkdir_dir",
+    try
+        ?assertEqual(nil, beamtalk_file:mkdir(list_to_binary(Dir))),
+        ?assert(filelib:is_dir(Dir)),
+        ?assertEqual(nil, beamtalk_file:delete(list_to_binary(Dir)))
+    after
+        file:del_dir(Dir)
+    end.
 
-has_method_listDirectory_test() ->
-    ?assert(beamtalk_file:has_method('listDirectory:')).
+ffi_shim_mkdirAll_and_deleteAll_test() ->
+    Dir = "_bt_shim_mkdirall/a/b",
+    try
+        ?assertEqual(nil, beamtalk_file:mkdirAll(list_to_binary(Dir))),
+        ?assert(filelib:is_dir(Dir)),
+        ?assertEqual(nil, beamtalk_file:deleteAll(<<"_bt_shim_mkdirall">>))
+    after
+        file:del_dir_r("_bt_shim_mkdirall")
+    end.
 
-has_method_delete_test() ->
-    ?assert(beamtalk_file:has_method('delete:')).
+ffi_shim_listDirectory_test() ->
+    with_temp_dir("_bt_shim_listdir", fun() ->
+        ok = file:write_file("_bt_shim_listdir/x.txt", <<"x">>),
+        Entries = beamtalk_file:listDirectory(<<"_bt_shim_listdir">>),
+        ?assertEqual([<<"x.txt">>], Entries)
+    end).
 
-has_method_deleteAll_test() ->
-    ?assert(beamtalk_file:has_method('deleteAll:')).
+ffi_shim_rename_test() ->
+    Src = "_bt_shim_rename_src.txt",
+    Dst = "_bt_shim_rename_dst.txt",
+    ok = file:write_file(Src, <<"data">>),
+    try
+        ?assertEqual(nil, beamtalk_file:rename(list_to_binary(Src), list_to_binary(Dst))),
+        ?assert(filelib:is_regular(Dst))
+    after
+        file:delete(Src),
+        file:delete(Dst)
+    end.
 
-has_method_rename_to_test() ->
-    ?assert(beamtalk_file:has_method('rename:to:')).
-
-has_method_absolutePath_test() ->
-    ?assert(beamtalk_file:has_method('absolutePath:')).
-
-has_method_tempDirectory_test() ->
-    ?assert(beamtalk_file:has_method('tempDirectory')).
-
-has_method_unknown_test() ->
-    ?assertNot(beamtalk_file:has_method('foo')).
-
-has_method_unknown_atom_test() ->
-    ?assertNot(beamtalk_file:has_method('noSuchMethod:')).
+ffi_shim_absolutePath_test() ->
+    Result = beamtalk_file:absolutePath(<<"some/path">>),
+    ?assert(is_binary(Result)).
 
 %%% ============================================================================
 %%% handle_has_method/1
