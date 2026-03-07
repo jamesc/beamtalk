@@ -1528,8 +1528,32 @@ impl CoreErlangGenerator {
                         }
                     } else {
                         let result_var = self.fresh_temp_var("Ret");
+                        // BT-1201: Clear before expression_doc so we only see open-scope results
+                        // produced by THIS expression, not by a previous field assignment.
+                        self.last_open_scope_result = None;
                         let expr_str = self.expression_doc(expr)?;
-                        if self.class_var_mutated {
+                        // BT-1201: If expression produced an open scope (e.g. `x := self classMethod`),
+                        // close it with the open-scope result variable, then wrap.
+                        if let Some(open_scope_result) = self.last_open_scope_result.take() {
+                            if self.class_var_mutated {
+                                let final_cv = self.current_class_var();
+                                let doc = docvec![
+                                    expr_str,
+                                    "let ",
+                                    Document::String(result_var.clone()),
+                                    " = ",
+                                    Document::String(open_scope_result),
+                                    " in {'class_var_result', ",
+                                    Document::String(result_var),
+                                    ", ",
+                                    Document::String(final_cv),
+                                    "}",
+                                ];
+                                docs.push(doc);
+                            } else {
+                                docs.push(docvec![expr_str, Document::String(open_scope_result),]);
+                            }
+                        } else if self.class_var_mutated {
                             let final_cv = self.current_class_var();
                             let doc = docvec![
                                 "let ",
@@ -1567,8 +1591,16 @@ impl CoreErlangGenerator {
                         docs.push(docvec![expr_str]);
                     }
                 } else {
+                    // BT-1201: Clear before expression_doc so we only see open-scope results
+                    // produced by THIS expression, not by a previous field assignment.
+                    self.last_open_scope_result = None;
                     let expr_str = self.expression_doc(expr)?;
-                    docs.push(docvec![expr_str]);
+                    // BT-1201: If expression produced an open scope, close it with the result.
+                    if let Some(open_scope_result) = self.last_open_scope_result.take() {
+                        docs.push(docvec![expr_str, Document::String(open_scope_result)]);
+                    } else {
+                        docs.push(docvec![expr_str]);
+                    }
                 }
             } else if self.is_class_var_assignment(expr) || self.is_class_method_self_send(expr) {
                 // Class var assignment or class method self-send: the generated code
@@ -1587,15 +1619,32 @@ impl CoreErlangGenerator {
                         let core_var = self
                             .lookup_var(var_name)
                             .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                        // BT-1201: Clear before expression_doc so we only see open-scope results
+                        // produced by THIS expression, not by a previous field assignment.
+                        self.last_open_scope_result = None;
                         let val_doc = self.expression_doc(value)?;
                         self.bind_var(var_name, &core_var);
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(core_var),
-                            " = ",
-                            val_doc,
-                            " in "
-                        ]);
+                        // BT-1201: If the RHS produced an open scope (e.g., `x := self classMethod`),
+                        // the doc ends with `in ` and the actual result is in last_open_scope_result.
+                        // Emit the open scope first, then bind the variable to the result.
+                        if let Some(open_scope_result) = self.last_open_scope_result.take() {
+                            docs.push(docvec![
+                                val_doc,
+                                "let ",
+                                Document::String(core_var),
+                                " = ",
+                                Document::String(open_scope_result),
+                                " in "
+                            ]);
+                        } else {
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(core_var),
+                                " = ",
+                                val_doc,
+                                " in "
+                            ]);
+                        }
                     }
                 }
             } else {
