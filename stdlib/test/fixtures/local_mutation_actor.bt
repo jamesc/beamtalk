@@ -70,3 +70,16 @@ Actor subclass: LocalMutationActor
         self.log := self.log + item
       ]
     #{#localCount => localCount, #log => self.log}
+
+  // BT-1224: Block-local variable (not captured from outer scope) assigned and read
+  // within the same block iteration. Previously caused {unbound_var,'Doubled',{dispatch,4}}
+  // because `compute_threaded_locals_for_loop` used `local_reads` instead of `captured_reads`,
+  // incorrectly packing block-local vars into the pre-loop StateAcc map.
+  doubleAndSum: items =>
+    total := 0
+    items
+      do: [:item |
+        doubled := item * 2
+        total := total + doubled
+      ]
+    total

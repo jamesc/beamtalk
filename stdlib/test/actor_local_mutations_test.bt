@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-598: Tests that local variables inside actor method blocks are correctly
+// BT-598/BT-1224: Tests that local variables inside actor method blocks are correctly
 // mutated and scoped — covering do:, inject:into:, to:do:, and whileFalse:
 
 TestCase subclass: ActorLocalMutationsTest
@@ -34,3 +34,11 @@ TestCase subclass: ActorLocalMutationsTest
       #localSum => 3,
       #sum => 60
     }
+
+  // BT-1224: Regression test — block-local variable assigned and read within the same
+  // do: block iteration must not cause {unbound_var,'Doubled',{dispatch,4}} compile error.
+  // The fix: compute_threaded_locals_for_loop uses captured_reads (not local_reads) for Actor,
+  // so block-locally-defined vars are never packed into the pre-loop StateAcc map.
+  testBlockLocalVarInDoBody =>
+    a := LocalMutationActor spawn
+    self assert: (a doubleAndSum: #(1, 2, 3)) equals: 12

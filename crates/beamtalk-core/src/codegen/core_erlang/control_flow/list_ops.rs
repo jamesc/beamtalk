@@ -228,6 +228,7 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         let mut has_mutations = false;
+        let mut has_plain_lets = false;
 
         // BT-598: At the start of each foldl iteration, read threaded locals from StateAcc.
         // This ensures that local variables resolve to their loop-accumulated values,
@@ -274,14 +275,19 @@ impl CoreErlangGenerator {
                     docs.push(Document::String(self.current_state_var()));
                 }
             } else if Self::is_local_var_assignment(expr) {
-                has_mutations = true;
-                // BT-598: Local variable mutation — thread through StateAcc map
-                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
-                docs.push(assign_doc);
-
-                if is_last {
-                    // Last expression: close with the final state variable
-                    docs.push(Document::String(format!(" {}", self.current_state_var())));
+                // BT-1224: Block-local vars use plain let; only captured/threaded vars use StateAcc.
+                if let Some(doc) =
+                    self.try_generate_block_local_plain_let(expr, is_last, &threaded)?
+                {
+                    has_plain_lets = true;
+                    docs.push(doc);
+                } else {
+                    has_mutations = true;
+                    let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                    docs.push(assign_doc);
+                    if is_last {
+                        docs.push(Document::String(format!(" {}", self.current_state_var())));
+                    }
                 }
             } else if self.control_flow_has_mutations(expr)
                 || Self::inline_conditional_writes_threaded(expr, &threaded)
@@ -320,8 +326,11 @@ impl CoreErlangGenerator {
                 let doc = self.generate_expression(expr)?;
                 docs.push(doc);
 
-                if is_last && has_mutations {
-                    // Return final state after non-assignment last expression
+                if is_last && (has_mutations || has_plain_lets) {
+                    // BT-1224: Return StateAcc when there are any prior bindings (threaded
+                    // mutations or block-local plain-lets). The foldl accumulator must always
+                    // be StateAcc — a non-assignment last expression in a stateful block still
+                    // needs to return the current state, not the expression's value.
                     docs.push(Document::String(format!(
                         " in {}",
                         self.current_state_var()
@@ -539,15 +548,21 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if Self::is_local_var_assignment(expr) {
-                has_mutations = true;
-                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
-                docs.push(assign_doc);
-
-                if is_last {
-                    let final_state = self.current_state_var();
-                    docs.push(Document::String(format!(
-                        " {{[_Val | AccList], {final_state}}}"
-                    )));
+                // BT-1224: Block-local vars use plain let; only captured/threaded vars use StateAcc.
+                if let Some(doc) =
+                    self.try_generate_block_local_plain_let(expr, is_last, &threaded)?
+                {
+                    docs.push(doc);
+                } else {
+                    has_mutations = true;
+                    let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                    docs.push(assign_doc);
+                    if is_last {
+                        let final_state = self.current_state_var();
+                        docs.push(Document::String(format!(
+                            " {{[_Val | AccList], {final_state}}}"
+                        )));
+                    }
                 }
             } else {
                 // Non-assignment expression
@@ -828,12 +843,18 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if Self::is_local_var_assignment(expr) {
-                has_mutations = true;
-                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
-                docs.push(assign_doc);
-
-                if is_last {
-                    docs.push(Document::String(format!(" let {pred_var} = _Val in ")));
+                // BT-1224: Block-local vars use plain let; only captured/threaded vars use StateAcc.
+                if let Some(doc) =
+                    self.try_generate_block_local_plain_let(expr, is_last, &threaded)?
+                {
+                    docs.push(doc);
+                } else {
+                    has_mutations = true;
+                    let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                    docs.push(assign_doc);
+                    if is_last {
+                        docs.push(Document::String(format!(" let {pred_var} = _Val in ")));
+                    }
                 }
             } else {
                 if i > 0 && !is_last {
@@ -1231,15 +1252,19 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if Self::is_local_var_assignment(expr) {
-                has_mutations = true;
-                // BT-598: Local variable mutation — thread through StateAcc map
-                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
-                docs.push(assign_doc);
-
-                if is_last {
-                    // inject:into: last expression should be the accumulator value
-                    let final_state = self.current_state_var();
-                    docs.push(Document::String(format!(" {{_Val, {final_state}}}")));
+                // BT-1224: Block-local vars use plain let; only captured/threaded vars use StateAcc.
+                if let Some(doc) =
+                    self.try_generate_block_local_plain_let(expr, is_last, &threaded)?
+                {
+                    docs.push(doc);
+                } else {
+                    has_mutations = true;
+                    let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                    docs.push(assign_doc);
+                    if is_last {
+                        let final_state = self.current_state_var();
+                        docs.push(Document::String(format!(" {{_Val, {final_state}}}")));
+                    }
                 }
             } else {
                 // Non-assignment expression
