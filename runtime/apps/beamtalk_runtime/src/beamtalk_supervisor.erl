@@ -197,7 +197,8 @@ terminateChild(Self, Arg) ->
 %% Called from `startChild` on DynamicSupervisor instances.
 %% Calls `Module:'childClass'()` to determine the child class and module,
 %% then starts the child via OTP simple_one_for_one.
-%% Returns a {beamtalk_object, ChildClass, ChildModule, ChildPid} actor object.
+%% Returns {beamtalk_supervisor, ChildClass, ChildModule, ChildPid} for supervisor
+%% subclasses, or {beamtalk_object, ChildClass, ChildModule, ChildPid} for workers.
 -spec startChild(tuple()) -> tuple().
 startChild(Self) ->
     SupPid = element(4, Self),
@@ -224,7 +225,8 @@ startChild(Self) ->
 %% Called from `startChild: args` on DynamicSupervisor instances.
 %% Args is passed as the extra argument to OTP simple_one_for_one,
 %% which appends it to the child start function's argument list.
-%% Returns a {beamtalk_object, ChildClass, ChildModule, ChildPid} actor object.
+%% Returns {beamtalk_supervisor, ChildClass, ChildModule, ChildPid} for supervisor
+%% subclasses, or {beamtalk_object, ChildClass, ChildModule, ChildPid} for workers.
 -spec startChild(tuple(), term()) -> tuple().
 startChild(Self, Args) ->
     SupPid = element(4, Self),

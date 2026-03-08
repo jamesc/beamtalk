@@ -13,19 +13,21 @@
 %%%
 %%% ### send/3 (sync — returns value)
 %%%
-%%% | Receiver Type | Dispatch Path | Returns |
-%%% |---------------|---------------|---------|
-%%% | Actor record  | `beamtalk_actor:sync_send/3` | Value |
-%%% | Class object  | `beamtalk_object_class:class_send/3` | Value |
-%%% | Primitive     | `beamtalk_primitive:send/3` | Value |
+%%% | Receiver Type    | Dispatch Path | Returns |
+%%% |------------------|---------------|---------|
+%%% | Supervisor tuple | hierarchy walk via `beamtalk_dispatch:lookup/5` (ADR 0059) | Value |
+%%% | Actor record     | `beamtalk_actor:sync_send/3` | Value |
+%%% | Class object     | `beamtalk_object_class:class_send/3` | Value |
+%%% | Primitive        | `beamtalk_primitive:send/3` | Value |
 %%%
 %%% ### cast/3 (fire-and-forget — returns ok) (BT-920)
 %%%
-%%% | Receiver Type | Dispatch Path | Returns |
-%%% |---------------|---------------|---------|
-%%% | Actor record  | `beamtalk_actor:cast_send/3` | ok |
-%%% | Class object  | (silently ignored) | ok |
-%%% | Primitive     | (silently ignored) | ok |
+%%% | Receiver Type    | Dispatch Path | Returns |
+%%% |------------------|---------------|---------|
+%%% | Supervisor tuple | (silently ignored — cast has no supervisor semantics) | ok |
+%%% | Actor record     | `beamtalk_actor:cast_send/3` | ok |
+%%% | Class object     | (silently ignored) | ok |
+%%% | Primitive        | (silently ignored) | ok |
 %%%
 %%% ## Usage (from generated Core Erlang)
 %%%
