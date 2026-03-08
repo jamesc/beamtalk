@@ -48,6 +48,7 @@
 %% @doc Send a message to any receiver (actor, class object, primitive, or future).
 %%
 %% For futures, auto-awaits the value and re-dispatches (BT-840).
+%% For supervisors, dispatches via hierarchy walk (ADR 0059 — not gen_server).
 %% For actors, sends synchronously via gen_server:call (BT-918 / ADR 0043).
 %% For class objects, dispatches synchronously via class_send.
 %% For primitives, dispatches synchronously via beamtalk_primitive:send/3.
@@ -58,6 +59,25 @@ send({beamtalk_future, _} = Future, Selector, Args) ->
     %% returned by old code paths are awaited before re-dispatching.
     Value = beamtalk_future:await(Future),
     send(Value, Selector, Args);
+send({beamtalk_supervisor, ClassName, _Module, Pid} = Self, isAlive, []) ->
+    %% ADR 0059: Supervisor lifecycle — check process liveness without gen_server.
+    is_process_alive(Pid) andalso ClassName =/= undefined;
+send({beamtalk_supervisor, _ClassName, _Module, Pid} = Self, stop, []) ->
+    %% ADR 0059: Supervisor stop — delegates to OTP supervisor:stop/1.
+    supervisor:stop(Pid),
+    nil;
+send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
+    %% ADR 0059: Route supervisor method calls via class hierarchy walk.
+    %% Supervisor instances do not run in a gen_server — methods execute
+    %% in the caller's process context (OTP supervisor handle_call is reserved).
+    %% Phase 2: walks hierarchy to stdlib Supervisor/DynamicSupervisor methods.
+    %% Phase 3: generated Module:'method'(Self) will be found first.
+    case beamtalk_dispatch:lookup(Selector, Args, Self, #{}, ClassName) of
+        {reply, Result, _} ->
+            Result;
+        {error, Error} ->
+            error(beamtalk_exception_handler:ensure_wrapped(Error))
+    end;
 send(Receiver, Selector, Args) ->
     case is_actor(Receiver) of
         true ->

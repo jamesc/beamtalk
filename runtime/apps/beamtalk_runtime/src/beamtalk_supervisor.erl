@@ -1,0 +1,327 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+%%% @doc Erlang runtime glue for Beamtalk Supervisor and DynamicSupervisor.
+%%%
+%%% **DDD Context:** Actor System Context
+%%%
+%%% This module provides the BEAM interop entry points called from the
+%%% Supervisor and DynamicSupervisor stdlib methods via Erlang FFI.
+%%% It also exposes `build_child_specs/1` for the generated `init/1` callbacks
+%%% (Phase 3 codegen) and `is_supervisor/1` for compile-time routing.
+%%%
+%%% ## Design (ADR 0059 Phase 2)
+%%%
+%%% Supervisor instances are represented as:
+%%%   `{beamtalk_supervisor, ClassName, Module, Pid}`
+%%%
+%%% This distinct tuple tag allows `beamtalk_message_dispatch` to route
+%%% messages directly to `Module:'method'(Self)` (Phase 3) or via the
+%%% stdlib hierarchy walk (Phase 2) without going through gen_server.
+%%%
+%%% OTP supervisor behaviour handles `handle_call/3` internally, so inspection
+%%% methods (`children`, `which:`, etc.) are implemented as exported module
+%%% functions that call OTP APIs from the caller's process context.
+%%%
+%%% ## References
+%%%
+%%% - ADR 0059: Supervision Tree Syntax, Phase 2
+%%% - stdlib/src/Supervisor.bt, DynamicSupervisor.bt
+%%% - runtime/apps/beamtalk_runtime/src/beamtalk_message_dispatch.erl (routing)
+
+-module(beamtalk_supervisor).
+
+-export([
+    startLink/1,
+    current/1,
+    whichChildren/1,
+    whichChild/2,
+    terminateChild/2,
+    startChild/1,
+    startChild/2,
+    countChildren/1,
+    stop/1,
+    build_child_specs/1,
+    is_supervisor/1
+]).
+
+-include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
+
+%%% ============================================================================
+%%% Public API
+%%% ============================================================================
+
+%% @doc Start (or return) the running supervisor for the given class.
+%%
+%% Called from `class supervise` on Supervisor and DynamicSupervisor subclasses.
+%% Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
+%%
+%% Returns `{beamtalk_supervisor, ClassName, Module, Pid}`.
+%% Idempotent: if the supervisor is already running, returns the existing instance.
+-spec startLink(tuple()) -> tuple().
+startLink(Self) ->
+    ClassPid = element(4, Self),
+    ClassName = beamtalk_object_class:class_name(ClassPid),
+    Module = beamtalk_object_class:module_name(ClassPid),
+    case Module:start_link() of
+        {ok, Pid} ->
+            {beamtalk_supervisor, ClassName, Module, Pid};
+        {error, {already_started, Pid}} ->
+            {beamtalk_supervisor, ClassName, Module, Pid};
+        {error, Reason} ->
+            Error = beamtalk_error:new(
+                runtime_error,
+                ClassName,
+                supervise,
+                iolist_to_binary(io_lib:format("supervisor start_link failed: ~p", [Reason]))
+            ),
+            error(beamtalk_exception_handler:ensure_wrapped(Error))
+    end.
+
+%% @doc Return the running supervisor instance, or nil if not started.
+%%
+%% Called from `class current` on Supervisor and DynamicSupervisor subclasses.
+%% Self is the class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
+-spec current(tuple()) -> tuple() | nil.
+current(Self) ->
+    ClassPid = element(4, Self),
+    ClassName = beamtalk_object_class:class_name(ClassPid),
+    Module = beamtalk_object_class:module_name(ClassPid),
+    case whereis(Module) of
+        undefined ->
+            nil;
+        Pid ->
+            {beamtalk_supervisor, ClassName, Module, Pid}
+    end.
+
+%% @doc Return the child ids of currently-running children.
+%%
+%% Called from `children` on Supervisor instances.
+%% Returns a list of child id atoms (class name atoms by default, or custom
+%% ids when `withId:` was used in `SupervisionSpec`).
+%% Dead or restarting children are excluded.
+-spec whichChildren(tuple()) -> [atom()].
+whichChildren(Self) ->
+    Pid = element(4, Self),
+    [
+        Id
+     || {Id, ChildPid, _, _} <- supervisor:which_children(Pid),
+        Id =/= undefined,
+        is_pid(ChildPid)
+    ].
+
+%% @doc Return the running child object for the given class, or nil.
+%%
+%% Called from `which: aClass` on Supervisor instances.
+%% ClassArg is a class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
+%% Returns {beamtalk_object, ChildClass, ChildModule, ChildPid} or nil.
+-spec whichChild(tuple(), tuple()) -> tuple() | nil.
+whichChild(Self, ClassArg) ->
+    SupPid = element(4, Self),
+    ChildModule = element(3, ClassArg),
+    ChildClassPid = element(4, ClassArg),
+    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    Children = supervisor:which_children(SupPid),
+    case lists:keyfind(ChildClass, 1, Children) of
+        {_Id, ChildPid, _, _} when is_pid(ChildPid) ->
+            {beamtalk_object, ChildClass, ChildModule, ChildPid};
+        _ ->
+            nil
+    end.
+
+%% @doc Terminate a supervised child.
+%%
+%% For Supervisor (static): Arg is a class object — terminates child by its
+%% class name, which is the OTP child id. Returns nil.
+%%
+%% For DynamicSupervisor (dynamic): Arg is an actor or supervisor instance —
+%% terminates child by its process pid (simple_one_for_one semantics). Returns nil.
+%%
+%% Raises a runtime_error if the child is not found or cannot be terminated.
+-spec terminateChild(tuple(), tuple()) -> nil.
+terminateChild(Self, Arg) ->
+    SupPid = element(4, Self),
+    SupClass = element(2, Self),
+    case beamtalk_class_registry:is_class_object(Arg) of
+        true ->
+            %% Supervisor case: terminate by class name (the default child id)
+            ChildClassPid = element(4, Arg),
+            ChildId = beamtalk_object_class:class_name(ChildClassPid),
+            case supervisor:terminate_child(SupPid, ChildId) of
+                ok ->
+                    nil;
+                {error, Reason} ->
+                    Error = beamtalk_error:new(
+                        runtime_error,
+                        SupClass,
+                        'terminate:',
+                        iolist_to_binary(io_lib:format("~p", [Reason]))
+                    ),
+                    error(beamtalk_exception_handler:ensure_wrapped(Error))
+            end;
+        false ->
+            %% DynamicSupervisor case: terminate by child process pid
+            ChildPid = element(4, Arg),
+            case supervisor:terminate_child(SupPid, ChildPid) of
+                ok ->
+                    nil;
+                {error, not_found} ->
+                    Error = beamtalk_error:new(
+                        runtime_error,
+                        SupClass,
+                        'terminateChild:',
+                        <<"Child not found — it may have already terminated">>
+                    ),
+                    error(beamtalk_exception_handler:ensure_wrapped(Error));
+                {error, Reason} ->
+                    Error = beamtalk_error:new(
+                        runtime_error,
+                        SupClass,
+                        'terminateChild:',
+                        iolist_to_binary(io_lib:format("~p", [Reason]))
+                    ),
+                    error(beamtalk_exception_handler:ensure_wrapped(Error))
+            end
+    end.
+
+%% @doc Start a new child with default args under a DynamicSupervisor.
+%%
+%% Called from `startChild` on DynamicSupervisor instances.
+%% Calls `Module:'childClass'()` to determine the child class and module,
+%% then starts the child via OTP simple_one_for_one.
+%% Returns a {beamtalk_object, ChildClass, ChildModule, ChildPid} actor object.
+-spec startChild(tuple()) -> tuple().
+startChild(Self) ->
+    SupPid = element(4, Self),
+    SupMod = element(3, Self),
+    ChildClassObj = SupMod:'childClass'(),
+    ChildClassPid = element(4, ChildClassObj),
+    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildModule = element(3, ChildClassObj),
+    case supervisor:start_child(SupPid, []) of
+        {ok, ChildPid} ->
+            {beamtalk_object, ChildClass, ChildModule, ChildPid};
+        {error, Reason} ->
+            Error = beamtalk_error:new(
+                runtime_error,
+                element(2, Self),
+                startChild,
+                iolist_to_binary(io_lib:format("~p", [Reason]))
+            ),
+            error(beamtalk_exception_handler:ensure_wrapped(Error))
+    end.
+
+%% @doc Start a new child with args under a DynamicSupervisor.
+%%
+%% Called from `startChild: args` on DynamicSupervisor instances.
+%% Args is passed as the extra argument to OTP simple_one_for_one,
+%% which appends it to the child start function's argument list.
+%% Returns a {beamtalk_object, ChildClass, ChildModule, ChildPid} actor object.
+-spec startChild(tuple(), term()) -> tuple().
+startChild(Self, Args) ->
+    SupPid = element(4, Self),
+    SupMod = element(3, Self),
+    ChildClassObj = SupMod:'childClass'(),
+    ChildClassPid = element(4, ChildClassObj),
+    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    ChildModule = element(3, ChildClassObj),
+    case supervisor:start_child(SupPid, [Args]) of
+        {ok, ChildPid} ->
+            {beamtalk_object, ChildClass, ChildModule, ChildPid};
+        {error, Reason} ->
+            Error = beamtalk_error:new(
+                runtime_error,
+                element(2, Self),
+                'startChild:',
+                iolist_to_binary(io_lib:format("~p", [Reason]))
+            ),
+            error(beamtalk_exception_handler:ensure_wrapped(Error))
+    end.
+
+%% @doc Return the count of active children.
+%%
+%% Called from `count` on Supervisor and DynamicSupervisor instances.
+%% Uses `supervisor:count_children/1` which returns a proplist with
+%% `active` (running), `workers`, `supervisors`, `specs` counts.
+-spec countChildren(tuple()) -> non_neg_integer().
+countChildren(Self) ->
+    Pid = element(4, Self),
+    Counts = supervisor:count_children(Pid),
+    proplists:get_value(active, Counts, 0).
+
+%% @doc Stop the supervisor and all its children.
+%%
+%% Called from `stop` on Supervisor and DynamicSupervisor instances.
+%% Uses gen_server:stop/1 since supervisors are OTP gen_servers.
+%% Returns nil.
+-spec stop(tuple()) -> nil.
+stop(Self) ->
+    Pid = element(4, Self),
+    gen_server:stop(Pid),
+    nil.
+
+%% @doc Build OTP child specs from a list of class objects or SupervisionSpec values.
+%%
+%% Called from the generated `init/1` of Supervisor subclasses (Phase 3 codegen).
+%% For each element:
+%% - Class object: calls `supervisionSpec` on the class to get a SupervisionSpec,
+%%   then calls `childSpec` on the spec to get the Beamtalk dict.
+%% - SupervisionSpec map: calls `childSpec` directly.
+%% Converts Beamtalk child spec dicts to OTP-compatible maps.
+-spec build_child_specs([term()]) -> [map()].
+build_child_specs(Children) ->
+    [build_child_spec(C) || C <- Children].
+
+%% @doc Check if a class name is a Supervisor or DynamicSupervisor subclass.
+%%
+%% Used by codegen (Phase 3) to determine routing at compile time and by
+%% `SupervisionSpec childSpec` to determine child `type` and `shutdown`.
+%% ClassName must be the base class name atom (e.g., 'WebApp', not 'WebApp class').
+-spec is_supervisor(atom()) -> boolean().
+is_supervisor(ClassName) ->
+    beamtalk_class_registry:inherits_from(ClassName, 'Supervisor') orelse
+        beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor').
+
+%%% ============================================================================
+%%% Internal helpers
+%%% ============================================================================
+
+%% @private
+%% Build a single OTP child spec from a class object or SupervisionSpec map.
+-spec build_child_spec(term()) -> map().
+build_child_spec(ClassObj) when is_tuple(ClassObj), element(1, ClassObj) =:= beamtalk_object ->
+    case beamtalk_class_registry:is_class_object(ClassObj) of
+        true ->
+            %% Bare class reference: call supervisionSpec to get a SupervisionSpec
+            ClassPid = element(4, ClassObj),
+            BtSpec = beamtalk_object_class:class_send(ClassPid, 'supervisionSpec', []),
+            spec_to_otp(beamtalk_message_dispatch:send(BtSpec, 'childSpec', []));
+        false ->
+            %% Actor instance passed as spec — treat as SupervisionSpec-like value
+            spec_to_otp(beamtalk_message_dispatch:send(ClassObj, 'childSpec', []))
+    end;
+build_child_spec(Spec) when is_map(Spec) ->
+    %% SupervisionSpec value (tagged map): call childSpec directly
+    spec_to_otp(beamtalk_message_dispatch:send(Spec, 'childSpec', [])).
+
+%% @private
+%% Convert a Beamtalk child spec dict to an OTP-compatible child spec map.
+%%
+%% The Beamtalk dict from `SupervisionSpec childSpec` has keys:
+%%   id, start ([ClassObj, FnAtom, ArgsList]), restart, shutdown, type
+%% The `start` value is a Beamtalk Array [ClassObj, #spawn, #()] that must be
+%% converted to the OTP MFA tuple {Module, Function, Args}.
+-spec spec_to_otp(map()) -> map().
+spec_to_otp(BtSpec) ->
+    [ClassObj, StartFn, StartArgs] = maps:get(start, BtSpec),
+    ChildModule = element(3, ClassObj),
+    OtpStart = {ChildModule, StartFn, StartArgs},
+    #{
+        id => maps:get(id, BtSpec),
+        start => OtpStart,
+        restart => maps:get(restart, BtSpec),
+        shutdown => maps:get(shutdown, BtSpec),
+        type => maps:get(type, BtSpec),
+        modules => [ChildModule]
+    }.
