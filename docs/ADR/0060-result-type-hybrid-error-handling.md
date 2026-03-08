@@ -513,6 +513,18 @@ Newspeak uses promises for asynchronous operations: if processing produces a res
 
 **What we noted:** Beamtalk's actor messaging is synchronous by default (ADR 0043), so promises are less immediately relevant. But the principle — fallible async operations return a value (Result/Promise) rather than raising — aligns with our decision.
 
+### What We're Actually Borrowing from Rust and Gleam
+
+Rust and Gleam are both statically typed. It might seem odd to cite them as prior art for a dynamic, live-environment language. The distinction is important: **we are adopting their runtime ergonomics and FFI convention, not their static enforcement model.**
+
+What makes Rust's `Result<T, E>` and Gleam's `Result(v, e)` valuable has two parts:
+
+1. **Static part** — The type checker enforces exhaustive handling at every call site. Neither we nor Elixir have this for dynamic code, and Beamtalk cannot have it in the general case because new classes can be defined at the REPL at any time (open-world, live system).
+
+2. **Runtime part** — `Result` is a structured value with known shape. `map`, `and_then`, `unwrap_or` are message sends that compose at runtime, regardless of what the type checker knows. The FFI mapping from `{ok, V} | {error, R}` is a runtime convention, not a type system feature.
+
+Beamtalk adopts part 2 entirely. Part 1 is available in typed contexts (gradual typing annotations) but is never the primary enforcement mechanism. This is the right split: the runtime convention works uniformly across dynamic and typed code, and typed code gets additional static guarantees on top. Attempting to rely on part 1 alone — union types without a runtime wrapper — fails for Beamtalk because the open-world live system makes exhaustiveness checking unsound (Alternative G).
+
 ### Summary
 
 | Feature | Pharo | Gleam | Elixir | Rust | **Beamtalk (proposed)** |
