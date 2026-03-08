@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for AtomicCounter class (BT-1250)
+
+TestCase subclass: AtomicCounterTest
+  state: counter = nil
+
+  setUp =>
+    self.counter := AtomicCounter new: #atomicCounterBUnitTest
+    self
+
+  tearDown =>
+    self.counter isNil ifFalse: [[self.counter delete] on: Error do: [:e | nil]]
+    self.counter := nil
+
+  testStartsAtZero => self assert: self.counter value equals: 0
+
+  testIncrementReturnsNewValue => self assert: self.counter increment equals: 1
+
+  testIncrementAccumulates =>
+    self.counter increment
+    self.counter increment
+    self assert: self.counter increment equals: 3
+
+  testIncrementByN => self assert: (self.counter incrementBy: 5) equals: 5
+
+  testIncrementByAccumulates =>
+    self.counter incrementBy: 3
+    self assert: (self.counter incrementBy: 7) equals: 10
+
+  testDecrementReturnsNewValue => self assert: self.counter decrement equals: -1
+
+  testDecrementByN => self assert: (self.counter decrementBy: 4) equals: -4
+
+  testValueReflectsIncrements =>
+    self.counter increment
+    self.counter increment
+    self assert: self.counter value equals: 2
+
+  testResetSetsToZero =>
+    self.counter incrementBy: 42
+    self.counter reset
+    self assert: self.counter value equals: 0
+
+  testResetReturnsNil =>
+    self.counter increment
+    result := self.counter reset
+    self assert: result equals: nil
+
+  testNamedLookup =>
+    other := AtomicCounter named: #atomicCounterBUnitTest
+    self.counter increment
+    self assert: other value equals: 1
+
+  testNewAlreadyExistsRaisesError =>
+    self should: [
+      AtomicCounter new: #atomicCounterBUnitTest
+    ] raise: #already_exists
+
+  testNamedNotFoundRaisesError =>
+    self should: [AtomicCounter named: #noSuchCounterXyz] raise: #not_found
+
+  testDeleteMakesCounterStale =>
+    self.counter delete
+    self.counter := nil
+    // Creating a fresh counter with the same name succeeds
+    fresh := AtomicCounter new: #atomicCounterBUnitTest
+    self assert: fresh value equals: 0
+    self.counter := fresh
+
+  testIncrementAndDecrementCombined =>
+    self.counter incrementBy: 10
+    self.counter decrementBy: 3
+    self assert: self.counter value equals: 7

@@ -1408,4 +1408,76 @@ The owning process (the one that called `Ets new:type:`) holds the table. When t
 
 ---
 
+### Queue — O(1) Amortised FIFO Queue
+
+`Queue` wraps Erlang's `:queue` module, providing O(1) amortised enqueue and dequeue. It is a value type: each mutation returns a new `Queue` rather than modifying the receiver. Use `Queue` instead of `List` when O(1) amortised head/tail access matters.
+
+#### Creating a Queue
+
+```beamtalk
+q := Queue new        // empty queue
+```
+
+#### Enqueueing and Dequeueing
+
+```beamtalk
+q2 := q enqueue: 1
+q3 := q2 enqueue: 2
+result := q3 dequeue         // => #(1, <Queue with [2]>)
+value := result at: 1       // => 1
+rest := result at: 2        // => Queue containing [2]
+```
+
+`dequeue` returns a `Tuple` of `#(value, newQueue)`. Raises `empty_queue` if the queue is empty.
+
+#### Other Operations
+
+```beamtalk
+q peek                        // => front element without removing (raises empty_queue if empty)
+q isEmpty                     // => true or false
+q size                        // => number of elements
+```
+
+---
+
+### AtomicCounter — Lock-Free Shared Counter
+
+`AtomicCounter` provides a named integer counter backed by `ets:update_counter`. Increments and decrements are atomic and safe for concurrent access from multiple actors without message-passing overhead.
+
+#### Creating a Counter
+
+```beamtalk
+c := AtomicCounter new: #requests     // create named counter starting at 0
+c := AtomicCounter named: #requests   // look up existing counter from another actor
+```
+
+#### Atomic Operations
+
+```beamtalk
+c increment                    // atomically add 1, return new value
+c incrementBy: 5               // atomically add N, return new value
+c decrement                    // atomically subtract 1, return new value
+c decrementBy: 3               // atomically subtract N, return new value
+c value                        // read current value (not atomic w.r.t. other reads)
+c reset                        // set to 0, return nil
+c delete                       // destroy the backing ETS table
+```
+
+#### Cross-Actor Sharing
+
+```beamtalk
+// Actor A — create
+c := AtomicCounter new: #hits
+
+// Actor B — look up by name and increment
+c := AtomicCounter named: #hits
+c increment
+```
+
+#### Counter Lifecycle
+
+Each `AtomicCounter` owns its own named ETS table. When `delete` is called, the table is destroyed and the counter is stale. Any subsequent operations on a deleted counter raise `stale_counter`.
+
+---
+
 See [Tooling](beamtalk-tooling.md) for CLI tools, REPL, VS Code extension, and testing framework.

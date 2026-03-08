@@ -1,0 +1,78 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Queue — O(1) amortised FIFO queue backed by Erlang's `:queue` module.
+///
+/// Queue provides O(1) amortised enqueue and dequeue using Erlang's built-in
+/// `:queue` module. It is a value type: each operation (enqueue, dequeue)
+/// returns a new Queue rather than modifying the receiver in place.
+///
+/// Use Queue when you need a FIFO data structure with guaranteed O(1)
+/// amortised head/tail access, distinct from List's O(n) append.
+///
+/// ## Examples
+/// ```beamtalk
+/// q := Queue new
+/// q2 := q enqueue: 1
+/// q3 := q2 enqueue: 2
+/// result := q3 dequeue       // => #(1, <Queue with [2]>)
+/// value := result at: 1     // => 1
+/// rest := result at: 2      // => Queue with [2]
+/// ```
+Object subclass: Queue
+
+  /// Create an empty Queue (class method).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// q := Queue new
+  /// ```
+  class sealed new -> Queue => (Erlang beamtalk_queue) new
+
+  /// Add an element to the back of the queue. Returns a new Queue.
+  ///
+  /// O(1) amortised.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// q2 := q enqueue: 42
+  /// ```
+  enqueue: elem -> Queue => (Erlang beamtalk_queue) enqueue: self elem: elem
+
+  /// Remove and return the front element as a `#(value, newQueue)` tuple.
+  ///
+  /// O(1) amortised. Raises `empty_queue` if the queue is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// result := q dequeue
+  /// value := result at: 1
+  /// rest := result at: 2
+  /// ```
+  dequeue => (Erlang beamtalk_queue) dequeue: self
+
+  /// Return the front element without removing it.
+  ///
+  /// Raises `empty_queue` if the queue is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// front := q peek    // => first element
+  /// ```
+  peek => (Erlang beamtalk_queue) peek: self
+
+  /// Return `true` if the queue contains no elements.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Queue new isEmpty    // => true
+  /// ```
+  isEmpty -> Boolean => (Erlang beamtalk_queue) isEmpty: self
+
+  /// Return the number of elements in the queue.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// q size    // => 3
+  /// ```
+  size -> Integer => (Erlang beamtalk_queue) size: self

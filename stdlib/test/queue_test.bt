@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for Queue class (BT-1250)
+
+TestCase subclass: QueueTest
+
+  testNewIsEmpty =>
+    q := Queue new
+    self assert: q isEmpty
+
+  testNewSizeIsZero =>
+    q := Queue new
+    self assert: q size equals: 0
+
+  testEnqueueIncreasesSize =>
+    q := Queue new
+    q2 := q enqueue: 1
+    self assert: q2 size equals: 1
+
+  testEnqueueDoesNotMutateOriginal =>
+    q := Queue new
+    q enqueue: 42
+    self assert: q isEmpty
+
+  testDequeueReturnsTupleWithValueAndQueue =>
+    q := (Queue new) enqueue: 99
+    result := q dequeue
+    self assert: (result at: 1) equals: 99
+    self assert: (result at: 2) isEmpty
+
+  testDequeueReducesSize =>
+    q := ((Queue new) enqueue: 1) enqueue: 2
+    result := q dequeue
+    self assert: (result at: 2) size equals: 1
+
+  testDequeueOnEmptyQueueRaisesError =>
+    self should: [Queue new dequeue] raise: #empty_queue
+
+  testPeekReturnsFrontElement =>
+    q := (Queue new) enqueue: 7
+    self assert: q peek equals: 7
+
+  testPeekDoesNotReduceSize =>
+    q := (Queue new) enqueue: 7
+    q peek
+    self assert: q size equals: 1
+
+  testPeekOnEmptyQueueRaisesError =>
+    self should: [Queue new peek] raise: #empty_queue
+
+  testIsEmptyFalseAfterEnqueue =>
+    q := (Queue new) enqueue: 1
+    self deny: q isEmpty
+
+  testIsEmptyTrueAfterDequeueAll =>
+    q := (Queue new) enqueue: 1
+    result := q dequeue
+    self assert: (result at: 2) isEmpty
+
+  testFifoOrder =>
+    q0 := Queue new
+    q1 := q0 enqueue: "first"
+    q2 := q1 enqueue: "second"
+    q3 := q2 enqueue: "third"
+    r1 := q3 dequeue
+    r2 := (r1 at: 2) dequeue
+    r3 := (r2 at: 2) dequeue
+    self assert: (r1 at: 1) equals: "first"
+    self assert: (r2 at: 1) equals: "second"
+    self assert: (r3 at: 1) equals: "third"
+
+  testPeekMatchesDequeue =>
+    q := (Queue new) enqueue: "hello"
+    front := q peek
+    result := q dequeue
+    self assert: front equals: (result at: 1)
+
+  testEnqueueMultipleTypes =>
+    q := Queue new
+    q2 := ((q enqueue: 1) enqueue: "two") enqueue: #three
+    self assert: q2 size equals: 3

@@ -20,6 +20,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
         name,
         "Actor"
             | "Array"
+            | "AtomicCounter"
             | "BEAMError"
             | "BeamtalkInterface"
             | "Behaviour"
@@ -56,6 +57,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Pid"
             | "Port"
             | "ProtoObject"
+            | "Queue"
             | "Random"
             | "ReactiveSubprocess"
             | "Reference"
@@ -150,6 +152,34 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, return_type: Some("Array".into()), param_types: vec![Some("List".into())], doc: Some("Create an Array from a list of elements.\n\n## Examples\n```beamtalk\nArray withAll: #(1, 2, 3)   // => #[1, 2, 3]\n```".into()) },
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Array".into(), is_sealed: false, return_type: Some("Array".into()), param_types: vec![Some("List".into())], doc: Some("Create an Array from a list. Convenience alias for `withAll:`.\n\n## Examples\n```beamtalk\nArray new: #(1, 2, 3)            // => #[1, 2, 3]\n```".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "AtomicCounter".into(),
+        ClassInfo {
+            name: "AtomicCounter".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "increment".into(), arity: 0, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Atomically add 1. Returns the new value.\n\n## Examples\n```beamtalk\nc increment    // => 1\n```".into()) },
+                MethodInfo { selector: "incrementBy:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![Some("Integer".into())], doc: Some("Atomically add N. Returns the new value.\n\n## Examples\n```beamtalk\nc incrementBy: 5    // => 6\n```".into()) },
+                MethodInfo { selector: "decrement".into(), arity: 0, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Atomically subtract 1. Returns the new value.\n\n## Examples\n```beamtalk\nc decrement    // => -1\n```".into()) },
+                MethodInfo { selector: "decrementBy:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![Some("Integer".into())], doc: Some("Atomically subtract N. Returns the new value.\n\n## Examples\n```beamtalk\nc decrementBy: 3    // => -3\n```".into()) },
+                MethodInfo { selector: "value".into(), arity: 0, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Read the current value.\n\n## Examples\n```beamtalk\nc value    // => 42\n```".into()) },
+                MethodInfo { selector: "reset".into(), arity: 0, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Reset the counter to 0. Returns nil.\n\n## Examples\n```beamtalk\nc reset\n```".into()) },
+                MethodInfo { selector: "delete".into(), arity: 0, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Destroy the backing ETS table. Returns nil.\n\nAfter calling `delete`, this AtomicCounter instance is stale.\n\n## Examples\n```beamtalk\nc delete\n```".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: true, return_type: Some("AtomicCounter".into()), param_types: vec![Some("Symbol".into())], doc: Some("Create a new named counter starting at 0 (class method).\n\nRaises `already_exists` if a counter with this name already exists.\nRaises `type_error` if the argument is not a Symbol.\n\n## Examples\n```beamtalk\nc := AtomicCounter new: #requests\n```".into()) },
+                MethodInfo { selector: "named:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "AtomicCounter".into(), is_sealed: true, return_type: Some("AtomicCounter".into()), param_types: vec![Some("Symbol".into())], doc: Some("Look up an existing counter by name (class method).\n\nRaises `not_found` if no counter with this name exists.\nRaises `type_error` if the argument is not a Symbol.\n\n## Examples\n```beamtalk\nc := AtomicCounter named: #requests\n```".into()) },
             ],
             class_variables: vec![],
         },
@@ -1225,6 +1255,31 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "perform:withArguments:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ProtoObject".into(), is_sealed: false, return_type: None, param_types: vec![None, None], doc: Some("Send a message dynamically with an arguments list.\n\n## Examples\n```beamtalk\n42 perform: #abs withArguments: #()   // => 42\n```".into()) },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Queue".into(),
+        ClassInfo {
+            name: "Queue".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "enqueue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: false, return_type: Some("Queue".into()), param_types: vec![None], doc: Some("Add an element to the back of the queue. Returns a new Queue.\n\nO(1) amortised.\n\n## Examples\n```beamtalk\nq2 := q enqueue: 42\n```".into()) },
+                MethodInfo { selector: "dequeue".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Remove and return the front element as a `#(value, newQueue)` tuple.\n\nO(1) amortised. Raises `empty_queue` if the queue is empty.\n\n## Examples\n```beamtalk\nresult := q dequeue\nvalue := result at: 1\nrest := result at: 2\n```".into()) },
+                MethodInfo { selector: "peek".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Return the front element without removing it.\n\nRaises `empty_queue` if the queue is empty.\n\n## Examples\n```beamtalk\nfront := q peek    // => first element\n```".into()) },
+                MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Return `true` if the queue contains no elements.\n\n## Examples\n```beamtalk\nQueue new isEmpty    // => true\n```".into()) },
+                MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the number of elements in the queue.\n\n## Examples\n```beamtalk\nq size    // => 3\n```".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Queue".into(), is_sealed: true, return_type: Some("Queue".into()), param_types: vec![], doc: Some("Create an empty Queue (class method).\n\n## Examples\n```beamtalk\nq := Queue new\n```".into()) },
+            ],
             class_variables: vec![],
         },
     );
