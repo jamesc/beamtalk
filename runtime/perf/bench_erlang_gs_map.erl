@@ -1,6 +1,8 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% **DDD Context:** Runtime benchmark — gen_server counter with map state
+%%%
 %%% @doc Erlang gen_server counter using a map for state (no dispatch layer).
 %%%
 %%% Baseline for overhead comparison: same map-based state as Beamtalk actors,

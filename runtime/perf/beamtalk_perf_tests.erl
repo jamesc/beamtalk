@@ -359,13 +359,13 @@ bench_overhead_comparison_hires() ->
     RawPid = spawn_link(fun() -> raw_counter_loop(0) end),
     lists:foreach(fun(_) ->
         RawPid ! {increment, self()},
-        receive ok -> ok after 1000 -> error(timeout) end
+        receive ok -> ok after 1000 -> error({perf_timeout, overhead_raw_process_hires, warmup_increment}) end
     end, lists:seq(1, ?HIRES_WARMUP * ?HIRES_BATCH)),
     RawBatchTimings = lists:map(fun(_) ->
         {T, _} = timer:tc(fun() ->
             lists:foreach(fun(_) ->
                 RawPid ! {increment, self()},
-                receive ok -> ok after 1000 -> error(timeout) end
+                receive ok -> ok after 1000 -> error({perf_timeout, overhead_raw_process_hires, increment}) end
             end, lists:seq(1, ?HIRES_BATCH))
         end),
         %% Convert to nanoseconds per call

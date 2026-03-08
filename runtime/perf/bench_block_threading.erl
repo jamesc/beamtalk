@@ -1,6 +1,8 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% **DDD Context:** Runtime benchmark — block state-threading and maybe_await overhead
+%%%
 %%% @doc Erlang simulations of Beamtalk's block state-threading patterns.
 %%%
 %%% Beamtalk blocks that mutate local variables use a "StateAcc" calling
@@ -103,14 +105,16 @@ sum_stateacc_maybe_await_loop(I, StateAcc) ->
 -spec sum_procdict(non_neg_integer()) -> integer().
 sum_procdict(N) ->
     OldSum = get('__local__sum'),
-    put('__local__sum', 0),
-    sum_procdict_loop(N),
-    Result = get('__local__sum'),
-    case OldSum of
-        undefined -> erase('__local__sum');
-        _         -> put('__local__sum', OldSum)
-    end,
-    Result.
+    try
+        put('__local__sum', 0),
+        sum_procdict_loop(N),
+        get('__local__sum')
+    after
+        case OldSum of
+            undefined -> erase('__local__sum');
+            _         -> put('__local__sum', OldSum)
+        end
+    end.
 
 sum_procdict_loop(0) -> ok;
 sum_procdict_loop(I) ->

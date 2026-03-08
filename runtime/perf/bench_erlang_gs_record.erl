@@ -1,6 +1,8 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% **DDD Context:** Runtime benchmark — gen_server counter with record state
+%%%
 %%% @doc Idiomatic Erlang gen_server counter using a record for state.
 %%%
 %%% Baseline for overhead comparison: this is how you would write a counter
