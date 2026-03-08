@@ -599,10 +599,24 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<LintParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let path = params.path.as_deref().unwrap_or(".");
-        let result = run_lint_structured(path);
+        let path = params.path.unwrap_or_else(|| ".".to_string());
+        // Run blocking I/O and CPU-bound parsing off the Tokio worker thread.
+        let result = tokio::task::spawn_blocking(move || run_lint_structured(&path))
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+        let has_errors = !result.errors.is_empty();
         let text = serde_json::to_string_pretty(&result).unwrap_or_else(|_| format!("{result:?}"));
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        let structured = serde_json::to_value(&result).ok();
+        let mut call_result = CallToolResult {
+            content: vec![Content::text(text)],
+            structured_content: structured,
+            is_error: None,
+            meta: None,
+        };
+        if has_errors {
+            call_result.is_error = Some(true);
+        }
+        Ok(call_result)
     }
 
     /// Discover supported REPL operations and protocol version.
@@ -647,10 +661,15 @@ impl BeamtalkMcp {
 // --- Lint helpers ---
 
 /// A single lint diagnostic in structured form.
+///
+/// `line` is `None` for file-level errors (e.g. unreadable path, non-`.bt` file)
+/// where there is no specific source location.  For diagnostics derived from
+/// source text it is a 1-indexed line number.
 #[derive(Debug, serde::Serialize)]
 struct LintDiagnostic {
     file: String,
-    line: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<u32>,
     message: String,
     severity: &'static str,
 }
@@ -672,12 +691,13 @@ fn offset_to_line(source: &str, offset: usize) -> u32 {
 }
 
 /// Recursively collect all `.bt` files under `dir`.
-fn collect_bt_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+///
+/// Returns an error if the directory cannot be read (e.g. permission denied),
+/// preventing silent false-clean results.
+fn collect_bt_files(dir: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
     let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return out;
-    };
-    let mut entries: Vec<_> = entries.flatten().collect();
+    let entries = std::fs::read_dir(dir)?;
+    let mut entries: Vec<_> = entries.collect::<std::io::Result<Vec<_>>>()?;
     entries.sort_by_key(std::fs::DirEntry::file_name);
     for entry in entries {
         let path = entry.path();
@@ -685,52 +705,64 @@ fn collect_bt_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
             continue;
         }
         if path.is_dir() {
-            out.extend(collect_bt_files(&path));
+            out.extend(collect_bt_files(&path)?);
         } else if path.extension().is_some_and(|e| e == "bt") {
             out.push(path);
         }
     }
-    out
+    Ok(out)
+}
+
+/// Resolve `path` to a list of `.bt` source files, or return a `LintResult`
+/// containing a single error diagnostic explaining why no files could be found.
+fn resolve_source_files(path: &str) -> Result<Vec<Utf8PathBuf>, LintResult> {
+    let source_path = Utf8PathBuf::from(path);
+    if source_path.is_file() {
+        if source_path.extension() == Some("bt") {
+            return Ok(vec![source_path]);
+        }
+        return Err(lint_error(
+            path,
+            format!("'{path}' is not a .bt source file"),
+        ));
+    }
+    if source_path.is_dir() {
+        let files = collect_bt_files(source_path.as_std_path())
+            .map_err(|e| lint_error(path, format!("Failed to read directory '{path}': {e}")))?;
+        if files.is_empty() {
+            return Err(lint_error(
+                path,
+                format!("No .bt source files found in '{path}'"),
+            ));
+        }
+        return Ok(files
+            .into_iter()
+            .filter_map(|p| Utf8PathBuf::try_from(p).ok())
+            .collect());
+    }
+    Err(lint_error(path, format!("Path '{path}' does not exist")))
+}
+
+/// Build a `LintResult` containing a single file-level error diagnostic.
+fn lint_error(file: &str, message: String) -> LintResult {
+    let diag = LintDiagnostic {
+        file: file.to_string(),
+        line: None,
+        message,
+        severity: "error",
+    };
+    LintResult {
+        warnings: vec![],
+        errors: vec![diag],
+        total: 1,
+    }
 }
 
 /// Run lint passes on `path` (file or directory) and return structured results.
 fn run_lint_structured(path: &str) -> LintResult {
-    let source_path = Utf8PathBuf::from(path);
-
-    let source_files: Vec<Utf8PathBuf> = if source_path.is_file() {
-        if source_path.extension() == Some("bt") {
-            vec![source_path]
-        } else {
-            return LintResult {
-                warnings: vec![],
-                errors: vec![LintDiagnostic {
-                    file: path.to_string(),
-                    line: 0,
-                    message: format!("'{path}' is not a .bt source file"),
-                    severity: "error",
-                }],
-                total: 1,
-            };
-        }
-    } else if source_path.is_dir() {
-        // Check src/ subdirectory first, then directory itself.
-        let search = source_path.join("src");
-        let search = if search.exists() { search } else { source_path };
-        collect_bt_files(search.as_std_path())
-            .into_iter()
-            .filter_map(|p| Utf8PathBuf::try_from(p).ok())
-            .collect()
-    } else {
-        return LintResult {
-            warnings: vec![],
-            errors: vec![LintDiagnostic {
-                file: path.to_string(),
-                line: 0,
-                message: format!("Path '{path}' does not exist"),
-                severity: "error",
-            }],
-            total: 1,
-        };
+    let source_files = match resolve_source_files(path) {
+        Ok(files) => files,
+        Err(result) => return result,
     };
 
     let mut warnings = Vec::new();
@@ -740,7 +772,7 @@ fn run_lint_structured(path: &str) -> LintResult {
         let Ok(source) = std::fs::read_to_string(file.as_std_path()) else {
             errors.push(LintDiagnostic {
                 file: file.to_string(),
-                line: 0,
+                line: None,
                 message: format!("Failed to read '{file}'"),
                 severity: "error",
             });
@@ -750,11 +782,18 @@ fn run_lint_structured(path: &str) -> LintResult {
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
 
-        // Include parse errors (syntax problems) so files with broken syntax
-        // don't silently appear clean, plus Lint-severity style diagnostics.
+        // Include parse errors (syntax problems) and warnings so files with
+        // broken syntax or parser-emitted warnings don't silently appear clean.
+        // Hint-severity diagnostics (DNU hints) are excluded as they are
+        // informational and belong to the check/compile workflow.
         let mut lint_diags: Vec<_> = parse_diags
             .into_iter()
-            .filter(|d| matches!(d.severity, Severity::Error | Severity::Lint))
+            .filter(|d| {
+                matches!(
+                    d.severity,
+                    Severity::Error | Severity::Warning | Severity::Lint
+                )
+            })
             .collect();
         lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
 
@@ -766,7 +805,7 @@ fn run_lint_structured(path: &str) -> LintResult {
             };
             let entry = LintDiagnostic {
                 file: file.to_string(),
-                line,
+                line: Some(line),
                 message: diag.message.to_string(),
                 severity,
             };
@@ -857,7 +896,16 @@ mod tests {
 
     #[test]
     fn run_lint_structured_non_bt_file() {
-        let result = run_lint_structured("/etc/hostname");
+        // Use a temp file so the test is portable across platforms.
+        let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir should be UTF-8")
+            .join(format!(
+                "beamtalk-mcp-lint-non-bt-{}.txt",
+                std::process::id()
+            ));
+        std::fs::write(path.as_std_path(), "not beamtalk").unwrap();
+        let result = run_lint_structured(path.as_str());
+        let _ = std::fs::remove_file(path.as_std_path());
         assert_eq!(result.total, 1);
         assert!(result.errors.len() == 1);
         assert!(result.errors[0].message.contains(".bt source file"));
