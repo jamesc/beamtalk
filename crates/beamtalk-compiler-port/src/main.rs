@@ -477,13 +477,13 @@ fn error_response(diagnostics: &[String]) -> Term {
 /// risk from non-char-boundary offsets.
 fn byte_offset_to_line(source: &str, offset: u32) -> u32 {
     let offset_clamped = (offset as usize).min(source.len());
-    let newlines = source.as_bytes()[..offset_clamped]
-        .iter()
-        .filter(|&&b| b == b'\n')
-        .count();
-    u32::try_from(newlines)
-        .unwrap_or(u32::MAX)
-        .saturating_add(1)
+    let mut newlines: u32 = 0;
+    for &b in &source.as_bytes()[..offset_clamped] {
+        if b == b'\n' {
+            newlines = newlines.saturating_add(1);
+        }
+    }
+    newlines.saturating_add(1)
 }
 
 /// Build a response map for compile-time diagnostic errors.
