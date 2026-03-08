@@ -41,7 +41,7 @@ Object subclass: Queue
   /// ```
   enqueue: elem -> Queue => (Erlang beamtalk_queue) enqueue: self elem: elem
 
-  /// Remove and return the front element as a `#(value, newQueue)` tuple.
+  /// Remove and return the front element as a `{value, newQueue}` Tuple.
   ///
   /// O(1) amortised. Raises `empty_queue` if the queue is empty.
   ///
@@ -51,7 +51,7 @@ Object subclass: Queue
   /// value := result at: 1
   /// rest := result at: 2
   /// ```
-  dequeue => (Erlang beamtalk_queue) dequeue: self
+  dequeue -> Tuple => (Erlang beamtalk_queue) dequeue: self
 
   /// Return the front element without removing it.
   ///
