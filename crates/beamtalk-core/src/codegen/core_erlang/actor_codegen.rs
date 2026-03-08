@@ -33,6 +33,16 @@ impl CoreErlangGenerator {
     /// - This enables reflection (`obj class`) and proper object semantics
     #[allow(clippy::too_many_lines)]
     pub(super) fn generate_actor_module(&mut self, module: &Module) -> Result<Document<'static>> {
+        // BT-1220: Concrete Supervisor/DynamicSupervisor subclasses generate OTP supervisor
+        // behaviour, not gen_server. Abstract base classes compile as value types.
+        if module
+            .classes
+            .first()
+            .is_some_and(|c| c.supervisor_kind.is_some() && !c.is_abstract)
+        {
+            return self.generate_supervisor_module(module);
+        }
+
         // BT-213: Set context to Actor for this module
         self.context = CodeGenContext::Actor;
         self.setup_class_identity(module);

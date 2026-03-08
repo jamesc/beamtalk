@@ -68,3 +68,4 @@ mod dispatch;
 mod expressions;
 mod gen_server;
 mod primitives;
+mod supervisor;
