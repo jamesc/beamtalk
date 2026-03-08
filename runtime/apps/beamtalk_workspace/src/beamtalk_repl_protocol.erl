@@ -23,7 +23,7 @@
     decode/1,
     parse_request/1,
     encode_result/3, encode_result/4, encode_result/5,
-    encode_error/3, encode_error/4, encode_error/5,
+    encode_error/3, encode_error/4, encode_error/5, encode_error/6,
     encode_status/3,
     encode_out/3,
     encode_need_input/2,
@@ -261,14 +261,24 @@ encode_error(Reason, Msg, FormatError, Output) ->
 -spec encode_error(term(), protocol_msg(), fun((term()) -> binary()), binary(), [binary()]) ->
     binary().
 encode_error(Reason, Msg, FormatError, Output, Warnings) ->
+    encode_error(Reason, Msg, FormatError, Output, Warnings, #{}).
+
+%% @doc Encode an error response with captured stdout, warnings, and extra metadata fields.
+%% BT-1235: Metadata may include `<<"line">>' and `<<"hint">>' for compile errors.
+-spec encode_error(
+    term(), protocol_msg(), fun((term()) -> binary()), binary(), [binary()], map()
+) -> binary().
+encode_error(Reason, Msg, FormatError, Output, Warnings, Metadata) ->
     Message = FormatError(Reason),
     case Msg#protocol_msg.legacy of
         true ->
+            %% Legacy protocol does not support extra metadata (line/hint)
             Base = #{<<"type">> => <<"error">>, <<"message">> => Message},
             jsx:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings));
         false ->
             Base = base_response(Msg),
-            Full = Base#{<<"error">> => Message, <<"status">> => [<<"done">>, <<"error">>]},
+            Full0 = Base#{<<"error">> => Message, <<"status">> => [<<"done">>, <<"error">>]},
+            Full = maps:merge(Full0, Metadata),
             jsx:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
     end.
 

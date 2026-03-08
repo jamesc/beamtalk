@@ -53,12 +53,26 @@ ensure_structured_error({eval_error, _Class, #beamtalk_error{} = Err}) ->
 ensure_structured_error({eval_error, _Class, Reason}) ->
     %% Delegate to /1 for known tuple patterns; fall back to generic wrapper.
     ensure_structured_error(Reason);
+ensure_structured_error({compile_error, [#{message := Msg} = Diag | _]}) ->
+    %% BT-1235: structured diagnostic list — extract message and hint from first diagnostic
+    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
+    Err1 = beamtalk_error:with_message(Err0, Msg),
+    case maps:find(hint, Diag) of
+        {ok, Hint} when is_binary(Hint) -> beamtalk_error:with_hint(Err1, Hint);
+        _ -> Err1
+    end;
 ensure_structured_error({compile_error, Msg}) when is_binary(Msg) ->
     Err0 = beamtalk_error:new(compile_error, 'Compiler'),
     beamtalk_error:with_message(Err0, Msg);
 ensure_structured_error({compile_error, Msg}) when is_list(Msg) ->
     Err0 = beamtalk_error:new(compile_error, 'Compiler'),
-    beamtalk_error:with_message(Err0, list_to_binary(Msg));
+    MsgBin =
+        try
+            list_to_binary(Msg)
+        catch
+            error:badarg -> iolist_to_binary(io_lib:format("~p", [Msg]))
+        end,
+    beamtalk_error:with_message(Err0, MsgBin);
 ensure_structured_error({compile_error, Reason}) ->
     Err0 = beamtalk_error:new(compile_error, 'Compiler'),
     beamtalk_error:with_message(

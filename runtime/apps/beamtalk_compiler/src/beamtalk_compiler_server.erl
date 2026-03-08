@@ -65,12 +65,13 @@ start_link(Args) ->
 %% Returns `{ok, CoreErlang, Warnings}' for expressions,
 %% `{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
 %% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
-%% or `{error, Diagnostics}' on failure.
+%% or `{error, Diagnostics}' on failure, where each diagnostic is a map with
+%% `message', `line' (1-based), and optionally `hint'.
 -spec compile_expression(binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
-    | {error, [binary()]}.
+    | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
     compile_expression(Source, ModuleName, KnownVars, #{}).
 
@@ -82,7 +83,7 @@ compile_expression(Source, ModuleName, KnownVars) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
-    | {error, [binary()]}.
+    | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars, Options) ->
     gen_server:call(
         ?MODULE, {compile_expression, Source, ModuleName, KnownVars, Options}, 30000
@@ -92,7 +93,7 @@ compile_expression(Source, ModuleName, KnownVars, Options) ->
 %% Options: #{path => binary(), stdlib_mode => boolean(), workspace_mode => boolean()}
 %% Returns `{ok, #{core_erlang, module_name, classes, warnings}}' or `{error, Diagnostics}'.
 -spec compile(binary(), map()) ->
-    {ok, map()} | {error, [binary()]}.
+    {ok, map()} | {error, [map()]}.
 compile(Source, Options) ->
     gen_server:call(?MODULE, {compile, Source, Options}, 30000).
 
@@ -383,13 +384,13 @@ do_compile(Port, Source, Options) ->
             handle_compile_response(Response);
         {exit_status, Status} ->
             ?LOG_ERROR("Compiler port exited during compile", #{status => Status}),
-            {error, [<<"Compiler port exited unexpectedly">>]};
+            {error, [#{message => <<"Compiler port exited unexpectedly">>}]};
         timeout ->
-            {error, [<<"Compiler port timed out">>]};
+            {error, [#{message => <<"Compiler port timed out">>}]};
         port_not_available ->
-            {error, [<<"Compiler port is not available">>]};
+            {error, [#{message => <<"Compiler port is not available">>}]};
         decode_error ->
-            {error, [<<"Compiler port response is malformed">>]}
+            {error, [#{message => <<"Compiler port response is malformed">>}]}
     end.
 
 %% Send a diagnostics request via the port.
@@ -400,13 +401,13 @@ do_diagnostics(Port, Source) ->
             handle_diagnostics_response(Response);
         {exit_status, Status} ->
             ?LOG_ERROR("Compiler port exited during diagnostics", #{status => Status}),
-            {error, [<<"Compiler port exited unexpectedly">>]};
+            {error, [#{message => <<"Compiler port exited unexpectedly">>}]};
         timeout ->
-            {error, [<<"Compiler port timed out">>]};
+            {error, [#{message => <<"Compiler port timed out">>}]};
         port_not_available ->
-            {error, [<<"Compiler port is not available">>]};
+            {error, [#{message => <<"Compiler port is not available">>}]};
         decode_error ->
-            {error, [<<"Compiler port response is malformed">>]}
+            {error, [#{message => <<"Compiler port response is malformed">>}]}
     end.
 
 %% Send a version request via the port.
@@ -443,7 +444,7 @@ handle_compile_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};
 handle_compile_response(Other) ->
     ?LOG_ERROR("Unexpected compile response", #{response => Other}),
-    {error, [<<"Unexpected compiler response">>]}.
+    {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 %% Handle response from diagnostics command.
 handle_diagnostics_response(#{status := ok, diagnostics := Diagnostics}) ->
@@ -452,7 +453,7 @@ handle_diagnostics_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};
 handle_diagnostics_response(Other) ->
     ?LOG_ERROR("Unexpected diagnostics response", #{response => Other}),
-    {error, [<<"Unexpected compiler response">>]}.
+    {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 %% Handle response from version command.
 handle_version_response(#{status := ok, version := Version}) ->

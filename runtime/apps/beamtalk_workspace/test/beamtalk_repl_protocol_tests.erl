@@ -440,6 +440,41 @@ encode_error_with_empty_warnings_omitted_test() ->
     Decoded = jsx:decode(Result, [return_maps]),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
 
+%%% encode_error/6 — with metadata (BT-1235)
+
+encode_error_with_metadata_new_format_test() ->
+    %% BT-1235: metadata (line/hint) merged into JSON response
+    Msg = make_msg(<<"eval">>, <<"msg-m1">>, <<"s1">>, false),
+    Metadata = #{<<"line">> => 3, <<"hint">> => <<"prefix with _">>},
+    Result = beamtalk_repl_protocol:encode_error(
+        err, Msg, fun format_err/1, <<>>, [], Metadata
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(3, maps:get(<<"line">>, Decoded)),
+    ?assertEqual(<<"prefix with _">>, maps:get(<<"hint">>, Decoded)),
+    ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
+
+encode_error_with_empty_metadata_test() ->
+    %% Empty metadata adds no extra fields
+    Msg = make_msg(<<"eval">>, <<"msg-m2">>, undefined, false),
+    Result = beamtalk_repl_protocol:encode_error(
+        err, Msg, fun format_err/1, <<>>, [], #{}
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(error, maps:find(<<"line">>, Decoded)),
+    ?assertEqual(error, maps:find(<<"hint">>, Decoded)).
+
+encode_error_with_metadata_legacy_drops_metadata_test() ->
+    %% BT-1235: legacy protocol intentionally drops metadata
+    Msg = make_msg(<<"eval">>, undefined, undefined, true),
+    Metadata = #{<<"line">> => 5},
+    Result = beamtalk_repl_protocol:encode_error(
+        err, Msg, fun format_err/1, <<>>, [], Metadata
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(error, maps:find(<<"line">>, Decoded)),
+    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)).
+
 %%% encode_inspect/2 (binary version)
 
 encode_inspect_binary_new_format_test() ->

@@ -180,8 +180,16 @@ impl BeamtalkMcp {
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
         if response.is_error() {
+            use std::fmt::Write as _;
             let msg = response.error_message().unwrap_or("Unknown error");
-            return Ok(error_result(format!("ERROR: {msg}")));
+            let mut error_text = format!("ERROR: {msg}");
+            if let Some(line) = response.line {
+                let _ = write!(error_text, "\nLine: {line}");
+            }
+            if let Some(ref hint) = response.hint {
+                let _ = write!(error_text, "\nHint: {hint}");
+            }
+            return Ok(error_result(error_text));
         }
 
         let mut parts = Vec::new();
