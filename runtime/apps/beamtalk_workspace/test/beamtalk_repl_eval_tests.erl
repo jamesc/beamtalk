@@ -110,12 +110,26 @@ handle_load_directory_test() ->
 
 %%% Additional do_eval tests
 
-do_eval_load_binary_error_test() ->
-    %% Test case where compilation fails without compiler server
+do_eval_compile_error_no_server_test() ->
+    %% Compilation fails without compiler server - load_binary is never reached
     State = beamtalk_repl_state:new(undefined, 0),
     {error, #beamtalk_error{}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
     %% Counter should still increment even on error
     ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)).
+
+wrap_load_err_returns_structured_error_test() ->
+    %% wrap_load_err/2 normalises a raw load reason to a structured #beamtalk_error{}.
+    %% load_error maps to kind=io_error via ensure_structured_error.
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:wrap_load_err(bad_module, State),
+    ?assertMatch({error, #beamtalk_error{kind = io_error}, <<>>, [], _}, Result).
+
+wrap_load_err_message_contains_reason_test() ->
+    %% The error message should describe the load failure reason.
+    State = beamtalk_repl_state:new(undefined, 0),
+    {error, #beamtalk_error{message = Msg}, <<>>, [], _} =
+        beamtalk_repl_eval:wrap_load_err(bad_module, State),
+    ?assert(binary:match(Msg, <<"bad_module">>) =/= nomatch).
 
 do_eval_preserves_bindings_on_error_test() ->
     %% Verify that existing bindings are preserved when eval fails

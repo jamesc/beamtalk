@@ -29,7 +29,8 @@
     strip_internal_bindings/1,
     inject_output/3,
     handle_class_definition/7,
-    handle_method_definition/4
+    handle_method_definition/4,
+    wrap_load_err/2
 ]).
 -endif.
 
@@ -269,7 +270,7 @@ handle_class_definition(
                         NewState2
                     );
                 {error, LoadReason} ->
-                    {error, {load_error, LoadReason}, <<>>, Warnings, NewState2}
+                    wrap_load_err(LoadReason, NewState2)
             end;
         {error, Reason, NewState2} ->
             {error, Reason, <<>>, Warnings, NewState2}
