@@ -389,7 +389,23 @@ This is correct: the expression evaluated successfully and returned a Result val
 
 **Future consideration:** The REPL could render `Result error:` values with different formatting (e.g., yellow text vs green) to visually signal that the result represents a failure. This is a UX enhancement, not a semantic change.
 
-### 9. Forward Compatibility: Parameterized Result Types
+### 9. Forward Compatibility: Match Expression Integration
+
+If `match:` gains class/structural patterns (planned separately), Result becomes directly destructurable:
+
+```beamtalk
+// Future: class pattern arms in match:
+(File readAll: path) match: [
+  Result ok: content -> process: content;
+  Result error: e    -> handleError: e
+]
+```
+
+This is an alternative to `ifOk:ifError:` for **exhaustive case analysis** — the match enforces that both arms are present and the compiler can warn on missing cases. `ifOk:ifError:` remains the idiomatic API for **chaining** (`andThen:`, `map:`), where the Result stays wrapped and propagates through a pipeline.
+
+The two are complementary: `ifOk:ifError:` for pipelines, `match:` for terminal case dispatch. No changes to ADR 0060's design are needed to support this — Result's tagged map representation (`isOk`, `okValue`, `errReason`) is straightforwardly matchable by a structural pattern system.
+
+### 10. Forward Compatibility: Parameterized Result Types
 
 The current design uses `-> Result` as the return type annotation, which doesn't express what types the ok value and error carry. When gradual typing (ADR 0025) matures, Result should support parameterized type annotations:
 
