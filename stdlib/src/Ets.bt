@@ -115,10 +115,11 @@ Object subclass: Ets
   ///
   /// Order is unspecified for `#set` and `#bag` tables.
   /// Keys are sorted for `#orderedSet` tables.
+  /// For `#bag` and `#duplicateBag` tables, each key appears only once.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// cache keys    // => ["key1", "key2"]
+  /// cache keys    // => #("key1", "key2")
   /// ```
   keys -> List => (Erlang beamtalk_ets) keys: self
 
@@ -132,6 +133,7 @@ Object subclass: Ets
 
   /// Destroy the table, freeing all memory. Returns `nil`.
   ///
+  /// Only the process that created the table (the owner) may call `delete`.
   /// After calling `delete`, this `Ets` instance is no longer valid.
   /// Any further operations on the deleted table will raise an error.
   ///

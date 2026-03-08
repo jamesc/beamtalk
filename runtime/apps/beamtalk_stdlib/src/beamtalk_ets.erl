@@ -137,10 +137,13 @@
 %%% ============================================================================
 
 %% @doc Look up a key. Returns the value, or nil if the key is absent.
+%%
+%% For bag/duplicate_bag tables with multiple values for a key, returns
+%% the first stored value. Use `keys` and iterate for full multi-value access.
 -spec lookup(map(), term()) -> term().
 lookup(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
     case ets:lookup(TableName, Key) of
-        [{_K, Value}] -> Value;
+        [{_K, Value} | _] -> Value;
         [] -> nil
     end;
 lookup(_Self, _Key) ->
@@ -150,8 +153,17 @@ lookup(_Self, _Key) ->
     beamtalk_error:raise(Error2).
 
 %% @doc Insert or update a key-value pair. Returns nil.
+%%
+%% For bag/duplicate_bag tables, deletes all existing entries for Key before
+%% inserting, giving consistent "last write wins" / upsert semantics.
 -spec insert(map(), term(), term()) -> nil.
 insert(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Value) ->
+    case ets:info(TableName, type) of
+        T when T =:= bag; T =:= duplicate_bag ->
+            ets:delete(TableName, Key);
+        _ ->
+            ok
+    end,
     ets:insert(TableName, {Key, Value}),
     nil;
 insert(_Self, _Key, _Value) ->
@@ -166,7 +178,7 @@ lookupIfAbsent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) wh
     is_function(Block, 0)
 ->
     case ets:lookup(TableName, Key) of
-        [{_K, Value}] -> Value;
+        [{_K, Value} | _] -> Value;
         [] -> Block()
     end;
 lookupIfAbsent(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
@@ -201,10 +213,13 @@ removeKey(_Self, _Key) ->
     Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
     beamtalk_error:raise(Error2).
 
-%% @doc Return all keys in the table as a List.
+%% @doc Return all unique keys in the table as a List.
+%%
+%% For bag/duplicate_bag tables, duplicate keys are collapsed so each key
+%% appears only once. Order is unspecified for set/bag tables; sorted for orderedSet.
 -spec keys(map()) -> list().
 keys(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
-    ets:select(TableName, [{{'$1', '_'}, [], ['$1']}]);
+    lists:usort(ets:select(TableName, [{{'$1', '_'}, [], ['$1']}]));
 keys(_Self) ->
     Error0 = beamtalk_error:new(type_error, 'Ets'),
     Error1 = beamtalk_error:with_selector(Error0, 'keys'),

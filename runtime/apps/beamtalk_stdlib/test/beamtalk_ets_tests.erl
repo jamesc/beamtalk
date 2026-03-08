@@ -336,3 +336,58 @@ ffi_named_shim_not_found_test() ->
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = not_found}},
         beamtalk_ets:named(bt_ets_test_no_such_xyz_ffi)
     ).
+
+%%% ============================================================================
+%%% Bag / duplicate_bag table semantics
+%%% ============================================================================
+
+bag_insert_upsert_test() ->
+    %% insert on a bag table replaces existing values for the key (delete-then-insert)
+    catch ets:delete(bt_ets_test_bag_upsert),
+    Table = beamtalk_ets:'new:type:'(bt_ets_test_bag_upsert, bag),
+    try
+        beamtalk_ets:insert(Table, <<"key">>, <<"first">>),
+        beamtalk_ets:insert(Table, <<"key">>, <<"second">>),
+        %% After upsert only one entry should exist
+        ?assertEqual([{<<"key">>, <<"second">>}], ets:lookup(bt_ets_test_bag_upsert, <<"key">>)),
+        ?assertEqual(1, beamtalk_ets:tableSize(Table))
+    after
+        catch ets:delete(bt_ets_test_bag_upsert)
+    end.
+
+bag_lookup_returns_value_test() ->
+    %% lookup/2 returns the stored value for a bag table
+    catch ets:delete(bt_ets_test_bag_lookup),
+    Table = beamtalk_ets:'new:type:'(bt_ets_test_bag_lookup, bag),
+    try
+        beamtalk_ets:insert(Table, <<"key">>, <<"value">>),
+        ?assertEqual(<<"value">>, beamtalk_ets:lookup(Table, <<"key">>))
+    after
+        catch ets:delete(bt_ets_test_bag_lookup)
+    end.
+
+bag_keys_unique_test() ->
+    %% keys/1 returns each key only once even for bag tables
+    catch ets:delete(bt_ets_test_bag_keys),
+    Table = beamtalk_ets:'new:type:'(bt_ets_test_bag_keys, bag),
+    try
+        beamtalk_ets:insert(Table, <<"k1">>, <<"a">>),
+        beamtalk_ets:insert(Table, <<"k2">>, <<"b">>),
+        Keys = beamtalk_ets:keys(Table),
+        ?assertEqual([<<"k1">>, <<"k2">>], lists:sort(Keys))
+    after
+        catch ets:delete(bt_ets_test_bag_keys)
+    end.
+
+duplicate_bag_insert_upsert_test() ->
+    %% insert on a duplicate_bag table also replaces existing values (delete-then-insert)
+    catch ets:delete(bt_ets_test_dupbag_upsert),
+    Table = beamtalk_ets:'new:type:'(bt_ets_test_dupbag_upsert, duplicateBag),
+    try
+        beamtalk_ets:insert(Table, <<"key">>, <<"first">>),
+        beamtalk_ets:insert(Table, <<"key">>, <<"second">>),
+        ?assertEqual([{<<"key">>, <<"second">>}], ets:lookup(bt_ets_test_dupbag_upsert, <<"key">>)),
+        ?assertEqual(1, beamtalk_ets:tableSize(Table))
+    after
+        catch ets:delete(bt_ets_test_dupbag_upsert)
+    end.

@@ -92,3 +92,12 @@ TestCase subclass: EtsTest
 
   testNewAlreadyExistsRaisesError =>
     self should: [Ets new: #etsTest type: #set] raise: #already_exists
+
+  testBagUpsertSemantics =>
+    // insert on a bag table replaces the existing entry (delete-then-insert upsert)
+    bag := Ets new: #etsTestBag type: #bag
+    bag at: "key" put: "first"
+    bag at: "key" put: "second"
+    self assert: (bag at: "key") equals: "second"
+    self assert: bag size equals: 1
+    bag delete
