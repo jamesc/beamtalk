@@ -10,7 +10,7 @@
 //! with the provided bindings map.
 
 use super::document::Document;
-use super::{CodeGenContext, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::Expression;
 use crate::docvec;
 
@@ -101,6 +101,17 @@ impl CoreErlangGenerator {
 
     /// Common eval module body shared by REPL and test codegen.
     fn generate_eval_module_body(&mut self, expression: &Expression) -> Result<Document<'static>> {
+        // Destructuring assignments are not yet supported in the REPL.
+        // They work in compiled class methods and blocks, but the REPL's
+        // state-map threading model requires dedicated codegen.
+        if matches!(expression, Expression::DestructureAssignment { .. }) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "Destructuring assignment in REPL (use in class methods instead)"
+                    .to_string(),
+                location: format!("{:?}", expression.span()),
+            });
+        }
+
         // Register Bindings in scope for variable lookups
         self.push_scope();
         self.bind_var("__bindings__", "Bindings");
@@ -230,6 +241,15 @@ impl CoreErlangGenerator {
         expr: &Expression,
         result_var: &str,
     ) -> Result<Document<'static>> {
+        // Destructuring assignments not yet supported in REPL multi-expression mode
+        if matches!(expr, Expression::DestructureAssignment { .. }) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "Destructuring assignment in REPL (use in class methods instead)"
+                    .to_string(),
+                location: format!("{:?}", expr.span()),
+            });
+        }
+
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
                 let var_name = id.name.clone();

@@ -451,6 +451,11 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
+                }
             } else if self.is_tier2_value_call(expr) {
                 // BT-853: Tier 2 value: call in non-last position.
                 // Returns {Result, NewState} — discard Result, thread NewState.
@@ -781,6 +786,11 @@ impl CoreErlangGenerator {
                             docs.push(doc);
                         }
                     }
+                }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
                 }
             } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
                 // Control flow with local variable threading - need to rebind threaded vars after loop
@@ -1677,6 +1687,11 @@ impl CoreErlangGenerator {
                             ]);
                         }
                     }
+                }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
                 }
             } else {
                 let tmp_var = self.fresh_temp_var("seq");

@@ -207,6 +207,7 @@ impl CoreErlangGenerator {
         false
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_list_do_body_with_threading(
         &mut self,
         body: &Block,
@@ -288,6 +289,11 @@ impl CoreErlangGenerator {
                     if is_last {
                         docs.push(Document::String(format!(" {}", self.current_state_var())));
                     }
+                }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
                 }
             } else if self.control_flow_has_mutations(expr)
                 || Self::inline_conditional_writes_threaded(expr, &threaded)
@@ -477,6 +483,7 @@ impl CoreErlangGenerator {
 
     /// BT-904: Generate body expressions for stateful `collect:`, threading state
     /// through self-sends and field assignments. Returns `{[Result | AccList], NewState}`.
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_list_collect_body_with_threading(
         &mut self,
         body: &Block,
@@ -563,6 +570,11 @@ impl CoreErlangGenerator {
                             " {{[_Val | AccList], {final_state}}}"
                         )));
                     }
+                }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
                 }
             } else {
                 // Non-assignment expression
@@ -855,6 +867,11 @@ impl CoreErlangGenerator {
                     if is_last {
                         docs.push(Document::String(format!(" let {pred_var} = _Val in ")));
                     }
+                }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
                 }
             } else {
                 if i > 0 && !is_last {
@@ -1265,6 +1282,11 @@ impl CoreErlangGenerator {
                         let final_state = self.current_state_var();
                         docs.push(Document::String(format!(" {{_Val, {final_state}}}")));
                     }
+                }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
                 }
             } else {
                 // Non-assignment expression

@@ -170,7 +170,7 @@ fn check_expr(expr: &Expression, scope: &mut LintScope, diagnostics: &mut Vec<Di
             check_expr(receiver, scope, diagnostics);
         }
 
-        Return { value, .. } => {
+        Return { value, .. } | DestructureAssignment { value, .. } => {
             check_expr(value, scope, diagnostics);
         }
 

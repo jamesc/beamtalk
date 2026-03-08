@@ -60,58 +60,14 @@ Module {
                     },
                 ),
                 value: Error {
-                    message: "Unexpected token: expected expression, found {",
+                    message: "Tuple literal used as expression",
                     span: Span {
                         start: 131,
-                        end: 132,
+                        end: 139,
                     },
                 },
                 span: Span {
                     start: 122,
-                    end: 132,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Literal(
-                Integer(
-                    10,
-                ),
-                Span {
-                    start: 132,
-                    end: 134,
-                },
-            ),
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Error {
-                message: "Unexpected token: expected expression, found ,",
-                span: Span {
-                    start: 134,
-                    end: 135,
-                },
-            },
-            preceding_blank_line: false,
-        },
-        ExpressionStatement {
-            comments: CommentAttachment {
-                leading: [],
-                trailing: None,
-            },
-            expression: Error {
-                message: "Unexpected token: expected expression, found }",
-                span: Span {
-                    start: 138,
                     end: 139,
                 },
             },
@@ -122,10 +78,25 @@ Module {
                 leading: [],
                 trailing: None,
             },
-            expression: Error {
-                message: "Unexpected token: expected expression, found }",
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "rgb",
+                        span: Span {
+                            start: 140,
+                            end: 143,
+                        },
+                    },
+                ),
+                value: Error {
+                    message: "Tuple literal used as expression",
+                    span: Span {
+                        start: 147,
+                        end: 160,
+                    },
+                },
                 span: Span {
-                    start: 159,
+                    start: 140,
                     end: 160,
                 },
             },
@@ -136,10 +107,25 @@ Module {
                 leading: [],
                 trailing: None,
             },
-            expression: Error {
-                message: "Unexpected token: expected expression, found }",
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "empty",
+                        span: Span {
+                            start: 161,
+                            end: 166,
+                        },
+                    },
+                ),
+                value: Error {
+                    message: "Tuple literal used as expression",
+                    span: Span {
+                        start: 170,
+                        end: 172,
+                    },
+                },
                 span: Span {
-                    start: 171,
+                    start: 161,
                     end: 172,
                 },
             },
@@ -147,108 +133,962 @@ Module {
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "Index access (1-based)",
+                        span: Span {
+                            start: 200,
+                            end: 201,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
                 trailing: None,
             },
-            expression: Error {
-                message: "Unexpected token: expected expression, found ]",
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "x",
+                        span: Span {
+                            start: 200,
+                            end: 201,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "point",
+                            span: Span {
+                                start: 205,
+                                end: 210,
+                            },
+                        },
+                    ),
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "at:",
+                                span: Span {
+                                    start: 211,
+                                    end: 214,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                1,
+                            ),
+                            Span {
+                                start: 215,
+                                end: 216,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 205,
+                        end: 216,
+                    },
+                },
                 span: Span {
-                    start: 423,
-                    end: 424,
+                    start: 200,
+                    end: 216,
                 },
             },
-            preceding_blank_line: false,
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
             },
-            expression: Error {
-                message: "Unexpected token: expected expression, found ]",
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "y",
+                        span: Span {
+                            start: 217,
+                            end: 218,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "point",
+                            span: Span {
+                                start: 222,
+                                end: 227,
+                            },
+                        },
+                    ),
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "at:",
+                                span: Span {
+                                    start: 228,
+                                    end: 231,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                2,
+                            ),
+                            Span {
+                                start: 232,
+                                end: 233,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 222,
+                        end: 233,
+                    },
+                },
                 span: Span {
-                    start: 479,
-                    end: 480,
+                    start: 217,
+                    end: 233,
                 },
             },
             preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "First and last",
+                        span: Span {
+                            start: 253,
+                            end: 258,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "first",
+                        span: Span {
+                            start: 253,
+                            end: 258,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "rgb",
+                            span: Span {
+                                start: 262,
+                                end: 265,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "first",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 262,
+                        end: 271,
+                    },
+                },
+                span: Span {
+                    start: 253,
+                    end: 271,
+                },
+            },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
             },
-            expression: Error {
-                message: "Unexpected token: expected expression, found ]",
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "last",
+                        span: Span {
+                            start: 272,
+                            end: 276,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "rgb",
+                            span: Span {
+                                start: 280,
+                                end: 283,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "last",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 280,
+                        end: 288,
+                    },
+                },
                 span: Span {
-                    start: 529,
-                    end: 530,
+                    start: 272,
+                    end: 288,
                 },
             },
             preceding_blank_line: false,
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "Size",
+                        span: Span {
+                            start: 298,
+                            end: 302,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
                 trailing: None,
             },
-            expression: Error {
-                message: "Unexpected token: expected expression, found ]",
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "size",
+                        span: Span {
+                            start: 298,
+                            end: 302,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "rgb",
+                            span: Span {
+                                start: 306,
+                                end: 309,
+                            },
+                        },
+                    ),
+                    selector: Unary(
+                        "size",
+                    ),
+                    arguments: [],
+                    is_cast: false,
+                    span: Span {
+                        start: 306,
+                        end: 314,
+                    },
+                },
                 span: Span {
-                    start: 590,
-                    end: 591,
+                    start: 298,
+                    end: 314,
                 },
             },
-            preceding_blank_line: false,
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "Update (returns new array)",
+                        span: Span {
+                            start: 346,
+                            end: 351,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "moved",
+                        span: Span {
+                            start: 346,
+                            end: 351,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "point",
+                            span: Span {
+                                start: 355,
+                                end: 360,
+                            },
+                        },
+                    ),
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "at:",
+                                span: Span {
+                                    start: 361,
+                                    end: 364,
+                                },
+                            },
+                            KeywordPart {
+                                keyword: "put:",
+                                span: Span {
+                                    start: 367,
+                                    end: 371,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                1,
+                            ),
+                            Span {
+                                start: 365,
+                                end: 366,
+                            },
+                        ),
+                        Literal(
+                            Integer(
+                                15,
+                            ),
+                            Span {
+                                start: 372,
+                                end: 374,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 355,
+                        end: 374,
+                    },
+                },
+                span: Span {
+                    start: 346,
+                    end: 374,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Iteration",
+                        span: Span {
+                            start: 389,
+                            end: 392,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
                 trailing: None,
             },
             expression: MessageSend {
-                receiver: Error {
-                    message: "Unexpected token: expected expression, found }",
-                    span: Span {
-                        start: 675,
-                        end: 676,
-                    },
-                },
-                selector: Binary(
-                    "++",
-                ),
-                arguments: [
-                    Error {
-                        message: "Unexpected token: expected expression, found {",
+                receiver: Identifier(
+                    Identifier {
+                        name: "rgb",
                         span: Span {
-                            start: 680,
-                            end: 681,
+                            start: 389,
+                            end: 392,
                         },
                     },
+                ),
+                selector: Keyword(
+                    [
+                        KeywordPart {
+                            keyword: "each:",
+                            span: Span {
+                                start: 393,
+                                end: 398,
+                            },
+                        },
+                    ],
+                ),
+                arguments: [
+                    Block(
+                        Block {
+                            parameters: [
+                                BlockParameter {
+                                    name: "c",
+                                    span: Span {
+                                        start: 401,
+                                        end: 402,
+                                    },
+                                },
+                            ],
+                            body: [
+                                ExpressionStatement {
+                                    comments: CommentAttachment {
+                                        leading: [],
+                                        trailing: None,
+                                    },
+                                    expression: MessageSend {
+                                        receiver: ClassReference {
+                                            name: Identifier {
+                                                name: "Transcript",
+                                                span: Span {
+                                                    start: 405,
+                                                    end: 415,
+                                                },
+                                            },
+                                            span: Span {
+                                                start: 405,
+                                                end: 415,
+                                            },
+                                        },
+                                        selector: Keyword(
+                                            [
+                                                KeywordPart {
+                                                    keyword: "show:",
+                                                    span: Span {
+                                                        start: 416,
+                                                        end: 421,
+                                                    },
+                                                },
+                                            ],
+                                        ),
+                                        arguments: [
+                                            Identifier(
+                                                Identifier {
+                                                    name: "c",
+                                                    span: Span {
+                                                        start: 422,
+                                                        end: 423,
+                                                    },
+                                                },
+                                            ),
+                                        ],
+                                        is_cast: false,
+                                        span: Span {
+                                            start: 405,
+                                            end: 423,
+                                        },
+                                    },
+                                    preceding_blank_line: false,
+                                },
+                            ],
+                            span: Span {
+                                start: 399,
+                                end: 424,
+                            },
+                        },
+                    ),
                 ],
                 is_cast: false,
                 span: Span {
-                    start: 675,
-                    end: 681,
+                    start: 389,
+                    end: 424,
                 },
             },
-            preceding_blank_line: false,
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
-                leading: [],
+                leading: [
+                    Comment {
+                        content: "Transformation",
+                        span: Span {
+                            start: 444,
+                            end: 451,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
                 trailing: None,
             },
-            expression: Literal(
-                Integer(
-                    3,
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "doubled",
+                        span: Span {
+                            start: 444,
+                            end: 451,
+                        },
+                    },
                 ),
-                Span {
-                    start: 681,
-                    end: 682,
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "rgb",
+                            span: Span {
+                                start: 455,
+                                end: 458,
+                            },
+                        },
+                    ),
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "collect:",
+                                span: Span {
+                                    start: 459,
+                                    end: 467,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Block(
+                            Block {
+                                parameters: [
+                                    BlockParameter {
+                                        name: "c",
+                                        span: Span {
+                                            start: 470,
+                                            end: 471,
+                                        },
+                                    },
+                                ],
+                                body: [
+                                    ExpressionStatement {
+                                        comments: CommentAttachment {
+                                            leading: [],
+                                            trailing: None,
+                                        },
+                                        expression: MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "c",
+                                                    span: Span {
+                                                        start: 474,
+                                                        end: 475,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "*",
+                                            ),
+                                            arguments: [
+                                                Literal(
+                                                    Integer(
+                                                        2,
+                                                    ),
+                                                    Span {
+                                                        start: 478,
+                                                        end: 479,
+                                                    },
+                                                ),
+                                            ],
+                                            is_cast: false,
+                                            span: Span {
+                                                start: 474,
+                                                end: 479,
+                                            },
+                                        },
+                                        preceding_blank_line: false,
+                                    },
+                                ],
+                                span: Span {
+                                    start: 468,
+                                    end: 480,
+                                },
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 455,
+                        end: 480,
+                    },
                 },
-            ),
-            preceding_blank_line: false,
+                span: Span {
+                    start: 444,
+                    end: 480,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Filtering",
+                        span: Span {
+                            start: 495,
+                            end: 500,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "small",
+                        span: Span {
+                            start: 495,
+                            end: 500,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "rgb",
+                            span: Span {
+                                start: 504,
+                                end: 507,
+                            },
+                        },
+                    ),
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "select:",
+                                span: Span {
+                                    start: 508,
+                                    end: 515,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Block(
+                            Block {
+                                parameters: [
+                                    BlockParameter {
+                                        name: "c",
+                                        span: Span {
+                                            start: 518,
+                                            end: 519,
+                                        },
+                                    },
+                                ],
+                                body: [
+                                    ExpressionStatement {
+                                        comments: CommentAttachment {
+                                            leading: [],
+                                            trailing: None,
+                                        },
+                                        expression: MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "c",
+                                                    span: Span {
+                                                        start: 522,
+                                                        end: 523,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "<",
+                                            ),
+                                            arguments: [
+                                                Literal(
+                                                    Integer(
+                                                        200,
+                                                    ),
+                                                    Span {
+                                                        start: 526,
+                                                        end: 529,
+                                                    },
+                                                ),
+                                            ],
+                                            is_cast: false,
+                                            span: Span {
+                                                start: 522,
+                                                end: 529,
+                                            },
+                                        },
+                                        preceding_blank_line: false,
+                                    },
+                                ],
+                                span: Span {
+                                    start: 516,
+                                    end: 530,
+                                },
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 504,
+                        end: 530,
+                    },
+                },
+                span: Span {
+                    start: 495,
+                    end: 530,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Reduction",
+                        span: Span {
+                            start: 545,
+                            end: 548,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "sum",
+                        span: Span {
+                            start: 545,
+                            end: 548,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "rgb",
+                            span: Span {
+                                start: 552,
+                                end: 555,
+                            },
+                        },
+                    ),
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "inject:",
+                                span: Span {
+                                    start: 556,
+                                    end: 563,
+                                },
+                            },
+                            KeywordPart {
+                                keyword: "into:",
+                                span: Span {
+                                    start: 566,
+                                    end: 571,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 564,
+                                end: 565,
+                            },
+                        ),
+                        Block(
+                            Block {
+                                parameters: [
+                                    BlockParameter {
+                                        name: "acc",
+                                        span: Span {
+                                            start: 574,
+                                            end: 577,
+                                        },
+                                    },
+                                    BlockParameter {
+                                        name: "c",
+                                        span: Span {
+                                            start: 579,
+                                            end: 580,
+                                        },
+                                    },
+                                ],
+                                body: [
+                                    ExpressionStatement {
+                                        comments: CommentAttachment {
+                                            leading: [],
+                                            trailing: None,
+                                        },
+                                        expression: MessageSend {
+                                            receiver: Identifier(
+                                                Identifier {
+                                                    name: "acc",
+                                                    span: Span {
+                                                        start: 583,
+                                                        end: 586,
+                                                    },
+                                                },
+                                            ),
+                                            selector: Binary(
+                                                "+",
+                                            ),
+                                            arguments: [
+                                                Identifier(
+                                                    Identifier {
+                                                        name: "c",
+                                                        span: Span {
+                                                            start: 589,
+                                                            end: 590,
+                                                        },
+                                                    },
+                                                ),
+                                            ],
+                                            is_cast: false,
+                                            span: Span {
+                                                start: 583,
+                                                end: 590,
+                                            },
+                                        },
+                                        preceding_blank_line: false,
+                                    },
+                                ],
+                                span: Span {
+                                    start: 572,
+                                    end: 591,
+                                },
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 552,
+                        end: 591,
+                    },
+                },
+                span: Span {
+                    start: 545,
+                    end: 591,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Membership test",
+                        span: Span {
+                            start: 612,
+                            end: 618,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "hasRed",
+                        span: Span {
+                            start: 612,
+                            end: 618,
+                        },
+                    },
+                ),
+                value: MessageSend {
+                    receiver: Identifier(
+                        Identifier {
+                            name: "rgb",
+                            span: Span {
+                                start: 622,
+                                end: 625,
+                            },
+                        },
+                    ),
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "includes:",
+                                span: Span {
+                                    start: 626,
+                                    end: 635,
+                                },
+                            },
+                        ],
+                    ),
+                    arguments: [
+                        Literal(
+                            Integer(
+                                255,
+                            ),
+                            Span {
+                                start: 636,
+                                end: 639,
+                            },
+                        ),
+                    ],
+                    is_cast: false,
+                    span: Span {
+                        start: 622,
+                        end: 639,
+                    },
+                },
+                span: Span {
+                    start: 612,
+                    end: 639,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Concatenation",
+                        span: Span {
+                            start: 658,
+                            end: 666,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "combined",
+                        span: Span {
+                            start: 658,
+                            end: 666,
+                        },
+                    },
+                ),
+                value: Error {
+                    message: "Tuple literal used as expression",
+                    span: Span {
+                        start: 670,
+                        end: 676,
+                    },
+                },
+                span: Span {
+                    start: 658,
+                    end: 676,
+                },
+            },
+            preceding_blank_line: true,
         },
         ExpressionStatement {
             comments: CommentAttachment {
@@ -256,10 +1096,10 @@ Module {
                 trailing: None,
             },
             expression: Error {
-                message: "Unexpected token: expected expression, found ,",
+                message: "Unexpected token: expected expression, found ++",
                 span: Span {
-                    start: 682,
-                    end: 683,
+                    start: 677,
+                    end: 679,
                 },
             },
             preceding_blank_line: false,
@@ -288,16 +1128,9 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found {", span: Span { start: 131, end: 132 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 134, end: 135 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 138, end: 139 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 159, end: 160 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 171, end: 172 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 423, end: 424 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 479, end: 480 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 529, end: 530 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 590, end: 591 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 675, end: 676 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found {", span: Span { start: 680, end: 681 }, hint: None, category: None }
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 682, end: 683 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 131, end: 139 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 147, end: 160 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 170, end: 172 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring", span: Span { start: 670, end: 676 }, hint: None, category: None }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ++", span: Span { start: 677, end: 679 }, hint: None, category: None }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found }", span: Span { start: 685, end: 686 }, hint: None, category: None }

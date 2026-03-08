@@ -15,7 +15,7 @@
 //! **References:**
 //! - `docs/beamtalk-ddd-model.md` - Semantic Analysis Context
 
-use crate::ast::{Block, ClassDefinition, Expression, MatchArm, MethodDefinition, Module};
+use crate::ast::{Block, ClassDefinition, Expression, MatchArm, MethodDefinition, Module, Pattern};
 use crate::semantic_analysis::scope::{BindingKind, Scope};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -308,6 +308,37 @@ impl NameResolver {
                     }
                 }
             }
+
+            DestructureAssignment { pattern, value, .. } => {
+                self.resolve_expression(value);
+                // Define variables from the destructuring pattern
+                self.define_pattern_variables(pattern);
+            }
+        }
+    }
+
+    /// Defines variables from a destructuring pattern in the current scope.
+    fn define_pattern_variables(&mut self, pattern: &Pattern) {
+        match pattern {
+            Pattern::Variable(id) => {
+                if self.scope.lookup_immut(&id.name).is_none() {
+                    self.scope.define(&id.name, id.span, BindingKind::Local);
+                }
+            }
+            Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
+                for elem in elements {
+                    self.define_pattern_variables(elem);
+                }
+            }
+            Pattern::List { elements, tail, .. } => {
+                for elem in elements {
+                    self.define_pattern_variables(elem);
+                }
+                if let Some(t) = tail {
+                    self.define_pattern_variables(t);
+                }
+            }
+            Pattern::Binary { .. } | Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
         }
     }
 

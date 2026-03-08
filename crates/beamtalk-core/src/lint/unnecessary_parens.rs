@@ -141,7 +141,7 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
             check_expr(value, diagnostics);
         }
 
-        Expression::Return { value, .. } => {
+        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
             check_expr(value, diagnostics);
         }
 

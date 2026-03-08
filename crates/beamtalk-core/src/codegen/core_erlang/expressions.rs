@@ -910,6 +910,11 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
+                }
             } else {
                 // Non-assignment expression
                 if !is_last {
@@ -1178,26 +1183,6 @@ impl CoreErlangGenerator {
             return Ok(Document::Str("'nil'"));
         }
 
-        // Generate body expressions in sequence
-        // For state threading to work correctly, field assignments must leave
-        // their let bindings OPEN so that State{n} is visible to subsequent expressions.
-        //
-        // For a block like: [self.value := self.value + 1. ^self.value]
-        // We need:
-        //   let _Val1 = ... in let State1 = ... in <return expression>
-        // NOT:
-        //   let _seq1 = (let _Val1 = ... in let State1 = ... in _Val1) in <return expression>
-        //
-        // The difference is crucial: in the first form, State1 is visible in <return expression>.
-        //
-        // Similarly, for local variable assignments like: [count := 0. count + 1]
-        // We need:
-        //   let Count = 0 in Count + 1
-        // NOT:
-        //   let _seq1 = 0 in <expression that can't see Count>
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-
         // Filter out @expect directives — they are compile-time only and generate no code.
         let body: Vec<&Expression> = block
             .body
@@ -1206,7 +1191,41 @@ impl CoreErlangGenerator {
             .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
             .collect();
 
-        for (i, expr) in body.iter().enumerate() {
+        self.generate_block_body_slice(&body)
+    }
+
+    /// Generates a slice of block body expressions with proper state threading.
+    ///
+    /// Handles field assignments specially to keep State{n} variables in scope
+    /// for subsequent expressions. Called recursively for tuple destructuring.
+    ///
+    /// # State threading
+    ///
+    /// For a block like: `[self.value := self.value + 1. ^self.value]`
+    /// We need:
+    ///   `let _Val1 = ... in let State1 = ... in <return expression>`
+    /// NOT:
+    ///   `let _seq1 = (let _Val1 = ... in let State1 = ... in _Val1) in <return expression>`
+    ///
+    /// The difference is crucial: in the first form, `State1` is visible in `<return expression>`.
+    ///
+    /// For local variable assignments like: `[count := 0. count + 1]`
+    /// We need:
+    ///   `let Count = 0 in Count + 1`
+    #[allow(clippy::too_many_lines)]
+    pub(super) fn generate_block_body_slice(
+        &mut self,
+        body: &[&Expression],
+    ) -> Result<Document<'static>> {
+        if body.is_empty() {
+            return Ok(Document::Str("'nil'"));
+        }
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut i = 0;
+
+        while i < body.len() {
+            let expr = body[i];
             let is_last = i == body.len() - 1;
             let is_field_assignment = Self::is_field_assignment(expr);
             let is_local_assignment = Self::is_local_var_assignment(expr);
@@ -1247,6 +1266,114 @@ impl CoreErlangGenerator {
                         ]);
                     }
                 }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                match pattern {
+                    Pattern::Array { elements, .. } => {
+                        // Array destructuring: generate sequential `let` bindings using `at:`.
+                        // Example: `#[a, b] := expr` →
+                        //   let _Arr1 = <expr> in
+                        //   let A = send(_Arr1, 'at:', [1]) in
+                        //   let B = send(_Arr1, 'at:', [2]) in
+                        let arr_var = self.fresh_temp_var("Arr");
+                        let val_doc = self.expression_doc(value)?;
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(arr_var.clone()),
+                            " = ",
+                            val_doc,
+                            " in "
+                        ]);
+                        for (idx, elem) in elements.iter().enumerate() {
+                            let one_based = Document::String((idx + 1).to_string());
+                            match elem {
+                                Pattern::Variable(id) => {
+                                    let core_var = Self::to_core_erlang_var(&id.name);
+                                    self.bind_var(&id.name, &core_var);
+                                    docs.push(docvec![
+                                        "let ",
+                                        Document::String(core_var),
+                                        " = call 'beamtalk_message_dispatch':'send'(",
+                                        Document::String(arr_var.clone()),
+                                        ", 'at:', [",
+                                        one_based,
+                                        "]) in "
+                                    ]);
+                                }
+                                Pattern::Wildcard(_) => {} // no binding needed
+                                _ => {
+                                    return Err(CodeGenError::UnsupportedFeature {
+                                        feature: "Nested patterns in array destructuring"
+                                            .to_string(),
+                                        location: format!("{:?}", elem.span()),
+                                    });
+                                }
+                            }
+                        }
+                        if is_last {
+                            docs.push(Document::Str("'nil'"));
+                        }
+                    }
+                    Pattern::Tuple { .. } => {
+                        // Tuple destructuring: wrap the remaining body in a `case` arm.
+                        // Example: `{a, b} := expr` at non-last position →
+                        //   let _Tup1 = <expr> in
+                        //   case _Tup1 of <{A, B}> when 'true' -> <rest of body> end
+                        let tup_var = self.fresh_temp_var("Tup");
+                        let val_doc = self.expression_doc(value)?;
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(tup_var.clone()),
+                            " = ",
+                            val_doc,
+                            " in "
+                        ]);
+
+                        let pattern_doc = self.generate_pattern(pattern)?;
+
+                        self.push_scope();
+                        Self::collect_pattern_variables(pattern, |name, core_var| {
+                            self.bind_var(name, core_var);
+                        });
+
+                        // Generate remaining body inside the case arm
+                        let rest_doc = self.generate_block_body_slice(&body[i + 1..])?;
+                        self.pop_scope();
+
+                        // Build a descriptive error for the catch-all arm
+                        let err0 = self.fresh_temp_var("Err");
+                        let err1 = self.fresh_temp_var("Err");
+
+                        docs.push(docvec![
+                            "case ",
+                            Document::String(tup_var),
+                            " of <",
+                            pattern_doc,
+                            "> when 'true' -> ",
+                            rest_doc,
+                            " <_> when 'true' -> ",
+                            "let ", Document::String(err0.clone()), " = ",
+                            "call 'beamtalk_error':'new'('destructure_mismatch', 'unknown') in ",
+                            "let ", Document::String(err1.clone()), " = ",
+                            "call 'beamtalk_error':'with_message'(",
+                            Document::String(err0),
+                            ", ",
+                            "<<\"Destructuring failed: value does not match expected tuple pattern\">>",
+                            ") in ",
+                            "call 'beamtalk_error':'raise'(",
+                            Document::String(err1),
+                            ")",
+                            " end"
+                        ]);
+                        // All remaining expressions are inside the case arm
+                        break;
+                    }
+                    _ => {
+                        return Err(CodeGenError::UnsupportedFeature {
+                            feature: "Unsupported destructuring pattern kind".to_string(),
+                            location: "generate_block_body_slice".to_string(),
+                        });
+                    }
+                }
             } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
                 // whileTrue:/whileFalse:/timesRepeat: with mutations - need to rebind threaded vars after loop
                 // For single var, the loop returns its final value directly
@@ -1269,7 +1396,7 @@ impl CoreErlangGenerator {
                     // Multi-var case not supported yet
                     return Err(CodeGenError::UnsupportedFeature {
                         feature: "Multiple threaded variables in control flow".to_string(),
-                        location: "generate_block_body".to_string(),
+                        location: "generate_block_body_slice".to_string(),
                     });
                 }
             } else {
@@ -1277,9 +1404,118 @@ impl CoreErlangGenerator {
                 let expr_doc = self.expression_doc(expr)?;
                 docs.push(docvec!["let _Unit = ", expr_doc, " in "]);
             }
+
+            i += 1;
         }
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Generates flat `let` bindings for a destructuring assignment.
+    ///
+    /// This is the general-purpose helper used by all body-generation loops
+    /// (`gen_server` methods, value-type methods, block bodies, etc.) to handle
+    /// `DestructureAssignment` in non-last positions.
+    ///
+    /// For tuples, uses `erlang:element/2` to extract each position.
+    /// For arrays, uses `beamtalk_message_dispatch:send` with `at:`.
+    ///
+    /// Returns a `Vec<Document>` of `let X = ... in` bindings.
+    /// Variables are bound in the current scope for subsequent expressions.
+    pub(super) fn generate_destructure_bindings(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expression,
+    ) -> Result<Vec<Document<'static>>> {
+        let mut docs: Vec<Document<'static>> = Vec::new();
+
+        match pattern {
+            Pattern::Array { elements, .. } => {
+                let arr_var = self.fresh_temp_var("Arr");
+                let val_doc = self.expression_doc(value)?;
+                docs.push(docvec![
+                    "let ",
+                    Document::String(arr_var.clone()),
+                    " = ",
+                    val_doc,
+                    " in "
+                ]);
+                for (idx, elem) in elements.iter().enumerate() {
+                    let one_based = Document::String((idx + 1).to_string());
+                    match elem {
+                        Pattern::Variable(id) => {
+                            let core_var = Self::to_core_erlang_var(&id.name);
+                            self.bind_var(&id.name, &core_var);
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(core_var),
+                                " = call 'beamtalk_message_dispatch':'send'(",
+                                Document::String(arr_var.clone()),
+                                ", 'at:', [",
+                                one_based,
+                                "]) in "
+                            ]);
+                        }
+                        Pattern::Wildcard(_) => {}
+                        _ => {
+                            return Err(CodeGenError::UnsupportedFeature {
+                                feature: "Nested patterns in array destructuring".to_string(),
+                                location: format!("{:?}", elem.span()),
+                            });
+                        }
+                    }
+                }
+            }
+            Pattern::Tuple { elements, .. } => {
+                let tup_var = self.fresh_temp_var("Tup");
+                let val_doc = self.expression_doc(value)?;
+                docs.push(docvec![
+                    "let ",
+                    Document::String(tup_var.clone()),
+                    " = ",
+                    val_doc,
+                    " in "
+                ]);
+                for (idx, elem) in elements.iter().enumerate() {
+                    let one_based = Document::String((idx + 1).to_string());
+                    match elem {
+                        Pattern::Variable(id) => {
+                            let core_var = Self::to_core_erlang_var(&id.name);
+                            self.bind_var(&id.name, &core_var);
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(core_var),
+                                " = call 'erlang':'element'(",
+                                one_based,
+                                ", ",
+                                Document::String(tup_var.clone()),
+                                ") in "
+                            ]);
+                        }
+                        Pattern::Literal(lit, _) => {
+                            // Literal in pattern (e.g. `{#ok, val}`) — skip, no binding.
+                            // A full pattern match would validate; flat codegen trusts the shape.
+                            let _ = lit;
+                        }
+                        Pattern::Wildcard(_) => {}
+                        _ => {
+                            return Err(CodeGenError::UnsupportedFeature {
+                                feature: "Nested patterns in tuple destructuring".to_string(),
+                                location: format!("{:?}", elem.span()),
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "Unsupported destructuring pattern kind".to_string(),
+                    location: "generate_destructure_bindings".to_string(),
+                });
+            }
+        }
+
+        Ok(docs)
     }
 
     /// Generates cascade arguments, hoisting field-assignment bindings to outer scope.
@@ -1392,6 +1628,14 @@ impl CoreErlangGenerator {
                 }
                 parts.push(Document::Str("}"));
                 Ok(Document::Vec(parts))
+            }
+            Pattern::Array { .. } => {
+                // Array patterns are only valid in destructuring assignments,
+                // not in match arms (arrays are opaque tagged maps, not Core Erlang lists).
+                Err(CodeGenError::UnsupportedFeature {
+                    feature: "Array pattern in match arm — use destructuring assignment `#[a, b] := expr` instead".to_string(),
+                    location: format!("{:?}", pattern.span()),
+                })
             }
             Pattern::List { elements, tail, .. } => {
                 if elements.is_empty() && tail.is_none() {
@@ -1573,7 +1817,9 @@ impl CoreErlangGenerator {
                 let core_var = Self::to_core_erlang_var(&id.name);
                 bind(&id.name, &core_var);
             }
-            Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+            Pattern::Tuple { elements, .. }
+            | Pattern::Array { elements, .. }
+            | Pattern::List { elements, .. } => {
                 for elem in elements {
                     Self::collect_pattern_variables_inner(elem, bind);
                 }

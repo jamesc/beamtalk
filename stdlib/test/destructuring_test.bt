@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for destructuring assignment: tuple {a, b} := expr and array #[a, b] := expr
+
+TestCase subclass: DestructuringTest
+
+  // === Tuple destructuring ===
+  testTupleDestructuringBasic =>
+    {a, b} := Erlang erlang list_to_tuple: #(10, 20)
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testTupleDestructuringThreeElements =>
+    {a, b, c} := Erlang erlang list_to_tuple: #(1, 2, 3)
+    self assert: a equals: 1
+    self assert: b equals: 2
+    self assert: c equals: 3
+
+  testTupleDestructuringWithTaggedSymbol =>
+    {status, val} := Erlang erlang list_to_tuple: #(#ok, 42)
+    self assert: status equals: #ok
+    self assert: val equals: 42
+
+  testTupleDestructuringWithWildcard =>
+    {_, b} := Erlang erlang list_to_tuple: #(#ignore, 99)
+    self assert: b equals: 99
+
+  // === Array destructuring ===
+  testArrayDestructuringBasic =>
+    #[a, b] := #[10, 20]
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testArrayDestructuringThreeElements =>
+    #[a, b, c] := #[1, 2, 3]
+    self assert: a equals: 1
+    self assert: b equals: 2
+    self assert: c equals: 3
+
+  testArrayDestructuringWithWildcard =>
+    #[_, b] := #[99, 42]
+    self assert: b equals: 42
+
+  testArrayDestructuringExtraElements =>
+    // Array has more elements than pattern — that's fine, extras ignored
+    #[a, b] := #[10, 20, 30, 40]
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testArrayDestructuringStrings =>
+    #[first, second] := #["hello", "world"]
+    self assert: first equals: "hello"
+    self assert: second equals: "world"

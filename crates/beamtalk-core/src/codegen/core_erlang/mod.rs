@@ -1536,6 +1536,7 @@ impl CoreErlangGenerator {
     ///
     /// ADR 0018 Phase 3: Returns `Document<'static>` directly for composable
     /// code generation without string buffer intermediaries.
+    #[allow(clippy::too_many_lines)]
     fn generate_expression(&mut self, expr: &Expression) -> Result<Document<'static>> {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
@@ -1658,6 +1659,13 @@ impl CoreErlangGenerator {
             Expression::Match { value, arms, .. } => self.generate_match(value, arms),
             Expression::StringInterpolation { segments, .. } => {
                 self.generate_string_interpolation(segments)
+            }
+            Expression::DestructureAssignment { .. } => {
+                // DestructureAssignment is only valid as a statement inside a block body.
+                // generate_block_body_slice() handles it; hitting here means it appeared
+                // in an expression position (e.g. as the sole expression in a method body
+                // with no surrounding block).  Return nil so compilation can continue.
+                Ok(Document::Str("'nil'"))
             }
             Expression::Error { message, span, .. } => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression error: {message}"),

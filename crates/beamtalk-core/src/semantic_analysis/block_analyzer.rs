@@ -251,6 +251,11 @@ impl Analyser {
                 }
             }
 
+            DestructureAssignment { value, .. } => {
+                // Walk into value; pattern variables are new bindings, not field mutations
+                self.collect_captures_and_mutations(value, captures, mutations);
+            }
+
             Literal(..)
             | Super(..)
             | Error { .. }

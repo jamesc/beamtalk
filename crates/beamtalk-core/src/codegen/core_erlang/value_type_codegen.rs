@@ -914,6 +914,11 @@ impl CoreErlangGenerator {
                         body_parts.push(docvec!["    let ", core_var, " = ", val_doc, " in\n",]);
                     }
                 }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    body_parts.push(d);
+                }
             } else if self.is_do_with_vt_local_threading(expr) {
                 // BT-1053: Non-last `do:` loop that mutates captured outer locals.
                 // Generate foldl + extract locals as open let chains so the updated
@@ -1232,6 +1237,9 @@ impl CoreErlangGenerator {
                 StringSegment::Literal(_) => false,
                 StringSegment::Interpolation(e) => Self::expr_has_block_nlr(e, inside_block),
             }),
+            Expression::DestructureAssignment { value, .. } => {
+                Self::expr_has_block_nlr(value, inside_block)
+            }
             // True leaf expressions — cannot contain sub-expressions.
             Expression::Literal(..)
             | Expression::Identifier(..)
