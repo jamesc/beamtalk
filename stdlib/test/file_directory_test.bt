@@ -223,6 +223,20 @@ TestCase subclass: FileDirectoryTest
     @expect type
     self should: [File absolutePath: 42] raise: #type_error
 
+  testCwd =>
+    cwd := File cwd
+    self assert: (cwd size > 0)
+
+  testCwdIsString =>
+    cwd := File cwd
+    self assert: (cwd class name) equals: #String
+
+  testCwdIsAbsolute =>
+    // Unix only: absolute paths always start with '/'
+    System osFamily == "unix" ifFalse: [self skip: "Unix only"]
+    cwd := File cwd
+    self assert: (cwd includesSubstring: "/")
+
   testTempDirectory =>
     tmp := File tempDirectory
     self assert: (tmp size > 0)
