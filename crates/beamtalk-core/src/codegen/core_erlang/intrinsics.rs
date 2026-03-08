@@ -519,6 +519,10 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         selector_name: &str,
     ) -> Result<Document<'static>> {
+        // TODO(BT-1270): If receiver or any argument is a field-assignment expression,
+        // its StateN binding will be scoped inside the RHS let and lost before the
+        // guard/apply runs. Apply the generate_cascade_args hoisting pattern here
+        // (same issue exists in generate_block_value_call).
         let recv_var = self.fresh_temp_var("ValRecv");
         let recv_code = self.expression_doc(receiver)?;
 
