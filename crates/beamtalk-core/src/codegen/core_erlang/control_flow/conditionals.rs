@@ -244,13 +244,24 @@ impl CoreErlangGenerator {
                     // within this block resolve directly to the temp var (e.g. `_Val1`)
                     // rather than falling through to maps:get without the __local__ prefix,
                     // which would cause a {badkey,VarName} crash at runtime.
-                    if let Expression::Assignment { target, .. } = expr {
-                        if let Expression::Identifier(id) = target.as_ref() {
-                            if let Some(val_var) = self.last_open_scope_result.clone() {
-                                self.bind_var(&id.name, &val_var);
-                            }
-                        }
-                    }
+                    //
+                    // is_local_var_assignment(expr) guarantees expr is Assignment { target: Identifier }.
+                    // If either invariant breaks, fail loudly rather than silently skipping bind_var.
+                    let Expression::Assignment { target, .. } = expr else {
+                        unreachable!(
+                            "is_local_var_assignment must ensure expr is an Assignment"
+                        );
+                    };
+                    let Expression::Identifier(id) = target.as_ref() else {
+                        unreachable!(
+                            "is_local_var_assignment must ensure assignment target is an Identifier"
+                        );
+                    };
+                    let val_var = self
+                        .last_open_scope_result
+                        .clone()
+                        .expect("generate_local_var_assignment_in_loop must set last_open_scope_result");
+                    self.bind_var(&id.name, &val_var);
                 }
             } else if is_last && self.control_flow_has_mutations(expr) {
                 // Last expression is nested control flow with mutations.
