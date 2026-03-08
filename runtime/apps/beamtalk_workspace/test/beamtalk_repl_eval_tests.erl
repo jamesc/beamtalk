@@ -92,8 +92,7 @@ do_eval_no_compiler_error_test() ->
 
     %% Error message should mention compiler
     {error, #beamtalk_error{message = Msg}, _, _, _} = Result,
-    LowerMsg = string:lowercase(Msg),
-    ?assert(binary:match(LowerMsg, <<"compiler">>) =/= nomatch).
+    ?assert(re:run(Msg, <<"compiler">>, [caseless, {capture, none}]) =:= match).
 
 %%% File loading tests
 

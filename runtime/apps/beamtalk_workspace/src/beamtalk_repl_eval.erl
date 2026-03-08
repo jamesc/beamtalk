@@ -431,14 +431,14 @@ inject_output({error, Reason, State}, Output, Warnings) ->
 
 %% @private Wrap a compile error as a structured #beamtalk_error{} result tuple.
 -spec wrap_compile_err(term(), beamtalk_repl_state:state()) ->
-    {error, #beamtalk_error{}, binary(), [], beamtalk_repl_state:state()}.
+    {error, #beamtalk_error{}, binary(), [binary()], beamtalk_repl_state:state()}.
 wrap_compile_err(Reason, State) ->
     Err = beamtalk_repl_errors:ensure_structured_error({compile_error, Reason}),
     {error, Err, <<>>, [], State}.
 
 %% @private Wrap a load error as a structured #beamtalk_error{} result tuple.
 -spec wrap_load_err(term(), beamtalk_repl_state:state()) ->
-    {error, #beamtalk_error{}, binary(), [], beamtalk_repl_state:state()}.
+    {error, #beamtalk_error{}, binary(), [binary()], beamtalk_repl_state:state()}.
 wrap_load_err(Reason, State) ->
     Err = beamtalk_repl_errors:ensure_structured_error({load_error, Reason}),
     {error, Err, <<>>, [], State}.
