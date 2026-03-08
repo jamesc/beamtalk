@@ -513,6 +513,27 @@ Newspeak uses promises for asynchronous operations: if processing produces a res
 
 **What we noted:** Beamtalk's actor messaging is synchronous by default (ADR 0043), so promises are less immediately relevant. But the principle — fallible async operations return a value (Result/Promise) rather than raising — aligns with our decision.
 
+### Ruby — `dry-monads` (Dynamic Language Precedent)
+
+Ruby is dynamically typed and has no gradual typing. The `dry-monads` gem (part of the dry-rb ecosystem) provides `Success(value)` / `Failure(reason)` with `fmap` (our `map:`), `bind` (our `andThen:`), and `value_or` (our `valueOr:`):
+
+```ruby
+result = File.read("config.yml")
+  .then { |content| YAML.safe_load(content) }
+  .then { |parsed| build_config(parsed) }
+
+case result
+in Success(config) then use(config)
+in Failure(reason) then use_defaults
+end
+```
+
+`dry-monads` is widely used in production Rails applications — without type annotations. The chaining ergonomics (`bind`, `fmap`) provide value purely as a runtime convention: callers know what shape they're getting back, and the composition is explicit. The Ruby community does not find the absence of static enforcement to be a blocker; the convention itself is sufficient.
+
+**What this confirms for Beamtalk:** Result works as a dynamic runtime convention. The ergonomic value — composable chaining, explicit failure shape, no surprise nil — does not require a type checker to be useful. This is the strongest dynamic-language precedent for our design.
+
+**What we adapted:** Ruby uses `Success`/`Failure` constructors (following Haskell/Scala terminology). We use `Result ok:`/`Result error:` — more explicit about the container type, consistent with Beamtalk's keyword message style.
+
 ### What We're Actually Borrowing from Rust and Gleam
 
 Rust and Gleam are both statically typed. It might seem odd to cite them as prior art for a dynamic, live-environment language. The distinction is important: **we are adopting their runtime ergonomics and FFI convention, not their static enforcement model.**
@@ -527,14 +548,16 @@ Beamtalk adopts part 2 entirely. Part 1 is available in typed contexts (gradual 
 
 ### Summary
 
-| Feature | Pharo | Gleam | Elixir | Rust | **Beamtalk (proposed)** |
-|---------|-------|-------|--------|------|------------------------|
-| Expected failure mechanism | `ifAbsent:` blocks | `Result(v, e)` | `{:ok, v} \| {:error, r}` | `Result<T, E>` | **`Result` class** |
-| Bug mechanism | Exceptions | `panic` / `let assert` | `raise` | `panic!` | **Exceptions (ADR 0015)** |
-| Composition | None (blocks inline) | `use` + `result.try` | `with` statement | `?` operator | **`andThen:`** |
-| FFI mapping | N/A | Native | Native tuples | FFI crate-specific | **`beamtalk_result:from_tagged_tuple/1`** |
-| Unwrap with default | `ifAbsent:` block | `result.unwrap` | `elem(tuple, 1)` | `.unwrap_or()` | **`valueOr:`** |
-| Two systems coexist? | Yes (exceptions + blocks) | No (Result only) | Yes (tuples + raise) | Yes (Result + panic) | **Yes (Result + exceptions)** |
+| Feature | Pharo | Ruby dry-monads | Gleam | Elixir | Rust | **Beamtalk (proposed)** |
+|---------|-------|-----------------|-------|--------|------|------------------------|
+| Typed? | Dynamic | Dynamic | Static | Dynamic | Static | **Dynamic + optional types** |
+| Expected failure mechanism | `ifAbsent:` blocks | `Success`/`Failure` | `Result(v, e)` | `{:ok, v} \| {:error, r}` | `Result<T, E>` | **`Result` class** |
+| Bug mechanism | Exceptions | Exceptions | `panic` / `let assert` | `raise` | `panic!` | **Exceptions (ADR 0015)** |
+| Composition | None (blocks inline) | `bind` / `fmap` | `use` + `result.try` | `with` statement | `?` operator | **`andThen:`** |
+| Static exhaustiveness? | No | No | Yes | No | Yes | **No (open-world live system)** |
+| FFI mapping | N/A | N/A | Native | Native tuples | FFI crate-specific | **`beamtalk_result:from_tagged_tuple/1`** |
+| Unwrap with default | `ifAbsent:` block | `value_or` | `result.unwrap` | `elem(tuple, 1)` | `.unwrap_or()` | **`valueOr:`** |
+| Two systems coexist? | Yes (exceptions + blocks) | Yes | No (Result only) | Yes (tuples + raise) | Yes (Result + panic) | **Yes (Result + exceptions)** |
 
 ## User Impact
 
