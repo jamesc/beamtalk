@@ -109,20 +109,23 @@ impl CoreErlangGenerator {
         let src_bin = Self::binary_string_literal(source_text);
 
         let return_tuple: Document<'static> = if self.repl_loop_mutated {
-            Document::String(format!(
+            docvec![
                 "let _LoopResult = call 'erlang':'element'(1, Result) in \
                  let _LoopState = call 'erlang':'element'(2, Result) in \
-                 {{[{{{src_bin}, _LoopResult}}], _LoopState}}"
-            ))
+                 {[{",
+                src_bin,
+                ", _LoopResult}], _LoopState}",
+            ]
         } else if final_state != "State" {
-            Document::String(format!("{{[{{{src_bin}, Result}}], {final_state}}}"))
+            docvec!["{[{", src_bin, ", Result}], ", final_state, "}"]
         } else {
-            Document::String(format!("{{[{{{src_bin}, Result}}], State}}"))
+            docvec!["{[{", src_bin, ", Result}], State}"]
         };
 
-        let module_name = &self.module_name;
         let doc = docvec![
-            Document::String(format!("module '{module_name}' ['eval'/1]\n")),
+            "module '",
+            self.module_name.clone(),
+            "' ['eval'/1]\n",
             "  attributes []\n",
             "\n",
             "'eval'/1 = fun (Bindings) ->\n",
@@ -154,8 +157,8 @@ impl CoreErlangGenerator {
 
         let n = expressions.len();
         let mut body_parts: Vec<Document<'static>> = Vec::new();
-        // (source_text, result_var) pairs used to build the final steps list.
-        let mut step_pairs: Vec<(String, String)> = Vec::new();
+        // (source_text, step_value_doc) pairs used to build the final steps list.
+        let mut step_pairs: Vec<(String, Document<'static>)> = Vec::new();
 
         for (i, expr) in expressions[..n - 1].iter().enumerate() {
             self.repl_loop_mutated = false;
@@ -164,10 +167,10 @@ impl CoreErlangGenerator {
             body_parts.push(part);
             // BT-790: When `repl_loop_mutated` is true, `result_var` holds `{Result, StateAcc}`.
             // Extract element 1 for the trace step so callers see the unwrapped value.
-            let step_val = if self.repl_loop_mutated {
-                format!("call 'erlang':'element'(1, {result_var})")
+            let step_val: Document<'static> = if self.repl_loop_mutated {
+                docvec!["call 'erlang':'element'(1, ", result_var, ")",]
             } else {
-                result_var
+                Document::String(result_var)
             };
             step_pairs.push((source_texts[i].clone(), step_val));
         }
@@ -175,11 +178,11 @@ impl CoreErlangGenerator {
         self.repl_loop_mutated = false;
         let last_expr = &expressions[n - 1];
         let (last_val_doc, trace_return) =
-            self.generate_trace_last_expr(last_expr, &source_texts[n - 1], &step_pairs)?;
+            self.generate_trace_last_expr(last_expr, &source_texts[n - 1], step_pairs)?;
 
         let module_name = self.module_name.clone();
         let mut all_parts: Vec<Document<'static>> = vec![
-            Document::String(format!("module '{module_name}' ['eval'/1]\n")),
+            docvec!["module '", module_name, "' ['eval'/1]\n"],
             Document::Str("  attributes []\n"),
             Document::Str("\n"),
             Document::Str("'eval'/1 = fun (Bindings) ->\n"),
@@ -204,23 +207,32 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
         source_text: &str,
-        prev_steps: &[(String, String)],
+        prev_steps: Vec<(String, Document<'static>)>,
     ) -> Result<(Document<'static>, Document<'static>)> {
         Self::reject_repl_destructure(expr)?;
 
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
-                let var_name = id.name.clone();
+                let var_name = id.name.to_string();
                 let current_state = self.current_state_var();
                 let val_doc = self.expression_doc(value)?;
                 let new_state = self.next_state_var();
-                let mut all_steps = prev_steps.to_vec();
-                all_steps.push((source_text.to_string(), "Result".to_string()));
-                let steps_str = Self::build_steps_list_string(&all_steps);
-                let trace_return = Document::String(format!(
-                    "let {new_state} = call 'maps':'put'('{var_name}', Result, {current_state}) in \
-                     {{{steps_str}, {new_state}}}"
-                ));
+                let mut all_steps = prev_steps;
+                all_steps.push((source_text.to_string(), Document::Str("Result")));
+                let steps_doc = Self::build_steps_list_doc(all_steps);
+                let trace_return = docvec![
+                    "let ",
+                    new_state.clone(),
+                    " = call 'maps':'put'('",
+                    var_name,
+                    "', Result, ",
+                    current_state,
+                    ") in {",
+                    steps_doc,
+                    ", ",
+                    new_state,
+                    "}",
+                ];
                 return Ok((val_doc, trace_return));
             }
         }
@@ -228,37 +240,43 @@ impl CoreErlangGenerator {
         let val_doc = self.expression_doc(expr)?;
         let final_state = self.current_state_var();
 
-        let mut all_steps = prev_steps.to_vec();
+        let mut all_steps = prev_steps;
         let trace_return: Document<'static> = if self.repl_loop_mutated {
-            all_steps.push((source_text.to_string(), "_LoopTraceResult".to_string()));
-            let steps_str = Self::build_steps_list_string(&all_steps);
+            all_steps.push((source_text.to_string(), Document::Str("_LoopTraceResult")));
+            let steps_doc = Self::build_steps_list_doc(all_steps);
             let new_state = self.next_state_var();
-            Document::String(format!(
+            docvec![
                 "let _LoopTraceResult = call 'erlang':'element'(1, Result) in \
-                 let {new_state} = call 'erlang':'element'(2, Result) in \
-                 {{{steps_str}, {new_state}}}"
-            ))
+                 let ",
+                new_state.clone(),
+                " = call 'erlang':'element'(2, Result) in \
+                 {",
+                steps_doc,
+                ", ",
+                new_state,
+                "}",
+            ]
         } else if final_state != "State" {
-            all_steps.push((source_text.to_string(), "Result".to_string()));
-            let steps_str = Self::build_steps_list_string(&all_steps);
-            Document::String(format!("{{{steps_str}, {final_state}}}"))
+            all_steps.push((source_text.to_string(), Document::Str("Result")));
+            let steps_doc = Self::build_steps_list_doc(all_steps);
+            docvec!["{", steps_doc, ", ", final_state, "}"]
         } else {
-            all_steps.push((source_text.to_string(), "Result".to_string()));
-            let steps_str = Self::build_steps_list_string(&all_steps);
-            Document::String(format!("{{{steps_str}, State}}"))
+            all_steps.push((source_text.to_string(), Document::Str("Result")));
+            let steps_doc = Self::build_steps_list_doc(all_steps);
+            docvec!["{", steps_doc, ", State}"]
         };
 
         Ok((val_doc, trace_return))
     }
 
-    /// Builds a Core Erlang list literal from (`source_text`, `var_name`) pairs.
+    /// Builds a Core Erlang list literal from (`source_text`, `value_doc`) pairs.
     ///
     /// Produces: `[{<<"src0">>, V0} | [{<<"src1">>, V1} | ... | []]]`
-    fn build_steps_list_string(step_pairs: &[(String, String)]) -> String {
-        let mut result = "[]".to_string();
-        for (src, var) in step_pairs.iter().rev() {
-            let src_bin = Self::binary_string_literal(src);
-            result = format!("[{{{src_bin}, {var}}} | {result}]");
+    fn build_steps_list_doc(step_pairs: Vec<(String, Document<'static>)>) -> Document<'static> {
+        let mut result: Document<'static> = Document::Str("[]");
+        for (src, val_doc) in step_pairs.into_iter().rev() {
+            let src_bin = Self::binary_string_literal(&src);
+            result = docvec!["[{", src_bin, ", ", val_doc, "} | ", result, "]"];
         }
         result
     }
@@ -335,15 +353,16 @@ impl CoreErlangGenerator {
             )
         } else if final_state != "State" {
             // Direct state mutation (field assignment) — Result is the value, use updated state
-            Document::String(format!("{{Result, {final_state}}}"))
+            docvec!["{Result, ", final_state, "}"]
         } else {
             // No mutation - Result is the value, State is unchanged bindings
             Document::Str("{Result, State}")
         };
 
-        let module_name = &self.module_name;
         let doc = docvec![
-            Document::String(format!("module '{module_name}' ['eval'/1]\n")),
+            "module '",
+            self.module_name.clone(),
+            "' ['eval'/1]\n",
             "  attributes []\n",
             "\n",
             "'eval'/1 = fun (Bindings) ->\n",
@@ -408,7 +427,7 @@ impl CoreErlangGenerator {
 
         let module_name = self.module_name.clone();
         let mut all_parts: Vec<Document<'static>> = vec![
-            Document::String(format!("module '{module_name}' ['eval'/1]\n")),
+            docvec!["module '", module_name, "' ['eval'/1]\n"],
             Document::Str("  attributes []\n"),
             Document::Str("\n"),
             Document::Str("'eval'/1 = fun (Bindings) ->\n"),
@@ -446,7 +465,7 @@ impl CoreErlangGenerator {
 
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
-                let var_name = id.name.clone();
+                let var_name = id.name.to_string();
                 let current_state = self.current_state_var();
                 let val_doc = self.expression_doc(value)?;
                 let new_state = self.next_state_var();
@@ -455,9 +474,15 @@ impl CoreErlangGenerator {
                     result_var.to_string(),
                     " = ",
                     val_doc,
-                    Document::String(format!(
-                        " in let {new_state} = call 'maps':'put'('{var_name}', {result_var}, {current_state}) in\n"
-                    )),
+                    " in let ",
+                    new_state,
+                    " = call 'maps':'put'('",
+                    var_name,
+                    "', ",
+                    result_var.to_string(),
+                    ", ",
+                    current_state,
+                    ") in\n",
                 ]);
             }
         }
@@ -474,9 +499,11 @@ impl CoreErlangGenerator {
                 result_var.to_string(),
                 " = ",
                 expr_doc,
-                Document::String(format!(
-                    " in let {new_state} = call 'erlang':'element'(2, {result_var}) in\n"
-                )),
+                " in let ",
+                new_state,
+                " = call 'erlang':'element'(2, ",
+                result_var.to_string(),
+                ") in\n",
             ])
         } else {
             Ok(docvec![
@@ -503,13 +530,21 @@ impl CoreErlangGenerator {
 
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
-                let var_name = id.name.clone();
+                let var_name = id.name.to_string();
                 let current_state = self.current_state_var();
                 let val_doc = self.expression_doc(value)?;
                 let new_state = self.next_state_var();
-                let return_tuple = Document::String(format!(
-                    "let {new_state} = call 'maps':'put'('{var_name}', Result, {current_state}) in {{Result, {new_state}}}"
-                ));
+                let return_tuple = docvec![
+                    "let ",
+                    new_state.clone(),
+                    " = call 'maps':'put'('",
+                    var_name,
+                    "', Result, ",
+                    current_state,
+                    ") in {Result, ",
+                    new_state,
+                    "}",
+                ];
                 return Ok((val_doc, return_tuple));
             }
         }
@@ -523,7 +558,7 @@ impl CoreErlangGenerator {
                  {_LoopResult, _LoopState}",
             )
         } else if final_state != "State" {
-            Document::String(format!("{{Result, {final_state}}}"))
+            docvec!["{Result, ", final_state, "}"]
         } else {
             Document::Str("{Result, State}")
         };
