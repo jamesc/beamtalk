@@ -16,7 +16,11 @@ TestCase subclass: BT1226MultiStateMutationsTest
     a addEntry: "y"
     a addEntry: "z"
     result := a removeAll: #("x", "z")
+    // Both field mutations must be correctly threaded through StateAcc
     self assert: (result at: #claimed) equals: #("y")
+    self deny: ((result at: #running) includesKey: "x")
+    self deny: ((result at: #running) includesKey: "z")
+    self assert: ((result at: #running) includesKey: "y")
 
   // removeAll: with single-element list (single iteration)
   testDoBlockSingleIterationTwoMutations =>
@@ -24,7 +28,10 @@ TestCase subclass: BT1226MultiStateMutationsTest
     b addEntry: "a"
     b addEntry: "b"
     result := b removeAll: #("a")
+    // Both mutations applied: running loses "a" key, claimed loses "a" element
     self assert: (result at: #claimed) equals: #("b")
+    self deny: ((result at: #running) includesKey: "a")
+    self assert: ((result at: #running) includesKey: "b")
 
   // Two field mutations per iteration with simple integer values
   testDoBlockTwoSimpleMutationsPerIteration =>
