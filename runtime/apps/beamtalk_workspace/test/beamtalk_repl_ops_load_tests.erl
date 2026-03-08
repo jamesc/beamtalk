@@ -24,22 +24,29 @@ write_temp_file(Dir, Name, Content) ->
     Path.
 
 %% Create a fresh temp directory for a test.
+%% Checks TMPDIR → TEMP → "/tmp" for cross-platform compatibility.
 make_temp_dir() ->
+    TmpBase =
+        case os:getenv("TMPDIR") of
+            false ->
+                case os:getenv("TEMP") of
+                    false -> "/tmp";
+                    T -> T
+                end;
+            T ->
+                T
+        end,
     Base = filename:join(
-        [
-            os:getenv("TMPDIR", "/tmp"),
-            "bt_ops_load_test_" ++ integer_to_list(erlang:unique_integer([positive]))
-        ]
+        [TmpBase, "bt_ops_load_test_" ++ integer_to_list(erlang:unique_integer([positive]))]
     ),
     ok = file:make_dir(Base),
     Base.
 
-%% Recursively delete a temp directory.
+%% Delete a temp directory and all its contents (files only — tests do not
+%% create nested subdirectories, so recursive removal is not needed here).
 rm_temp_dir(Dir) ->
-    lists:foreach(
-        fun(F) -> file:delete(filename:join(Dir, F)) end,
-        element(2, file:list_dir(Dir))
-    ),
+    {ok, Entries} = file:list_dir(Dir),
+    lists:foreach(fun(F) -> file:delete(filename:join(Dir, F)) end, Entries),
     file:del_dir(Dir).
 
 %%====================================================================
@@ -121,30 +128,27 @@ extract_bt_class_info_missing_file_test() ->
 sort_bt_files_empty_test() ->
     ?assertEqual([], beamtalk_repl_ops_load:sort_bt_files_by_deps([])).
 
-sort_bt_files_stdlib_superclass_first_test() ->
+sort_bt_files_superclass_before_subclass_test() ->
     Dir = make_temp_dir(),
     try
         PathA = write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
         PathB = write_temp_file(Dir, "b.bt", <<"A subclass: B">>),
-        %% Provide in "wrong" order — B before A
+        %% Provide in "wrong" order — B before A; sort must reorder so A loads first.
         Sorted = beamtalk_repl_ops_load:sort_bt_files_by_deps([PathB, PathA]),
-        ?assertEqual(2, length(Sorted)),
-        %% A must come before B
-        PosA = string:str(Sorted, [PathA]),
-        PosB = string:str(Sorted, [PathB]),
-        ?assert(PosA < PosB)
+        ?assertEqual([PathA, PathB], Sorted)
     after
         rm_temp_dir(Dir)
     end.
 
-sort_bt_files_no_deps_preserves_order_test() ->
+sort_bt_files_independent_files_stable_test() ->
     Dir = make_temp_dir(),
     try
-        %% Both files depend on Object (outside project), so both are "ready" immediately.
+        %% Both files declare a direct Object subclass (superclass is outside the project).
+        %% Neither depends on the other, so input order should be preserved.
         PathA = write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
         PathB = write_temp_file(Dir, "b.bt", <<"Object subclass: B">>),
         Sorted = beamtalk_repl_ops_load:sort_bt_files_by_deps([PathA, PathB]),
-        ?assertEqual(2, length(Sorted))
+        ?assertEqual([PathA, PathB], Sorted)
     after
         rm_temp_dir(Dir)
     end.

@@ -299,6 +299,13 @@ sort_bt_files_by_deps(Files) ->
 topo_sort_loop([], [], Acc) ->
     lists:reverse(Acc);
 topo_sort_loop([], Pending, Acc) ->
+    %% Unresolved entries remain (likely a cycle or unparseable class declaration).
+    %% Warn and append them in original order so load proceeds best-effort.
+    ?LOG_WARNING(
+        "load-project: ~B file(s) have unresolved superclass dependencies "
+        "(possible cycle or missing class declaration); loading in original order",
+        [length(Pending)]
+    ),
     lists:reverse(Acc) ++ [maps:get(path, I) || I <- Pending];
 topo_sort_loop([#{path := Path, class := Class} | Ready], Pending, Acc) ->
     {NowReady, StillPending} = lists:partition(
@@ -309,23 +316,26 @@ topo_sort_loop([#{path := Path, class := Class} | Ready], Pending, Acc) ->
 
 %% @private
 %% @doc Load files one by one, accumulating class maps and per-file error messages.
+%% Accumulates in reverse to avoid quadratic ++ and reverses at the end.
 -spec load_files_sequential([string()], pid()) -> {[map()], [binary()]}.
 load_files_sequential(Files, SessionPid) ->
-    lists:foldl(
-        fun(Path, {ClassesAcc, ErrorsAcc}) ->
-            case beamtalk_repl_shell:load_file(SessionPid, Path) of
-                {ok, Classes} ->
-                    {ClassesAcc ++ Classes, ErrorsAcc};
-                {error, Reason} ->
-                    Wrapped = beamtalk_repl_errors:ensure_structured_error(Reason),
-                    ErrBin = beamtalk_repl_json:format_error_message(Wrapped),
-                    ErrMsg = iolist_to_binary([list_to_binary(Path), ": ", ErrBin]),
-                    {ClassesAcc, ErrorsAcc ++ [ErrMsg]}
-            end
-        end,
-        {[], []},
-        Files
-    ).
+    {RevClasses, RevErrors} =
+        lists:foldl(
+            fun(Path, {ClassesAcc, ErrorsAcc}) ->
+                case beamtalk_repl_shell:load_file(SessionPid, Path) of
+                    {ok, Classes} ->
+                        {lists:reverse(Classes, ClassesAcc), ErrorsAcc};
+                    {error, Reason} ->
+                        Wrapped = beamtalk_repl_errors:ensure_structured_error(Reason),
+                        ErrBin = beamtalk_repl_json:format_error_message(Wrapped),
+                        ErrMsg = iolist_to_binary([list_to_binary(Path), ": ", ErrBin]),
+                        {ClassesAcc, [ErrMsg | ErrorsAcc]}
+                end
+            end,
+            {[], []},
+            Files
+        ),
+    {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
 
 %% @private
 %% @doc Collect collision warnings for the loaded classes after a file load.
