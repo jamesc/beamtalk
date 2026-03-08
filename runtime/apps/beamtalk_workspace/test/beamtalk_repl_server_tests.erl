@@ -2562,7 +2562,8 @@ handle_op_show_codegen_in_describe_test() ->
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"show-codegen">>, Ops)),
     ShowCodegenOp = maps:get(<<"show-codegen">>, Ops),
-    %% BT-1236: show-codegen now accepts code, class, or selector (all optional)
+    %% BT-1236: show-codegen exposes optional params code, class, and selector.
+    %% Requires either code (snippet) or class (loaded class); selector is only meaningful with class.
     ?assertEqual([], maps:get(<<"params">>, ShowCodegenOp)),
     Optional = maps:get(<<"optional">>, ShowCodegenOp),
     ?assert(lists:member(<<"code">>, Optional)),

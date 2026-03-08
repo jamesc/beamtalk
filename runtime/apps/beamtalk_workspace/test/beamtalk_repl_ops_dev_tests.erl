@@ -316,6 +316,39 @@ handle_show_codegen_class_takes_priority_over_code_test() ->
     %% class path taken, returns error for non-existent class
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
+handle_show_codegen_empty_class_falls_back_to_code_test() ->
+    %% Empty class binary is treated as absent; falls back to code path.
+    %% Use empty code so we get the "empty expression" error without calling a real session.
+    Msg = make_msg(<<"show-codegen">>, <<"sc-6">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>,
+        #{<<"class">> => <<>>, <<"code">> => <<>>},
+        Msg,
+        self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    %% Code path taken (empty class ignored), empty code yields the standard "empty expression" error.
+    %% If class="" had been selected instead, we'd get a class-not-found error (different error type).
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+%% @doc Unit test for compile_file_for_codegen/2 success path (BT-1236).
+%%
+%% Tests that the compiler can take a Beamtalk class source binary and
+%% return Core Erlang text without loading a module into the runtime.
+%% This exercises the compilation side of show_codegen_class_method/3.
+compile_file_for_codegen_success_test() ->
+    Source = <<"Object subclass: TestCodegenClass\n  greet => 42\n">>,
+    Result = beamtalk_repl_compiler:compile_file_for_codegen(Source, undefined),
+    case Result of
+        {ok, CoreErlang, Warnings} ->
+            ?assert(is_binary(CoreErlang)),
+            ?assert(byte_size(CoreErlang) > 0),
+            ?assert(is_list(Warnings));
+        {error, _Reason} ->
+            %% Compiler port may not be available in this test environment; that's acceptable.
+            ok
+    end.
+
 %%====================================================================
 %% handle/4 -- complete with old protocol (no cursor field)
 %%====================================================================

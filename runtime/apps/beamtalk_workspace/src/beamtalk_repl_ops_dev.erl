@@ -152,7 +152,8 @@ handle(<<"docs">>, Params, Msg, _SessionPid) ->
 handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
     %% BT-700: Compile expression and return Core Erlang source without evaluating.
     %% BT-1236: Also accepts class+selector to inspect a loaded class method.
-    ClassBin = maps:get(<<"class">>, Params, undefined),
+    %% `class` takes priority when both are present; empty string is treated as absent.
+    ClassBin = nonempty_or_undefined(maps:get(<<"class">>, Params, undefined)),
     CodeBin = maps:get(<<"code">>, Params, undefined),
     case {ClassBin, CodeBin} of
         {CB, _} when CB =/= undefined ->
@@ -268,7 +269,7 @@ show_codegen_class_method(ClassBin, _SelectorBin, Msg) ->
                     );
                 ClassPid ->
                     ModuleName = beamtalk_runtime_api:module_name(ClassPid),
-                    SourcePath = resolve_class_source_path(ModuleName),
+                    SourcePath = beamtalk_repl_modules:resolve_source_path(ModuleName),
                     case SourcePath of
                         "unknown" ->
                             Err0 = beamtalk_error:new(runtime_error, ClassAtom),
@@ -324,19 +325,12 @@ show_codegen_class_method(ClassBin, _SelectorBin, Msg) ->
     end.
 
 %% @private
-%% @doc Resolve the source file path for a loaded Erlang module.
-%% Reads the beamtalk_source attribute embedded by the compiler (BT-845/BT-860).
--spec resolve_class_source_path(atom()) -> string().
-resolve_class_source_path(ModName) ->
-    try
-        Attrs = erlang:get_module_info(ModName, attributes),
-        case proplists:get_value(beamtalk_source, Attrs) of
-            [Path] when is_list(Path), Path =/= "" -> Path;
-            _ -> "unknown"
-        end
-    catch
-        _:_ -> "unknown"
-    end.
+%% @doc Return the value if it is a non-empty binary, otherwise return undefined.
+%% Used to normalise optional params so that "" is treated the same as absent.
+-spec nonempty_or_undefined(binary() | undefined) -> binary() | undefined.
+nonempty_or_undefined(<<>>) -> undefined;
+nonempty_or_undefined(undefined) -> undefined;
+nonempty_or_undefined(Bin) when is_binary(Bin) -> Bin.
 
 %%% Test op helpers
 

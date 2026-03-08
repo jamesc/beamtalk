@@ -106,18 +106,19 @@ pub struct DocsParams {
 
 /// Parameters for the `show_codegen` MCP tool.
 ///
-/// Either `code` (expression snippet) or `class` (loaded class name) must be provided.
+/// Provide either `code` (expression snippet) or `class` (loaded class name).
+/// When both are provided, `class` takes priority.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ShowCodegenParams {
     /// Beamtalk code snippet to compile and show the generated Core Erlang for.
-    /// Mutually exclusive with `class`.
+    /// Used when `class` is not provided.
     #[schemars(
-        description = "Beamtalk code snippet to compile and show generated Core Erlang for. Use this for expressions. Mutually exclusive with 'class'."
+        description = "Beamtalk code snippet to compile and show generated Core Erlang for. Used when 'class' is not provided."
     )]
     pub code: Option<String>,
-    /// Name of a loaded Beamtalk class to inspect. Mutually exclusive with `code`.
+    /// Name of a loaded Beamtalk class to inspect. Takes priority over `code` when both provided.
     #[schemars(
-        description = "Name of a loaded Beamtalk class to show generated Core Erlang for. Mutually exclusive with 'code'."
+        description = "Name of a loaded Beamtalk class to show generated Core Erlang for. Takes priority over 'code' when both are provided."
     )]
     pub class: Option<String>,
     /// Optional method selector when using `class`. If omitted, shows the full module.
