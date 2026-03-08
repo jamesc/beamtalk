@@ -1577,6 +1577,7 @@ impl CoreErlangGenerator {
     ///
     /// ADR 0018 Phase 3: Returns `Document<'static>` directly for composable
     /// code generation without string buffer intermediaries.
+    #[allow(clippy::too_many_lines)]
     fn generate_expression(&mut self, expr: &Expression) -> Result<Document<'static>> {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
@@ -1699,6 +1700,15 @@ impl CoreErlangGenerator {
             Expression::Match { value, arms, .. } => self.generate_match(value, arms),
             Expression::StringInterpolation { segments, .. } => {
                 self.generate_string_interpolation(segments)
+            }
+            Expression::DestructureAssignment { span, .. } => {
+                // DestructureAssignment is only valid as a statement in a body context.
+                // All statement-body generators handle it explicitly. Reaching here means
+                // it appeared in a pure expression position, which is not supported.
+                Err(CodeGenError::UnsupportedFeature {
+                    feature: "destructuring assignment in expression position".to_string(),
+                    location: format!("{span:?}"),
+                })
             }
             Expression::Error { message, span, .. } => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression error: {message}"),

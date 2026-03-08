@@ -139,7 +139,7 @@ fn recurse(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
             recurse(value, diagnostics);
         }
 
-        Expression::Return { value, .. } => {
+        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
             recurse(value, diagnostics);
         }
 

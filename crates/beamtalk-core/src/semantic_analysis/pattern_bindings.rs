@@ -83,8 +83,8 @@ fn extract_pattern_bindings_impl(
             bindings.push(id.clone());
         }
 
-        // Tuple patterns: recursively extract from all elements
-        Pattern::Tuple { elements, .. } => {
+        // Tuple and array patterns: recursively extract from all elements
+        Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
             for element in elements {
                 extract_pattern_bindings_impl(element, bindings, seen, diagnostics);
             }

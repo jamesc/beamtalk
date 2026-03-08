@@ -89,7 +89,7 @@ where
             walk_expression(target, f);
             walk_expression(value, f);
         }
-        Expression::Return { value, .. } => {
+        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
             walk_expression(value, f);
         }
         Expression::Cascade {

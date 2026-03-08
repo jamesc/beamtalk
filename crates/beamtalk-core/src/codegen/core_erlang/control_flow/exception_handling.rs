@@ -545,6 +545,11 @@ impl CoreErlangGenerator {
             } else if Self::is_local_var_assignment(expr) {
                 let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
                 docs.push(assign_doc);
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
+                }
             } else if is_last {
                 if has_direct_field_assignments {
                     // Has direct field assignments — last non-assignment expr result is captured
