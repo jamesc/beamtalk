@@ -42,7 +42,7 @@ Value subclass: SupervisionSpec
   state: restart :: Symbol = #temporary
   /// Optional initialization arguments passed via `spawnWith:`.
   ///
-  /// nil means no args (use `spawn`); a Dictionary means use `spawnWith:`.
+  /// nil means no args (use `spawn`); any non-nil value is passed to `spawnWith:`.
   state: args = nil
 
   // === Multi-keyword fluent overrides ===
