@@ -680,3 +680,101 @@ encode_need_input_no_session_test() ->
     ?assertEqual([<<"need-input">>], maps:get(<<"status">>, Decoded)),
     ?assertEqual(<<"? ">>, maps:get(<<"prompt">>, Decoded)),
     ?assertEqual(error, maps:find(<<"session">>, Decoded)).
+
+%%% encode_trace_result tests (BT-1238)
+
+encode_trace_result_empty_steps_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"tr-001">>, <<"s1">>, false),
+    Result = beamtalk_repl_protocol:encode_trace_result([], Msg, fun identity/1, <<>>, []),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"tr-001">>, maps:get(<<"id">>, Decoded)),
+    ?assertEqual(<<"s1">>, maps:get(<<"session">>, Decoded)),
+    ?assertEqual([], maps:get(<<"steps">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+encode_trace_result_single_step_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"tr-002">>, <<"s1">>, false),
+    Steps = [{<<"1 + 2">>, 3}],
+    Result = beamtalk_repl_protocol:encode_trace_result(Steps, Msg, fun identity/1, <<>>, []),
+    Decoded = jsx:decode(Result, [return_maps]),
+    [Step] = maps:get(<<"steps">>, Decoded),
+    ?assertEqual(<<"1 + 2">>, maps:get(<<"src">>, Step)),
+    ?assertEqual(3, maps:get(<<"value">>, Step)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+encode_trace_result_multiple_steps_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"tr-003">>, undefined, false),
+    Steps = [{<<"x := 1">>, 1}, {<<"y := 2">>, 2}, {<<"x + y">>, 3}],
+    Result = beamtalk_repl_protocol:encode_trace_result(Steps, Msg, fun identity/1, <<>>, []),
+    Decoded = jsx:decode(Result, [return_maps]),
+    StepList = maps:get(<<"steps">>, Decoded),
+    ?assertEqual(3, length(StepList)),
+    [S1, S2, S3] = StepList,
+    ?assertEqual(<<"x := 1">>, maps:get(<<"src">>, S1)),
+    ?assertEqual(1, maps:get(<<"value">>, S1)),
+    ?assertEqual(<<"y := 2">>, maps:get(<<"src">>, S2)),
+    ?assertEqual(2, maps:get(<<"value">>, S2)),
+    ?assertEqual(<<"x + y">>, maps:get(<<"src">>, S3)),
+    ?assertEqual(3, maps:get(<<"value">>, S3)).
+
+encode_trace_result_with_output_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"tr-004">>, <<"s1">>, false),
+    Steps = [{<<"Transcript show: 'hi'">>, nil}],
+    Result = beamtalk_repl_protocol:encode_trace_result(
+        Steps, Msg, fun identity/1, <<"hi\n">>, []
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"hi\n">>, maps:get(<<"output">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+encode_trace_result_empty_output_omitted_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"tr-005">>, undefined, false),
+    Result = beamtalk_repl_protocol:encode_trace_result([], Msg, fun identity/1, <<>>, []),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(error, maps:find(<<"output">>, Decoded)).
+
+encode_trace_result_with_warnings_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"tr-006">>, <<"s1">>, false),
+    Steps = [{<<"42">>, 42}],
+    Result = beamtalk_repl_protocol:encode_trace_result(
+        Steps, Msg, fun identity/1, <<>>, [<<"unused var">>, <<"deprecated">>]
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual([<<"unused var">>, <<"deprecated">>], maps:get(<<"warnings">>, Decoded)).
+
+encode_trace_result_empty_warnings_omitted_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"tr-007">>, undefined, false),
+    Result = beamtalk_repl_protocol:encode_trace_result([], Msg, fun identity/1, <<>>, []),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
+
+encode_trace_result_legacy_format_test() ->
+    Msg = make_msg(<<"eval">>, undefined, undefined, true),
+    Steps = [{<<"1">>, 1}, {<<"2">>, 2}],
+    Result = beamtalk_repl_protocol:encode_trace_result(Steps, Msg, fun identity/1, <<>>, []),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(error, maps:find(<<"status">>, Decoded)),
+    StepList = maps:get(<<"steps">>, Decoded),
+    ?assertEqual(2, length(StepList)).
+
+encode_trace_result_legacy_with_output_test() ->
+    Msg = make_msg(<<"eval">>, undefined, undefined, true),
+    Steps = [{<<"Transcript show: 'x'">>, nil}],
+    Result = beamtalk_repl_protocol:encode_trace_result(
+        Steps, Msg, fun identity/1, <<"x\n">>, []
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(<<"x\n">>, maps:get(<<"output">>, Decoded)).
+
+encode_trace_result_applies_term_to_json_test() ->
+    Msg = make_msg(<<"eval">>, <<"tr-010">>, undefined, false),
+    %% TermToJson converts atom to binary
+    Steps = [{<<"some_atom">>, hello}],
+    Result = beamtalk_repl_protocol:encode_trace_result(
+        Steps, Msg, fun(A) -> atom_to_binary(A, utf8) end, <<>>, []
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    [Step] = maps:get(<<"steps">>, Decoded),
+    ?assertEqual(<<"hello">>, maps:get(<<"value">>, Step)).

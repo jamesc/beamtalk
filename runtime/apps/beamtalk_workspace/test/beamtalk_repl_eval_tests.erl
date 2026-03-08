@@ -1241,3 +1241,43 @@ verify_class_present_empty_classes_test() ->
         {error, {class_not_found, 'Counter', "/some/path.bt", []}},
         Result
     ).
+
+%%% do_eval_trace tests (BT-1238)
+
+do_eval_trace_increments_counter_test() ->
+    %% do_eval_trace should increment the eval counter even on compile error
+    State = beamtalk_repl_state:new(undefined, 0),
+    InitialCounter = beamtalk_repl_state:get_eval_counter(State),
+    {error, _, _, _, NewState} = beamtalk_repl_eval:do_eval_trace("1 + 2", State),
+    ?assertEqual(InitialCounter + 1, beamtalk_repl_state:get_eval_counter(NewState)).
+
+do_eval_trace_compile_error_without_server_test() ->
+    %% Without compiler server, compile_expression_trace returns a compile_error
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:do_eval_trace("1 + 2", State),
+    ?assertMatch({error, {compile_error, _}, _, _, _}, Result).
+
+do_eval_trace_compile_error_includes_empty_output_test() ->
+    %% Output should be <<>> when compilation fails before IO capture starts
+    State = beamtalk_repl_state:new(undefined, 0),
+    {error, _, Output, _, _} = beamtalk_repl_eval:do_eval_trace("1 + 2", State),
+    ?assertEqual(<<>>, Output).
+
+do_eval_trace_compile_error_includes_empty_warnings_test() ->
+    %% Warnings should be [] when compilation fails
+    State = beamtalk_repl_state:new(undefined, 0),
+    {error, _, _, Warnings, _} = beamtalk_repl_eval:do_eval_trace("1 + 2", State),
+    ?assertEqual([], Warnings).
+
+do_eval_trace_preserves_existing_bindings_on_error_test() ->
+    %% Existing bindings must be preserved when trace eval fails
+    State = beamtalk_repl_state:new(undefined, 0),
+    Bindings = #{x => 10, y => 20},
+    StateWithBindings = beamtalk_repl_state:set_bindings(Bindings, State),
+    {error, _, _, _, NewState} = beamtalk_repl_eval:do_eval_trace(
+        "z := 99", StateWithBindings
+    ),
+    FinalBindings = beamtalk_repl_state:get_bindings(NewState),
+    ?assertEqual(10, maps:get(x, FinalBindings)),
+    ?assertEqual(20, maps:get(y, FinalBindings)),
+    ?assertEqual(false, maps:is_key(z, FinalBindings)).
