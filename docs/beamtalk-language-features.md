@@ -1482,7 +1482,7 @@ rest := result at: 2        // => Queue containing [2]
 ```beamtalk
 q peek                        // => front element without removing (raises empty_queue if empty)
 q isEmpty                     // => true or false
-q size                        // => number of elements
+q size                        // => number of elements (O(n))
 ```
 
 ---
@@ -1506,7 +1506,7 @@ c incrementBy: 5               // atomically add N, return new value
 c decrement                    // atomically subtract 1, return new value
 c decrementBy: 3               // atomically subtract N, return new value
 c value                        // instantaneous read; may observe a stale value under concurrent updates or reset
-c reset                        // set to 0, return nil
+c reset                        // set to 0, return nil (not atomic with concurrent increments/decrements)
 c delete                       // destroy the backing ETS table
 ```
 
