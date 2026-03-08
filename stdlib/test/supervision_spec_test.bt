@@ -99,6 +99,10 @@ TestCase subclass: SupervisionSpecTest
     child := spec childSpec
     self assert: (child at: #restart) equals: #permanent
 
+  testChildSpecNilActorClassRaisesError =>
+    spec := SupervisionSpec new
+    self should: [spec childSpec] raise: #user_error
+
   // === Actor supervision defaults ===
   testActorSupervisionPolicyDefault =>
     self assert: Counter supervisionPolicy equals: #temporary

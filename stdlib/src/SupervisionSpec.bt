@@ -53,12 +53,12 @@ Value subclass: SupervisionSpec
     (self withId: anId) withRestart: policy
 
   /// Return a new spec with id and args overridden.
-  withId: anId :: Symbol withArgs: aDict :: Dictionary -> SupervisionSpec =>
-    (self withId: anId) withArgs: aDict
+  withId: anId :: Symbol withArgs: someArgs -> SupervisionSpec =>
+    (self withId: anId) withArgs: someArgs
 
   /// Return a new spec with id, restart, and args all overridden.
-  withId: anId :: Symbol withRestart: policy :: Symbol withArgs: aDict :: Dictionary -> SupervisionSpec =>
-    ((self withId: anId) withRestart: policy) withArgs: aDict
+  withId: anId :: Symbol withRestart: policy :: Symbol withArgs: someArgs -> SupervisionSpec =>
+    ((self withId: anId) withRestart: policy) withArgs: someArgs
 
   // === OTP child spec construction ===
 
@@ -74,6 +74,9 @@ Value subclass: SupervisionSpec
   /// - `start`: `#[actorClass, startFn, startArgs]` — an intermediate Array
   ///   that the runtime translates into the MFA tuple OTP expects
   childSpec -> Dictionary =>
+    self actorClass isNil ifTrue: [
+      self error: "SupervisionSpec>>childSpec: actorClass must not be nil"
+    ]
     childId := self id isNil ifTrue: [self actorClass name] ifFalse: [self id]
     startFn := self args isNil ifTrue: [#spawn] ifFalse: [#spawnWith:]
     startArgs := self args isNil ifTrue: [#()] ifFalse: [#(self args)]
