@@ -1602,6 +1602,14 @@ mod tests {
     #[test]
     #[serial_test::serial(cwd)]
     fn test_find_package_root_relative_path_does_not_return_empty() {
+        // RAII guard so CWD is restored even if an assertion panics.
+        struct CwdGuard(std::path::PathBuf);
+        impl Drop for CwdGuard {
+            fn drop(&mut self) {
+                std::env::set_current_dir(&self.0).unwrap();
+            }
+        }
+
         let temp = tempfile::TempDir::new().unwrap();
 
         // Write a beamtalk.toml at the temp dir root so that "".join("beamtalk.toml")
@@ -1612,21 +1620,21 @@ mod tests {
         )
         .unwrap();
 
-        let original_dir = std::env::current_dir().unwrap();
+        let _cwd_guard = CwdGuard(std::env::current_dir().unwrap());
         std::env::set_current_dir(temp.path()).unwrap();
 
         // Single-component relative paths: parent is "" which would resolve
-        // "beamtalk.toml" in the CWD without the guard.
+        // "beamtalk.toml" in the CWD without the guard. With the guard they
+        // must return None — the CWD root is handled by the canonical_path(".")
+        // check in run_tests, not by walking relative path ancestors.
         for rel in &["test", "src", "lib"] {
             let result = find_package_root(Utf8Path::new(rel));
             assert!(
-                result.as_ref().is_none_or(|r| !r.as_str().is_empty()),
-                "find_package_root(\"{rel}\") returned Some(\"\"), \
-                 which would cause build to fail with \"Path '' does not exist\""
+                result.is_none(),
+                "find_package_root(\"{rel}\") should return None for single-component \
+                 relative paths, got {result:?}"
             );
         }
-
-        std::env::set_current_dir(&original_dir).unwrap();
     }
 
     #[test]
