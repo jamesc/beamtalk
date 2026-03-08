@@ -685,8 +685,6 @@ handle_has_method(_) -> false.
 -spec 'cwd'() -> binary().
 'cwd'() ->
     case file:get_cwd() of
-        {ok, Dir} when is_binary(Dir) ->
-            Dir;
         {ok, Dir} ->
             unicode:characters_to_binary(Dir);
         {error, Reason} ->
