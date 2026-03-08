@@ -15,6 +15,21 @@ use crate::ast::Expression;
 use crate::docvec;
 
 impl CoreErlangGenerator {
+    /// Rejects destructuring assignments in REPL context (BT-1264).
+    ///
+    /// Destructuring works in compiled class methods and test-eval modules,
+    /// but the REPL's state-map threading model requires dedicated codegen
+    /// that hasn't been implemented yet.
+    fn reject_repl_destructure(expr: &Expression) -> Result<()> {
+        if matches!(expr, Expression::DestructureAssignment { .. }) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "Destructuring assignment is not yet supported in the REPL".to_string(),
+                location: format!("{:?}", expr.span()),
+            });
+        }
+        Ok(())
+    }
+
     /// Generates a REPL evaluation module (with workspace bindings).
     ///
     /// Creates a module with a single `eval/1` function that evaluates
@@ -39,16 +54,7 @@ impl CoreErlangGenerator {
         &mut self,
         expression: &Expression,
     ) -> Result<Document<'static>> {
-        // Destructuring assignments are not yet supported in the REPL.
-        // They work in compiled class methods and test-eval modules, but the REPL's
-        // state-map threading model requires dedicated codegen (BT-1264).
-        if matches!(expression, Expression::DestructureAssignment { .. }) {
-            return Err(CodeGenError::UnsupportedFeature {
-                feature: "Destructuring assignment in REPL (use in class methods instead)"
-                    .to_string(),
-                location: format!("{:?}", expression.span()),
-            });
-        }
+        Self::reject_repl_destructure(expression)?;
 
         let previous_is_repl_mode = self.is_repl_mode;
         self.context = CodeGenContext::Repl;
@@ -93,6 +99,8 @@ impl CoreErlangGenerator {
         expression: &Expression,
         source_text: &str,
     ) -> Result<Document<'static>> {
+        Self::reject_repl_destructure(expression)?;
+
         self.push_scope();
         self.bind_var("__bindings__", "Bindings");
 
@@ -198,6 +206,8 @@ impl CoreErlangGenerator {
         source_text: &str,
         prev_steps: &[(String, String)],
     ) -> Result<(Document<'static>, Document<'static>)> {
+        Self::reject_repl_destructure(expr)?;
+
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
                 let var_name = id.name.clone();
@@ -432,14 +442,7 @@ impl CoreErlangGenerator {
         expr: &Expression,
         result_var: &str,
     ) -> Result<Document<'static>> {
-        // Destructuring assignments not yet supported in REPL multi-expression mode
-        if matches!(expr, Expression::DestructureAssignment { .. }) {
-            return Err(CodeGenError::UnsupportedFeature {
-                feature: "Destructuring assignment in REPL (use in class methods instead)"
-                    .to_string(),
-                location: format!("{:?}", expr.span()),
-            });
-        }
+        Self::reject_repl_destructure(expr)?;
 
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
@@ -496,14 +499,8 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<(Document<'static>, Document<'static>)> {
-        // Destructuring assignments not yet supported in REPL
-        if matches!(expr, Expression::DestructureAssignment { .. }) {
-            return Err(CodeGenError::UnsupportedFeature {
-                feature: "Destructuring assignment in REPL (use in class methods instead)"
-                    .to_string(),
-                location: format!("{:?}", expr.span()),
-            });
-        }
+        Self::reject_repl_destructure(expr)?;
+
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
                 let var_name = id.name.clone();
