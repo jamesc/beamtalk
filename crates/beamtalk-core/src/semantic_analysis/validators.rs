@@ -1361,10 +1361,11 @@ fn check_children_array_for_policy(
         return;
     };
     for element in elements {
-        let Expression::Identifier(id) = element else {
-            continue;
+        let (class_name, span) = match element {
+            Expression::ClassReference { name, span } => (name.name.as_str(), *span),
+            Expression::Identifier(id) => (id.name.as_str(), id.span),
+            _ => continue,
         };
-        let class_name = id.name.as_str();
         // Only warn for Actor subclasses visible in the hierarchy
         if !hierarchy.is_actor_subclass(class_name) {
             continue;
@@ -1382,7 +1383,7 @@ fn check_children_array_for_policy(
                         "Actor subclass `{class_name}` has no explicit `class supervisionPolicy` \
                          override; default is `#temporary` (not restarted on crash)"
                     ),
-                    id.span,
+                    span,
                 )
                 .with_hint(
                     "Add `class supervisionPolicy -> Symbol => #permanent` (or `#transient`) \
@@ -2650,6 +2651,138 @@ mod tests {
             diagnostics[0].message.contains("doVoid"),
             "Expected selector in message, got: {:?}",
             diagnostics[0].message
+        );
+    }
+
+    // ── BT-1218: supervisionPolicy override validation ────────────────────────
+
+    /// Valid `#permanent` override — no diagnostics.
+    #[test]
+    fn supervision_policy_permanent_is_valid() {
+        let src =
+            "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #permanent\n  go => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_supervision_policy_override(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for #permanent, got: {diagnostics:?}"
+        );
+    }
+
+    /// Valid `#transient` override — no diagnostics.
+    #[test]
+    fn supervision_policy_transient_is_valid() {
+        let src =
+            "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #transient\n  go => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_supervision_policy_override(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for #transient, got: {diagnostics:?}"
+        );
+    }
+
+    /// Valid `#temporary` override — no diagnostics.
+    #[test]
+    fn supervision_policy_temporary_is_valid() {
+        let src =
+            "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #temporary\n  go => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_supervision_policy_override(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for #temporary, got: {diagnostics:?}"
+        );
+    }
+
+    /// Invalid symbol `#restart` — error diagnostic.
+    #[test]
+    fn supervision_policy_invalid_symbol_is_error() {
+        let src =
+            "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #restart\n  go => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_supervision_policy_override(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for #restart, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(
+            diagnostics[0].message.contains("restart"),
+            "Expected 'restart' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// Multi-expression body is skipped (no static check possible).
+    #[test]
+    fn supervision_policy_multi_expr_body_is_skipped() {
+        let src =
+            "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol =>\n    x := #invalid\n    x\n  go => nil";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_supervision_policy_override(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for multi-expr body, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-1218: children supervision policy warning ──────────────────────────
+
+    /// Actor subclass in children array with no policy override → warning.
+    #[test]
+    fn children_actor_without_policy_warns() {
+        let src = "Actor subclass: Worker\n  go => nil\nSupervisor subclass: MySup\n  class children => #[Worker]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for Worker with no policy, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("Worker"),
+            "Expected 'Worker' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// Actor subclass with explicit policy override → no warning.
+    #[test]
+    fn children_actor_with_policy_no_warning() {
+        let src = "Actor subclass: Worker\n  class supervisionPolicy -> Symbol => #permanent\n  go => nil\nSupervisor subclass: MySup\n  class children => #[Worker]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warning for Worker with #permanent policy, got: {diagnostics:?}"
         );
     }
 }
