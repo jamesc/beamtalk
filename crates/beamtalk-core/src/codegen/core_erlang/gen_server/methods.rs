@@ -1058,6 +1058,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_register_class(
         &mut self,
         module: &Module,
+        synthesize_supervision_spec: bool,
     ) -> Result<Document<'static>> {
         // Skip if no class definitions
         if module.classes.is_empty() {
@@ -1246,12 +1247,7 @@ impl CoreErlangGenerator {
                         "'meta' => ",
                         // include_standalone: true — standalone methods included in BuilderState.meta
                         // so that init/1 can register their return types during on_load.
-                        Self::build_meta_map_doc(
-                            class,
-                            module,
-                            true,
-                            self.synthesize_supervision_spec
-                        ),
+                        Self::build_meta_map_doc(class, module, true, synthesize_supervision_spec),
                         if is_non_constructible {
                             docvec![",", line(), "'isConstructible' => 'false'"]
                         } else {
@@ -1867,6 +1863,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_meta_function(
         &self,
         module: &Module,
+        synthesize_supervision_spec: bool,
     ) -> Result<Document<'static>> {
         let Some(class) = module.classes.first() else {
             return Ok(Document::Nil);
@@ -1876,7 +1873,7 @@ impl CoreErlangGenerator {
             "'__beamtalk_meta'/0 = fun () ->\n",
             "    ",
             // include_standalone: false — standalone methods are runtime-patched, not static
-            Self::build_meta_map_doc(class, module, false, self.synthesize_supervision_spec),
+            Self::build_meta_map_doc(class, module, false, synthesize_supervision_spec),
             "\n\n",
         ])
     }
@@ -2108,7 +2105,7 @@ impl CoreErlangGenerator {
                 0,
                 Some("SupervisionSpec".to_string()),
                 vec![],
-                false,
+                sealed,
             ));
         }
         entries
@@ -2237,7 +2234,7 @@ mod tests {
             file_leading_comments: vec![],
             file_trailing_comments: Vec::new(),
         };
-        let doc = generator.generate_register_class(&module).unwrap();
+        let doc = generator.generate_register_class(&module, false).unwrap();
         assert_eq!(
             doc.to_pretty_string(),
             "",
@@ -2256,7 +2253,7 @@ mod tests {
             file_leading_comments: vec![],
             file_trailing_comments: Vec::new(),
         };
-        let doc = generator.generate_register_class(&module).unwrap();
+        let doc = generator.generate_register_class(&module, false).unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("'Counter'"),

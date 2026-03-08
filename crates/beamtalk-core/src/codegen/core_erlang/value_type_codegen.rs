@@ -396,11 +396,12 @@ impl CoreErlangGenerator {
         }
 
         // BT-246: Register value type class with the class system for dynamic dispatch
-        docs.push(self.generate_register_class(module)?);
+        // Value types never need supervisionSpec synthesis (they are not actors).
+        docs.push(self.generate_register_class(module, false)?);
         docs.push(Document::Str("\n"));
 
         // BT-942: Generate __beamtalk_meta/0 for zero-process reflection
-        docs.push(self.generate_meta_function(module)?);
+        docs.push(self.generate_meta_function(module, false)?);
 
         // Module end
         docs.push(Document::Str("end\n"));

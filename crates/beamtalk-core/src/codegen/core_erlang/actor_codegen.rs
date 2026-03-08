@@ -45,7 +45,6 @@ impl CoreErlangGenerator {
         let class_method_export_doc = Self::build_class_method_export_doc(module);
         // BT-1218: Synthesize class_supervisionSpec for Actor subclasses that don't define it
         let needs_spec_synthesis = Self::needs_supervision_spec_synthesis(module);
-        self.synthesize_supervision_spec = needs_spec_synthesis;
         let supervision_spec_export: Document<'static> = if needs_spec_synthesis {
             Document::Str(", 'class_supervisionSpec'/2")
         } else {
@@ -225,9 +224,9 @@ impl CoreErlangGenerator {
         if !module.classes.is_empty() {
             // BT-942: Generate __beamtalk_meta/0 for zero-process reflection
             docs.push(Document::Str("\n"));
-            docs.push(self.generate_meta_function(module)?);
+            docs.push(self.generate_meta_function(module, needs_spec_synthesis)?);
             // BT-218: Generate register_class/0 for class system registration
-            docs.push(self.generate_register_class(module)?);
+            docs.push(self.generate_register_class(module, needs_spec_synthesis)?);
         }
 
         // Module end
@@ -480,7 +479,9 @@ impl CoreErlangGenerator {
     /// Synthesis is skipped when the class already defines `class supervisionSpec`
     /// explicitly (e.g. the `Actor` base class itself), either as an inline class
     /// method or as a standalone class-side method definition.
-    fn needs_supervision_spec_synthesis(module: &Module) -> bool {
+    pub(in crate::codegen::core_erlang) fn needs_supervision_spec_synthesis(
+        module: &Module,
+    ) -> bool {
         let Some(class) = module.classes.first() else {
             return false;
         };
