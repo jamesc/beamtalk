@@ -223,7 +223,23 @@ impl CoreErlangGenerator {
                                 return Ok(Some(doc));
                             }
                         }
-                        let doc = self.generate_block_value_call(receiver, arguments)?;
+                        // Fast path: block literal receiver → fast inline apply
+                        if matches!(receiver, Expression::Block(_)) {
+                            let doc = self.generate_block_value_call(receiver, arguments)?;
+                            return Ok(Some(doc));
+                        }
+                        // BT-1260: Compile-time Erlang FFI receiver (e.g. `(Erlang maps)`) →
+                        // fall through to Erlang interop handler (step 7).
+                        if Self::is_erlang_ffi_receiver(receiver) {
+                            return Ok(None);
+                        }
+                        // BT-1260: Unknown receiver → emit runtime is_function guard with
+                        // beamtalk_primitive:send fallback (mirrors the `value` unary fix).
+                        let doc = self.generate_value_keyword_guard(
+                            receiver,
+                            arguments,
+                            selector_name.as_str(),
+                        )?;
                         Ok(Some(doc))
                     }
 
@@ -460,6 +476,116 @@ impl CoreErlangGenerator {
             ")",
         ];
         Ok(doc)
+    }
+
+    /// BT-1260: Returns true if `expr` is a compile-time Erlang FFI proxy expression.
+    ///
+    /// Matches `(Erlang module_name)` — i.e., a `MessageSend` whose inner receiver is
+    /// `ClassReference("Erlang")` and whose selector is a unary module name.  These
+    /// expressions should **not** be treated as blocks by the `value:` handler; instead
+    /// they fall through to `try_handle_erlang_interop` (step 7 of dispatch).
+    fn is_erlang_ffi_receiver(expr: &Expression) -> bool {
+        if let Expression::MessageSend {
+            receiver: inner_receiver,
+            selector: MessageSelector::Unary(_),
+            ..
+        } = expr
+        {
+            if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
+                return name.name == "Erlang";
+            }
+        }
+        false
+    }
+
+    /// BT-1260: Generates a runtime `erlang:is_function/1` guard for keyword `value:` sends.
+    ///
+    /// When the receiver is not a compile-time-known block or Erlang FFI expression,
+    /// emits a runtime check:
+    ///
+    /// ```erlang
+    /// let _ValRecv = <recv> in
+    /// let _ValArg0 = <arg0> in
+    /// case call 'erlang':'is_function'(_ValRecv) of
+    ///   'true' when 'true' -> apply _ValRecv (_ValArg0)
+    ///   'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv, 'value:', [_ValArg0])
+    /// end
+    /// ```
+    ///
+    /// This mirrors the runtime guard emitted for the unary `value` case (BT-335).
+    fn generate_value_keyword_guard(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+        selector_name: &str,
+    ) -> Result<Document<'static>> {
+        let recv_var = self.fresh_temp_var("ValRecv");
+        let recv_code = self.expression_doc(receiver)?;
+
+        let mut arg_vars: Vec<String> = Vec::new();
+        let mut parts: Vec<Document<'static>> = Vec::new();
+
+        parts.push(docvec![
+            "let ",
+            Document::String(recv_var.clone()),
+            " = ",
+            recv_code,
+            " in ",
+        ]);
+
+        for arg in arguments {
+            let arg_var = self.fresh_temp_var("ValArg");
+            let arg_code = self.expression_doc(arg)?;
+            parts.push(docvec![
+                "let ",
+                Document::String(arg_var.clone()),
+                " = ",
+                arg_code,
+                " in ",
+            ]);
+            arg_vars.push(arg_var);
+        }
+
+        let apply_args = {
+            let mut a: Vec<Document<'static>> = Vec::new();
+            for (i, v) in arg_vars.iter().enumerate() {
+                if i > 0 {
+                    a.push(Document::Str(", "));
+                }
+                a.push(Document::String(v.clone()));
+            }
+            Document::Vec(a)
+        };
+
+        let send_list = {
+            let mut a: Vec<Document<'static>> = vec![Document::Str("[")];
+            for (i, v) in arg_vars.iter().enumerate() {
+                if i > 0 {
+                    a.push(Document::Str(", "));
+                }
+                a.push(Document::String(v.clone()));
+            }
+            a.push(Document::Str("]"));
+            Document::Vec(a)
+        };
+
+        parts.push(docvec![
+            "case call 'erlang':'is_function'(",
+            Document::String(recv_var.clone()),
+            ") of 'true' when 'true' -> apply ",
+            Document::String(recv_var.clone()),
+            " (",
+            apply_args,
+            ") 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
+            Document::String(recv_var),
+            ", '",
+            Document::String(selector_name.to_string()),
+            "', ",
+            send_list,
+            ") end",
+        ]);
+
+        Ok(Document::Vec(parts))
     }
 
     /// BT-851: Generates a Tier 2 stateful block value call (ADR 0041 Phase 0).
