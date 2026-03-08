@@ -460,9 +460,53 @@ fn diagnostics_ok_response(diagnostics: &[DiagInfo]) -> Term {
     ]))
 }
 
-/// Build a response map for a compilation error.
+/// Build a response map for a simple string error (protocol-level errors, not diagnostics).
 fn error_response(diagnostics: &[String]) -> Term {
-    let diag_terms: Vec<Term> = diagnostics.iter().map(|d| binary(d)).collect();
+    let diag_terms: Vec<Term> = diagnostics
+        .iter()
+        .map(|d| Term::from(Map::from([(atom("message"), binary(d))])))
+        .collect();
+    Term::from(Map::from([
+        (atom("status"), atom("error")),
+        (atom("diagnostics"), Term::from(List::from(diag_terms))),
+    ]))
+}
+
+/// Compute 1-based line number for a byte offset in source text.
+fn byte_offset_to_line(source: &str, offset: u32) -> u32 {
+    let offset_clamped = (offset as usize).min(source.len());
+    let newlines = source[..offset_clamped]
+        .chars()
+        .filter(|c| *c == '\n')
+        .count();
+    u32::try_from(newlines)
+        .unwrap_or(u32::MAX)
+        .saturating_add(1)
+}
+
+/// Build a response map for compile-time diagnostic errors.
+/// Each diagnostic entry includes `message`, `line` (1-based), and optionally `hint`.
+fn diagnostic_error_response(
+    diagnostics: &[&beamtalk_core::source_analysis::Diagnostic],
+    source: &str,
+) -> Term {
+    let diag_terms: Vec<Term> = diagnostics
+        .iter()
+        .map(|d| {
+            let line = byte_offset_to_line(source, d.span.start());
+            let line_term = Term::from(eetf::FixInteger::from(
+                i32::try_from(line).unwrap_or(i32::MAX),
+            ));
+            let mut map: std::collections::HashMap<Term, Term> = std::collections::HashMap::from([
+                (atom("message"), binary(d.message.as_ref())),
+                (atom("line"), line_term),
+            ]);
+            if let Some(ref hint) = d.hint {
+                map.insert(atom("hint"), binary(hint.as_ref()));
+            }
+            Term::from(Map::from(map))
+        })
+        .collect();
     Term::from(Map::from([
         (atom("status"), atom("error")),
         (atom("diagnostics"), Term::from(List::from(diag_terms))),
@@ -587,10 +631,9 @@ fn handle_compile_expression(request: &Map) -> Term {
     all_diagnostics.extend(primitive_diags);
 
     // Separate errors and warnings
-    let errors: Vec<String> = all_diagnostics
+    let error_diags: Vec<&beamtalk_core::source_analysis::Diagnostic> = all_diagnostics
         .iter()
         .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Error))
-        .map(|d| d.message.to_string())
         .collect();
 
     let warnings: Vec<String> = all_diagnostics
@@ -607,8 +650,8 @@ fn handle_compile_expression(request: &Map) -> Term {
         .map(|d| d.message.to_string())
         .collect();
 
-    if !errors.is_empty() {
-        return error_response(&errors);
+    if !error_diags.is_empty() {
+        return diagnostic_error_response(&error_diags, &source);
     }
 
     // BT-571: If the parsed module contains class definitions, use compile path
@@ -817,11 +860,14 @@ fn handle_compile(request: &Map) -> Term {
         all_diagnostics.extend(stdlib_shadow_diags);
     }
 
-    let (errors, mut warnings) = partition_diagnostics(&all_diagnostics);
+    let error_diags: Vec<&beamtalk_core::source_analysis::Diagnostic> = all_diagnostics
+        .iter()
+        .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Error))
+        .collect();
+    let (_, mut warnings) = partition_diagnostics(&all_diagnostics);
 
-    if !errors.is_empty() {
-        let error_msgs: Vec<String> = errors.iter().map(|e| e.message.clone()).collect();
-        return error_response(&error_msgs);
+    if !error_diags.is_empty() {
+        return diagnostic_error_response(&error_diags, &source);
     }
 
     // BT-571: Merge standalone method definitions into their target classes
@@ -1649,10 +1695,10 @@ mod property_tests {
             }
         }
 
-        /// Property 3: Diagnostic entries are non-empty valid UTF-8 strings.
+        /// Property 3: Diagnostic entries are structured maps with a non-empty message.
         ///
-        /// Every diagnostic in an error response must be a non-empty binary
-        /// that decodes to valid UTF-8.
+        /// BT-1235: Every diagnostic in an error response must be a Map with a
+        /// non-empty `message` binary field (and optionally `line` and `hint`).
         #[test]
         fn diagnostics_are_nonempty_strings(input in "\\PC{0,500}") {
             for response in [
@@ -1662,24 +1708,40 @@ mod property_tests {
                 if response_status(&response).as_deref() == Some("error") {
                     if let Some(diags) = response_diagnostics(&response) {
                         for (i, diag_term) in diags.elements.iter().enumerate() {
-                            if let Term::Binary(b) = diag_term {
+                            let Term::Map(diag_map) = diag_term else {
+                                prop_assert!(
+                                    false,
+                                    "Diagnostic {} is not a Map term for input: {:?}",
+                                    i,
+                                    input,
+                                );
+                                continue;
+                            };
+                            let msg_term = diag_map.map.get(&atom("message"));
+                            prop_assert!(
+                                msg_term.is_some(),
+                                "Diagnostic {} has no 'message' field for input: {:?}",
+                                i,
+                                input,
+                            );
+                            if let Some(Term::Binary(b)) = msg_term {
                                 let text = String::from_utf8(b.bytes.clone());
                                 prop_assert!(
                                     text.is_ok(),
-                                    "Diagnostic {} is not valid UTF-8 for input: {:?}",
+                                    "Diagnostic {} message is not valid UTF-8 for input: {:?}",
                                     i,
                                     input,
                                 );
                                 prop_assert!(
                                     !text.unwrap().is_empty(),
-                                    "Diagnostic {} is empty for input: {:?}",
+                                    "Diagnostic {} message is empty for input: {:?}",
                                     i,
                                     input,
                                 );
                             } else {
                                 prop_assert!(
                                     false,
-                                    "Diagnostic {} is not a Binary term for input: {:?}",
+                                    "Diagnostic {} message is not a Binary for input: {:?}",
                                     i,
                                     input,
                                 );

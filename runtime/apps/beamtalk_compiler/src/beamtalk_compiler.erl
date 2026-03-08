@@ -37,12 +37,13 @@
 %% Returns `{ok, CoreErlang, Warnings}' for expressions,
 %% `{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
 %% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
-%% or `{error, Diagnostics}' on failure.
+%% or `{error, Diagnostics}' on failure, where each diagnostic is a map with
+%% `message', `line' (1-based), and optionally `hint'.
 -spec compile_expression(binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
-    | {error, [binary()]}.
+    | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars).
 
@@ -54,7 +55,7 @@ compile_expression(Source, ModuleName, KnownVars) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
-    | {error, [binary()]}.
+    | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars, Options) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars, Options).
 
@@ -68,7 +69,7 @@ compile_expression(Source, ModuleName, KnownVars, Options) ->
 %% Returns `{ok, #{core_erlang, module_name, classes, warnings}}' or
 %% `{error, Diagnostics}'.
 -spec compile(binary(), map()) ->
-    {ok, map()} | {error, [binary()]}.
+    {ok, map()} | {error, [map()]}.
 compile(Source, Options) ->
     beamtalk_compiler_server:compile(Source, Options).
 

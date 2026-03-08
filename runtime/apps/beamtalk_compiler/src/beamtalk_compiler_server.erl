@@ -65,12 +65,13 @@ start_link(Args) ->
 %% Returns `{ok, CoreErlang, Warnings}' for expressions,
 %% `{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
 %% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
-%% or `{error, Diagnostics}' on failure.
+%% or `{error, Diagnostics}' on failure, where each diagnostic is a map with
+%% `message', `line' (1-based), and optionally `hint'.
 -spec compile_expression(binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
-    | {error, [binary()]}.
+    | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
     compile_expression(Source, ModuleName, KnownVars, #{}).
 
@@ -82,7 +83,7 @@ compile_expression(Source, ModuleName, KnownVars) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
-    | {error, [binary()]}.
+    | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars, Options) ->
     gen_server:call(
         ?MODULE, {compile_expression, Source, ModuleName, KnownVars, Options}, 30000
@@ -92,7 +93,7 @@ compile_expression(Source, ModuleName, KnownVars, Options) ->
 %% Options: #{path => binary(), stdlib_mode => boolean(), workspace_mode => boolean()}
 %% Returns `{ok, #{core_erlang, module_name, classes, warnings}}' or `{error, Diagnostics}'.
 -spec compile(binary(), map()) ->
-    {ok, map()} | {error, [binary()]}.
+    {ok, map()} | {error, [map()]}.
 compile(Source, Options) ->
     gen_server:call(?MODULE, {compile, Source, Options}, 30000).
 

@@ -128,8 +128,14 @@ websocket_info(
     Msg =/= undefined
 ->
     WrappedReason = beamtalk_repl_errors:ensure_structured_error(Reason),
+    Location = extract_compile_error_location(Reason),
     Response = beamtalk_repl_protocol:encode_error(
-        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1, Output, Warnings
+        WrappedReason,
+        Msg,
+        fun beamtalk_repl_json:format_error_message/1,
+        Output,
+        Warnings,
+        Location
     ),
     {[{text, Response}], State#ws_state{
         pending_eval = undefined,
@@ -586,6 +592,24 @@ encode_stop_info(#{pid := Pid, class := Class, reason := Reason}) ->
         <<"pid">> => list_to_binary(pid_to_list(Pid)),
         <<"reason">> => TruncatedReason
     }.
+
+%% @private
+%% BT-1235: Extract line/hint metadata from a compile error for inclusion in JSON response.
+%% Returns a map with `<<"line">>' and optionally `<<"hint">>' keys, or an empty map.
+-spec extract_compile_error_location(term()) -> map().
+extract_compile_error_location({compile_error, [DiagMap | _]}) when is_map(DiagMap) ->
+    case maps:find(line, DiagMap) of
+        {ok, Line} when is_integer(Line) ->
+            Base = #{<<"line">> => Line},
+            case maps:find(hint, DiagMap) of
+                {ok, Hint} -> Base#{<<"hint">> => Hint};
+                error -> Base
+            end;
+        _ ->
+            #{}
+    end;
+extract_compile_error_location(_) ->
+    #{}.
 
 %% @private
 %% Truncate binary to at most MaxBytes, respecting UTF-8 boundaries.

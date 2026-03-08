@@ -53,12 +53,13 @@ open(BinaryPath) ->
 %% Returns `{ok, CoreErlang, Warnings}' on success,
 %% `{ok, class_definition, ClassInfo}' for inline class definitions (BT-571),
 %% `{ok, method_definition, MethodInfo}' for standalone method definitions (BT-571),
-%% or `{error, Diagnostics}' on failure.
+%% or `{error, Diagnostics}' on failure, where each diagnostic is a map with
+%% `message', `line' (1-based), and optionally `hint'.
 -spec compile_expression(port(), binary(), binary(), [binary()]) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
-    | {error, [binary()]}.
+    | {error, [map()]}.
 compile_expression(Port, Source, ModuleName, KnownVars) ->
     compile_expression(Port, Source, ModuleName, KnownVars, #{}).
 
@@ -75,7 +76,7 @@ compile_expression(Port, Source, ModuleName, KnownVars) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
-    | {error, [binary()]}.
+    | {error, [map()]}.
 compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
     SuperclassIndex = maps:get(class_superclass_index, Options, #{}),
     ModuleIndex = maps:get(class_module_index, Options, #{}),
@@ -116,21 +117,21 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
                     catch
                         error:badarg ->
                             ?LOG_ERROR("Compiler port decode error", #{port => Port}),
-                            {error, [<<"Compiler port response is malformed">>]}
+                            {error, [#{message => <<"Compiler port response is malformed">>}]}
                     end;
                 {Port, {exit_status, Status}} ->
                     ?LOG_ERROR("Compiler port exited", #{status => Status}),
-                    {error, [<<"Compiler port exited unexpectedly">>]}
+                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
             after 30000 ->
                 ?LOG_ERROR("Compiler port timeout", #{port => Port}),
                 %% Close the port so any late response cannot poison the next request.
                 catch port_close(Port),
-                {error, [<<"Compiler port timed out">>]}
+                {error, [#{message => <<"Compiler port timed out">>}]}
             end
     catch
         error:badarg ->
             ?LOG_ERROR("Compiler port not available", #{port => Port}),
-            {error, [<<"Compiler port is not available">>]}
+            {error, [#{message => <<"Compiler port is not available">>}]}
     end.
 
 %% @doc Resolve the type of an expression for REPL completion fallback (BT-1068).
@@ -192,12 +193,13 @@ close(Port) ->
 %%% Internal functions
 
 %% @private Handle ETF response from the compiler port.
-%% BT-571: Extended to handle class_definition and method_definition responses
+%% BT-571: Extended to handle class_definition and method_definition responses.
+%% BT-1235: Diagnostics in error responses are maps with `message', `line', and optional `hint'.
 -spec handle_response(map()) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
-    | {error, [binary()]}.
+    | {error, [map()]}.
 handle_response(
     #{
         status := ok,
@@ -244,10 +246,10 @@ handle_response(#{status := ok, core_erlang := CoreErlang, warnings := Warnings}
     PrettyCore = maybe_pretty_core(CoreErlang),
     {ok, PrettyCore, Warnings};
 handle_response(#{status := error, diagnostics := Diagnostics}) ->
-    {error, Diagnostics};
+    {error, normalize_diagnostics(Diagnostics)};
 handle_response(Other) ->
     ?LOG_ERROR("Unexpected compiler response", #{response => Other}),
-    {error, [<<"Unexpected compiler response">>]}.
+    {error, [#{message => <<"Unexpected compiler response">>}]}.
 
 %% @private Handle ETF response from a resolve_completion_type request.
 %% Returns `{ok, ClassName}' when the class name is a known existing atom,
@@ -261,6 +263,17 @@ handle_resolve_response(#{status := ok, class_name := ClassName}) when is_binary
     end;
 handle_resolve_response(_) ->
     {error, type_unknown}.
+
+%% @private Normalize a list of diagnostics to a uniform list of maps.
+%% BT-1235: The port now returns maps with `message', `line', `hint'.
+%% Plain binaries (legacy/protocol errors) are wrapped as `#{message => Bin}'.
+-spec normalize_diagnostics([term()]) -> [map()].
+normalize_diagnostics(Diagnostics) when is_list(Diagnostics) ->
+    [normalize_diagnostic(D) || D <- Diagnostics].
+
+-spec normalize_diagnostic(term()) -> map().
+normalize_diagnostic(D) when is_map(D) -> D;
+normalize_diagnostic(D) when is_binary(D) -> #{message => D}.
 
 %% Try to pretty-print textual Core Erlang using Erlang's core parser/pretty-printer.
 %% Falls back to the original Core Erlang text on any failure.

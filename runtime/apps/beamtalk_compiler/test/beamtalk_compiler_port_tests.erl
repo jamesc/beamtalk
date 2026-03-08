@@ -158,17 +158,27 @@ handle_response_method_definition_test() ->
     ?assertEqual(<<"increment">>, maps:get(selector, Info)),
     ?assertEqual(false, maps:get(is_class_method, Info)).
 
-handle_response_error_test() ->
+handle_response_error_binary_test() ->
+    %% Legacy: plain binary diagnostics are normalized to maps.
     Response = #{status => error, diagnostics => [<<"err">>]},
     ?assertEqual(
-        {error, [<<"err">>]},
+        {error, [#{message => <<"err">>}]},
+        beamtalk_compiler_port:handle_response(Response)
+    ).
+
+handle_response_error_structured_test() ->
+    %% BT-1235: Structured diagnostic maps with line and hint.
+    Diag = #{message => <<"Unused variable `x`">>, line => 2, hint => <<"prefix with _">>},
+    Response = #{status => error, diagnostics => [Diag]},
+    ?assertEqual(
+        {error, [Diag]},
         beamtalk_compiler_port:handle_response(Response)
     ).
 
 handle_response_unexpected_test() ->
     Response = #{bogus => true},
     ?assertMatch(
-        {error, [<<"Unexpected compiler response">>]},
+        {error, [#{message := <<"Unexpected compiler response">>}]},
         beamtalk_compiler_port:handle_response(Response)
     ).
 

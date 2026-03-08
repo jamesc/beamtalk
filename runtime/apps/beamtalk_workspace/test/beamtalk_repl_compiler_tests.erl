@@ -13,21 +13,43 @@
 format_diagnostics_empty_test() ->
     ?assertEqual(<<"Compilation failed">>, beamtalk_repl_compiler:format_formatted_diagnostics([])).
 
-format_diagnostics_single_test() ->
+format_diagnostics_single_binary_test() ->
     ?assertEqual(
         <<"Unexpected token">>,
         beamtalk_repl_compiler:format_formatted_diagnostics([<<"Unexpected token">>])
     ).
 
-format_diagnostics_multiple_test() ->
+format_diagnostics_multiple_binary_test() ->
     Result = beamtalk_repl_compiler:format_formatted_diagnostics([<<"Error 1">>, <<"Error 2">>]),
     ?assertEqual(<<"Error 1\n\nError 2">>, Result).
 
-format_diagnostics_three_test() ->
+format_diagnostics_three_binary_test() ->
     Result = beamtalk_repl_compiler:format_formatted_diagnostics([<<"A">>, <<"B">>, <<"C">>]),
     ?assert(binary:match(Result, <<"A">>) =/= nomatch),
     ?assert(binary:match(Result, <<"B">>) =/= nomatch),
     ?assert(binary:match(Result, <<"C">>) =/= nomatch).
+
+format_diagnostics_map_message_only_test() ->
+    %% BT-1235: structured diagnostic map without hint
+    Result = beamtalk_repl_compiler:format_formatted_diagnostics([
+        #{message => <<"Unused variable `x`">>, line => 3}
+    ]),
+    ?assertEqual(<<"Unused variable `x`">>, Result).
+
+format_diagnostics_map_with_hint_test() ->
+    %% BT-1235: structured diagnostic map with hint
+    Result = beamtalk_repl_compiler:format_formatted_diagnostics([
+        #{message => <<"Unused variable `x`">>, line => 3, hint => <<"prefix with _x">>}
+    ]),
+    ?assertEqual(<<"Unused variable `x`\nHint: prefix with _x">>, Result).
+
+format_diagnostics_map_multiple_test() ->
+    %% BT-1235: multiple structured diagnostics joined with double newline
+    Result = beamtalk_repl_compiler:format_formatted_diagnostics([
+        #{message => <<"Error 1">>, line => 1},
+        #{message => <<"Error 2">>, line => 2}
+    ]),
+    ?assertEqual(<<"Error 1\n\nError 2">>, Result).
 
 %%====================================================================
 %% is_internal_key/1

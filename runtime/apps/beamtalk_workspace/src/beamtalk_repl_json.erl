@@ -371,6 +371,9 @@ format_error_message(empty_expression) ->
     <<"Empty expression">>;
 format_error_message(timeout) ->
     <<"Request timed out">>;
+format_error_message({compile_error, [#{message := Msg} | _]}) ->
+    %% BT-1235: structured diagnostic list — use the first diagnostic's message
+    Msg;
 format_error_message({compile_error, Msg}) when is_binary(Msg) ->
     Msg;
 format_error_message({compile_error, Msg}) when is_list(Msg) ->

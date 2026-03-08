@@ -80,12 +80,25 @@ compile_for_codegen(SourceBin, ModNameBin, KnownVars) ->
         wrapped
     ).
 
-%% @doc Format pre-formatted diagnostics (miette output).
+%% @doc Format a list of diagnostics as a human-readable binary string.
+%% Handles both structured diagnostic maps (BT-1235) and plain binaries (legacy).
 -spec format_formatted_diagnostics(list()) -> binary().
 format_formatted_diagnostics([]) ->
     <<"Compilation failed">>;
 format_formatted_diagnostics(FormattedList) ->
-    iolist_to_binary(lists:join(<<"\n\n">>, FormattedList)).
+    Messages = [format_diagnostic_text(D) || D <- FormattedList],
+    iolist_to_binary(lists:join(<<"\n\n">>, Messages)).
+
+%% @private Format a single diagnostic for human-readable display.
+-spec format_diagnostic_text(term()) -> binary().
+format_diagnostic_text(D) when is_map(D) ->
+    Msg = maps:get(message, D, <<"Unknown error">>),
+    case maps:find(hint, D) of
+        {ok, Hint} -> iolist_to_binary([Msg, <<"\nHint: ">>, Hint]);
+        error -> Msg
+    end;
+format_diagnostic_text(D) when is_binary(D) ->
+    D.
 
 %% @doc Check if a binding key is internal (not a user variable).
 -spec is_internal_key(atom()) -> boolean().
@@ -204,7 +217,9 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
                 {ok, CoreErlang, Warnings} ->
                     compile_standard_expression(CoreErlang, Warnings);
                 {error, Diagnostics} ->
-                    {error, format_formatted_diagnostics(Diagnostics)}
+                    %% BT-1235: Return structured diagnostics (maps with message/line/hint)
+                    %% so callers can surface line numbers and hints to MCP clients.
+                    {error, Diagnostics}
             end
         end,
         direct

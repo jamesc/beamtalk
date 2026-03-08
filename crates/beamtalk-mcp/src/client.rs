@@ -396,6 +396,10 @@ pub struct ReplResponse {
     pub state: Option<serde_json::Value>,
     /// Compilation warnings.
     pub warnings: Option<Vec<String>>,
+    /// Line number (1-based) of a compile error in the submitted snippet (BT-1235).
+    pub line: Option<u32>,
+    /// Hint text for a compile error, where available (BT-1235).
+    pub hint: Option<String>,
     /// Documentation text.
     pub docs: Option<String>,
     /// Number of actors affected by reload.
