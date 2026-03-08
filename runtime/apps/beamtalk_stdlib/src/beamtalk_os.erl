@@ -82,18 +82,20 @@ run_cmd(Cmd, TimeoutMs, Selector) ->
 collect(Port, Acc, Timer, Selector) ->
     receive
         {Port, {data, Data}} ->
-            NewAcc = <<Acc/binary, Data/binary>>,
-            case byte_size(NewAcc) > ?MAX_OUTPUT_BYTES of
+            case byte_size(Acc) + byte_size(Data) > ?MAX_OUTPUT_BYTES of
                 true ->
                     erlang:cancel_timer(Timer),
                     port_close(Port),
                     flush_port(Port),
                     raise_output_too_large(Selector);
                 false ->
-                    collect(Port, NewAcc, Timer, Selector)
+                    collect(Port, <<Acc/binary, Data/binary>>, Timer, Selector)
             end;
         {Port, {exit_status, _}} ->
+            %% Cancel the timer and flush any timer message that may have
+            %% already been enqueued before cancel_timer/1 ran.
             erlang:cancel_timer(Timer),
+            flush_timer(Timer),
             string:trim(Acc, trailing);
         {timeout, Timer, os_run_timeout} ->
             port_close(Port),
@@ -107,6 +109,15 @@ collect(Port, Acc, Timer, Selector) ->
 flush_port(Port) ->
     receive
         {Port, _} -> flush_port(Port)
+    after 0 -> ok
+    end.
+
+%% @private Drain a stale timer message that may have been enqueued before
+%% erlang:cancel_timer/1 ran. Safe to call even when cancel_timer succeeded.
+-spec flush_timer(reference()) -> ok.
+flush_timer(Timer) ->
+    receive
+        {timeout, Timer, os_run_timeout} -> ok
     after 0 -> ok
     end.
 
