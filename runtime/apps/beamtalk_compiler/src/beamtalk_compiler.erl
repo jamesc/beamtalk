@@ -21,6 +21,7 @@
 
 -export([
     compile_expression/3, compile_expression/4,
+    compile_expression_trace/3, compile_expression_trace/4,
     compile/2,
     diagnostics/1,
     version/0,
@@ -58,6 +59,20 @@ compile_expression(Source, ModuleName, KnownVars) ->
     | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars, Options) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars, Options).
+
+%% @doc Compile a REPL expression in trace mode (BT-1238).
+%%
+%% Returns `{ok, CoreErlang, Warnings}' where the generated module's `eval/1'
+%% returns `{[{<<"src0">>, Val0}, ...], FinalState}' instead of `{Result, FinalState}'.
+-spec compile_expression_trace(binary(), binary(), [binary()]) ->
+    {ok, binary(), [binary()]} | {error, [map()]}.
+compile_expression_trace(Source, ModuleName, KnownVars) ->
+    beamtalk_compiler_server:compile_expression_trace(Source, ModuleName, KnownVars, #{}).
+
+-spec compile_expression_trace(binary(), binary(), [binary()], map()) ->
+    {ok, binary(), [binary()]} | {error, [map()]}.
+compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
+    beamtalk_compiler_server:compile_expression_trace(Source, ModuleName, KnownVars, Options).
 
 %% @doc Compile a file/class definition.
 %%

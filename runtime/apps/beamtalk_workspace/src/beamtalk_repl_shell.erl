@@ -26,6 +26,7 @@
     stop/1,
     eval/2,
     eval_async/3,
+    eval_trace/2,
     interrupt/1,
     get_bindings/1,
     clear_bindings/1,
@@ -64,6 +65,14 @@ stop(SessionPid) ->
     {ok, term(), binary(), [binary()]} | {error, term(), binary(), [binary()]}.
 eval(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval, Expression}, 30000).
+
+%% @doc Evaluate an expression in trace mode (BT-1238).
+%% Returns `{ok, Steps, Output, Warnings}' or `{error, Reason, Output, Warnings}'.
+-spec eval_trace(pid(), string()) ->
+    {ok, [{binary(), term()}], binary(), [binary()]}
+    | {error, term(), binary(), [binary()]}.
+eval_trace(SessionPid, Expression) ->
+    gen_server:call(SessionPid, {eval_trace, Expression}, 30000).
 
 %% @doc Evaluate an expression with streaming subscriber (BT-696).
 %% Subscriber receives {eval_out, Chunk} messages during eval.
@@ -158,6 +167,18 @@ handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
         Self ! {eval_result, self(), Result}
     end),
     {noreply, {SessionId, State, {WorkerPid, MonRef, From}}};
+handle_call({eval_trace, Expression}, From, {SessionId, State, undefined}) ->
+    Self = self(),
+    {WorkerPid, MonRef} = spawn_monitor(fun() ->
+        Result = beamtalk_repl_eval:do_eval_trace(Expression, State),
+        Self ! {eval_result, self(), Result}
+    end),
+    {noreply, {SessionId, State, {WorkerPid, MonRef, From}}};
+handle_call({eval_trace, _Expression}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
+    Err0 = beamtalk_error:new(eval_busy, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
+    Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
+    {reply, {error, Err2, <<>>, []}, FullState};
 handle_call({eval, _Expression}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
     %% Already evaluating — reject concurrent eval
     Err0 = beamtalk_error:new(eval_busy, 'REPL'),

@@ -17,6 +17,7 @@
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"eval">>, Params, Msg, SessionPid) ->
     Code = binary_to_list(maps:get(<<"code">>, Params, <<>>)),
+    Trace = maps:get(<<"trace">>, Params, false) =:= true,
     case Code of
         [] ->
             Err = beamtalk_error:new(empty_expression, 'REPL'),
@@ -25,6 +26,22 @@ handle(<<"eval">>, Params, Msg, SessionPid) ->
             beamtalk_repl_protocol:encode_error(
                 Err2, Msg, fun beamtalk_repl_json:format_error_message/1
             );
+        _ when Trace ->
+            case beamtalk_repl_shell:eval_trace(SessionPid, Code) of
+                {ok, Steps, Output, Warnings} ->
+                    beamtalk_repl_protocol:encode_trace_result(
+                        Steps, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings
+                    );
+                {error, ErrorReason, Output, Warnings} ->
+                    WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
+                    beamtalk_repl_protocol:encode_error(
+                        WrappedReason,
+                        Msg,
+                        fun beamtalk_repl_json:format_error_message/1,
+                        Output,
+                        Warnings
+                    )
+            end;
         _ ->
             case beamtalk_repl_shell:eval(SessionPid, Code) of
                 {ok, Result, Output, Warnings} ->

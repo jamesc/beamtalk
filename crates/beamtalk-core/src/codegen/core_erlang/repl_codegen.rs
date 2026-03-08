@@ -51,6 +51,197 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
+    /// Generates a REPL evaluation module in trace mode (BT-1238).
+    ///
+    /// Returns `{[{<<"source">>, Value}, ...], FinalState}` instead of `{Result, FinalState}`,
+    /// giving the caller a value for every top-level statement.
+    /// `source_texts` must have the same length as `expressions`.
+    pub(super) fn generate_repl_module_multi_traced(
+        &mut self,
+        expressions: &[Expression],
+        source_texts: &[String],
+    ) -> Result<Document<'static>> {
+        let previous_is_repl_mode = self.is_repl_mode;
+        self.context = CodeGenContext::Repl;
+        self.is_repl_mode = true;
+        self.workspace_mode = true;
+
+        let doc = if expressions.len() == 1 {
+            self.generate_repl_single_traced(&expressions[0], &source_texts[0])?
+        } else {
+            self.generate_repl_multi_traced_body(expressions, source_texts)?
+        };
+
+        self.is_repl_mode = previous_is_repl_mode;
+        Ok(doc)
+    }
+
+    /// Single-expression trace body.
+    fn generate_repl_single_traced(
+        &mut self,
+        expression: &Expression,
+        source_text: &str,
+    ) -> Result<Document<'static>> {
+        self.push_scope();
+        self.bind_var("__bindings__", "Bindings");
+
+        let expr_code = self.expression_doc(expression)?;
+        let final_state = self.current_state_var();
+        let src_bin = Self::binary_string_literal(source_text);
+
+        let return_tuple: Document<'static> = if self.repl_loop_mutated {
+            Document::String(format!(
+                "let _LoopResult = call 'erlang':'element'(1, Result) in \
+                 let _LoopState = call 'erlang':'element'(2, Result) in \
+                 {{[{{{src_bin}, _LoopResult}}], _LoopState}}"
+            ))
+        } else if final_state != "State" {
+            Document::String(format!("{{[{{{src_bin}, Result}}], {final_state}}}"))
+        } else {
+            Document::String(format!("{{[{{{src_bin}, Result}}], State}}"))
+        };
+
+        let module_name = &self.module_name;
+        let doc = docvec![
+            Document::String(format!("module '{module_name}' ['eval'/1]\n")),
+            "  attributes []\n",
+            "\n",
+            "'eval'/1 = fun (Bindings) ->\n",
+            "    let State = Bindings in\n",
+            "    let Result = ",
+            expr_code,
+            " in\n",
+            "    ",
+            return_tuple,
+            "\n",
+            "end\n",
+        ];
+
+        self.pop_scope();
+        Ok(doc)
+    }
+
+    /// Multi-expression trace body (BT-1238).
+    ///
+    /// Mirrors `generate_repl_multi_module_body` but changes the return from
+    /// `{Result, FinalState}` to `{[{<<"src0">>, _R1}, ..., {<<"srcN">>, Result}], FinalState}`.
+    fn generate_repl_multi_traced_body(
+        &mut self,
+        expressions: &[Expression],
+        source_texts: &[String],
+    ) -> Result<Document<'static>> {
+        self.push_scope();
+        self.bind_var("__bindings__", "Bindings");
+
+        let n = expressions.len();
+        let mut body_parts: Vec<Document<'static>> = Vec::new();
+        // (source_text, result_var) pairs used to build the final steps list.
+        let mut step_pairs: Vec<(String, String)> = Vec::new();
+
+        for (i, expr) in expressions[..n - 1].iter().enumerate() {
+            self.repl_loop_mutated = false;
+            let result_var = format!("_R{}", i + 1);
+            let part = self.generate_repl_intermediate_expr(expr, &result_var)?;
+            body_parts.push(part);
+            // BT-790: When `repl_loop_mutated` is true, `result_var` holds `{Result, StateAcc}`.
+            // Extract element 1 for the trace step so callers see the unwrapped value.
+            let step_val = if self.repl_loop_mutated {
+                format!("call 'erlang':'element'(1, {result_var})")
+            } else {
+                result_var
+            };
+            step_pairs.push((source_texts[i].clone(), step_val));
+        }
+
+        self.repl_loop_mutated = false;
+        let last_expr = &expressions[n - 1];
+        let (last_val_doc, trace_return) =
+            self.generate_trace_last_expr(last_expr, &source_texts[n - 1], &step_pairs)?;
+
+        let module_name = self.module_name.clone();
+        let mut all_parts: Vec<Document<'static>> = vec![
+            Document::String(format!("module '{module_name}' ['eval'/1]\n")),
+            Document::Str("  attributes []\n"),
+            Document::Str("\n"),
+            Document::Str("'eval'/1 = fun (Bindings) ->\n"),
+            Document::Str("    let State = Bindings in\n"),
+        ];
+        all_parts.extend(body_parts);
+        all_parts.push(Document::Str("    let Result = "));
+        all_parts.push(last_val_doc);
+        all_parts.push(Document::Str(" in\n    "));
+        all_parts.push(trace_return);
+        all_parts.push(Document::Str("\nend\n"));
+
+        self.pop_scope();
+        Ok(Document::Vec(all_parts))
+    }
+
+    /// Generates the value doc and trace return expression for the last statement.
+    ///
+    /// Mirrors `generate_repl_last_expr` but returns `{StepsList, FinalState}` instead of
+    /// `{Result, FinalState}`.
+    fn generate_trace_last_expr(
+        &mut self,
+        expr: &Expression,
+        source_text: &str,
+        prev_steps: &[(String, String)],
+    ) -> Result<(Document<'static>, Document<'static>)> {
+        if let Expression::Assignment { target, value, .. } = expr {
+            if let Expression::Identifier(id) = target.as_ref() {
+                let var_name = id.name.clone();
+                let current_state = self.current_state_var();
+                let val_doc = self.expression_doc(value)?;
+                let new_state = self.next_state_var();
+                let mut all_steps = prev_steps.to_vec();
+                all_steps.push((source_text.to_string(), "Result".to_string()));
+                let steps_str = Self::build_steps_list_string(&all_steps);
+                let trace_return = Document::String(format!(
+                    "let {new_state} = call 'maps':'put'('{var_name}', Result, {current_state}) in \
+                     {{{steps_str}, {new_state}}}"
+                ));
+                return Ok((val_doc, trace_return));
+            }
+        }
+
+        let val_doc = self.expression_doc(expr)?;
+        let final_state = self.current_state_var();
+
+        let mut all_steps = prev_steps.to_vec();
+        let trace_return: Document<'static> = if self.repl_loop_mutated {
+            all_steps.push((source_text.to_string(), "_LoopTraceResult".to_string()));
+            let steps_str = Self::build_steps_list_string(&all_steps);
+            let new_state = self.next_state_var();
+            Document::String(format!(
+                "let _LoopTraceResult = call 'erlang':'element'(1, Result) in \
+                 let {new_state} = call 'erlang':'element'(2, Result) in \
+                 {{{steps_str}, {new_state}}}"
+            ))
+        } else if final_state != "State" {
+            all_steps.push((source_text.to_string(), "Result".to_string()));
+            let steps_str = Self::build_steps_list_string(&all_steps);
+            Document::String(format!("{{{steps_str}, {final_state}}}"))
+        } else {
+            all_steps.push((source_text.to_string(), "Result".to_string()));
+            let steps_str = Self::build_steps_list_string(&all_steps);
+            Document::String(format!("{{{steps_str}, State}}"))
+        };
+
+        Ok((val_doc, trace_return))
+    }
+
+    /// Builds a Core Erlang list literal from (`source_text`, `var_name`) pairs.
+    ///
+    /// Produces: `[{<<"src0">>, V0} | [{<<"src1">>, V1} | ... | []]]`
+    fn build_steps_list_string(step_pairs: &[(String, String)]) -> String {
+        let mut result = "[]".to_string();
+        for (src, var) in step_pairs.iter().rev() {
+            let src_bin = Self::binary_string_literal(src);
+            result = format!("[{{{src_bin}, {var}}} | {result}]");
+        }
+        result
+    }
+
     /// Generates a REPL evaluation module for multiple expressions (BT-780).
     ///
     /// When given multiple expressions (period-separated REPL input like
