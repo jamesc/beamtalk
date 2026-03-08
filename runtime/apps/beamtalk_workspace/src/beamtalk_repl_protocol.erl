@@ -101,6 +101,8 @@ parse_request(Data) when is_binary(Data) ->
                 {list_actors};
             {ok, #{<<"type">> := <<"modules">>}} ->
                 {list_modules};
+            {ok, #{<<"type">> := <<"unload">>} = Map} ->
+                {unload, maps:get(<<"module">>, Map, <<>>)};
             {ok, #{<<"type">> := <<"kill">>, <<"pid">> := PidStr}} ->
                 {kill_actor, binary_to_list(PidStr)};
             {ok, _Other} ->

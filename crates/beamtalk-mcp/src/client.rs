@@ -971,9 +971,9 @@ mod tests {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
 
-        // BT-1239: unload op is restored — returns error when class not found.
-        // Counter is a stdlib class and cannot be removed.
-        let resp = client.unload("Counter").await.unwrap();
+        // BT-1239: unload op is restored — stdlib classes cannot be removed.
+        // Integer is a stdlib class (bt@stdlib@Integer) and must be rejected.
+        let resp = client.unload("Integer").await.unwrap();
         assert!(resp.is_error(), "stdlib class cannot be unloaded");
         Ok(())
     }

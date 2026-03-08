@@ -298,11 +298,9 @@ parse_request_type_modules_test() ->
     ?assertEqual({list_modules}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_type_unload_test() ->
-    %% BT-785: :unload removed — legacy type "unload" no longer recognized
+    %% BT-1239: legacy type "unload" is now supported again
     Request = <<"{\"type\": \"unload\", \"module\": \"Counter\"}">>,
-    ?assertEqual(
-        {error, {invalid_request, unknown_type}}, beamtalk_repl_server:parse_request(Request)
-    ).
+    ?assertEqual({unload, <<"Counter">>}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_type_kill_test() ->
     Request = <<"{\"type\": \"kill\", \"pid\": \"<0.1.0>\"}">>,

@@ -236,12 +236,18 @@ handle_call({unload_module, Module}, _From, {SessionId, State, Worker}) ->
             ),
             {reply, {error, Err}, {SessionId, State, Worker}}
     end;
-handle_call({remove_from_tracker, Module}, _From, {SessionId, State, Worker}) ->
+handle_call(
+    {remove_from_tracker, _Module}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState
+) ->
+    %% Reject while an eval worker is active: the worker's snapshot would
+    %% overwrite any tracker edit we make here once eval_result arrives.
+    {reply, ok, FullState};
+handle_call({remove_from_tracker, Module}, _From, {SessionId, State, undefined}) ->
     %% BT-1239: Remove module from tracker only (BEAM purge already done by caller).
     Tracker = beamtalk_repl_state:get_module_tracker(State),
     NewTracker = beamtalk_repl_modules:remove_module(Module, Tracker),
     NewState = beamtalk_repl_state:set_module_tracker(NewTracker, State),
-    {reply, ok, {SessionId, NewState, Worker}};
+    {reply, ok, {SessionId, NewState, undefined}};
 handle_call({show_codegen, _Expression}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
     %% Reject if eval is in progress
     Err0 = beamtalk_error:new(eval_busy, 'REPL'),

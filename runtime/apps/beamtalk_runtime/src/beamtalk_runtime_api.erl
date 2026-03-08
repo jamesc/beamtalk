@@ -189,17 +189,18 @@ get_class_method_return_type(ClassName, Selector) ->
 %% (class not found, stdlib class, has subclasses, etc.).
 -spec remove_class_from_system(atom()) -> {ok, module()} | {error, #beamtalk_error{}}.
 remove_class_from_system(ClassName) ->
-    %% Look up the module name before removal (gen_server will be gone afterwards).
-    ModuleName =
-        case beamtalk_class_registry:whereis_class(ClassName) of
-            undefined -> undefined;
-            ClassPid -> beamtalk_object_class:module_name(ClassPid)
-        end,
     try
+        %% Look up the module name inside the protected block to catch races
+        %% where the class dies between whereis_class/1 and module_name/1.
+        ModuleName =
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                undefined -> undefined;
+                ClassPid -> beamtalk_object_class:module_name(ClassPid)
+            end,
         beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName),
         {ok, ModuleName}
     catch
-        throw:{beamtalk_error, Error} -> {error, Error}
+        error:#{error := #beamtalk_error{} = Error} -> {error, Error}
     end.
 
 %%% ====================================================================
