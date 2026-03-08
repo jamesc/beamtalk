@@ -308,6 +308,21 @@ impl NameResolver {
                     }
                 }
             }
+
+            DestructureAssignment { pattern, value, .. } => {
+                self.resolve_expression(value);
+                // Use extract_pattern_bindings for consistency with match arms:
+                // this both collects bindings AND emits duplicate-binding diagnostics.
+                let (bindings, pattern_diagnostics) =
+                    crate::semantic_analysis::extract_pattern_bindings(pattern);
+                self.diagnostics.extend(pattern_diagnostics);
+                for binding in bindings {
+                    if self.scope.lookup_immut(&binding.name).is_none() {
+                        self.scope
+                            .define(&binding.name, binding.span, BindingKind::Local);
+                    }
+                }
+            }
         }
     }
 

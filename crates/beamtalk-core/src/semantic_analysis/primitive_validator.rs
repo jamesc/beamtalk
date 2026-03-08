@@ -157,7 +157,8 @@ fn validate_expr(
         Expression::Return { value, .. }
         | Expression::Parenthesized {
             expression: value, ..
-        } => {
+        }
+        | Expression::DestructureAssignment { value, .. } => {
             validate_expr(value, is_stdlib, options, diagnostics);
         }
         Expression::FieldAccess { receiver, .. } => {

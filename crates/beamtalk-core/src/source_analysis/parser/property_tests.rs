@@ -156,7 +156,9 @@ fn has_error_node(expr: &Expression) -> bool {
         Expression::Assignment { target, value, .. } => {
             has_error_node(target) || has_error_node(value)
         }
-        Expression::Return { value, .. } => has_error_node(value),
+        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
+            has_error_node(value)
+        }
         Expression::Parenthesized { expression, .. } => has_error_node(expression),
         Expression::Block(block) => block.body.iter().any(|s| has_error_node(&s.expression)),
         Expression::Cascade {

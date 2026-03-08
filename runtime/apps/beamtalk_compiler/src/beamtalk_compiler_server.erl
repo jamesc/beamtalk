@@ -22,6 +22,7 @@
 -export([
     start_link/0, start_link/1,
     compile_expression/3, compile_expression/4,
+    compile_expression_trace/3, compile_expression_trace/4,
     compile/2,
     diagnostics/1,
     version/0,
@@ -87,6 +88,19 @@ compile_expression(Source, ModuleName, KnownVars) ->
 compile_expression(Source, ModuleName, KnownVars, Options) ->
     gen_server:call(
         ?MODULE, {compile_expression, Source, ModuleName, KnownVars, Options}, 30000
+    ).
+
+%% @doc Compile a REPL expression in trace mode (BT-1238).
+-spec compile_expression_trace(binary(), binary(), [binary()]) ->
+    {ok, binary(), [binary()]} | {error, [map()]}.
+compile_expression_trace(Source, ModuleName, KnownVars) ->
+    compile_expression_trace(Source, ModuleName, KnownVars, #{}).
+
+-spec compile_expression_trace(binary(), binary(), [binary()], map()) ->
+    {ok, binary(), [binary()]} | {error, [map()]}.
+compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
+    gen_server:call(
+        ?MODULE, {compile_expression_trace, Source, ModuleName, KnownVars, Options}, 30000
     ).
 
 %% @doc Compile a file/class definition.
@@ -189,6 +203,12 @@ handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From,
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = beamtalk_compiler_port:compile_expression(
+        State#state.port, Source, ModuleName, KnownVars, Options1
+    ),
+    {reply, Result, State};
+handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, _From, State) ->
+    Options1 = Options#{class_hierarchy => State#state.classes},
+    Result = beamtalk_compiler_port:compile_expression_trace(
         State#state.port, Source, ModuleName, KnownVars, Options1
     ),
     {reply, Result, State};

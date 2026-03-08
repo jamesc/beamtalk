@@ -260,6 +260,11 @@ impl CoreErlangGenerator {
                     );
                     self.bind_var(&id.name, &val_var);
                 }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
+                }
             } else if is_last && self.control_flow_has_mutations(expr) {
                 // Last expression is nested control flow with mutations.
                 // It returns {Result, State} — unpack both.

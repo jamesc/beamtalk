@@ -1,0 +1,79 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Interval — An arithmetic sequence of integers.
+///
+/// Intervals represent a range of integers without materialising a list.
+/// They are immutable value objects backed by three integers: from, to, step.
+///
+/// Use `to:` or `to:by:` on any Integer to create an interval:
+/// ```beamtalk
+/// 1 to: 10            // => (1 to: 10)
+/// 1 to: 10 by: 2     // => (1 to: 10 by: 2)
+/// (1 to: 10) size    // => 10
+/// ```
+Collection subclass: Interval
+  state: from = 0
+  state: to = 0
+  state: step = 1
+
+  /// Number of elements in the interval.
+  ///
+  /// Returns 0 when the step direction does not move from toward to.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (1 to: 10) size      // => 10
+  /// (1 to: 1) size       // => 1
+  /// (1 to: 0) size       // => 0
+  /// (1 to: 0 by: 2) size  // => 0
+  /// ```
+  size -> Integer =>
+    wrongDirection := (self.step > 0 and: [
+      self.from > self.to
+    ]) or: [self.step < 0 and: [self.from < self.to]]
+    (self.step =:= 0 or: [
+      wrongDirection
+    ]) ifTrue: [0] ifFalse: [((self.to - self.from) abs div: self.step abs) + 1]
+
+  /// Iterate over each element, evaluating `block` with each one.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (1 to: 3) do: [:i | Transcript show: i]
+  /// ```
+  do: block :: Block -> Nil => self.from to: self.to by: self.step do: block
+
+  /// First element of the interval.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (1 to: 10) first     // => 1
+  /// ```
+  first -> Integer =>
+    self isEmpty ifTrue: [self error: "Interval is empty"] ifFalse: [self.from]
+
+  /// Last element of the interval.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (1 to: 10) last      // => 10
+  /// (1 to: 10 by: 3) last  // => 10
+  /// ```
+  last -> Integer =>
+    self isEmpty ifTrue: [
+      self error: "Interval is empty"
+    ] ifFalse: [self.from + ((self size - 1) * self.step)]
+
+  /// Return a developer-readable string representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (1 to: 10) printString          // => "(1 to: 10)"
+  /// (1 to: 10 by: 2) printString   // => "(1 to: 10 by: 2)"
+  /// ```
+  printString -> String =>
+    stepStr := self.step =:= 1 ifTrue: [
+      ""
+    ] ifFalse: [" by: " ++ self.step asString]
+    "(" ++ self.from asString ++ " to: " ++ self.to asString ++ stepStr ++ ")"
