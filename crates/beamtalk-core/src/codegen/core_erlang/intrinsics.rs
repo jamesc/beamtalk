@@ -485,14 +485,31 @@ impl CoreErlangGenerator {
     /// expressions should **not** be treated as blocks by the `value:` handler; instead
     /// they fall through to `try_handle_erlang_interop` (step 7 of dispatch).
     fn is_erlang_ffi_receiver(expr: &Expression) -> bool {
+        /// Class-protocol selectors excluded from Erlang FFI proxy construction.
+        /// Mirrors `CLASS_PROTOCOL_SELECTORS` in `dispatch_codegen.rs` so that
+        /// e.g. `(Erlang class) value: x` falls through to the `is_function` guard
+        /// instead of being treated as a module proxy (consistent with step 7).
+        const CLASS_PROTOCOL_SELECTORS: &[&str] = &[
+            "new",
+            "spawn",
+            "class",
+            "methods",
+            "superclass",
+            "subclasses",
+            "allSubclasses",
+            "class_name",
+            "module_name",
+            "printString",
+        ];
         if let Expression::MessageSend {
             receiver: inner_receiver,
-            selector: MessageSelector::Unary(_),
+            selector: MessageSelector::Unary(module_name),
             ..
         } = expr
         {
             if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
-                return name.name == "Erlang";
+                return name.name == "Erlang"
+                    && !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str());
             }
         }
         false
