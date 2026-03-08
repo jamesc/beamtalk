@@ -575,6 +575,235 @@ fn test_block_value_message_two_args() {
 }
 
 #[test]
+fn test_value_keyword_erlang_ffi_receiver_routes_to_erlang_interop() {
+    // BT-1260: `(Erlang maps) value: key` must route through Erlang interop, not block apply.
+    // Before the fix, this emitted `apply Fun(Key)` which crashes at runtime.
+    let mut generator = CoreErlangGenerator::new("test");
+
+    // Build: (Erlang maps) value: key
+    let erlang_proxy = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Erlang", Span::new(0, 6)),
+            span: Span::new(0, 6),
+        }),
+        selector: MessageSelector::Unary("maps".into()),
+        arguments: vec![],
+        is_cast: false,
+        span: Span::new(0, 11),
+    };
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(12, 18))]);
+    let arguments = vec![Expression::Identifier(Identifier::new(
+        "key",
+        Span::new(19, 22),
+    ))];
+
+    let doc = generator
+        .generate_message_send(&erlang_proxy, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("beamtalk_erlang_proxy"),
+        "Should route through Erlang interop. Got: {output}"
+    );
+    assert!(
+        !output.contains("is_function"),
+        "Should not emit is_function guard for FFI receiver. Got: {output}"
+    );
+    assert!(
+        !output.contains("apply"),
+        "Should not emit block apply for FFI receiver. Got: {output}"
+    );
+}
+
+#[test]
+fn test_value_keyword_unknown_receiver_emits_is_function_guard() {
+    // BT-1260: `someVar value: arg` where receiver is unknown emits a runtime
+    // is_function guard: if it's a function, apply it; otherwise dispatch via send.
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let receiver = Expression::Identifier(Identifier::new("someVar", Span::new(0, 7)));
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(8, 14))]);
+    let arguments = vec![Expression::Literal(Literal::Integer(42), Span::new(15, 17))];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("is_function"),
+        "Should emit erlang:is_function guard. Got: {output}"
+    );
+    assert!(
+        output.contains("apply"),
+        "Should emit apply for the function path. Got: {output}"
+    );
+    assert!(
+        output.contains("beamtalk_primitive':'send'"),
+        "Should emit beamtalk_primitive:send fallback. Got: {output}"
+    );
+    assert!(
+        output.contains("'value:'"),
+        "Should pass 'value:' selector to send. Got: {output}"
+    );
+}
+
+#[test]
+fn test_value_keyword_block_literal_receiver_still_uses_fast_apply() {
+    // BT-1260: Block literal receivers must still use the fast inline apply path (no regression).
+    // [:x | x + 1] value: 5 → let _Fun = ... in apply _Fun (5)
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let block = Block::new(
+        vec![BlockParameter::new("x", Span::new(1, 2))],
+        vec![bare(Expression::Literal(
+            Literal::Integer(0),
+            Span::new(5, 6),
+        ))],
+        Span::new(0, 8),
+    );
+    let receiver = Expression::Block(block);
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(9, 15))]);
+    let arguments = vec![Expression::Literal(Literal::Integer(5), Span::new(16, 17))];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("apply"),
+        "Block literal should use apply. Got: {output}"
+    );
+    assert!(
+        !output.contains("is_function"),
+        "Block literal should not emit is_function guard. Got: {output}"
+    );
+    assert!(
+        !output.contains("beamtalk_primitive':'send'"),
+        "Block literal should not use send fallback. Got: {output}"
+    );
+}
+
+#[test]
+fn test_value_value_keyword_erlang_ffi_receiver_routes_to_erlang_interop() {
+    // BT-1260: `(Erlang maps) value: key value: default` must route through Erlang
+    // interop, not block apply, for value:value: selector.
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let erlang_proxy = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Erlang", Span::new(0, 6)),
+            span: Span::new(0, 6),
+        }),
+        selector: MessageSelector::Unary("maps".into()),
+        arguments: vec![],
+        is_cast: false,
+        span: Span::new(0, 11),
+    };
+    let selector = MessageSelector::Keyword(vec![
+        KeywordPart::new("value:", Span::new(12, 18)),
+        KeywordPart::new("value:", Span::new(22, 28)),
+    ]);
+    let arguments = vec![
+        Expression::Identifier(Identifier::new("key", Span::new(19, 22))),
+        Expression::Identifier(Identifier::new("def", Span::new(29, 32))),
+    ];
+
+    let doc = generator
+        .generate_message_send(&erlang_proxy, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("beamtalk_erlang_proxy"),
+        "value:value: FFI receiver should route through Erlang interop. Got: {output}"
+    );
+    assert!(
+        !output.contains("is_function"),
+        "Should not emit is_function guard for FFI receiver. Got: {output}"
+    );
+    assert!(
+        !output.contains("apply"),
+        "Should not emit block apply for FFI receiver. Got: {output}"
+    );
+}
+
+#[test]
+fn test_value_value_value_keyword_unknown_receiver_emits_correct_selector() {
+    // BT-1260: `someVar value: a value: b value: c` emits the full 'value:value:value:'
+    // selector atom in the beamtalk_primitive:send fallback.
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let receiver = Expression::Identifier(Identifier::new("someVar", Span::new(0, 7)));
+    let selector = MessageSelector::Keyword(vec![
+        KeywordPart::new("value:", Span::new(8, 14)),
+        KeywordPart::new("value:", Span::new(18, 24)),
+        KeywordPart::new("value:", Span::new(28, 34)),
+    ]);
+    let arguments = vec![
+        Expression::Literal(Literal::Integer(1), Span::new(15, 16)),
+        Expression::Literal(Literal::Integer(2), Span::new(25, 26)),
+        Expression::Literal(Literal::Integer(3), Span::new(35, 36)),
+    ];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("is_function"),
+        "Should emit is_function guard. Got: {output}"
+    );
+    assert!(
+        output.contains("'value:value:value:'"),
+        "Fallback send must use the full 'value:value:value:' selector atom. Got: {output}"
+    );
+    assert!(
+        output.contains("apply"),
+        "Should emit apply for the function path. Got: {output}"
+    );
+}
+
+#[test]
+fn test_value_keyword_class_protocol_receiver_uses_is_function_guard() {
+    // BT-1260: `(Erlang class) value: x` — class-protocol selectors must NOT be
+    // treated as FFI module proxies; they fall through to the is_function guard.
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let erlang_class = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Erlang", Span::new(0, 6)),
+            span: Span::new(0, 6),
+        }),
+        selector: MessageSelector::Unary("class".into()),
+        arguments: vec![],
+        is_cast: false,
+        span: Span::new(0, 12),
+    };
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("value:", Span::new(13, 19))]);
+    let arguments = vec![Expression::Literal(Literal::Integer(1), Span::new(20, 21))];
+
+    let doc = generator
+        .generate_message_send(&erlang_class, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    // (Erlang class) is a metaclass, not a module proxy — must use the is_function guard,
+    // NOT fall through to Erlang interop.
+    assert!(
+        output.contains("is_function"),
+        "Class-protocol receiver should use is_function guard. Got: {output}"
+    );
+    assert!(
+        !output.contains("beamtalk_erlang_proxy"),
+        "Class-protocol receiver should not emit Erlang interop call. Got: {output}"
+    );
+}
+
+#[test]
 fn test_non_block_message_uses_unified_dispatch() {
     // BT-430: Regular message sends now use unified dispatch
     // actor increment → beamtalk_message_dispatch:send(actor, 'increment', [])
