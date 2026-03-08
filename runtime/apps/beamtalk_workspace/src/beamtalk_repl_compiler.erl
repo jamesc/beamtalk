@@ -93,10 +93,19 @@ format_formatted_diagnostics(FormattedList) ->
 -spec format_diagnostic_text(term()) -> binary().
 format_diagnostic_text(D) when is_map(D) ->
     Msg = maps:get(message, D, <<"Unknown error">>),
-    case maps:find(hint, D) of
-        {ok, Hint} -> iolist_to_binary([Msg, <<"\nHint: ">>, Hint]);
-        error -> Msg
-    end;
+    LinePrefix =
+        case maps:find(line, D) of
+            {ok, Line} when is_integer(Line) ->
+                [<<"Line ">>, integer_to_binary(Line), <<": ">>];
+            _ ->
+                []
+        end,
+    HintSuffix =
+        case maps:find(hint, D) of
+            {ok, Hint} -> [<<"\nHint: ">>, Hint];
+            error -> []
+        end,
+    iolist_to_binary([LinePrefix, Msg, HintSuffix]);
 format_diagnostic_text(D) when is_binary(D) ->
     D;
 format_diagnostic_text(D) ->

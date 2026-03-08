@@ -377,7 +377,11 @@ format_error_message({compile_error, [#{message := Msg} | _]}) ->
 format_error_message({compile_error, Msg}) when is_binary(Msg) ->
     Msg;
 format_error_message({compile_error, Msg}) when is_list(Msg) ->
-    list_to_binary(Msg);
+    try
+        list_to_binary(Msg)
+    catch
+        error:badarg -> iolist_to_binary(io_lib:format("~p", [Msg]))
+    end;
 format_error_message({undefined_variable, Name}) ->
     iolist_to_binary([<<"Undefined variable: ">>, format_name(Name)]);
 format_error_message({invalid_request, Reason}) ->

@@ -2176,6 +2176,20 @@ ensure_structured_error_compile_error_structured_diagnostics_test() ->
     ?assertEqual(compile_error, Err#beamtalk_error.kind),
     ?assertEqual('Compiler', Err#beamtalk_error.class).
 
+ensure_structured_error_compile_error_structured_with_hint_test() ->
+    %% BT-1235: structured diagnostic preserves hint
+    Err = beamtalk_repl_server:ensure_structured_error(
+        {compile_error, [
+            #{
+                message => <<"Unused variable `x`">>,
+                line => 3,
+                hint => <<"prefix with _x">>
+            }
+        ]}
+    ),
+    ?assertEqual(compile_error, Err#beamtalk_error.kind),
+    ?assertEqual(<<"prefix with _x">>, Err#beamtalk_error.hint).
+
 ensure_structured_error_compile_error_list_test() ->
     Err = beamtalk_repl_server:ensure_structured_error({compile_error, "some msg"}),
     ?assertEqual(compile_error, Err#beamtalk_error.kind).

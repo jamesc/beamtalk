@@ -272,9 +272,18 @@ normalize_diagnostics(Diagnostics) when is_list(Diagnostics) ->
     [normalize_diagnostic(D) || D <- Diagnostics].
 
 -spec normalize_diagnostic(term()) -> map().
-normalize_diagnostic(D) when is_map(D) -> D;
+normalize_diagnostic(D) when is_map(D) ->
+    %% Ensure `message` is present and binary
+    Msg0 = maps:get(message, D, <<"Unknown diagnostic">>),
+    MsgBin = ensure_binary(Msg0),
+    D#{message := MsgBin};
 normalize_diagnostic(D) when is_binary(D) -> #{message => D};
-normalize_diagnostic(D) -> #{message => iolist_to_binary(io_lib:format("~p", [D]))}.
+normalize_diagnostic(D) ->
+    #{message => iolist_to_binary(io_lib:format("~p", [D]))}.
+
+-spec ensure_binary(term()) -> binary().
+ensure_binary(B) when is_binary(B) -> B;
+ensure_binary(Other) -> iolist_to_binary(io_lib:format("~p", [Other])).
 
 %% Try to pretty-print textual Core Erlang using Erlang's core parser/pretty-printer.
 %% Falls back to the original Core Erlang text on any failure.
