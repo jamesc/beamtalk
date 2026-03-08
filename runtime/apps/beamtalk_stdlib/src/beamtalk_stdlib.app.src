@@ -8,6 +8,7 @@
         {classes, [
             {'bt@stdlib@actor', 'Actor', 'Object'},
             {'bt@stdlib@array', 'Array', 'Collection'},
+            {'bt@stdlib@atomic_counter', 'AtomicCounter', 'Object'},
             {'bt@stdlib@beamerror', 'BEAMError', 'Error'},
             {'bt@stdlib@bag', 'Bag', 'Collection'},
             {'bt@stdlib@beamtalk_interface', 'BeamtalkInterface', 'Object'},
@@ -46,6 +47,7 @@
             {'bt@stdlib@pid', 'Pid', 'Object'},
             {'bt@stdlib@port', 'Port', 'Object'},
             {'bt@stdlib@proto_object', 'ProtoObject', 'none'},
+            {'bt@stdlib@queue', 'Queue', 'Object'},
             {'bt@stdlib@random', 'Random', 'Object'},
             {'bt@stdlib@reactive_subprocess', 'ReactiveSubprocess', 'Actor'},
             {'bt@stdlib@reference', 'Reference', 'Object'},

@@ -41,7 +41,8 @@ Collection subclass: Bag
   /// (Bag withAll: #(1, 1, 2)) occurrencesOf: 1   // => 2
   /// (Bag withAll: #(1, 1, 2)) occurrencesOf: 3   // => 0
   /// ```
-  occurrencesOf: element -> Integer => self.counts at: element ifAbsent: [0]
+  occurrencesOf: element :: Object -> Integer =>
+    self.counts at: element ifAbsent: [0]
 
   /// Test if the bag contains at least one occurrence of `element`.
   ///
@@ -50,7 +51,7 @@ Collection subclass: Bag
   /// (Bag withAll: #(1, 2)) includes: 1   // => true
   /// (Bag withAll: #(1, 2)) includes: 3   // => false
   /// ```
-  includes: element -> Boolean => (self occurrencesOf: element) > 0
+  includes: element :: Object -> Boolean => (self occurrencesOf: element) > 0
 
   /// Return a new bag with one more occurrence of `element`.
   ///
@@ -58,7 +59,7 @@ Collection subclass: Bag
   /// ```beamtalk
   /// (Bag new add: 1) occurrencesOf: 1   // => 1
   /// ```
-  add: element -> Bag =>
+  add: element :: Object -> Bag =>
     current := self occurrencesOf: element
     Bag new: #{#counts => (self.counts at: element put: current + 1)}
 
@@ -68,7 +69,7 @@ Collection subclass: Bag
   /// ```beamtalk
   /// ((Bag new) add: 1 withCount: 3) occurrencesOf: 1   // => 3
   /// ```
-  add: element withCount: n :: Integer -> Bag =>
+  add: element :: Object withCount: n :: Integer -> Bag =>
     n < 0 ifTrue: [self error: "Bag count must be positive"]
     n =:= 0
       ifTrue: [self]
@@ -84,7 +85,7 @@ Collection subclass: Bag
   /// ((Bag withAll: #(1, 1)) remove: 1) occurrencesOf: 1   // => 1
   /// ((Bag withAll: #(1)) remove: 1) includes: 1           // => false
   /// ```
-  remove: element -> Bag =>
+  remove: element :: Object -> Bag =>
     current := self occurrencesOf: element
     current =:= 0 ifTrue: [
       self
