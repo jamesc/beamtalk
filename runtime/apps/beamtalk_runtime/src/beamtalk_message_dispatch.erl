@@ -59,12 +59,12 @@ send({beamtalk_future, _} = Future, Selector, Args) ->
     %% returned by old code paths are awaited before re-dispatching.
     Value = beamtalk_future:await(Future),
     send(Value, Selector, Args);
-send({beamtalk_supervisor, ClassName, _Module, Pid} = Self, isAlive, []) ->
+send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, isAlive, []) ->
     %% ADR 0059: Supervisor lifecycle — check process liveness without gen_server.
     is_process_alive(Pid) andalso ClassName =/= undefined;
-send({beamtalk_supervisor, _ClassName, _Module, Pid} = Self, stop, []) ->
-    %% ADR 0059: Supervisor stop — delegates to OTP supervisor:stop/1.
-    supervisor:stop(Pid),
+send({beamtalk_supervisor, _ClassName, _Module, Pid} = _Self, stop, []) ->
+    %% ADR 0059: Supervisor stop — OTP supervisors are gen_servers; use gen_server:stop/1.
+    gen_server:stop(Pid),
     nil;
 send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
     %% ADR 0059: Route supervisor method calls via class hierarchy walk.

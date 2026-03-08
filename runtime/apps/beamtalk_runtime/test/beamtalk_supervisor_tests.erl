@@ -1,6 +1,8 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% **DDD Context:** Actor System Context
+%%%
 %%% @doc Unit tests for beamtalk_supervisor runtime helper.
 %%%
 %%% Tests cover:
@@ -21,7 +23,12 @@
 %% OTP supervisor callback
 %%====================================================================
 
-%% @private Used by start_anon_supervisor/0 as the supervisor callback module.
+%% @private Used as the supervisor callback module.
+%% {simple_one_for_one, ChildSpec}: dynamic supervisor with one child template.
+%% {SupFlags, ChildSpecs}: static (one_for_one) supervisor.
+init({simple_one_for_one, ChildSpec}) ->
+    SupFlags = #{strategy => simple_one_for_one, intensity => 0, period => 1},
+    {ok, {SupFlags, [ChildSpec]}};
 init({SupFlags, ChildSpecs}) ->
     {ok, {SupFlags, ChildSpecs}}.
 
@@ -36,7 +43,7 @@ start_anon_supervisor() ->
     Pid.
 
 %% Start an anonymous OTP supervisor with one temporary worker child.
-%% The worker uses proc_lib:start_link/3 for proper OTP worker initialization.
+%% The worker uses erlang:spawn_link and signals readiness via message.
 start_anon_supervisor_with_worker(ChildId) ->
     Self = self(),
     ChildSpec = #{
@@ -65,6 +72,19 @@ start_worker(ParentPid) ->
         end
     end),
     {ok, WorkerPid}.
+
+%% Start a simple_one_for_one dynamic supervisor (no children at start).
+start_dynamic_supervisor() ->
+    ChildSpec = #{
+        id => dynamic_worker,
+        start => {?MODULE, start_worker, []},
+        restart => temporary,
+        shutdown => brutal_kill,
+        type => worker,
+        modules => []
+    },
+    {ok, Pid} = supervisor:start_link(?MODULE, {simple_one_for_one, ChildSpec}),
+    Pid.
 
 make_supervisor_tuple(ClassName, Module, Pid) ->
     {beamtalk_supervisor, ClassName, Module, Pid}.
@@ -142,16 +162,27 @@ stop_returns_nil_test() ->
 %%====================================================================
 
 terminate_child_by_pid_test() ->
-    %% Test the actor-instance branch of terminateChild/2.
-    %% We use an actor-like tuple (not a class object) as the child arg.
-    SupPid = start_anon_supervisor_with_worker(tc_child_id),
+    %% Test the actor-instance branch of terminateChild/2 (DynamicSupervisor path).
+    %% Uses a simple_one_for_one supervisor so OTP accepts terminate_child by pid.
+    SupPid = start_dynamic_supervisor(),
     try
         Self = make_supervisor_tuple('TestSup6', test_module6, SupPid),
-        %% Verify child is alive
-        ?assertEqual(1, beamtalk_supervisor:countChildren(Self)),
-        %% Terminate via supervisor:terminate_child directly (no class lookup needed here)
-        ok = supervisor:terminate_child(SupPid, tc_child_id),
-        ?assertEqual(0, beamtalk_supervisor:countChildren(Self))
+        %% Start a dynamic child; start_worker/1 expects a parent pid to signal readiness.
+        Parent = self(),
+        {ok, ChildPid} = supervisor:start_child(SupPid, [Parent]),
+        receive
+            {worker_ready, _} -> ok
+        after 1000 ->
+            error(worker_not_ready)
+        end,
+        ?assert(is_process_alive(ChildPid)),
+        %% terminateChild/2 DynamicSupervisor path: Arg is an actor tuple (not a class object).
+        %% is_class_object returns false (no " class" suffix in element 2), so the pid branch runs.
+        ChildArg = {beamtalk_object, 'SomeActor', some_mod, ChildPid},
+        Result = beamtalk_supervisor:terminateChild(Self, ChildArg),
+        ?assertEqual(nil, Result),
+        timer:sleep(50),
+        ?assertEqual(false, is_process_alive(ChildPid))
     after
         gen_server:stop(SupPid)
     end.

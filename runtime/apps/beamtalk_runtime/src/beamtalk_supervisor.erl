@@ -115,7 +115,9 @@ whichChildren(Self) ->
 %%
 %% Called from `which: aClass` on Supervisor instances.
 %% ClassArg is a class object {beamtalk_object, 'ClassName class', Module, ClassPid}.
-%% Returns {beamtalk_object, ChildClass, ChildModule, ChildPid} or nil.
+%% Matches by child module (position 4 in which_children tuples) rather than child id
+%% so that custom ids set via `withId:` in SupervisionSpec still resolve correctly.
+%% Returns {beamtalk_supervisor, ...} for supervisor subclasses, {beamtalk_object, ...} otherwise.
 -spec whichChild(tuple(), tuple()) -> tuple() | nil.
 whichChild(Self, ClassArg) ->
     SupPid = element(4, Self),
@@ -123,10 +125,15 @@ whichChild(Self, ClassArg) ->
     ChildClassPid = element(4, ClassArg),
     ChildClass = beamtalk_object_class:class_name(ChildClassPid),
     Children = supervisor:which_children(SupPid),
-    case lists:keyfind(ChildClass, 1, Children) of
-        {_Id, ChildPid, _, _} when is_pid(ChildPid) ->
-            {beamtalk_object, ChildClass, ChildModule, ChildPid};
-        _ ->
+    case
+        lists:search(
+            fun({_Id, CPid, _, Mods}) -> is_pid(CPid) andalso lists:member(ChildModule, Mods) end,
+            Children
+        )
+    of
+        {value, {_Id, ChildPid, _, _}} ->
+            wrap_child(ChildClass, ChildModule, ChildPid);
+        false ->
             nil
     end.
 
@@ -155,7 +162,7 @@ terminateChild(Self, Arg) ->
                     Error = beamtalk_error:new(
                         runtime_error,
                         SupClass,
-                        'terminate:',
+                        'terminateChild:',
                         iolist_to_binary(io_lib:format("~p", [Reason]))
                     ),
                     error(beamtalk_exception_handler:ensure_wrapped(Error))
@@ -201,7 +208,7 @@ startChild(Self) ->
     ChildModule = element(3, ChildClassObj),
     case supervisor:start_child(SupPid, []) of
         {ok, ChildPid} ->
-            {beamtalk_object, ChildClass, ChildModule, ChildPid};
+            wrap_child(ChildClass, ChildModule, ChildPid);
         {error, Reason} ->
             Error = beamtalk_error:new(
                 runtime_error,
@@ -228,7 +235,7 @@ startChild(Self, Args) ->
     ChildModule = element(3, ChildClassObj),
     case supervisor:start_child(SupPid, [Args]) of
         {ok, ChildPid} ->
-            {beamtalk_object, ChildClass, ChildModule, ChildPid};
+            wrap_child(ChildClass, ChildModule, ChildPid);
         {error, Reason} ->
             Error = beamtalk_error:new(
                 runtime_error,
@@ -312,11 +319,26 @@ build_child_spec(Spec) when is_map(Spec) ->
 %%   id, start ([ClassObj, FnAtom, ArgsList]), restart, shutdown, type
 %% The `start` value is a Beamtalk Array [ClassObj, #spawn, #()] that must be
 %% converted to the OTP MFA tuple {Module, Function, Args}.
+%%
+%% For nested supervisor children (Supervisor/DynamicSupervisor subclasses), the
+%% Beamtalk IR uses #spawn as the start function, but OTP requires start_link/0
+%% so the supervisor process is linked into the tree. This is translated here.
 -spec spec_to_otp(map()) -> map().
 spec_to_otp(BtSpec) ->
-    [ClassObj, StartFn, StartArgs] = maps:get(start, BtSpec),
+    [ClassObj, _StartFn, _StartArgs] = maps:get(start, BtSpec),
     ChildModule = element(3, ClassObj),
-    OtpStart = {ChildModule, StartFn, StartArgs},
+    ChildClassPid = element(4, ClassObj),
+    ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+    OtpStart =
+        case is_supervisor(ChildClass) of
+            true ->
+                %% Nested supervisor: OTP expects start_link/0 to link the child supervisor.
+                {ChildModule, start_link, []};
+            false ->
+                %% Worker: use the Beamtalk IR start function (spawn or spawnWith:).
+                [_ClassObj2, StartFn, StartArgs] = maps:get(start, BtSpec),
+                {ChildModule, StartFn, StartArgs}
+        end,
     #{
         id => maps:get(id, BtSpec),
         start => OtpStart,
@@ -325,3 +347,14 @@ spec_to_otp(BtSpec) ->
         type => maps:get(type, BtSpec),
         modules => [ChildModule]
     }.
+
+%% @private
+%% Wrap a child pid with the correct Beamtalk tuple tag.
+%% Supervisor subclasses use {beamtalk_supervisor, ...} so follow-up sends
+%% use the supervisor dispatch path rather than the actor/gen_server path.
+-spec wrap_child(atom(), module(), pid()) -> tuple().
+wrap_child(ChildClass, ChildModule, ChildPid) ->
+    case is_supervisor(ChildClass) of
+        true -> {beamtalk_supervisor, ChildClass, ChildModule, ChildPid};
+        false -> {beamtalk_object, ChildClass, ChildModule, ChildPid}
+    end.
