@@ -139,7 +139,8 @@ from_tagged_tuple_error_already_wrapped_test() ->
 try_do_non_fun_raises_type_error_test() ->
     %% Passing a non-block (e.g. an integer) raises type_error rather than badfun crash.
     try
-        beamtalk_result:'tryDo:'(42)
+        beamtalk_result:'tryDo:'(42),
+        ?assert(false, "tryDo: should have raised a type_error")
     catch
         error:Caught ->
             ?assertMatch(
@@ -209,7 +210,8 @@ unwrap_error_rewraps_exception_test() ->
     #{'errReason' := ErrReason} = Result,
     %% ErrReason is the wrapped exception map; unwrapError: should re-raise the embedded error
     try
-        beamtalk_result:'unwrapError:'(undefined, ErrReason)
+        beamtalk_result:'unwrapError:'(undefined, ErrReason),
+        ?assert(false, "unwrapError: should have raised an exception")
     catch
         error:Caught ->
             ?assertMatch(#{'$beamtalk_class' := _, error := _}, Caught),
@@ -222,7 +224,8 @@ unwrap_error_rewraps_exception_test() ->
 unwrap_error_raw_symbol_test() ->
     %% unwrapError: with a raw symbol (not a wrapped exception) raises a generic signal error
     try
-        beamtalk_result:'unwrapError:'(undefined, not_found)
+        beamtalk_result:'unwrapError:'(undefined, not_found),
+        ?assert(false, "unwrapError: should have raised an exception")
     catch
         error:Caught ->
             ?assertMatch(

@@ -60,9 +60,10 @@ sealed Value subclass: Result
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Result error: #not_found          // => Result error: #not_found
-  /// Result error: (Error new signal: "oops")
+  /// Result error: #not_found   // => Result error: #not_found
+  /// Result error: Error new    // => Result error: <Error>
   /// ```
+  /// To capture a raised exception as a Result, use `Result tryDo: [Error new signal: "oops"]`.
   class error: reason -> Result => (Erlang beamtalk_result) makeError: reason
 
   /// Evaluate a block and return a Result (class method).
