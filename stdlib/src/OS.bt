@@ -9,15 +9,30 @@
 /// ## Examples
 /// ```beamtalk
 /// OS run: "echo hello"   // => "hello"
+/// OS run: "echo hello" timeout: 5000   // => "hello"
 /// ```
 sealed Object subclass: OS
 
   /// Execute a shell command and return its trimmed stdout as a String.
   ///
-  /// Wraps `os:cmd/1` and trims trailing whitespace from the result.
+  /// Runs the command through the shell with a default 30-second timeout.
+  /// Raises a `#timeout` error if the command does not exit within the limit,
+  /// or an `#output_too_large` error if stdout exceeds 10 MB.
   ///
   /// ## Examples
   /// ```beamtalk
   /// OS run: "echo hello"   // => "hello"
   /// ```
   class sealed run: cmd :: String -> String => (Erlang beamtalk_os) run: cmd
+
+  /// Execute a shell command with an explicit wall-clock timeout in milliseconds.
+  ///
+  /// Behaves like `run:` but the caller controls the deadline.
+  /// Raises a `#timeout` error if the command has not exited within `ms` milliseconds.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// OS run: "sleep 1" timeout: 5000   // => ""
+  /// ```
+  class sealed run: cmd :: String timeout: ms :: Integer -> String =>
+    (Erlang beamtalk_os) run: cmd timeout: ms

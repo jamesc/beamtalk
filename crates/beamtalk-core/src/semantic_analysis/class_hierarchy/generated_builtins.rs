@@ -1109,7 +1109,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::new(),
             methods: vec![],
             class_methods: vec![
-                MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "OS".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("String".into())], doc: Some("Execute a shell command and return its trimmed stdout as a String.\n\nWraps `os:cmd/1` and trims trailing whitespace from the result.\n\n## Examples\n```beamtalk\nOS run: \"echo hello\"   // => \"hello\"\n```".into()) },
+                MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "OS".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("String".into())], doc: Some("Execute a shell command and return its trimmed stdout as a String.\n\nRuns the command through the shell with a default 30-second timeout.\nRaises a `#timeout` error if the command does not exit within the limit,\nor an `#output_too_large` error if stdout exceeds 10 MB.\n\n## Examples\n```beamtalk\nOS run: \"echo hello\"   // => \"hello\"\n```".into()) },
+                MethodInfo { selector: "run:timeout:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "OS".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("String".into()), Some("Integer".into())], doc: Some("Execute a shell command with an explicit wall-clock timeout in milliseconds.\n\nBehaves like `run:` but the caller controls the deadline.\nRaises a `#timeout` error if the command has not exited within `ms` milliseconds.\n\n## Examples\n```beamtalk\nOS run: \"sleep 1\" timeout: 5000   // => \"\"\n```".into()) },
             ],
             class_variables: vec![],
         },
