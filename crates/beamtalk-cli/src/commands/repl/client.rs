@@ -338,4 +338,13 @@ impl ReplClient {
             "code": code
         }))
     }
+
+    /// Unload a class from the workspace by name (BT-1243).
+    pub(crate) fn unload(&mut self, class_name: &str) -> Result<ReplResponse> {
+        self.send_request(&serde_json::json!({
+            "op": "unload",
+            "id": protocol::next_msg_id(),
+            "module": class_name
+        }))
+    }
 }
