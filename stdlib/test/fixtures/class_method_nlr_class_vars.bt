@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1202: Fixture for non-local return (^) inside blocks in class methods
+// that also have class variables. Tests that class var state is preserved
+// at the point of the non-local return.
+
+Object subclass: ClassMethodNlrClassVars
+  classState: flag = false
+
+  // Mutates the class var, then uses ^ to return early if positive.
+  // If ^ fires, class var mutation should be visible to subsequent calls.
+  class check: x =>
+    self.flag := true
+    x > 0 ifTrue: [^"positive"]
+    "negative"
+
+  class flagValue => self.flag
+
+  // Resets the flag for test isolation.
+  class resetFlag => self.flag := false

@@ -1397,13 +1397,44 @@ impl CoreErlangGenerator {
                 })
                 .collect();
 
-            // Generate body as Document, render to string for embedding
-            let body_str = if method.body.is_empty() {
-                // Empty class method body returns self (ClassSelf)
-                "ClassSelf".to_string()
+            // BT-1202: Detect if method body has ^ inside blocks (needs NLR).
+            let needs_nlr = method
+                .body
+                .iter()
+                .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
+
+            let nlr_token_var = if needs_nlr {
+                let token_var = self.fresh_temp_var("NlrToken");
+                self.current_nlr_token = Some(token_var.clone());
+                Some(token_var)
             } else {
-                let body_doc = self.generate_class_method_body(method, &class.class_variables)?;
-                body_doc.to_pretty_string()
+                None
+            };
+
+            // Generate body as Document and keep it in the Document pipeline (BT-875).
+            let body_doc: Document<'static> = if method.body.is_empty() {
+                self.current_nlr_token = None;
+                // Empty class method body returns self (ClassSelf)
+                docvec!["ClassSelf"]
+            } else {
+                let inner_doc = self.generate_class_method_body(method, &class.class_variables)?;
+                self.current_nlr_token = None;
+                // BT-1202: Use self.class_var_mutated (not just whether class vars are declared)
+                // to preserve the {class_var_result, ...} contract. The normal path only wraps
+                // in class_var_result when class vars were actually mutated; the NLR path must
+                // match. class_var_mutated is set by generate_class_method_body when it sees a
+                // class var assignment.
+                let returns_class_var_result = self.class_var_mutated;
+                if let Some(ref token_var) = nlr_token_var {
+                    // BT-1202: Wrap body in try/catch to catch NLR throws from ^ inside blocks.
+                    self.wrap_class_method_body_with_nlr_catch(
+                        inner_doc,
+                        token_var,
+                        returns_class_var_result,
+                    )
+                } else {
+                    inner_doc
+                }
             };
 
             // Build function header with params
@@ -1422,7 +1453,7 @@ impl CoreErlangGenerator {
                 " = fun (ClassSelf, ClassVars",
                 Document::String(params_suffix),
                 ") ->",
-                nest(INDENT, docvec![line(), body_str,]),
+                nest(INDENT, docvec![line(), body_doc,]),
                 "\n",
             ];
             docs.push(doc);
