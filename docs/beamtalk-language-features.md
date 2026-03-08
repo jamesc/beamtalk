@@ -1339,7 +1339,7 @@ someObject unknownMessage   // DNU hint suppressed
 42 + "hello"                // type warning suppressed
 
 @expect type
-someObject unknownMethod    // also suppresses method-not-found at type-erasure boundaries
+42 unknownMethod            // also suppresses method-not-found (DNU) hints
 
 @expect unused
 x := computeSomething       // unused-variable warning suppressed
@@ -1353,13 +1353,13 @@ anything                    // any diagnostic suppressed
 | Category | Suppresses |
 |----------|-----------|
 | `dnu` | Does-not-understand hints |
-| `type` | Type mismatch warnings *and* method-not-found hints at type-erasure boundaries |
+| `type` | Type mismatch warnings *and* method-not-found (DNU) hints |
 | `unused` | Unused variable warnings |
 | `all` | Any diagnostic on the following expression |
 
-**`@expect type` at type-erasure boundaries:**
+**`@expect type` for method-not-found diagnostics:**
 
-When `Result.unwrap` (or any other method returning `Object`) is used, the type system loses track of the concrete type. Calling methods on the erased value produces a DNU hint. Use `@expect type` to document that the caller knows the true type but the type system cannot verify it:
+`@expect type` suppresses DNU hints unconditionally. A common use-case is type-erasure boundaries where `Result.unwrap` (or any other method returning `Object`) causes the type system to lose track of the concrete type:
 
 ```beamtalk
 // Result.unwrap returns Object — the type system cannot verify 'size' exists
@@ -1367,7 +1367,7 @@ When `Result.unwrap` (or any other method returning `Object`) is used, the type 
 self assert: someResult unwrap size equals: 10
 ```
 
-This is preferred over `@expect dnu` because it communicates *why* the diagnostic appears: a type-system limitation at a type-erasure boundary, not intentional dynamic dispatch.
+This is preferred over `@expect dnu` at type-erasure boundaries because it communicates *why* the diagnostic appears: a type-system limitation, not intentional dynamic dispatch.
 
 **Stale directives:** If `@expect` does not suppress any diagnostic (because no matching diagnostic exists on the following expression), the compiler emits an error to prevent directives from silently becoming out of date.
 

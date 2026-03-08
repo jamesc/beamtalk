@@ -170,17 +170,16 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
 /// Returns true if the `@expect` category matches a diagnostic category.
 ///
 /// `@expect type` matches both type-mismatch warnings (`DiagnosticCategory::Type`)
-/// and method-not-found hints (`DiagnosticCategory::Dnu`).  At type-erasure
-/// boundaries — e.g. `Result.unwrap` which returns `Object` — the type system
-/// loses track of the concrete type and emits a DNU hint for any method called
-/// on the erased value.  From the author's perspective these are type-system
-/// limitations, so `@expect type` is the natural annotation to use.
+/// and method-not-found hints (`DiagnosticCategory::Dnu`).  A common motivation
+/// for the latter is type-erasure boundaries — e.g. `Result.unwrap` returns
+/// `Object`, so any method call on the result produces a DNU hint — but the
+/// suppression applies unconditionally whenever `@expect type` is written.
 fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCategory>) -> bool {
     expect_cat == ExpectCategory::All
         || matches!(
             (expect_cat, diag_cat),
-            // BT-1273: @expect type also covers method-not-found (Dnu) at type-erasure
-            // boundaries (e.g. calling methods on Object returned by Result.unwrap).
+            // BT-1273: @expect type also covers method-not-found (Dnu) hints so that
+            // callers can use a single annotation for all type-related suppressions.
             (
                 ExpectCategory::Dnu | ExpectCategory::Type,
                 Some(DiagnosticCategory::Dnu)
@@ -751,9 +750,7 @@ mod tests {
 
     #[test]
     fn expect_type_suppresses_dnu_hint() {
-        // BT-1273: @expect type suppresses DNU hints, not just type-mismatch warnings.
-        // This models the type-erasure boundary case where the caller knows the true
-        // type but the type system sees Object (e.g. after Result.unwrap).
+        // BT-1273: @expect type suppresses DNU hints in addition to type-mismatch warnings.
         let source = "@expect type\n42 unknownMethod";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);

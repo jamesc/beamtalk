@@ -3046,14 +3046,12 @@ mod tests {
     }
 
     #[test]
-    fn test_expect_type_suppresses_dnu_at_type_erasure_boundary() {
-        // BT-1273: @expect type also suppresses method-not-found (DNU) hints.
-        // At type-erasure boundaries (e.g. Object returned by Result.unwrap),
-        // the author knows the true type but the type system sees Object.
-        // @expect type is the natural annotation for these sites.
+    fn test_expect_type_suppresses_dnu_hint() {
+        // BT-1273: @expect type also suppresses method-not-found (DNU) hints,
+        // not just type-mismatch warnings.
         let hierarchy = ClassHierarchy::with_builtins();
 
-        // Without @expect: calling unknownMethod on Integer (known type) produces DNU hint
+        // Without @expect: calling unknownMethod on Integer produces a DNU hint
         let module_bare = parse_source("42 unknownMethod");
         let diags_without = run_with_expect(&module_bare, &hierarchy);
         assert!(
