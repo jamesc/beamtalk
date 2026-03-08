@@ -172,7 +172,7 @@ sealed Value subclass: Result
 
 ### 2. REPL Usage
 
-```
+```text
 > Result ok: 42
 // => Result ok: 42
 
@@ -204,7 +204,7 @@ sealed Value subclass: Result
 
 ### 3. Error Examples (Misuse)
 
-```
+```text
 > (Result ok: 42) andThen: [:v | v + 1]
 // => TypeError: andThen: block must return a Result, got Integer
 //    Hint: Use map: to transform the value, or wrap in Result ok:
@@ -224,18 +224,19 @@ Erlang modules that return `{ok, V} | {error, R}` can surface these as Results v
 -module(beamtalk_result).
 -export([from_tagged_tuple/1]).
 
-%% Convert Erlang {ok, V} | {error, R} | ok to Result tagged maps.
+%% Convert Erlang {ok, V} | {error, R} to Result tagged maps.
 %% Uses internal field names (okValue, errReason) to prevent unguarded
 %% field access — the public API goes through guarded value/error methods.
 %%
-%% NOTE: from_tagged_tuple/1 only handles the standard Erlang convention.
-%% For functions returning bare ok atoms, {ok, V1, V2} multi-value tuples,
-%% or other shapes, FFI authors must construct the Result manually or
-%% normalize the return value before calling from_tagged_tuple/1.
+%% NOTE: from_tagged_tuple/1 strictly handles {ok, V} | {error, R}.
+%% It does NOT accept bare ok atoms — the atom ok maps to the Beamtalk
+%% Symbol #ok, not the boolean true, and conflating the two would silently
+%% change the payload type. For functions returning bare ok (e.g., file:close/1),
+%% FFI authors must handle the atom explicitly:
+%%   ok -> beamtalk_result:ok(ok_symbol_here)  % or wrap in {ok, unit_value}
+%% For {ok, V1, V2} multi-value tuples, normalize before calling this helper.
 from_tagged_tuple({ok, Value}) ->
     #{'$beamtalk_class' => 'Result', 'isOk' => true, 'okValue' => Value, 'errReason' => nil};
-from_tagged_tuple(ok) ->
-    #{'$beamtalk_class' => 'Result', 'isOk' => true, 'okValue' => true, 'errReason' => nil};
 from_tagged_tuple({error, Reason}) ->
     #{'$beamtalk_class' => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => Reason}.
 ```
@@ -253,7 +254,7 @@ Usage in FFI modules:
     end.
 ```
 
-**Scope of `from_tagged_tuple/1`:** This helper covers the standard `{ok, V} | {error, R}` convention only. Erlang functions that return bare `ok` atoms, multi-value tuples `{ok, V1, V2}`, or other shapes must be normalized by the FFI author before calling `from_tagged_tuple/1`. Functions that crash on failure (e.g., `erlang:binary_to_integer/1` raising `badarg`) should use `tryDo:` instead.
+**Scope of `from_tagged_tuple/1`:** This helper covers `{ok, V} | {error, R}` only. It does **not** accept bare `ok` atoms — the atom `ok` is the Beamtalk Symbol `#ok`, not `true`, and silently coercing it would change the payload type. FFI authors must handle bare `ok` explicitly (e.g., wrapping it as `{ok, nil}` or constructing the Result map directly). Multi-value tuples `{ok, V1, V2}` and other shapes must also be normalized before calling this helper. Functions that crash on failure (e.g., `erlang:binary_to_integer/1` raising `badarg`) should use `tryDo:` instead.
 
 This replaces the current 5-line error builder chain per error case:
 
@@ -349,7 +350,7 @@ An actor method can return a Result. This is a normal return value — it flows 
 // Actor method returns Result — actor stays alive
 readConfig =>
   (File readAll: self configPath)
-    map: [:content | Yaml parse: content]
+    andThen: [:content | Yaml parse: content]
 
 // Caller handles the Result
 config := worker readConfig
@@ -376,7 +377,7 @@ processFile: path =>
 
 When a Result error is returned at the REPL, it is displayed as a **normal result** (not an error):
 
-```
+```text
 > File readAll: "/nonexistent"
 // => Result error: #file_not_found     (displayed as a value, not an error)
 > _
