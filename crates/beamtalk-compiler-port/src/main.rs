@@ -1569,10 +1569,7 @@ mod tests {
 
         let request = Map::from([
             (atom("command"), atom("compile_expression_trace")),
-            (
-                atom("source"),
-                binary("Object subclass: Foo\n  bar => 42"),
-            ),
+            (atom("source"), binary("Object subclass: Foo\n  bar => 42")),
             (atom("module"), binary("bt@trace_class_test")),
             (atom("known_vars"), Term::from(List::from(vec![]))),
         ]);

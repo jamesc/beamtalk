@@ -128,12 +128,32 @@ do_eval_trace(Expression, State) ->
                                 BindingsWithRegistry
                             ]),
                             CleanBindings = strip_internal_bindings(UpdatedBindings),
-                            Steps = [
+                            %% BT-1238: Await each step's value. If any future rejects, propagate
+                            %% as a top-level error (consistent with the non-trace eval path).
+                            AwaitedSteps = [
                                 {Src, maybe_await_future(Val)}
                              || {Src, Val} <- RawSteps
                             ],
-                            FinalState = beamtalk_repl_state:set_bindings(CleanBindings, NewState),
-                            {ok, Steps, FinalState}
+                            case
+                                lists:search(
+                                    fun
+                                        ({_Src, {future_rejected, _}}) -> true;
+                                        (_) -> false
+                                    end,
+                                    AwaitedSteps
+                                )
+                            of
+                                {value, {_Src, {future_rejected, FutureReason}}} ->
+                                    ErrState = beamtalk_repl_state:set_bindings(
+                                        CleanBindings, NewState
+                                    ),
+                                    {error, {future_rejected, FutureReason}, ErrState};
+                                false ->
+                                    FinalState = beamtalk_repl_state:set_bindings(
+                                        CleanBindings, NewState
+                                    ),
+                                    {ok, AwaitedSteps, FinalState}
+                            end
                         catch
                             Class:Reason:Stacktrace ->
                                 CaughtExObj = beamtalk_exception_handler:ensure_wrapped(

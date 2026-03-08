@@ -143,7 +143,14 @@ impl CoreErlangGenerator {
             let result_var = format!("_R{}", i + 1);
             let part = self.generate_repl_intermediate_expr(expr, &result_var)?;
             body_parts.push(part);
-            step_pairs.push((source_texts[i].clone(), result_var));
+            // BT-790: When `repl_loop_mutated` is true, `result_var` holds `{Result, StateAcc}`.
+            // Extract element 1 for the trace step so callers see the unwrapped value.
+            let step_val = if self.repl_loop_mutated {
+                format!("call 'erlang':'element'(1, {result_var})")
+            } else {
+                result_var
+            };
+            step_pairs.push((source_texts[i].clone(), step_val));
         }
 
         self.repl_loop_mutated = false;
