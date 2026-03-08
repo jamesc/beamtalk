@@ -7,12 +7,18 @@ TestCase subclass: FileStreamTest
 
   testFileLinesBasicReading =>
     self assert: (File lines: "test/fixtures/stream_test.txt") isOk
+    self assert: (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h lines asList size
+    ]) unwrap equals: 3
     self assert: (File lines: "test/fixtures/stream_single.txt") isOk
     self assert: (File lines: "test/fixtures/stream_no_trailing.txt") isOk
 
   testEmptyFile =>
     // Empty file returns empty stream
     self assert: (File lines: "test/fixtures/stream_empty.txt") isOk
+    self assert: (File open: "test/fixtures/stream_empty.txt" do: [:h |
+      h lines asList
+    ]) unwrap equals: #()
 
   testStreamPipelineComposition =>
     // Pipeline operations are verified through open:do: (see testFileOpenDoBlockScopedHandle)
@@ -41,19 +47,27 @@ TestCase subclass: FileStreamTest
     ]) unwrap equals: #()
 
   testLazyEvaluationConstantMemory =>
-    // Lazy evaluation verified through open:do: handles
-    self assert: (File lines: "test/fixtures/stream_large.txt") isOk
+    // Lazy take: reads only N lines from a large file; count with inject:into:
+    self assert: (File open: "test/fixtures/stream_large.txt" do: [:h |
+      (h lines take: 3) inject: 0 into: [:count :_ | count + 1]
+    ]) unwrap equals: 3
 
   testDoSideEffects =>
-    // do: iterates for side effects
-    self assert: (File lines: "test/fixtures/stream_test.txt") isOk
+    // do: iterates all lines; verify count via inject:into:
+    self assert: (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h lines inject: 0 into: [:count :line | count + 1]
+    ]) unwrap equals: 3
 
   testPrintstringStreamDescription =>
-    self assert: (File lines: "test/fixtures/stream_test.txt") isOk
+    // Stream printString returns a non-empty description
+    stream := (File lines: "test/fixtures/stream_test.txt") unwrap
+    self assert: ((stream printString size) > 0)
 
   testStreamFinalizerPartialConsumption =>
-    // Finalizers close handles on partial consumption
-    self assert: (File lines: "test/fixtures/stream_test.txt") isOk
+    // Partial consumption via open:do: returns only the taken lines
+    self assert: (File open: "test/fixtures/stream_test.txt" do: [:h |
+      h lines take: 1
+    ]) unwrap equals: #("line one")
     self assert: (File lines: "test/fixtures/stream_large.txt") isOk
 
   testErrorPaths =>

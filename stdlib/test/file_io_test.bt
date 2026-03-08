@@ -35,9 +35,10 @@ TestCase subclass: FileIoTest
     self deny: (File exists: "\\\\server\\share")
 
   testErrorPathsReadall =>
-    // readAll: nonexistent file
+    // readAll: nonexistent file returns file_not_found error
     result := File readAll: "target/bt-test-tmp/no_such_file_xyz.txt"
     self assert: result isError
+    self assert: result error notNil
     // readAll: non-string path
     @expect type
     self should: [File readAll: 42] raise: #type_error

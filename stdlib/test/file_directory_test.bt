@@ -86,7 +86,9 @@ TestCase subclass: FileDirectoryTest
   testListDirectory =>
     self assert: (File writeAll: "target/bt-test-tmp/fdt/a.txt" contents: "a") isOk
     self assert: (File writeAll: "target/bt-test-tmp/fdt/b.txt" contents: "b") isOk
-    self assert: (File listDirectory: "target/bt-test-tmp/fdt") isOk
+    entries := (File listDirectory: "target/bt-test-tmp/fdt") unwrap
+    self assert: (entries printString includesSubstring: "a.txt")
+    self assert: (entries printString includesSubstring: "b.txt")
 
   testListDirectoryContainsExpectedEntry =>
     self assert: (File writeAll: "target/bt-test-tmp/fdt/hello.txt" contents: "hi") isOk
@@ -185,11 +187,16 @@ TestCase subclass: FileDirectoryTest
     ] raise: #type_error
 
   testAbsolutePath =>
-    self assert: (File absolutePath: "target/bt-test-tmp/fdt") isOk
+    result := File absolutePath: "target/bt-test-tmp/fdt"
+    self assert: result isOk
+    self assert: (result unwrap printString includesSubstring: "bt-test-tmp/fdt")
 
   testAbsolutePathIsAbsolute =>
     result := File absolutePath: "target/bt-test-tmp/fdt"
     self assert: result isOk
+    System osFamily == "unix" ifTrue: [
+      self assert: (result unwrap printString includesSubstring: "/")
+    ]
 
   testAbsolutePathInvalidRaisesError =>
     self assert: (File absolutePath: "/etc/passwd") isError
