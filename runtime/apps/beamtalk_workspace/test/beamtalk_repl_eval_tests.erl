@@ -88,10 +88,10 @@ do_eval_no_compiler_error_test() ->
     %% Without a running compiler server (port backend), should get compile_error
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval("1 + 1", State),
-    ?assertMatch({error, {compile_error, _}, _, _, _}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = compile_error}, _, _, _}, Result),
 
     %% Error message should mention compiler
-    {error, {compile_error, Msg}, _, _, _} = Result,
+    {error, #beamtalk_error{message = Msg}, _, _, _} = Result,
     LowerMsg = string:lowercase(Msg),
     ?assert(binary:match(LowerMsg, <<"compiler">>) =/= nomatch).
 
@@ -114,7 +114,7 @@ handle_load_directory_test() ->
 do_eval_load_binary_error_test() ->
     %% Test case where compilation fails without compiler server
     State = beamtalk_repl_state:new(undefined, 0),
-    {error, {compile_error, _}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
+    {error, #beamtalk_error{}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
     %% Counter should still increment even on error
     ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)).
 
@@ -511,7 +511,7 @@ do_eval_empty_expression_test() ->
     %% Empty expression should still attempt compilation (and fail without compiler)
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval("", State),
-    ?assertMatch({error, {compile_error, _}, _, _, _}, Result).
+    ?assertMatch({error, #beamtalk_error{kind = compile_error}, _, _, _}, Result).
 
 do_eval_counter_increments_on_each_call_test() ->
     %% Verify counter increments independently on each call
@@ -652,7 +652,7 @@ handle_load_valid_file_no_compiler_test() ->
 do_eval_with_registry_no_compiler_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     State = beamtalk_repl_state:new(RegistryPid, 0),
-    {error, {compile_error, _}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 2", State),
+    {error, #beamtalk_error{}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 2", State),
     ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)),
     gen_server:stop(RegistryPid).
 

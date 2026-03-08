@@ -85,10 +85,10 @@ do_eval(Expression, State, Subscriber) ->
                         NewState
                     );
                 {error, Reason} ->
-                    {error, {load_error, Reason}, <<>>, [], NewState}
+                    wrap_load_err(Reason, NewState)
             end;
         {error, Reason} ->
-            {error, {compile_error, Reason}, <<>>, [], NewState}
+            wrap_compile_err(Reason, NewState)
     end.
 
 %% @doc Evaluate a Beamtalk expression in trace mode (BT-1238).
@@ -183,16 +183,10 @@ do_eval_trace(Expression, State) ->
                             {error, WrappedReason, Output, Warnings, ErrorState}
                     end;
                 {error, Reason} ->
-                    WrappedLoadErr = beamtalk_repl_errors:ensure_structured_error(
-                        {load_error, Reason}
-                    ),
-                    {error, WrappedLoadErr, <<>>, [], NewState}
+                    wrap_load_err(Reason, NewState)
             end;
         {error, Reason} ->
-            WrappedCompileErr = beamtalk_repl_errors:ensure_structured_error(
-                {compile_error, Reason}
-            ),
-            {error, WrappedCompileErr, <<>>, [], NewState}
+            wrap_compile_err(Reason, NewState)
     end.
 
 %% @doc Compile a Beamtalk expression and return Core Erlang source (BT-700).
@@ -434,3 +428,17 @@ inject_output({ok, Result, State}, Output, Warnings) ->
     {ok, Result, Output, Warnings, State};
 inject_output({error, Reason, State}, Output, Warnings) ->
     {error, Reason, Output, Warnings, State}.
+
+%% @private Wrap a compile error as a structured #beamtalk_error{} result tuple.
+-spec wrap_compile_err(term(), beamtalk_repl_state:state()) ->
+    {error, #beamtalk_error{}, binary(), [], beamtalk_repl_state:state()}.
+wrap_compile_err(Reason, State) ->
+    Err = beamtalk_repl_errors:ensure_structured_error({compile_error, Reason}),
+    {error, Err, <<>>, [], State}.
+
+%% @private Wrap a load error as a structured #beamtalk_error{} result tuple.
+-spec wrap_load_err(term(), beamtalk_repl_state:state()) ->
+    {error, #beamtalk_error{}, binary(), [], beamtalk_repl_state:state()}.
+wrap_load_err(Reason, State) ->
+    Err = beamtalk_repl_errors:ensure_structured_error({load_error, Reason}),
+    {error, Err, <<>>, [], State}.
