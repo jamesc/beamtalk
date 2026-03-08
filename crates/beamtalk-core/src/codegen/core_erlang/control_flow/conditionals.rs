@@ -248,19 +248,16 @@ impl CoreErlangGenerator {
                     // is_local_var_assignment(expr) guarantees expr is Assignment { target: Identifier }.
                     // If either invariant breaks, fail loudly rather than silently skipping bind_var.
                     let Expression::Assignment { target, .. } = expr else {
-                        unreachable!(
-                            "is_local_var_assignment must ensure expr is an Assignment"
-                        );
+                        unreachable!("is_local_var_assignment must ensure expr is an Assignment");
                     };
                     let Expression::Identifier(id) = target.as_ref() else {
                         unreachable!(
                             "is_local_var_assignment must ensure assignment target is an Identifier"
                         );
                     };
-                    let val_var = self
-                        .last_open_scope_result
-                        .clone()
-                        .expect("generate_local_var_assignment_in_loop must set last_open_scope_result");
+                    let val_var = self.last_open_scope_result.clone().expect(
+                        "generate_local_var_assignment_in_loop must set last_open_scope_result",
+                    );
                     self.bind_var(&id.name, &val_var);
                 }
             } else if is_last && self.control_flow_has_mutations(expr) {
