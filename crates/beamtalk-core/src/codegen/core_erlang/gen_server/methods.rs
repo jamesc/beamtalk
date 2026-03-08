@@ -1411,13 +1411,13 @@ impl CoreErlangGenerator {
                 None
             };
 
-            // Generate body as Document, render to string for embedding
-            let body_str = if method.body.is_empty() {
+            // Generate body as Document and keep it in the Document pipeline (BT-875).
+            let body_doc: Document<'static> = if method.body.is_empty() {
                 self.current_nlr_token = None;
                 // Empty class method body returns self (ClassSelf)
-                "ClassSelf".to_string()
+                docvec!["ClassSelf"]
             } else {
-                let body_doc = self.generate_class_method_body(method, &class.class_variables)?;
+                let inner_doc = self.generate_class_method_body(method, &class.class_variables)?;
                 self.current_nlr_token = None;
                 // BT-1202: Use self.class_var_mutated (not just whether class vars are declared)
                 // to preserve the {class_var_result, ...} contract. The normal path only wraps
@@ -1427,14 +1427,13 @@ impl CoreErlangGenerator {
                 let returns_class_var_result = self.class_var_mutated;
                 if let Some(ref token_var) = nlr_token_var {
                     // BT-1202: Wrap body in try/catch to catch NLR throws from ^ inside blocks.
-                    let wrapped = self.wrap_class_method_body_with_nlr_catch(
-                        body_doc,
+                    self.wrap_class_method_body_with_nlr_catch(
+                        inner_doc,
                         token_var,
                         returns_class_var_result,
-                    );
-                    wrapped.to_pretty_string()
+                    )
                 } else {
-                    body_doc.to_pretty_string()
+                    inner_doc
                 }
             };
 
@@ -1454,7 +1453,7 @@ impl CoreErlangGenerator {
                 " = fun (ClassSelf, ClassVars",
                 Document::String(params_suffix),
                 ") ->",
-                nest(INDENT, docvec![line(), body_str,]),
+                nest(INDENT, docvec![line(), body_doc,]),
                 "\n",
             ];
             docs.push(doc);
