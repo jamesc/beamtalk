@@ -1232,6 +1232,11 @@ mod tests {
         assert_node_stopped(&info1, "node should not be running after graceful stop");
 
         // Wait for epmd deregistration before restarting with the same name.
+        // 15s here vs 5s in NodeGuard::drop and kill_node_raw: this is the one
+        // place where we restart with the *same* node name, so deregistration
+        // must fully complete before the next start_detached_node call. On a
+        // loaded CI runner (Docker, shared GHA) graceful stop via stop_workspace
+        // may take longer to propagate through epmd than a raw SIGKILL would.
         wait_for_epmd_deregistration(&info1.node_name, 15)
             .expect("epmd should deregister node name within timeout");
 
