@@ -310,7 +310,7 @@ fn collect_pattern_bindings(
         Pattern::Variable(id) => {
             let name = id.name.to_string();
             if ctx.local_bindings.contains(name.as_str()) {
-                // Shadowing an outer local — record the write
+                // Rebinding an existing local in this block — record the write
                 analysis.local_writes.insert(name.clone());
             } else {
                 ctx.local_bindings.insert(name.clone());
@@ -333,6 +333,10 @@ fn collect_pattern_bindings(
         Pattern::Binary { segments, .. } => {
             for seg in segments {
                 collect_pattern_bindings(&seg.value, analysis, ctx);
+                // Size expressions (e.g. `len` in `<<payload:len/binary>>`) are reads
+                if let Some(size_expr) = &seg.size {
+                    analyze_expression(size_expr, analysis, ctx);
+                }
             }
         }
         Pattern::Wildcard(..) | Pattern::Literal(..) => {
@@ -760,9 +764,16 @@ mod tests {
                     value: Box::new(make_expr_id("arr")),
                     span: Span::new(0, 20),
                 }),
-                bare(make_expr_id("first")),
+                // Read both bound variables so captured_reads assertions are meaningful
+                bare(Expression::MessageSend {
+                    receiver: Box::new(make_expr_id("first")),
+                    selector: MessageSelector::Binary("+".into()),
+                    arguments: vec![make_expr_id("second")],
+                    is_cast: false,
+                    span: Span::new(22, 30),
+                }),
             ],
-            Span::new(0, 28),
+            Span::new(0, 32),
         );
         let analysis = analyze_block(&block);
 
@@ -770,6 +781,53 @@ mod tests {
         assert!(analysis.local_writes.contains("second"));
         assert!(!analysis.captured_reads.contains("first"));
         assert!(!analysis.captured_reads.contains("second"));
+    }
+
+    #[test]
+    fn test_binary_destructure_size_expr_recorded_as_read() {
+        // BT-1263: [<<payload:len/binary>> := bin] where `len` is a variable —
+        // the size expression `len` must appear in local_reads/captured_reads.
+        use crate::ast::{BinarySegment, Pattern};
+
+        let binary_pattern = Pattern::Binary {
+            segments: vec![BinarySegment {
+                value: Pattern::Variable(make_id("payload")),
+                size: Some(Box::new(make_expr_id("len"))),
+                segment_type: None,
+                signedness: None,
+                endianness: None,
+                unit: None,
+                span: Span::new(2, 14),
+            }],
+            span: Span::new(0, 16),
+        };
+
+        let block = Block::new(
+            vec![],
+            vec![bare(Expression::DestructureAssignment {
+                pattern: binary_pattern,
+                value: Box::new(make_expr_id("bin")),
+                span: Span::new(0, 25),
+            })],
+            Span::new(0, 27),
+        );
+        let analysis = analyze_block(&block);
+
+        // `payload` is a binding introduced by the pattern
+        assert!(
+            analysis.local_writes.contains("payload"),
+            "payload should be in local_writes"
+        );
+        // `len` is read as a size expression — should appear in local_reads
+        assert!(
+            analysis.local_reads.contains("len"),
+            "len (size expression) should be in local_reads"
+        );
+        // `len` is not locally defined, so it should be a captured read
+        assert!(
+            analysis.captured_reads.contains("len"),
+            "len should be in captured_reads (read before definition)"
+        );
     }
 
     #[test]
