@@ -1284,58 +1284,23 @@ impl CoreErlangGenerator {
                         }
                     }
                     Pattern::Tuple { .. } => {
-                        // Tuple destructuring: wrap the remaining body in a `case` arm.
+                        // Tuple destructuring in a block body: use the flat element/2 approach
+                        // (same strategy as array destructuring above). This avoids generating a
+                        // `case` expression inside a `fun` body, which triggers core_lint
+                        // `illegal_expr` due to the invalid `<<"...">>` binary literal in the
+                        // catch-all arm.
+                        //
                         // Example: `{a, b} := expr` →
                         //   let _Tup1 = <expr> in
-                        //   case _Tup1 of <{A, B}> when 'true' -> <rest of body> end
-                        let tup_var = self.fresh_temp_var("Tup");
-                        let val_doc = self.expression_doc(value)?;
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(tup_var.clone()),
-                            " = ",
-                            val_doc,
-                            " in "
-                        ]);
-
-                        let pattern_doc = self.generate_pattern(pattern)?;
-
-                        self.push_scope();
-                        Self::collect_pattern_variables(pattern, |name, core_var| {
-                            self.bind_var(name, core_var);
-                        });
-
-                        // Generate remaining body inside the case arm (empty slice → 'nil')
-                        let rest_doc = self.generate_block_body_slice(&body[i + 1..])?;
-                        self.pop_scope();
-
-                        // Build a descriptive error for the catch-all arm
-                        let err0 = self.fresh_temp_var("Err");
-                        let err1 = self.fresh_temp_var("Err");
-
-                        docs.push(docvec![
-                            "case ",
-                            Document::String(tup_var),
-                            " of <",
-                            pattern_doc,
-                            "> when 'true' -> ",
-                            rest_doc,
-                            " <_> when 'true' -> ",
-                            "let ", Document::String(err0.clone()), " = ",
-                            "call 'beamtalk_error':'new'('destructure_mismatch', 'unknown') in ",
-                            "let ", Document::String(err1.clone()), " = ",
-                            "call 'beamtalk_error':'with_message'(",
-                            Document::String(err0),
-                            ", ",
-                            "<<\"Destructuring failed: value does not match expected tuple pattern\">>",
-                            ") in ",
-                            "call 'beamtalk_error':'raise'(",
-                            Document::String(err1),
-                            ")",
-                            " end"
-                        ]);
-                        // All remaining expressions are inside the case arm
-                        break;
+                        //   let A = call 'erlang':'element'(1, _Tup1) in
+                        //   let B = call 'erlang':'element'(2, _Tup1) in
+                        let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                        for d in binding_docs {
+                            docs.push(d);
+                        }
+                        if is_last {
+                            docs.push(Document::Str("'nil'"));
+                        }
                     }
                     _ => {
                         return Err(CodeGenError::UnsupportedFeature {
@@ -1428,6 +1393,7 @@ impl CoreErlangGenerator {
     ///
     /// Returns a `Vec<Document>` of `let X = ... in` bindings.
     /// Variables are bound in the current scope for subsequent expressions.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn generate_destructure_bindings(
         &mut self,
         pattern: &Pattern,
@@ -1482,6 +1448,23 @@ impl CoreErlangGenerator {
                     val_doc,
                     " in "
                 ]);
+                // Arity check: verify the tuple has the expected number of elements.
+                let expected_arity = Document::String(elements.len().to_string());
+                let size_ok_var = self.fresh_temp_var("SizeOk");
+                let bad_arity_var = self.fresh_temp_var("BadArity");
+                docs.push(docvec![
+                    "let ",
+                    Document::String(size_ok_var),
+                    " = case call 'erlang':'tuple_size'(",
+                    Document::String(tup_var.clone()),
+                    ") of <",
+                    expected_arity,
+                    "> when 'true' -> 'ok' <",
+                    Document::String(bad_arity_var),
+                    "> when 'true' -> call 'erlang':'error'({'badmatch', ",
+                    Document::String(tup_var.clone()),
+                    "}) end in "
+                ]);
                 for (idx, elem) in elements.iter().enumerate() {
                     let one_based = Document::String((idx + 1).to_string());
                     match elem {
@@ -1499,13 +1482,12 @@ impl CoreErlangGenerator {
                             ]);
                         }
                         Pattern::Literal(_, span) => {
-                            // Literal patterns (e.g. `{#ok, val}`) are not supported in the flat
-                            // codegen path. Use block-body tuple destructuring (which compiles to
-                            // a `case`) if matching on literals is needed.
+                            // Literal patterns (e.g. `{#ok, val}`) require pattern matching
+                            // semantics; use a `match:` expression or the `beamtalk_match`
+                            // mechanism instead of destructuring assignment.
                             return Err(CodeGenError::UnsupportedFeature {
-                                feature:
-                                    "Literal patterns in tuple destructuring outside a block body"
-                                        .to_string(),
+                                feature: "Literal patterns in tuple destructuring assignment"
+                                    .to_string(),
                                 location: format!("{span:?}"),
                             });
                         }
