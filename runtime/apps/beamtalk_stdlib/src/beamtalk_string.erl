@@ -242,19 +242,41 @@ from_code_point(CodePoint) when is_integer(CodePoint) ->
     Error0 = beamtalk_error:new(type_error, 'String'),
     Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoint:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Code point must be a non-negative integer">>),
+    beamtalk_error:raise(Error2);
+from_code_point(_) ->
+    Error0 = beamtalk_error:new(type_error, 'String'),
+    Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoint:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Code point must be an Integer">>),
     beamtalk_error:raise(Error2).
 
 %% @doc Create a UTF-8 binary from a list of Unicode code points.
 -spec from_code_points([integer()]) -> binary().
 from_code_points(List) when is_list(List) ->
-    case unicode:characters_to_binary(List) of
-        Bin when is_binary(Bin) -> Bin;
-        _ ->
+    case lists:all(fun(X) -> is_integer(X) andalso X >= 0 end, List) of
+        true ->
+            case unicode:characters_to_binary(List) of
+                Bin when is_binary(Bin) -> Bin;
+                _ ->
+                    Error0 = beamtalk_error:new(type_error, 'String'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoints:'),
+                    Error2 = beamtalk_error:with_hint(
+                        Error1, <<"Invalid Unicode code points in list">>
+                    ),
+                    beamtalk_error:raise(Error2)
+            end;
+        false ->
             Error0 = beamtalk_error:new(type_error, 'String'),
             Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoints:'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Invalid Unicode code points in list">>),
+            Error2 = beamtalk_error:with_hint(
+                Error1, <<"List must contain only non-negative integer code points">>
+            ),
             beamtalk_error:raise(Error2)
-    end.
+    end;
+from_code_points(_) ->
+    Error0 = beamtalk_error:new(type_error, 'String'),
+    Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoints:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Expected a List of Integer code points">>),
+    beamtalk_error:raise(Error2).
 
 %%% ============================================================================
 %%% Internal Functions

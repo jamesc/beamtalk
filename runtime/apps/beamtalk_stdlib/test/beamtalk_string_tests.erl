@@ -503,3 +503,36 @@ from_code_points_empty_test() ->
 
 from_code_points_multibyte_test() ->
     ?assertEqual(<<"€£"/utf8>>, beamtalk_string:from_code_points([8364, 163])).
+
+from_code_point_non_integer_raises_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'String', selector = 'fromCodePoint:'
+            }
+        },
+        beamtalk_string:from_code_point(<<"not_an_integer">>)
+    ).
+
+from_code_points_non_list_raises_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'String', selector = 'fromCodePoints:'
+            }
+        },
+        beamtalk_string:from_code_points(not_a_list)
+    ).
+
+from_code_points_non_integer_elements_raises_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'String', selector = 'fromCodePoints:'
+            }
+        },
+        beamtalk_string:from_code_points([65, <<"not_an_int">>, 97])
+    ).
