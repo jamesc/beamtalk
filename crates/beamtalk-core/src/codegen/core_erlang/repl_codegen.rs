@@ -305,6 +305,14 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<(Document<'static>, Document<'static>)> {
+        // Destructuring assignments not yet supported in REPL
+        if matches!(expr, Expression::DestructureAssignment { .. }) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "Destructuring assignment in REPL (use in class methods instead)"
+                    .to_string(),
+                location: format!("{:?}", expr.span()),
+            });
+        }
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
                 let var_name = id.name.clone();

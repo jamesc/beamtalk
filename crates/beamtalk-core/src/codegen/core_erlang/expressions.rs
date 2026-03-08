@@ -915,6 +915,10 @@ impl CoreErlangGenerator {
                 for d in binding_docs {
                     docs.push(d);
                 }
+                if is_last {
+                    let state = self.current_state_var();
+                    docs.push(docvec!["{'nil', ", Document::String(state), "}"]);
+                }
             } else {
                 // Non-assignment expression
                 if !is_last {

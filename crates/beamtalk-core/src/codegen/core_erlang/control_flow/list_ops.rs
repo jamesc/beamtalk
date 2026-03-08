@@ -291,9 +291,13 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                has_plain_lets = true;
                 let binding_docs = self.generate_destructure_bindings(pattern, value)?;
                 for d in binding_docs {
                     docs.push(d);
+                }
+                if is_last {
+                    docs.push(Document::String(self.current_state_var()));
                 }
             } else if self.control_flow_has_mutations(expr)
                 || Self::inline_conditional_writes_threaded(expr, &threaded)
@@ -576,6 +580,16 @@ impl CoreErlangGenerator {
                 for d in binding_docs {
                     docs.push(d);
                 }
+                if is_last {
+                    let final_state = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    docs.push(Document::String(format!(
+                        "{{['nil' | AccList], {final_state}}}"
+                    )));
+                }
             } else {
                 // Non-assignment expression
                 if i > 0 && !is_last {
@@ -787,6 +801,7 @@ impl CoreErlangGenerator {
     /// BT-904: Generate body for stateful `select:`/`reject:`, threading state through
     /// self-sends and field assignments. Returns `{NewAccList, NewState}` where
     /// the item is conditionally appended based on the block predicate result.
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_list_filter_body_with_threading(
         &mut self,
         body: &Block,
@@ -872,6 +887,10 @@ impl CoreErlangGenerator {
                 let binding_docs = self.generate_destructure_bindings(pattern, value)?;
                 for d in binding_docs {
                     docs.push(d);
+                }
+                if is_last {
+                    // Destructuring as predicate: emit false so the item is not selected
+                    docs.push(Document::String(format!("let {pred_var} = 'false' in ")));
                 }
             } else {
                 if i > 0 && !is_last {
@@ -1193,6 +1212,7 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(in crate::codegen::core_erlang) fn generate_list_inject_body_with_threading(
         &mut self,
         body: &Block,
@@ -1287,6 +1307,15 @@ impl CoreErlangGenerator {
                 let binding_docs = self.generate_destructure_bindings(pattern, value)?;
                 for d in binding_docs {
                     docs.push(d);
+                }
+                if is_last {
+                    // Destructuring as last inject: expression: acc unchanged, return nil as acc
+                    let final_state = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    docs.push(Document::String(format!("{{'nil', {final_state}}}")));
                 }
             } else {
                 // Non-assignment expression
