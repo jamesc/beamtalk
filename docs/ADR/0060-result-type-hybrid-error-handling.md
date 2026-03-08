@@ -730,35 +730,24 @@ content := File readAll: path  // => Result ok: "..." or Result error: #file_not
 
 ## Implementation
 
-### Phase 1: Result Class + Runtime Helper (S)
+### Phase 1: Result Class + FFI Migration (M)
 
-**Components:** stdlib (Beamtalk), runtime (Erlang)
+Ship Result and migrate all FFI modules in one step. Existing callers (including Symphony) are already in poor shape with ad-hoc error conventions — deferring the FFI migration only adds more callers to the future migration burden and allows `tryDo:` to become an entrenched substitute convention.
 
-1. **`stdlib/src/Result.bt`** — Value class with `state:` declarations, `ifOk:ifError:`, `map:`, `andThen:`, `valueOr:`, `valueOrDo:`, `unwrap`, `mapError:`, `printString`
-2. **`runtime/apps/beamtalk_stdlib/src/beamtalk_result.erl`** — `from_tagged_tuple/1` helper for FFI modules, `class_tryDo:/3` for `tryDo:` class method
-3. **`stdlib/test/result_test.bt`** — BUnit tests for all Result methods
-4. **Boot order** — Ensure Result loads before File, Yaml, etc. in `build_stdlib.rs`
+**Components:** stdlib (Beamtalk), runtime (Erlang), stdlib tests, e2e tests
 
-### Phase 2: Migrate File I/O to Result (M)
+1. **`stdlib/src/Result.bt`** — Value class with `state:` declarations, `ifOk:ifError:`, `map:`, `andThen:`, `valueOr:`, `valueOrDo:`, `unwrap`, `mapError:`, `printString`. Boot order: ensure Result loads before File, Yaml, etc. in `build_stdlib.rs`
+2. **`runtime/apps/beamtalk_stdlib/src/beamtalk_result.erl`** — `from_tagged_tuple/1` helper, `class_tryDo:/3` for `tryDo:` class method
+3. **`beamtalk_file.erl`** — Convert all 12 fallible methods to return Result via `from_tagged_tuple/1`. Each replaces a 5-line error builder chain per error case with 2-3 lines
+4. **`beamtalk_regex.erl`** — `Regex from:` returns Result (invalid pattern is expected)
+5. **`beamtalk_http.erl`** — Network errors return Result; HTTP status codes remain on HTTPResponse
+6. **`beamtalk_subprocess.erl`** / **`beamtalk_reactive_subprocess.erl`** — Startup failures return Result
+7. **Yaml/JSON parsing** — Parse errors return Result
+8. **`stdlib/test/result_test.bt`** — BUnit tests for all Result methods
+9. **Update stdlib tests** — file, regex, HTTP, subprocess tests for Result-returning methods
+10. **Update e2e tests** — `tests/e2e/cases/` for file-related cases
 
-**Components:** runtime (Erlang), stdlib tests
-
-1. **`beamtalk_file.erl`** — Convert `readAll:`, `writeAll:to:`, `exists:`, `makeDirectory:`, `deleteRecursive:`, `list:`, `stat:` to return Result via `from_tagged_tuple/1`. ~8 methods, each replacing 10-30 lines of error builder chains with 2-3 lines
-2. **Preserve exception variants** — Add `readAll:orRaise:` (or similar) for callers who want exception behavior. Or: provide `unwrap` as the escape hatch
-3. **Update stdlib tests** — `stdlib/test/file_test.bt` tests for Result-returning methods
-4. **Update e2e tests** — `tests/e2e/cases/` file-related tests
-
-### Phase 3: Migrate Other FFI Modules (M)
-
-**Components:** runtime (Erlang), stdlib (Beamtalk)
-
-1. **`beamtalk_regex.erl`** — `Regex from:` returns Result (pattern might be invalid)
-2. **`beamtalk_http.erl`** — Network errors return Result; HTTP status codes remain on HTTPResponse (not errors)
-3. **`beamtalk_subprocess.erl`** — Process startup failures return Result
-4. **Yaml/JSON parsing** — Parse errors return Result (untrusted input)
-5. **Update tests and docs**
-
-### Phase 4: Language Features Documentation (S)
+### Phase 2: Language Features Documentation (S)
 
 **Components:** docs
 
@@ -810,12 +799,9 @@ case some_erlang_call(Args) of
 end.
 ```
 
-### Phased Rollout
+### Rollout
 
-1. **Phase 1:** Ship `Result.bt` and `beamtalk_result.erl`. No existing APIs change. Users can create Results manually and use `tryDo:` to wrap exception-based code.
-2. **Phase 2:** Migrate `File` methods to return Result. This is a breaking change for direct callers but `unwrap` provides backward-compatible behavior.
-3. **Phase 3:** Migrate remaining FFI modules. Each migration is independent.
-4. **Phase 4:** Document the convention. New FFI modules should return Result by default.
+**Phase 1** ships Result and migrates all FFI modules simultaneously. Existing callers (Symphony and stdlib tests) need updating, but `unwrap` provides a mechanical escape hatch for any call site that wants to preserve exception-raising behavior. New FFI modules must return Result by default from day one.
 
 ## References
 
