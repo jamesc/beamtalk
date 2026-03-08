@@ -714,9 +714,15 @@ In dynamic mode (the common case), `-> String | IOError` is an unenforced annota
 
 The discrimination syntax (`isKindOf:`) is also heavier than TypeScript's `instanceof` narrowing, and the result is not composable — there is no `andThen:` or `map:` without reinventing the Result container.
 
-**The structural problem — not a maturity problem:** This alternative is sometimes framed as "viable once gradual typing matures." That framing is wrong. Because typing is always optional in Beamtalk, there will permanently be dynamic-mode callers with no exhaustiveness enforcement — not as a temporary gap, but as a design invariant. Union types can never be the primary error-handling convention when the enforcement mechanism is opt-in. At best, `-> String | IOError` annotations could serve as a typed-mode overlay on top of whatever convention dynamic code uses — which must be Result anyway.
+**The structural problem — not a maturity problem:** This alternative is sometimes framed as "viable once gradual typing matures." That framing is wrong at two levels.
 
-**Not adopted because:** The optional type system means caller enforcement is permanently absent for dynamic-mode code. The error branch is silently ignorable with no compile-time penalty — strictly worse than exceptions. The Result wrapper provides runtime shape guarantees (`$beamtalk_class`, `isOk`, guarded accessors) that hold regardless of typing mode. Composability (`andThen:`, `map:`) works at runtime without a type checker. Union types could complement Result as typed annotations (e.g., narrowing `result :: Result(String, IOError)`) but cannot replace it.
+First, typing is always optional — dynamic-mode callers permanently exist with no exhaustiveness enforcement.
+
+Second, and more fundamentally: Beamtalk is a **live, open-world system**. New classes can be created at the REPL at any time. The class hierarchy is open and mutable at runtime. Static exhaustiveness checking assumes a closed world where the set of types is fixed at compile time — an assumption Beamtalk explicitly rejects. Even fully-annotated code cannot guarantee exhaustiveness over `String | IOError` because new `IOError` subclasses can be defined mid-session. The type checker would have to re-verify all union branches on every new class definition, which is either unsound or requires whole-program re-checking on every REPL eval.
+
+This is not a gap to close with better tooling. It is a consequence of the core design principle: **the REPL is not a sandbox, it is the live system.** A static exhaustiveness discipline that breaks on every new class definition is not a discipline — it is friction.
+
+**Not adopted because:** Static exhaustiveness is irreconcilable with a live open-world system. The Result wrapper is the correct design for this context: it provides runtime shape guarantees (`$beamtalk_class`, `isOk`, guarded accessors) that hold regardless of typing mode or class hierarchy mutations. Composability (`andThen:`, `map:`) works at runtime without a type checker. Union type annotations could complement Result (e.g., `result :: Result(String, IOError)` for tooling hints) but cannot replace the runtime convention.
 
 ### Alternative F: Optional/Maybe Type (Separate from Result)
 
