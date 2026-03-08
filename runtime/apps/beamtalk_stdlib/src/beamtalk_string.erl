@@ -35,7 +35,8 @@
     is_digit/1,
     is_alpha/1,
     from_code_point/1,
-    from_code_points/1
+    from_code_points/1,
+    from_iolist/1
 ]).
 
 %% @doc 1-based grapheme access. Returns the grapheme at the given index.
@@ -276,6 +277,58 @@ from_code_points(_) ->
     Error0 = beamtalk_error:new(type_error, 'String'),
     Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoints:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Expected a List of Integer code points">>),
+    beamtalk_error:raise(Error2).
+
+%% @doc Coerce an Erlang iolist or charlist to a UTF-8 binary String.
+%%
+%% Strategy: try iolist_to_binary/1 first to preserve byte-oriented iodata,
+%% then validate/normalise the result as UTF-8. Only fall back to treating the
+%% original list as a Unicode charlist of code points when the byte-oriented
+%% path fails — this correctly handles both UTF-8 byte iolists such as
+%% [195, 169] and Unicode codepoint charlists such as [233], both yielding "é".
+-spec from_iolist(iolist() | binary()) -> binary().
+from_iolist(X) when is_binary(X) ->
+    X;
+from_iolist(X) when is_list(X) ->
+    case catch iolist_to_binary(X) of
+        Bytes when is_binary(Bytes) ->
+            %% Assemble bytes first; then validate/normalise as UTF-8.
+            case catch unicode:characters_to_binary(Bytes) of
+                UtfBin when is_binary(UtfBin) ->
+                    UtfBin;
+                _ ->
+                    %% Byte assembly succeeded but the bytes are not valid UTF-8.
+                    %% Fall back: interpret the original list as a charlist of code points.
+                    case catch unicode:characters_to_binary(X) of
+                        UtfBin2 when is_binary(UtfBin2) ->
+                            UtfBin2;
+                        _ ->
+                            Error0 = beamtalk_error:new(type_error, 'String'),
+                            Error1 = beamtalk_error:with_selector(Error0, 'fromIolist:'),
+                            Error2 = beamtalk_error:with_hint(
+                                Error1, <<"Could not convert iolist to String">>
+                            ),
+                            beamtalk_error:raise(Error2)
+                    end
+            end;
+        _ ->
+            %% iolist_to_binary/1 failed — try treating the list as a charlist directly.
+            case catch unicode:characters_to_binary(X) of
+                UtfBin when is_binary(UtfBin) ->
+                    UtfBin;
+                _ ->
+                    Error0 = beamtalk_error:new(type_error, 'String'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'fromIolist:'),
+                    Error2 = beamtalk_error:with_hint(
+                        Error1, <<"Could not convert iolist to String">>
+                    ),
+                    beamtalk_error:raise(Error2)
+            end
+    end;
+from_iolist(_) ->
+    Error0 = beamtalk_error:new(type_error, 'String'),
+    Error1 = beamtalk_error:with_selector(Error0, 'fromIolist:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Expected an iolist (List) or String">>),
     beamtalk_error:raise(Error2).
 
 %%% ============================================================================
