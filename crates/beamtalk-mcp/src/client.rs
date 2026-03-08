@@ -351,6 +351,21 @@ impl ReplClient {
         self.send(&request).await
     }
 
+    /// Send a load-project operation.
+    pub async fn load_project(
+        &self,
+        path: &str,
+        include_tests: bool,
+    ) -> Result<ReplResponse, String> {
+        let request = serde_json::json!({
+            "op": "load-project",
+            "id": next_msg_id(),
+            "path": path,
+            "include_tests": include_tests
+        });
+        self.send(&request).await
+    }
+
     /// Send a docs operation.
     pub async fn docs(&self, class: &str, selector: Option<&str>) -> Result<ReplResponse, String> {
         let mut request = serde_json::json!({
@@ -404,6 +419,8 @@ pub struct ReplResponse {
     pub migration_failures: Option<u32>,
     /// Generated Core Erlang source (show-codegen op).
     pub core_erlang: Option<String>,
+    /// Per-file load errors (load-project op).
+    pub errors: Option<Vec<String>>,
     /// Test results (test / test-all ops).
     pub results: Option<serde_json::Value>,
     /// Supported operations and protocol info (describe op).
