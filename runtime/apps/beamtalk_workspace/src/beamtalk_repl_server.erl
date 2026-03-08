@@ -374,6 +374,8 @@ handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"clear">>; Op =:= <<"bindin
     beamtalk_repl_ops_eval:handle(Op, Params, Msg, SessionPid);
 handle_op(<<"load-source">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_load:handle(<<"load-source">>, Params, Msg, SessionPid);
+handle_op(<<"load-project">>, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops_load:handle(<<"load-project">>, Params, Msg, SessionPid);
 handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"load-file">>; Op =:= <<"reload">>; Op =:= <<"modules">>
 ->

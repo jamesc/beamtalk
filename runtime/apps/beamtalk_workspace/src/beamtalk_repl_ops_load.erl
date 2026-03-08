@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
-%%% @doc Op handlers for load-file, load-source, reload, unload, and modules operations.
+%%% @doc Op handlers for load-file, load-source, load-project, reload, unload, and modules operations.
 %%%
 %%% **DDD Context:** REPL Session Context
 %%%
@@ -14,8 +14,63 @@
 
 -export([handle/4, resolve_class_to_module/1, resolve_module_atoms/2]).
 
+%% Export internals for white-box testing of load-project helpers.
+-ifdef(TEST).
+-export([
+    find_bt_files/1,
+    extract_bt_class_info/1,
+    sort_bt_files_by_deps/1
+]).
+-endif.
+
 %% @doc Handle load/reload/unload/modules ops.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
+handle(<<"load-project">>, Params, Msg, SessionPid) ->
+    PathBin = maps:get(<<"path">>, Params, <<".">>),
+    Path = binary_to_list(PathBin),
+    IncludeTests = maps:get(<<"include_tests">>, Params, false),
+    AbsPath = filename:absname(Path),
+    ManifestPath = filename:join(AbsPath, "beamtalk.toml"),
+    case filelib:is_file(ManifestPath) of
+        false ->
+            Err0 = beamtalk_error:new(file_not_found, 'REPL'),
+            Err1 = beamtalk_error:with_message(
+                Err0,
+                iolist_to_binary(["No beamtalk.toml found in: ", AbsPath])
+            ),
+            Err2 = beamtalk_error:with_hint(
+                Err1,
+                <<"Provide a directory path containing beamtalk.toml">>
+            ),
+            beamtalk_repl_protocol:encode_error(
+                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+            );
+        true ->
+            SrcFiles = find_bt_files(filename:join(AbsPath, "src")),
+            TestFiles =
+                case IncludeTests of
+                    true -> find_bt_files(filename:join(AbsPath, "test"));
+                    false -> []
+                end,
+            AllFiles = SrcFiles ++ TestFiles,
+            SortedFiles = sort_bt_files_by_deps(AllFiles),
+            {AllClasses, Errors} = load_files_sequential(SortedFiles, SessionPid),
+            ClassNames =
+                [
+                    case maps:get(name, C, "") of
+                        N when is_binary(N) -> N;
+                        N -> list_to_binary(N)
+                    end
+                 || C <- AllClasses
+                ],
+            Base = beamtalk_repl_protocol:base_response(Msg),
+            Response = Base#{
+                <<"status">> => [<<"done">>],
+                <<"classes">> => ClassNames,
+                <<"errors">> => Errors
+            },
+            jsx:encode(Response)
+    end;
 handle(<<"load-file">>, Params, Msg, SessionPid) ->
     Path = binary_to_list(maps:get(<<"path">>, Params, <<>>)),
     case beamtalk_repl_shell:load_file(SessionPid, Path) of
@@ -193,6 +248,118 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
     ).
 
 %%% Internal helpers
+
+%% @private
+%% @doc Recursively find all .bt files in a directory.
+-spec find_bt_files(string()) -> [string()].
+find_bt_files(Dir) ->
+    case filelib:is_dir(Dir) of
+        false ->
+            [];
+        true ->
+            filelib:fold_files(Dir, ".*\\.bt$", true, fun(F, Acc) -> [F | Acc] end, [])
+    end.
+
+%% @private
+%% @doc Extract the declared class name and superclass from a .bt source file.
+%% Returns {ClassName, SuperClass} as binaries, or {undefined, undefined}.
+-spec extract_bt_class_info(string()) -> {binary() | undefined, binary() | undefined}.
+extract_bt_class_info(Path) ->
+    case file:read_file(Path) of
+        {ok, Bin} ->
+            case re:run(Bin, <<"(\\w+)\\s+subclass:\\s+(\\w+)">>, [{capture, [1, 2], binary}]) of
+                {match, [Super, Class]} -> {Class, Super};
+                nomatch -> {undefined, undefined}
+            end;
+        {error, _} ->
+            {undefined, undefined}
+    end.
+
+%% @private
+%% @doc Sort .bt files in topological dependency order (superclass before subclass).
+%% Files whose superclass is not in the project set come first.
+-spec sort_bt_files_by_deps([string()]) -> [string()].
+sort_bt_files_by_deps([]) ->
+    [];
+sort_bt_files_by_deps(Files) ->
+    Infos = lists:map(
+        fun(Path) ->
+            {Class, Super} = extract_bt_class_info(Path),
+            #{path => Path, class => Class, super => Super}
+        end,
+        Files
+    ),
+    ProjectClasses = sets:from_list([
+        C
+     || #{class := C} <- Infos, C =/= undefined
+    ]),
+    {Ready, Pending} = lists:partition(
+        fun(#{super := Super}) ->
+            Super =:= undefined orelse not sets:is_element(Super, ProjectClasses)
+        end,
+        Infos
+    ),
+    topo_sort_loop(Ready, Pending, []).
+
+%% @private
+-spec topo_sort_loop([map()], [map()], [string()]) -> [string()].
+topo_sort_loop([], [], Acc) ->
+    lists:reverse(Acc);
+topo_sort_loop([], Pending, Acc) ->
+    %% Unresolved entries remain (likely a cycle or unparseable class declaration).
+    %% Warn and append them in original order so load proceeds best-effort.
+    ?LOG_WARNING(
+        "load-project: ~B file(s) have unresolved superclass dependencies "
+        "(possible cycle or missing class declaration); loading in original order",
+        [length(Pending)]
+    ),
+    lists:reverse(Acc) ++ [maps:get(path, I) || I <- Pending];
+topo_sort_loop([#{path := Path, class := Class} | Ready], Pending, Acc) ->
+    {NowReady, StillPending} = lists:partition(
+        fun(#{super := Super}) -> Super =:= Class end,
+        Pending
+    ),
+    topo_sort_loop(Ready ++ NowReady, StillPending, [Path | Acc]).
+
+%% @private
+%% @doc Load files one by one, accumulating class maps and per-file error maps.
+%% Accumulates in reverse to avoid quadratic ++ and reverses at the end.
+%% Per-file errors are returned as structured maps with path, kind, and message
+%% so callers can handle partial failures programmatically.
+-spec load_files_sequential([string()], pid()) -> {[map()], [map()]}.
+load_files_sequential(Files, SessionPid) ->
+    {RevClasses, RevErrors} =
+        lists:foldl(
+            fun(Path, {ClassesAcc, ErrorsAcc}) ->
+                case beamtalk_repl_shell:load_file(SessionPid, Path) of
+                    {ok, Classes} ->
+                        {lists:reverse(Classes, ClassesAcc), ErrorsAcc};
+                    {error, Reason} ->
+                        ErrMap = structured_file_error(Path, Reason),
+                        {ClassesAcc, [ErrMap | ErrorsAcc]}
+                end
+            end,
+            {[], []},
+            Files
+        ),
+    {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
+
+%% @private
+%% @doc Build a structured error map for a per-file load failure.
+%% Preserves kind, message, and hint from the underlying beamtalk_error.
+-spec structured_file_error(string(), term()) -> map().
+structured_file_error(Path, Reason) ->
+    #beamtalk_error{kind = Kind, message = Msg, hint = Hint} =
+        beamtalk_repl_errors:ensure_structured_error(Reason),
+    ErrMap = #{
+        <<"path">> => list_to_binary(Path),
+        <<"kind">> => atom_to_binary(Kind, utf8),
+        <<"message">> => Msg
+    },
+    case Hint of
+        undefined -> ErrMap;
+        _ -> ErrMap#{<<"hint">> => Hint}
+    end.
 
 %% @private
 %% @doc Collect collision warnings for the loaded classes after a file load.

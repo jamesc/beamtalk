@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1226: Actor fixture for multi-statement do: block bodies with state mutations.
+// Exercises the exact pattern from the issue: multiple field mutations per do: iteration,
+// including mutations whose RHS involves nested collection operations (removeKey:, reject:).
+
+Actor subclass: BT1226MultiStateActor
+  state: running = #{}
+  state: claimed = #()
+
+  addEntry: entry =>
+    self.running := self.running at: entry put: true
+    self.claimed := self.claimed add: entry
+
+  getState => #{#running => self.running, #claimed => self.claimed}
+
+  // Two field mutations per iteration (exact BT-1226 pattern):
+  // removeKey: on map + reject: on list with nested identity check
+  removeAll: entries =>
+    entries
+      do: [:se |
+        self.running := self.running removeKey: se
+        self.claimed := self.claimed reject: [:c | c =:= se]
+      ]
+    #{#running => self.running, #claimed => self.claimed}
+
+  // Two simple integer field mutations per iteration
+  accumulatePairs: items =>
+    items
+      do: [:x |
+        self.running := self.running at: x put: (self.claimed size + 1)
+        self.claimed := self.claimed add: x
+      ]
+    #{#running => self.running, #claimed => self.claimed}
+
+  // Three field mutations per iteration
+  processAll: items =>
+    items
+      do: [:x |
+        self.running := self.running at: x put: true
+        self.claimed := self.claimed add: x
+        self.running := self.running at: #count put: (self.claimed size)
+      ]
+    #{#running => self.running, #claimed => self.claimed}
+
+  // Local var assigned before do:, then multi-mutation do: (exact issue pattern)
+  tickLocalVar =>
+    entries := #("a", "b", "c")
+    entries
+      do: [:se |
+        self.running := self.running removeKey: se
+        self.claimed := self.claimed reject: [:c | c =:= se]
+      ]
+    #{#running => self.running, #claimed => self.claimed}
