@@ -154,7 +154,7 @@ c2 increment
 
 // Load a fresh class to unload (reusing the point fixture)
 :load tests/e2e/fixtures/point.bt
-// => _
+// => Loaded: Point
 
 // Unload it — should succeed
 :unload Point

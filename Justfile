@@ -793,6 +793,10 @@ install PREFIX="/usr/local": build-release build-stdlib
         echo "❌ MCP server binary not found. Run 'just build-release' first."
         exit 1
     fi
+    if [ ! -f target/release/beamtalk-exec ]; then
+        echo "❌ beamtalk-exec binary not found. Run 'just build-release' first."
+        exit 1
+    fi
 
     # Binaries
     install -d "${PREFIX}/bin"
@@ -851,7 +855,7 @@ uninstall PREFIX="/usr/local":
     set -euo pipefail
     PREFIX="{{PREFIX}}"
     echo "🗑️  Uninstalling beamtalk from ${PREFIX}..."
-    rm -f "${PREFIX}/bin/beamtalk" "${PREFIX}/bin/beamtalk-compiler-port" "${PREFIX}/bin/beamtalk-lsp" "${PREFIX}/bin/beamtalk-mcp"
+    rm -f "${PREFIX}/bin/beamtalk" "${PREFIX}/bin/beamtalk-compiler-port" "${PREFIX}/bin/beamtalk-lsp" "${PREFIX}/bin/beamtalk-mcp" "${PREFIX}/bin/beamtalk-exec"
     rm -rf "${PREFIX}/lib/beamtalk"
     rm -rf "${PREFIX}/share/beamtalk"
     echo "✅ Uninstalled beamtalk from ${PREFIX}"
