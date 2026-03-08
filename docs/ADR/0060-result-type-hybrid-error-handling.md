@@ -499,6 +499,18 @@ end
 
 **What we adapted:** Elixir's tuples are raw data; our Result is a Beamtalk object that responds to messages. This follows Beamtalk's "everything is an object" principle while achieving the same semantics.
 
+**Elixir's enforcement story — and ours:** Elixir's runtime enforcement comes from `case` on tagged tuples: miss a branch and you get a `CaseClauseError` crash at runtime. This is not static — it fires when the unmatched value actually arrives. Once Beamtalk's `match:` gains class/structural patterns (§9), `Result` dispatch will have the same runtime enforcement:
+
+```beamtalk
+result match: [
+  Result ok: v  -> process: v.
+  Result error: e -> useDefaults
+]
+// Missing a branch → match failure at runtime, same as Elixir's CaseClauseError
+```
+
+Elixir uses `with` for chaining and `case` for dispatch at a decision point. Beamtalk maps the same split onto `andThen:` (chaining pipelines) and `match:` (exhaustive dispatch). The enforcement level is identical: runtime, not compile-time — which is appropriate for a dynamic, open-world system.
+
 ### Rust — `Result<T, E>` with `?` Operator
 
 Rust's `Result<T, E>` with `?` for propagation is the gold standard for typed error handling. The `?` operator short-circuits on `Err`, propagating the error up the call stack.
