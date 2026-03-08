@@ -51,7 +51,7 @@ abstract Object subclass: Supervisor
   /// Supervisor subclass: WebApp
   ///   class children => #(DatabasePool HTTPRouter)
   /// ```
-  class children -> Array => self subclassResponsibility
+  class children -> List => self subclassResponsibility
 
   // === Class-side lifecycle ===
 
@@ -62,7 +62,7 @@ abstract Object subclass: Supervisor
   class supervise -> Supervisor => (Erlang beamtalk_supervisor) startLink: self
 
   /// Return the running supervisor instance, or nil if not started.
-  class current -> Supervisor => (Erlang beamtalk_supervisor) current: self
+  class current => (Erlang beamtalk_supervisor) current: self
 
   // === Instance-side inspection ===
 
@@ -70,8 +70,7 @@ abstract Object subclass: Supervisor
   children -> Array => (Erlang beamtalk_supervisor) whichChildren: self
 
   /// Return the running child process for the given class, or nil.
-  which: aClass -> Object =>
-    (Erlang beamtalk_supervisor) whichChild: self class: aClass
+  which: aClass => (Erlang beamtalk_supervisor) whichChild: self class: aClass
 
   /// Terminate the running child process for the given class.
   terminate: aClass -> Nil =>

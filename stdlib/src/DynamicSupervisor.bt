@@ -53,8 +53,7 @@ abstract Object subclass: DynamicSupervisor
     (Erlang beamtalk_supervisor) startLink: self
 
   /// Return the running supervisor instance, or nil if not started.
-  class current -> DynamicSupervisor =>
-    (Erlang beamtalk_supervisor) current: self
+  class current => (Erlang beamtalk_supervisor) current: self
 
   // === Instance-side child management ===
 

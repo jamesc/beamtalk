@@ -1,0 +1,119 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1217: Tests for SupervisionSpec value type and Actor supervision defaults.
+// Exercises: auto-generated slot methods, childSpec construction, Actor class-side
+// supervision API (supervisionPolicy, isSupervisor, supervisionSpec).
+//
+// Fixtures: stdlib/test/fixtures/counter.bt (Counter — Actor subclass)
+
+TestCase subclass: SupervisionSpecTest
+
+  // === SupervisionSpec value type basics ===
+  testDefaultSlotValues =>
+    spec := SupervisionSpec new
+    self assert: spec id equals: nil
+    self assert: spec actorClass equals: nil
+    self assert: spec restart equals: #temporary
+    self assert: spec args equals: nil
+
+  testKeywordConstructor =>
+    spec := SupervisionSpec id: #db actorClass: Counter restart: #permanent args: nil
+    self assert: spec id equals: #db
+    self assert: spec actorClass equals: Counter
+    self assert: spec restart equals: #permanent
+    self assert: spec args equals: nil
+
+  testWithSetterReturnsFreshCopy =>
+    spec := SupervisionSpec new
+    spec2 := spec withRestart: #permanent
+    // Original unchanged
+    self assert: spec restart equals: #temporary
+    // New instance updated
+    self assert: spec2 restart equals: #permanent
+
+  testChainedWithSetters =>
+    spec := (SupervisionSpec new withActorClass: Counter) withRestart: #transient
+    self assert: spec actorClass equals: Counter
+    self assert: spec restart equals: #transient
+
+  // === Multi-keyword fluent overrides ===
+  testWithIdWithRestart =>
+    spec := SupervisionSpec new withId: #primary withRestart: #permanent
+    self assert: spec id equals: #primary
+    self assert: spec restart equals: #permanent
+
+  testWithIdWithArgs =>
+    args := #{#role => #primary}
+    spec := SupervisionSpec new withId: #db withArgs: args
+    self assert: spec id equals: #db
+    self assert: spec args equals: args
+
+  testWithIdWithRestartWithArgs =>
+    args := #{#role => #replica}
+    spec := SupervisionSpec new withId: #replica withRestart: #transient withArgs: args
+    self assert: spec id equals: #replica
+    self assert: spec restart equals: #transient
+    self assert: spec args equals: args
+
+  // === childSpec construction ===
+  testChildSpecDefaultId =>
+    spec := SupervisionSpec new withActorClass: Counter
+    child := spec childSpec
+    // Default id is the class name as a symbol (Class>>name returns a Symbol)
+    self assert: (child at: #id) equals: #Counter
+
+  testChildSpecCustomId =>
+    spec := (SupervisionSpec new withActorClass: Counter) withId: #myCounter
+    child := spec childSpec
+    self assert: (child at: #id) equals: #myCounter
+
+  testChildSpecSpawnWithoutArgs =>
+    spec := SupervisionSpec new withActorClass: Counter
+    child := spec childSpec
+    start := child at: #start
+    // start is #[ActorClass, #spawn, #()]
+    self assert: (start at: 2) equals: #spawn
+
+  testChildSpecSpawnWithArgs =>
+    args := #{#value => 10}
+    spec := (SupervisionSpec new withActorClass: Counter) withArgs: args
+    child := spec childSpec
+    start := child at: #start
+    self assert: (start at: 2) equals: #spawnWith:
+
+  testChildSpecWorkerType =>
+    spec := SupervisionSpec new withActorClass: Counter
+    child := spec childSpec
+    self assert: (child at: #type) equals: #worker
+    self assert: (child at: #shutdown) equals: 5000
+
+  testChildSpecSupervisorType =>
+    spec := SupervisionSpec new withActorClass: Supervisor
+    child := spec childSpec
+    self assert: (child at: #type) equals: #supervisor
+    self assert: (child at: #shutdown) equals: #infinity
+
+  testChildSpecRestartPolicy =>
+    spec := (SupervisionSpec new withActorClass: Counter) withRestart: #permanent
+    child := spec childSpec
+    self assert: (child at: #restart) equals: #permanent
+
+  // === Actor supervision defaults ===
+  testActorSupervisionPolicyDefault =>
+    self assert: Counter supervisionPolicy equals: #temporary
+
+  testActorIsSupervisorDefault =>
+    self assert: Counter isSupervisor equals: false
+
+  testSupervisorIsSupervisor =>
+    self assert: Supervisor isSupervisor equals: true
+
+  testDynamicSupervisorIsSupervisor =>
+    self assert: DynamicSupervisor isSupervisor equals: true
+
+  testActorSupervisionSpec =>
+    spec := Counter supervisionSpec
+    self assert: spec class equals: SupervisionSpec
+    self assert: spec actorClass name equals: #Counter
+    self assert: spec restart equals: #temporary
