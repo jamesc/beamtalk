@@ -16,3 +16,6 @@ Object subclass: ClassMethodNlrClassVars
     "negative"
 
   class flagValue => self.flag
+
+  // Resets the flag for test isolation.
+  class resetFlag => self.flag := false
