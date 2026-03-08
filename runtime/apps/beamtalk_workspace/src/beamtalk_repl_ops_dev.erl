@@ -34,7 +34,8 @@
 %% BT-1045: Export internals for white-box testing of the binding-lookup pipeline.
 -ifdef(TEST).
 -export([
-    get_session_bindings/1
+    get_session_bindings/1,
+    validate_selector_if_present/5
 ]).
 -endif.
 
@@ -246,12 +247,12 @@ encode_codegen_response(CoreErlang, Warnings, Msg) ->
 %%
 %% Looks up the class in the runtime, finds its source file via the
 %% beamtalk_source module attribute, re-compiles the source for codegen,
-%% and returns the Core Erlang. The selector parameter is informational —
-%% the full module Core Erlang is returned (Core Erlang is module-scoped).
+%% and returns the Core Erlang. When a selector is provided, validates that it
+%% exists on the class before compiling (Core Erlang output is always module-scoped).
 -spec show_codegen_class_method(
     binary(), binary() | undefined, beamtalk_repl_protocol:protocol_msg()
 ) -> binary().
-show_codegen_class_method(ClassBin, _SelectorBin, Msg) ->
+show_codegen_class_method(ClassBin, SelectorBin, Msg) ->
     case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
         {error, badarg} ->
             beamtalk_repl_protocol:encode_error(
@@ -268,60 +269,115 @@ show_codegen_class_method(ClassBin, _SelectorBin, Msg) ->
                         fun beamtalk_repl_json:format_error_message/1
                     );
                 ClassPid ->
-                    ModuleName = beamtalk_runtime_api:module_name(ClassPid),
-                    SourcePath = beamtalk_repl_modules:resolve_source_path(ModuleName),
-                    case SourcePath of
-                        "unknown" ->
-                            Err0 = beamtalk_error:new(runtime_error, ClassAtom),
-                            Err1 = beamtalk_error:with_message(
-                                Err0,
-                                iolist_to_binary([
-                                    <<"No source file for ">>,
-                                    ClassBin,
-                                    <<". Class may have been defined inline.">>
-                                ])
-                            ),
-                            beamtalk_repl_protocol:encode_error(
-                                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
-                            );
-                        _ ->
-                            case file:read_file(SourcePath) of
-                                {ok, SourceBin} ->
-                                    case
-                                        beamtalk_repl_compiler:compile_file_for_codegen(
-                                            SourceBin, SourcePath
-                                        )
-                                    of
-                                        {ok, CoreErlang, Warnings} ->
-                                            encode_codegen_response(CoreErlang, Warnings, Msg);
-                                        {error, ErrorReason} ->
-                                            WrappedReason =
-                                                beamtalk_repl_errors:ensure_structured_error(
-                                                    ErrorReason
-                                                ),
-                                            beamtalk_repl_protocol:encode_error(
-                                                WrappedReason,
-                                                Msg,
-                                                fun beamtalk_repl_json:format_error_message/1
-                                            )
-                                    end;
-                                {error, Reason} ->
+                    case
+                        validate_selector_if_present(
+                            ClassBin, ClassAtom, ClassPid, SelectorBin, Msg
+                        )
+                    of
+                        {error, ErrResponse} ->
+                            ErrResponse;
+                        ok ->
+                            ModuleName = beamtalk_runtime_api:module_name(ClassPid),
+                            SourcePath = beamtalk_repl_modules:resolve_source_path(ModuleName),
+                            case SourcePath of
+                                "unknown" ->
                                     Err0 = beamtalk_error:new(runtime_error, ClassAtom),
                                     Err1 = beamtalk_error:with_message(
                                         Err0,
-                                        iolist_to_binary(
-                                            io_lib:format(
-                                                "Cannot read source file ~s: ~p",
-                                                [SourcePath, Reason]
-                                            )
-                                        )
+                                        iolist_to_binary([
+                                            <<"No source file for ">>,
+                                            ClassBin,
+                                            <<". Class may have been defined inline.">>
+                                        ])
                                     ),
                                     beamtalk_repl_protocol:encode_error(
                                         Err1, Msg, fun beamtalk_repl_json:format_error_message/1
-                                    )
+                                    );
+                                _ ->
+                                    case file:read_file(SourcePath) of
+                                        {ok, SourceBin} ->
+                                            case
+                                                beamtalk_repl_compiler:compile_file_for_codegen(
+                                                    SourceBin, SourcePath
+                                                )
+                                            of
+                                                {ok, CoreErlang, Warnings} ->
+                                                    encode_codegen_response(
+                                                        CoreErlang, Warnings, Msg
+                                                    );
+                                                {error, ErrorReason} ->
+                                                    WrappedReason =
+                                                        beamtalk_repl_errors:ensure_structured_error(
+                                                            ErrorReason
+                                                        ),
+                                                    beamtalk_repl_protocol:encode_error(
+                                                        WrappedReason,
+                                                        Msg,
+                                                        fun beamtalk_repl_json:format_error_message/1
+                                                    )
+                                            end;
+                                        {error, Reason} ->
+                                            Err0 = beamtalk_error:new(runtime_error, ClassAtom),
+                                            Err1 = beamtalk_error:with_message(
+                                                Err0,
+                                                iolist_to_binary(
+                                                    io_lib:format(
+                                                        "Cannot read source file ~s: ~p",
+                                                        [SourcePath, Reason]
+                                                    )
+                                                )
+                                            ),
+                                            beamtalk_repl_protocol:encode_error(
+                                                Err1,
+                                                Msg,
+                                                fun beamtalk_repl_json:format_error_message/1
+                                            )
+                                    end
                             end
+                        %% validate_selector_if_present
                     end
             end
+    end.
+
+%% @private
+%% @doc Validate that SelectorBin exists on the class (instance-side or class-side).
+%% Returns ok when selector is undefined (no validation needed) or when found.
+%% Returns {error, EncodedResponse} when the selector is unknown.
+-spec validate_selector_if_present(
+    binary(), atom(), pid(), binary() | undefined, beamtalk_repl_protocol:protocol_msg()
+) -> ok | {error, binary()}.
+validate_selector_if_present(_ClassBin, _ClassAtom, _ClassPid, undefined, _Msg) ->
+    ok;
+validate_selector_if_present(ClassBin, ClassAtom, ClassPid, SelectorBin, Msg) ->
+    InstanceMethods = beamtalk_runtime_api:local_instance_methods(ClassPid),
+    ClassMethods = beamtalk_runtime_api:local_class_methods(ClassPid),
+    AllMethods = InstanceMethods ++ ClassMethods,
+    SelectorFound =
+        case beamtalk_repl_errors:safe_to_existing_atom(SelectorBin) of
+            {error, badarg} -> false;
+            {ok, SelectorAtom} -> lists:member(SelectorAtom, AllMethods)
+        end,
+    case SelectorFound of
+        true ->
+            ok;
+        false ->
+            Err0 = beamtalk_error:new(not_found, ClassAtom),
+            Err1 = beamtalk_error:with_message(
+                Err0,
+                iolist_to_binary([
+                    <<"Selector '">>, SelectorBin, <<"' not found on ">>, ClassBin
+                ])
+            ),
+            Err2 = beamtalk_error:with_hint(
+                Err1,
+                iolist_to_binary([
+                    <<"Use :help ">>, ClassBin, <<" to see available selectors.">>
+                ])
+            ),
+            {error,
+                beamtalk_repl_protocol:encode_error(
+                    Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+                )}
     end.
 
 %% @private

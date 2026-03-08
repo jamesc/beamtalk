@@ -331,6 +331,27 @@ handle_show_codegen_empty_class_falls_back_to_code_test() ->
     %% If class="" had been selected instead, we'd get a class-not-found error (different error type).
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
+handle_show_codegen_selector_without_class_test() ->
+    %% Providing selector without class is caught at Erlang level:
+    %% empty/absent class falls through to the "missing required parameter" error.
+    Msg = make_msg(<<"show-codegen">>, <<"sc-7">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>,
+        #{<<"selector">> => <<"greet">>},
+        Msg,
+        self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+validate_selector_undefined_returns_ok_test() ->
+    %% When SelectorBin is undefined, no validation is needed.
+    Msg = make_msg(<<"show-codegen">>, <<"sc-8">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:validate_selector_if_present(
+        <<"SomeClass">>, 'SomeClass', self(), undefined, Msg
+    ),
+    ?assertEqual(ok, Result).
+
 %% @doc Unit test for compile_file_for_codegen/2 success path (BT-1236).
 %%
 %% Tests that the compiler can take a Beamtalk class source binary and

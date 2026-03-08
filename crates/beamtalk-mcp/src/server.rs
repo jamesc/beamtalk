@@ -633,13 +633,25 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<ShowCodegenParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let response = match (&params.class, &params.code) {
-            (Some(class), _) => {
+        // Normalize empty strings to absent — Some("") is not a valid class or code.
+        let class = params.class.filter(|s| !s.is_empty());
+        let code = params.code.filter(|s| !s.is_empty());
+        let selector = params.selector.filter(|s| !s.is_empty());
+
+        // Reject orphaned selector (selector without class).
+        if selector.is_some() && class.is_none() {
+            return Ok(error_result(
+                "ERROR: 'selector' requires 'class' to be specified.",
+            ));
+        }
+
+        let response = match (&class, &code) {
+            (Some(class_str), _) => {
                 self.client
-                    .show_codegen_class(class, params.selector.as_deref())
+                    .show_codegen_class(class_str, selector.as_deref())
                     .await
             }
-            (None, Some(code)) => self.client.show_codegen(code).await,
+            (None, Some(code_str)) => self.client.show_codegen(code_str).await,
             (None, None) => {
                 return Ok(error_result(
                     "ERROR: Provide 'code' to compile an expression or 'class' to inspect a loaded class.",
