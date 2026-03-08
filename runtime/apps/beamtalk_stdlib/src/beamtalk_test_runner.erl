@@ -315,19 +315,35 @@ class_source_matches(ClassName, FilePath) ->
 
 %% @doc Check whether Stored (absolute) ends with Suffix (relative or absolute).
 %%
-%% Exact match, or the stored path ends with "/Suffix" (path-boundary safe).
-%% This allows passing relative paths like <<"test/foo_test.bt">> to match
-%% the full absolute stored path.
+%% Both inputs are normalised to forward slashes before comparison, so that
+%% Windows-style stored paths (backslash separators from canonicalize) and
+%% Unix-style suffix arguments both work correctly. Exact match, or the stored
+%% path ends with "/Suffix" (path-boundary safe).
 -spec path_suffix_match(binary(), binary()) -> boolean().
 path_suffix_match(Stored, Suffix) when is_binary(Stored), is_binary(Suffix) ->
-    StoredStr = binary_to_list(Stored),
-    SuffixStr = binary_to_list(Suffix),
+    StoredStr = normalize_separators(binary_to_list(Stored)),
+    SuffixStr = normalize_separators(binary_to_list(Suffix)),
     SL = length(StoredStr),
     SuffL = length(SuffixStr),
     StoredStr =:= SuffixStr orelse
         (SL > SuffL andalso
             lists:suffix(SuffixStr, StoredStr) andalso
             lists:nth(SL - SuffL, StoredStr) =:= $/).
+
+%% @doc Normalise path separators to forward slash.
+%%
+%% Converts backslashes to forward slashes so that Windows paths stored in
+%% the beamtalk_source module attribute compare correctly against Unix-style
+%% relative paths passed by callers.
+-spec normalize_separators(string()) -> string().
+normalize_separators(S) ->
+    [
+        case C of
+            $\\ -> $/;
+            _ -> C
+        end
+     || C <- S
+    ].
 
 %% @doc Convert a structured result map to a TestResult tagged map.
 -spec structured_to_test_result(map()) -> map().

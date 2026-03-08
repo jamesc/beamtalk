@@ -206,6 +206,14 @@ handle(<<"test">>, Params, Msg, _SessionPid) ->
             beamtalk_repl_protocol:encode_error(
                 Err1, Msg, fun beamtalk_repl_json:format_error_message/1
             );
+        {undefined, FP} when FP =/= undefined, not is_binary(FP) ->
+            Err0 = beamtalk_error:new(invalid_argument, 'TestRunner'),
+            Err1 = beamtalk_error:with_message(
+                Err0, <<"'file' must be a binary path">>
+            ),
+            beamtalk_repl_protocol:encode_error(
+                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+            );
         {undefined, FP} when FP =/= undefined ->
             run_test_op_file(FP, Msg);
         _ ->
