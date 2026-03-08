@@ -771,6 +771,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: fields
                 .into_iter()
                 .map(|(name, ann)| match ann {

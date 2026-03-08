@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1218: Actor with default (inherited) supervision policy — fixture for supervision_spec_test.bt
+
+Actor subclass: SpecTestActorDefault
+  state: count = 0
+
+  increment => self.count := self.count + 1
+
+  count => self.count

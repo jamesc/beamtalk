@@ -318,6 +318,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
+        supervisor_kind: None,
         state: vec![StateDeclaration {
             name: Identifier::new("listeners", Span::new(0, 9)),
             default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 1))),

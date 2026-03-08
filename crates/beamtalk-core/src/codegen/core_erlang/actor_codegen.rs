@@ -43,6 +43,13 @@ impl CoreErlangGenerator {
         let sealed_export_doc = self.build_sealed_export_doc(module);
         // BT-411: Build class method exports
         let class_method_export_doc = Self::build_class_method_export_doc(module);
+        // BT-1218: Synthesize class_supervisionSpec for Actor subclasses that don't define it
+        let needs_spec_synthesis = Self::needs_supervision_spec_synthesis(module);
+        let supervision_spec_export: Document<'static> = if needs_spec_synthesis {
+            Document::Str(", 'class_supervisionSpec'/2")
+        } else {
+            Document::Nil
+        };
         // BT-105: Check if class is abstract
         let is_abstract = module.classes.first().is_some_and(|c| c.is_abstract);
 
@@ -102,6 +109,7 @@ impl CoreErlangGenerator {
                 base_exports,
                 sealed_export_doc,
                 class_method_export_doc,
+                supervision_spec_export,
                 ", 'register_class'/0]",
                 "\n",
                 "  attributes ['behaviour' = ['gen_server'], \
@@ -120,6 +128,7 @@ impl CoreErlangGenerator {
                 base_exports,
                 sealed_export_doc,
                 class_method_export_doc,
+                supervision_spec_export,
                 "]",
                 "\n",
                 "  attributes ['behaviour' = ['gen_server']",
@@ -187,13 +196,37 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-1218: Synthesize class_supervisionSpec for Actor subclasses
+        if needs_spec_synthesis {
+            docs.push(Document::Str("\n"));
+            // Determine which module's class_supervisionPolicy to call.
+            // We check within the current file's AST (both inline class methods and
+            // standalone method definitions); cross-file inherited overrides are not
+            // resolved here (BT-1218 Phase 1 limitation — see the doc comment on
+            // generate_supervision_spec_synthesis).
+            let has_local_policy_override = module.classes.first().is_some_and(|c| {
+                let class_name = &c.name.name;
+                let has_inline = c
+                    .class_methods
+                    .iter()
+                    .any(|m| m.selector.name() == "supervisionPolicy");
+                let has_standalone = module.method_definitions.iter().any(|md| {
+                    md.is_class_method
+                        && &md.class_name.name == class_name
+                        && md.method.selector.name() == "supervisionPolicy"
+                });
+                has_inline || has_standalone
+            });
+            docs.push(self.generate_supervision_spec_synthesis(has_local_policy_override));
+        }
+
         // Generate class registration and metadata functions
         if !module.classes.is_empty() {
             // BT-942: Generate __beamtalk_meta/0 for zero-process reflection
             docs.push(Document::Str("\n"));
-            docs.push(self.generate_meta_function(module)?);
+            docs.push(self.generate_meta_function(module, needs_spec_synthesis)?);
             // BT-218: Generate register_class/0 for class system registration
-            docs.push(self.generate_register_class(module)?);
+            docs.push(self.generate_register_class(module, needs_spec_synthesis)?);
         }
 
         // Module end
@@ -439,5 +472,102 @@ impl CoreErlangGenerator {
         }
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Returns true if this actor module needs a synthesized `class_supervisionSpec/2`.
+    ///
+    /// Synthesis is skipped when the class already defines `class supervisionSpec`
+    /// explicitly (e.g. the `Actor` base class itself), either as an inline class
+    /// method or as a standalone class-side method definition.
+    pub(in crate::codegen::core_erlang) fn needs_supervision_spec_synthesis(
+        module: &Module,
+    ) -> bool {
+        let Some(class) = module.classes.first() else {
+            return false;
+        };
+        let class_name = &class.name.name;
+        // Skip if supervisionSpec is defined as an inline class method
+        let has_inline = class
+            .class_methods
+            .iter()
+            .any(|m| m.selector.name() == "supervisionSpec");
+        // Skip if supervisionSpec is defined as a standalone class-side method
+        let has_standalone = module.method_definitions.iter().any(|md| {
+            md.is_class_method
+                && &md.class_name.name == class_name
+                && md.method.selector.name() == "supervisionSpec"
+        });
+        !has_inline && !has_standalone
+    }
+
+    /// Generates the synthesized `class_supervisionSpec/2` function (BT-1218).
+    ///
+    /// Calls `class_supervisionPolicy` **directly** to avoid a `gen_server` re-entrant
+    /// deadlock: class methods execute inside a `gen_server:call` handler, so routing
+    /// back through `class_send` would block the process waiting for itself.
+    ///
+    /// When `has_local_policy_override` is true, calls the current module's own
+    /// `class_supervisionPolicy` (the subclass override). When false, the subclass
+    /// has no local override, so we call Actor's `class_supervisionPolicy` directly
+    /// which returns `#temporary`.
+    ///
+    /// **Phase 1 limitation**: Only local (same-file) `class supervisionPolicy`
+    /// overrides are detected. If an intermediate superclass in another file defines
+    /// `supervisionPolicy`, the synthesized `class_supervisionSpec` will call Actor's
+    /// default and return `#temporary` instead of the inherited policy. This affects
+    /// multi-level inheritance hierarchies where the intermediate class is compiled
+    /// separately. A future phase should resolve the defining class via the full
+    /// cross-module class hierarchy and call the correct module directly.
+    ///
+    /// ```erlang
+    /// %% With local override (has_local_policy_override = true):
+    /// 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
+    ///     let CMR = call 'bt@my_actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
+    ///     ...
+    ///
+    /// %% Without local override (has_local_policy_override = false):
+    /// 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
+    ///     let CMR = call 'bt@stdlib@actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
+    ///     ...
+    /// ```
+    fn generate_supervision_spec_synthesis(
+        &self,
+        has_local_policy_override: bool,
+    ) -> Document<'static> {
+        let spec_mod = self.compiled_module_name("SupervisionSpec");
+        let policy_mod: Document<'static> = if has_local_policy_override {
+            Document::String(self.module_name.clone())
+        } else {
+            Document::String(self.compiled_module_name("Actor"))
+        };
+        docvec![
+            "'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->\n",
+            "    let CMR = call '",
+            policy_mod,
+            "':'class_supervisionPolicy'(ClassSelf, ClassVars) in\n",
+            "    case CMR of\n",
+            "      <{'class_var_result', Policy, NewClassVars}> when 'true' ->\n",
+            "        let Spec0 = call '",
+            Document::String(spec_mod.clone()),
+            "':'new'() in\n",
+            "        let Spec1 = call '",
+            Document::String(spec_mod.clone()),
+            "':'withActorClass:'(Spec0, ClassSelf) in\n",
+            "        let Spec2 = call '",
+            Document::String(spec_mod.clone()),
+            "':'withRestart:'(Spec1, Policy) in\n",
+            "        {'class_var_result', Spec2, NewClassVars}\n",
+            "      <Policy> when 'true' ->\n",
+            "        let Spec0 = call '",
+            Document::String(spec_mod.clone()),
+            "':'new'() in\n",
+            "        let Spec1 = call '",
+            Document::String(spec_mod.clone()),
+            "':'withActorClass:'(Spec0, ClassSelf) in\n",
+            "        call '",
+            Document::String(spec_mod),
+            "':'withRestart:'(Spec1, Policy)\n",
+            "    end\n",
+        ]
     }
 }
