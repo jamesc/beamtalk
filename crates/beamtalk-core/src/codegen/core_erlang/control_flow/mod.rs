@@ -175,17 +175,29 @@ impl CoreErlangGenerator {
 
         match self.context {
             CodeGenContext::Actor => {
-                // Include reads from condition block if provided
-                let mut all_reads = analysis.local_reads.clone();
+                // BT-1224: Only thread vars captured from the outer scope that are also
+                // written in the block. Using `captured_reads` (not `local_reads`) excludes
+                // block-internal temporaries that are first defined then read within the block.
+                // Using `local_reads` caused unbound_var errors in dispatch/4 because packing
+                // code tried to reference unbound Core Erlang variables (e.g. `Y`) that only
+                // exist inside the lambda, not in the outer dispatch/4 function.
+                let mut all_captured_reads = analysis.captured_reads.clone();
+                let mut all_writes = analysis.local_writes.clone();
                 if let Some(Expression::Block(cond_block)) = condition {
                     let cond_analysis = block_analysis::analyze_block(cond_block);
-                    all_reads = all_reads
-                        .union(&cond_analysis.local_reads)
+                    all_captured_reads = all_captured_reads
+                        .union(&cond_analysis.captured_reads)
+                        .cloned()
+                        .collect();
+                    // BT-1224: Also include writes from the condition block so that
+                    // variables first written in a condition are included in threading.
+                    all_writes = all_writes
+                        .union(&cond_analysis.local_writes)
                         .cloned()
                         .collect();
                 }
-                all_reads
-                    .intersection(&analysis.local_writes)
+                all_captured_reads
+                    .intersection(&all_writes)
                     .filter(|v| !block_params.contains(*v))
                     .cloned()
                     .collect::<std::collections::BTreeSet<_>>()
@@ -212,5 +224,53 @@ impl CoreErlangGenerator {
     /// Uses a `__local__` prefix to prevent collision with actor field names.
     pub(super) fn local_state_key(var_name: &str) -> String {
         format!("__local__{var_name}")
+    }
+
+    /// BT-1224: Try to generate a plain `let Var = value in` binding for a block-local
+    /// variable assignment that does NOT need `StateAcc` threading.
+    ///
+    /// Returns `Some(doc)` when the assignment is:
+    /// - not the last expression in the block (`!is_last`)
+    /// - not in the `threaded` set (block-local, not captured from outer scope)
+    /// - not in REPL mode (REPL always uses `StateAcc` for local vars)
+    ///
+    /// Returns `None` when the variable needs `StateAcc` threading (caller should use
+    /// `generate_local_var_assignment_in_loop` instead).
+    pub(super) fn try_generate_block_local_plain_let(
+        &mut self,
+        expr: &Expression,
+        is_last: bool,
+        threaded: &[String],
+    ) -> Result<Option<Document<'static>>> {
+        if is_last || self.is_repl_mode {
+            return Ok(None);
+        }
+        let Expression::Assignment { target, value, .. } = expr else {
+            return Ok(None);
+        };
+        let Expression::Identifier(id) = target.as_ref() else {
+            return Ok(None);
+        };
+        if threaded.contains(&id.name.to_string()) {
+            return Ok(None);
+        }
+        // BT-912: Tier-2 block calls return {Result, NewStateAcc}. Fall back to
+        // generate_local_var_assignment_in_loop which already handles Tier-2 unpacking
+        // and StateAcc propagation correctly.
+        if self.is_tier2_value_call(value) {
+            return Ok(None);
+        }
+        let core_var = self
+            .lookup_var(&id.name)
+            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+        let val_doc = self.expression_doc(value)?;
+        self.bind_var(&id.name, &core_var);
+        Ok(Some(docvec![
+            "let ",
+            Document::String(core_var),
+            " = ",
+            val_doc,
+            " in ",
+        ]))
     }
 }

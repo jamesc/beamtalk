@@ -162,7 +162,8 @@ impl CoreErlangGenerator {
             "<'true'> when 'true' -> ",
         ]);
 
-        let (body_doc, final_state_version) = self.generate_while_body_with_threading(body, &[])?;
+        let (body_doc, final_state_version) =
+            self.generate_while_body_with_threading(body, &threaded_locals)?;
         docs.push(body_doc);
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
@@ -190,7 +191,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_while_body_with_threading(
         &mut self,
         body: &Block,
-        _mutated_vars: &[String],
+        threaded_locals: &[String],
     ) -> Result<(Document<'static>, usize)> {
         // Generate the body with state threading
         let saved_state_version = self.state_version();
@@ -226,9 +227,17 @@ impl CoreErlangGenerator {
                 let doc = self.generate_self_dispatch_open(expr)?;
                 docs.push(doc);
             } else if Self::is_local_var_assignment(expr) {
-                // BT-153: Handle local variable assignments for REPL context
-                let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
-                docs.push(assign_doc);
+                // BT-1224: Block-local vars (not in threaded_locals) use plain let.
+                // Threaded captured vars use StateAcc threading.
+                if let Some(doc) =
+                    self.try_generate_block_local_plain_let(expr, is_last, threaded_locals)?
+                {
+                    docs.push(doc);
+                } else {
+                    // BT-153: Threaded variable — thread through StateAcc
+                    let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                    docs.push(assign_doc);
+                }
             } else if is_last && !has_direct_field_assignments {
                 // BT-478/BT-483: Last expression with no direct field assignments in body.
                 // Mutations come from nested constructs (e.g., inner to:do:).
@@ -394,7 +403,8 @@ impl CoreErlangGenerator {
         ]);
 
         // FALSE case: execute body and recurse
-        let (body_doc, final_state_version) = self.generate_while_body_with_threading(body, &[])?;
+        let (body_doc, final_state_version) =
+            self.generate_while_body_with_threading(body, &threaded_locals)?;
         docs.push(body_doc);
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()

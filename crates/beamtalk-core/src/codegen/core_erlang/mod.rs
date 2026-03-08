@@ -1713,10 +1713,12 @@ impl CoreErlangGenerator {
             let cond_analysis = analyze_block(cond_block);
             let body_analysis = analyze_block(body_block);
 
-            // Combine reads and writes from both blocks
-            let all_reads: std::collections::HashSet<String> = cond_analysis
-                .local_reads
-                .union(&body_analysis.local_reads)
+            // BT-1224: Use captured_reads (not local_reads) to exclude block-local variables.
+            // Block-local vars (defined inside the block before being read) must not be
+            // extracted from the state map after the loop — they were never packed in.
+            let all_captured_reads: std::collections::HashSet<String> = cond_analysis
+                .captured_reads
+                .union(&body_analysis.captured_reads)
                 .cloned()
                 .collect();
             let all_writes: std::collections::HashSet<String> = cond_analysis
@@ -1725,8 +1727,11 @@ impl CoreErlangGenerator {
                 .cloned()
                 .collect();
 
-            // Threaded vars are those that are both read AND written
-            let threaded: Vec<String> = all_reads.intersection(&all_writes).cloned().collect();
+            // Threaded vars are those captured from outer scope AND written
+            let threaded: Vec<String> = all_captured_reads
+                .intersection(&all_writes)
+                .cloned()
+                .collect();
 
             if !threaded.is_empty() {
                 return Some(threaded);
@@ -1745,9 +1750,9 @@ impl CoreErlangGenerator {
 
             let body_analysis = analyze_block(body_block);
 
-            // Threaded vars are those that are both read AND written
+            // BT-1224: Use captured_reads to exclude block-local vars from threading.
             let threaded: Vec<String> = body_analysis
-                .local_reads
+                .captured_reads
                 .intersection(&body_analysis.local_writes)
                 .cloned()
                 .collect();
@@ -1783,9 +1788,10 @@ impl CoreErlangGenerator {
                 .map(|p| p.name.to_string())
                 .collect();
 
-            // Threaded vars are those that are both read AND written, but NOT block params
+            // BT-1224: Use captured_reads to exclude block-local vars from threading.
+            // Block params are implicitly excluded since they're not in captured_reads.
             let threaded: Vec<String> = body_analysis
-                .local_reads
+                .captured_reads
                 .intersection(&body_analysis.local_writes)
                 .filter(|v| !block_params.contains(*v))
                 .cloned()
@@ -1815,9 +1821,10 @@ impl CoreErlangGenerator {
                 .map(|p| p.name.to_string())
                 .collect();
 
-            // Threaded vars are those that are both read AND written, but NOT block params
+            // BT-1224: Use captured_reads to exclude block-local vars from threading.
+            // Block params are implicitly excluded since they're not in captured_reads.
             let threaded: Vec<String> = body_analysis
-                .local_reads
+                .captured_reads
                 .intersection(&body_analysis.local_writes)
                 .filter(|v| !block_params.contains(*v))
                 .cloned()
@@ -1846,9 +1853,10 @@ impl CoreErlangGenerator {
                 .map(|p| p.name.to_string())
                 .collect();
 
-            // Threaded vars are those that are both read AND written, but NOT block params
+            // BT-1224: Use captured_reads to exclude block-local vars from threading.
+            // Block params are implicitly excluded since they're not in captured_reads.
             let threaded: Vec<String> = body_analysis
-                .local_reads
+                .captured_reads
                 .intersection(&body_analysis.local_writes)
                 .filter(|v| !block_params.contains(*v))
                 .cloned()
