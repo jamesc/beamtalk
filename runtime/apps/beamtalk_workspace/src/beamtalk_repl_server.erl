@@ -456,7 +456,7 @@ handle_op(Op, _Params, Msg, _SessionPid) ->
     | {list_actors}
     | {kill_actor, string()}
     | {list_modules}
-    | {get_docs, binary(), binary() | undefined}
+    | {get_docs, binary(), binary() | undefined, boolean()}
     | {health}
     | {shutdown, string()}
     | {error, term()}.

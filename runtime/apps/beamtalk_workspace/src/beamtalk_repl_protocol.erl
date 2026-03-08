@@ -76,7 +76,7 @@
     | {kill_actor, string()}
     | {list_modules}
     | {unload, binary()}
-    | {get_docs, binary(), binary() | undefined}
+    | {get_docs, binary(), binary() | undefined, boolean()}
     | {health}
     | {shutdown, string()}
     | {error, term()}.
@@ -132,7 +132,7 @@ parse_request(Data) when is_binary(Data) ->
     | {list_modules}
     | {unload, binary()}
     | {kill_actor, string()}
-    | {get_docs, binary(), binary() | undefined}
+    | {get_docs, binary(), binary() | undefined, boolean()}
     | {health}
     | {shutdown, string()}
     | {error, term()}.
@@ -159,7 +159,8 @@ op_to_request(<<"kill">>, Map) ->
 op_to_request(<<"docs">>, Map) ->
     ClassName = maps:get(<<"class">>, Map, <<>>),
     Selector = maps:get(<<"selector">>, Map, undefined),
-    {get_docs, ClassName, Selector};
+    ClassSide = maps:get(<<"class_side">>, Map, false),
+    {get_docs, ClassName, Selector, ClassSide};
 op_to_request(<<"health">>, _Map) ->
     {health};
 op_to_request(<<"shutdown">>, Map) ->

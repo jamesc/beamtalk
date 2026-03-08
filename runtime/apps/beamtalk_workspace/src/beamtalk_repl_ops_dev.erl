@@ -97,6 +97,7 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
     end;
 handle(<<"docs">>, Params, Msg, _SessionPid) ->
     ClassBin = maps:get(<<"class">>, Params, <<>>),
+    ClassSide = maps:get(<<"class_side">>, Params, false),
     case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
         {error, badarg} ->
             beamtalk_repl_protocol:encode_error(
@@ -106,47 +107,52 @@ handle(<<"docs">>, Params, Msg, _SessionPid) ->
             );
         {ok, ClassName} ->
             Selector = maps:get(<<"selector">>, Params, undefined),
-            case Selector of
-                undefined ->
-                    case beamtalk_repl_docs:format_class_docs(ClassName) of
-                        {ok, DocText} ->
-                            beamtalk_repl_protocol:encode_docs(DocText, Msg);
-                        {error, {class_not_found, _}} ->
-                            beamtalk_repl_protocol:encode_error(
-                                make_class_not_found_error(ClassName),
-                                Msg,
-                                fun beamtalk_repl_json:format_error_message/1
-                            )
-                    end;
-                SelectorBin ->
-                    case beamtalk_repl_docs:format_method_doc(ClassName, SelectorBin) of
-                        {ok, DocText} ->
-                            beamtalk_repl_protocol:encode_docs(DocText, Msg);
-                        {error, {class_not_found, _}} ->
-                            beamtalk_repl_protocol:encode_error(
-                                make_class_not_found_error(ClassName),
-                                Msg,
-                                fun beamtalk_repl_json:format_error_message/1
-                            );
-                        {error, {method_not_found, _, _}} ->
-                            NameBin = to_binary(ClassName),
-                            SelectorAtom = binary_to_atom(SelectorBin, utf8),
-                            Err0 = beamtalk_error:new(does_not_understand, ClassName),
-                            Err1 = beamtalk_error:with_selector(Err0, SelectorAtom),
-                            Err2 = beamtalk_error:with_message(
-                                Err1,
-                                iolist_to_binary([NameBin, <<" does not understand ">>, SelectorBin])
-                            ),
-                            Err3 = beamtalk_error:with_hint(
-                                Err2,
-                                iolist_to_binary([
-                                    <<"Use :help ">>, NameBin, <<" to see available methods.">>
-                                ])
-                            ),
-                            beamtalk_repl_protocol:encode_error(
-                                Err3, Msg, fun beamtalk_repl_json:format_error_message/1
-                            )
-                    end
+            Result =
+                case {Selector, ClassSide} of
+                    {undefined, false} ->
+                        beamtalk_repl_docs:format_class_docs(ClassName);
+                    {undefined, true} ->
+                        beamtalk_repl_docs:format_class_docs_class_side(ClassName);
+                    {SelectorBin, false} ->
+                        beamtalk_repl_docs:format_method_doc(ClassName, SelectorBin);
+                    {SelectorBin, true} ->
+                        beamtalk_repl_docs:format_method_doc_class_side(ClassName, SelectorBin)
+                end,
+            case Result of
+                {ok, DocText} ->
+                    beamtalk_repl_protocol:encode_docs(DocText, Msg);
+                {error, {class_not_found, _}} ->
+                    beamtalk_repl_protocol:encode_error(
+                        make_class_not_found_error(ClassName),
+                        Msg,
+                        fun beamtalk_repl_json:format_error_message/1
+                    );
+                {error, {method_not_found, _, _}} ->
+                    NameBin = to_binary(ClassName),
+                    SelectorBin2 = maps:get(<<"selector">>, Params, <<"?">>),
+                    SelectorAtom = binary_to_atom(SelectorBin2, utf8),
+                    HintClass =
+                        case ClassSide of
+                            true ->
+                                iolist_to_binary([NameBin, <<" class">>]);
+                            false ->
+                                NameBin
+                        end,
+                    Err0 = beamtalk_error:new(does_not_understand, ClassName),
+                    Err1 = beamtalk_error:with_selector(Err0, SelectorAtom),
+                    Err2 = beamtalk_error:with_message(
+                        Err1,
+                        iolist_to_binary([HintClass, <<" does not understand ">>, SelectorBin2])
+                    ),
+                    Err3 = beamtalk_error:with_hint(
+                        Err2,
+                        iolist_to_binary([
+                            <<"Use :help ">>, HintClass, <<" to see available methods.">>
+                        ])
+                    ),
+                    beamtalk_repl_protocol:encode_error(
+                        Err3, Msg, fun beamtalk_repl_json:format_error_message/1
+                    )
             end
     end;
 handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
