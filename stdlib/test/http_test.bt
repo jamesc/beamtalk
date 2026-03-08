@@ -78,7 +78,7 @@ TestCase subclass: HttpTest
     json := resp bodyAsJson
     // bodyAsJson is typed -> Object because Json can be a Dictionary, List, or scalar.
     // Both Dictionary and List implement at:, but Object does not expose it.
-    // This test knows the endpoint returns a Json object, so the DNU is a false positive.
+    // This test knows the endpoint returns a Dictionary (JSON object), so the DNU is a false positive.
     @expect dnu
     self assert: (json at: "type") equals: "json"
 
