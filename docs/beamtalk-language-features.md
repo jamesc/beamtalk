@@ -1458,7 +1458,7 @@ c increment                    // atomically add 1, return new value
 c incrementBy: 5               // atomically add N, return new value
 c decrement                    // atomically subtract 1, return new value
 c decrementBy: 3               // atomically subtract N, return new value
-c value                        // read current value (not atomic w.r.t. other reads)
+c value                        // instantaneous read; may observe a stale value under concurrent updates or reset
 c reset                        // set to 0, return nil
 c delete                       // destroy the backing ETS table
 ```

@@ -148,7 +148,7 @@ incrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}, N) when
     catch
         error:badarg -> stale_counter_error('incrementBy:', TableName)
     end;
-incrementBy(#{'$beamtalk_class' := 'AtomicCounter'}, _N) ->
+incrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := _}, _N) ->
     Error0 = beamtalk_error:new(type_error, 'AtomicCounter'),
     Error1 = beamtalk_error:with_selector(Error0, 'incrementBy:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be an Integer">>),
@@ -175,7 +175,7 @@ decrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}, N) when
     catch
         error:badarg -> stale_counter_error('decrementBy:', TableName)
     end;
-decrementBy(#{'$beamtalk_class' := 'AtomicCounter'}, _N) ->
+decrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := _}, _N) ->
     Error0 = beamtalk_error:new(type_error, 'AtomicCounter'),
     Error1 = beamtalk_error:with_selector(Error0, 'decrementBy:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be an Integer">>),
@@ -219,6 +219,9 @@ reset(_Self) ->
     receiver_type_error('reset').
 
 %% @doc Destroy the backing ETS table. Returns nil.
+%%
+%% Raises `stale_counter` if the table no longer exists (already deleted or owner exited).
+%% Raises `permission_error` if the table still exists but the caller does not own it.
 -spec delete(map()) -> nil.
 delete(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
     try
@@ -226,13 +229,19 @@ delete(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
         nil
     catch
         error:badarg ->
-            Error0 = beamtalk_error:new(permission_error, 'AtomicCounter'),
-            Error1 = beamtalk_error:with_selector(Error0, 'delete'),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
-                <<"Caller is not the owner of the counter table, or it has already been deleted">>
-            ),
-            beamtalk_error:raise(Error2)
+            %% Distinguish stale (table gone) from permission error (table exists, not owner).
+            case ets:whereis(TableName) of
+                undefined ->
+                    stale_counter_error('delete', TableName);
+                _Tid ->
+                    Error0 = beamtalk_error:new(permission_error, 'AtomicCounter'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'delete'),
+                    Error2 = beamtalk_error:with_hint(
+                        Error1,
+                        <<"Caller is not the owner of the counter table">>
+                    ),
+                    beamtalk_error:raise(Error2)
+            end
     end;
 delete(_Self) ->
     receiver_type_error('delete').

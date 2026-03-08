@@ -163,6 +163,22 @@ incrementBy_type_error_non_integer_test() ->
         )
     end).
 
+incrementBy_malformed_receiver_is_receiver_error_test() ->
+    %% A map tagged AtomicCounter but missing `table` is a bad receiver, not a bad argument.
+    %% Must raise receiver type_error with hint about receiver, not argument.
+    Malformed = #{'$beamtalk_class' => 'AtomicCounter'},
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error,
+                class = 'AtomicCounter',
+                hint = <<"Receiver must be an AtomicCounter instance">>
+            }
+        },
+        beamtalk_atomic_counter:incrementBy(Malformed, 5)
+    ).
+
 %%% ============================================================================
 %%% decrement/1
 %%% ============================================================================
@@ -211,6 +227,22 @@ decrementBy_type_error_non_integer_test() ->
             beamtalk_atomic_counter:decrementBy(C, 1.5)
         )
     end).
+
+decrementBy_malformed_receiver_is_receiver_error_test() ->
+    %% A map tagged AtomicCounter but missing `table` is a bad receiver, not a bad argument.
+    %% Must raise receiver type_error with hint about receiver, not argument.
+    Malformed = #{'$beamtalk_class' => 'AtomicCounter'},
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error,
+                class = 'AtomicCounter',
+                hint = <<"Receiver must be an AtomicCounter instance">>
+            }
+        },
+        beamtalk_atomic_counter:decrementBy(Malformed, 3)
+    ).
 
 %%% ============================================================================
 %%% value/1
@@ -269,6 +301,19 @@ delete_type_error_test() ->
             error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
         },
         beamtalk_atomic_counter:delete(not_a_counter)
+    ).
+
+delete_stale_counter_test() ->
+    catch ets:delete(bt_ac_test_delete_stale),
+    C = beamtalk_atomic_counter:'new:'(bt_ac_test_delete_stale),
+    beamtalk_atomic_counter:delete(C),
+    %% Second delete: table is gone — must raise stale_counter, not permission_error.
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
+        },
+        beamtalk_atomic_counter:delete(C)
     ).
 
 %%% ============================================================================
@@ -349,11 +394,13 @@ concurrent_increment_test() ->
             end)
          || _ <- lists:seq(1, NumProcs)
         ],
-        %% Wait for all workers to finish
+        %% Wait for all workers to finish (5 s timeout guards against worker crashes)
         lists:foreach(
             fun(_) ->
                 receive
                     done -> ok
+                after 5000 ->
+                    error(concurrent_test_timeout)
                 end
             end,
             Pids
