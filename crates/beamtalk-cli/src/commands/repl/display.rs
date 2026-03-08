@@ -77,6 +77,7 @@ pub(crate) fn print_help() {
     println!("  :load <path>    Load a .bt file or directory (→ Workspace load: \"path\")");
     println!("  :reload         Reload the last loaded file or directory");
     println!("  :reload <Class> Reload a class by name (→ ClassName reload)");
+    println!("  :unload <Class> Unload a class from the workspace");
     println!("  :test           Run all test classes (→ Workspace test)");
     println!("  :test <Class>   Run a test class (→ Workspace test: ClassName)");
     println!("  :show-codegen <expr>  Show generated Core Erlang for an expression");

@@ -866,6 +866,22 @@ pub(crate) fn repl_loop(
                             }
                             continue;
                         }
+                        _ if line.starts_with(":unload ") => {
+                            let class_name = extract_command_arg(line, ":unload ", None).trim().to_string();
+                            if class_name.is_empty() {
+                                eprintln!("Usage: :unload <ClassName>");
+                            } else {
+                                match client.unload(&class_name) {
+                                    Ok(response) => display_eval_response(&response),
+                                    Err(e) => eprintln!("Error: {e}"),
+                                }
+                            }
+                            continue;
+                        }
+                        ":unload" => {
+                            eprintln!("Usage: :unload <ClassName>");
+                            continue;
+                        }
                         ":reload" | ":r" => {
                             // :reload (no arg) → reload the last loaded path (directory or file)
                             if let Some((path, is_directory)) = &last_loaded_path {
@@ -969,6 +985,7 @@ pub(crate) fn repl_loop(
                     if let Some(suggestion) = match first_word {
                         "load" => Some(":load"),
                         "reload" => Some(":reload"),
+                        "unload" => Some(":unload"),
                         "help" => Some(":help"),
                         "exit" | "quit" => Some(":exit"),
                         "clear" => Some(":clear"),
