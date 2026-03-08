@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for OS class (BT-1244)
+// Stdlib tests for OS class (BT-1244, BT-1247)
 
 TestCase subclass: OSTest
   state: isUnix = false
@@ -25,3 +25,19 @@ TestCase subclass: OSTest
   testRunWithNonStringRaisesTypeError =>
     @expect type
     self should: [OS run: 42] raise: #type_error
+
+  testRunTimeoutReturnsString =>
+    self.isUnix
+      ifTrue: [
+        result := OS run: "echo hello" timeout: 5000
+        self assert: result equals: "hello"
+      ]
+
+  testRunTimeoutWithNonStringRaisesTypeError =>
+    @expect type
+    self should: [OS run: 42 timeout: 5000] raise: #type_error
+
+  testRunTimeoutExpiryRaisesTimeout =>
+    self.isUnix ifTrue: [
+      self should: [OS run: "sleep 60" timeout: 100] raise: #timeout
+    ]

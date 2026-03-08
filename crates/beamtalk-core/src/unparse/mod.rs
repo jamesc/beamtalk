@@ -644,6 +644,9 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             let safe_msg = message.as_str().replace("*/", "* /");
             docvec!["/* error: ", Document::String(safe_msg), " */"]
         }
+        Expression::DestructureAssignment { pattern, value, .. } => {
+            docvec![unparse_pattern(pattern), " := ", unparse_expression(value)]
+        }
     }
 }
 
@@ -1105,6 +1108,11 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
                 segments.iter().map(unparse_binary_segment).collect();
             let joined = join_docs(seg_docs, ", ");
             docvec!["<<", joined, ">>"]
+        }
+        Pattern::Array { elements, .. } => {
+            let elem_docs: Vec<Document<'static>> = elements.iter().map(unparse_pattern).collect();
+            let joined = join_docs(elem_docs, ", ");
+            docvec!["#[", joined, "]"]
         }
     }
 }

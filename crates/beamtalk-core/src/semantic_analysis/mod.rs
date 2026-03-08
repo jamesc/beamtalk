@@ -608,6 +608,12 @@ impl Analyser {
                 }
             }
 
+            DestructureAssignment { pattern, value, .. } => {
+                self.analyse_expression(value, None);
+                // Define pattern variables in scope for capture tracking
+                self.define_pattern_variables_in_scope(pattern);
+            }
+
             Literal(..)
             | Super(..)
             | Error { .. }
@@ -624,6 +630,32 @@ impl Analyser {
                     }
                 }
             }
+        }
+    }
+
+    /// Defines variables from a destructuring pattern in the current scope.
+    fn define_pattern_variables_in_scope(&mut self, pattern: &crate::ast::Pattern) {
+        use crate::ast::Pattern;
+        match pattern {
+            Pattern::Variable(id) => {
+                if self.scope.lookup_immut(&id.name).is_none() {
+                    self.scope.define(&id.name, id.span, BindingKind::Local);
+                }
+            }
+            Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
+                for elem in elements {
+                    self.define_pattern_variables_in_scope(elem);
+                }
+            }
+            Pattern::List { elements, tail, .. } => {
+                for elem in elements {
+                    self.define_pattern_variables_in_scope(elem);
+                }
+                if let Some(t) = tail {
+                    self.define_pattern_variables_in_scope(t);
+                }
+            }
+            Pattern::Binary { .. } | Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
         }
     }
 

@@ -93,10 +93,74 @@ impl Parser {
 
     /// Parses an assignment or regular expression.
     fn parse_assignment(&mut self) -> Expression {
+        // Tuple destructuring: `{a, b} := expr`
+        // Tuples are not valid expressions, so we intercept `{` here before
+        // parse_cascade() would produce an error.
+        if self.check(&TokenKind::LeftBrace) {
+            let start = self.current_token().span();
+            let pattern = self.parse_tuple_pattern();
+            if self.match_token(&TokenKind::Assign) {
+                if let Err(error) = self.enter_nesting(start) {
+                    return error;
+                }
+                let value = Box::new(self.parse_assignment());
+                self.leave_nesting();
+                let span = start.merge(value.span());
+                return Expression::DestructureAssignment {
+                    pattern,
+                    value,
+                    span,
+                };
+            }
+            // `{...}` not followed by `:=` — tuple literals are not expressions
+            let span = pattern.span();
+            self.diagnostics.push(Diagnostic::error(
+                "Tuple literals are not valid expressions; use `{a, b} := expr` for destructuring",
+                span,
+            ));
+            return Expression::Error {
+                message: "Tuple literal used as expression".into(),
+                span,
+            };
+        }
+
         let expr = self.parse_cascade();
 
         // Check for assignment operators
         if self.match_token(&TokenKind::Assign) {
+            // Array destructuring: `#[a, b] := expr`
+            if let Expression::ArrayLiteral {
+                elements,
+                span: lhs_span,
+            } = &expr
+            {
+                match Self::array_elements_to_pattern(elements, *lhs_span) {
+                    Ok(pattern) => {
+                        if let Err(error) = self.enter_nesting(*lhs_span) {
+                            return error;
+                        }
+                        let value = Box::new(self.parse_assignment());
+                        self.leave_nesting();
+                        let span = lhs_span.merge(value.span());
+                        return Expression::DestructureAssignment {
+                            pattern,
+                            value,
+                            span,
+                        };
+                    }
+                    Err(bad_span) => {
+                        self.diagnostics.push(Diagnostic::error(
+                            "Array destructuring patterns may only contain identifiers, '_', or literals",
+                            bad_span,
+                        ));
+                        return Expression::Error {
+                            message: "Invalid array destructuring pattern".into(),
+                            span: *lhs_span,
+                        };
+                    }
+                }
+            }
+
             // Validate assignment target
             if !matches!(
                 expr,
@@ -128,6 +192,28 @@ impl Parser {
         }
 
         expr
+    }
+
+    /// Converts array literal elements to a destructuring pattern.
+    ///
+    /// Returns `Ok(Pattern::Array)` if all elements are valid pattern positions
+    /// (identifiers, `_`, or literals), or `Err(span)` pointing at the first
+    /// invalid element.
+    fn array_elements_to_pattern(elements: &[Expression], span: Span) -> Result<Pattern, Span> {
+        let mut patterns = Vec::new();
+        for elem in elements {
+            let pat = match elem {
+                Expression::Identifier(id) if id.name == "_" => Pattern::Wildcard(id.span),
+                Expression::Identifier(id) => Pattern::Variable(id.clone()),
+                Expression::Literal(lit, s) => Pattern::Literal(lit.clone(), *s),
+                _ => return Err(elem.span()),
+            };
+            patterns.push(pat);
+        }
+        Ok(Pattern::Array {
+            elements: patterns,
+            span,
+        })
     }
 
     /// Parses a cascade (multiple messages to the same receiver).
@@ -909,6 +995,9 @@ impl Parser {
             // Tuple pattern: {p1, p2, ...}
             TokenKind::LeftBrace => self.parse_tuple_pattern(),
 
+            // Array pattern: #[p1, p2, ...]
+            TokenKind::ArrayOpen => self.parse_array_pattern(),
+
             // Binary pattern: <<seg, seg, ...>>
             TokenKind::LtLt => self.parse_binary_pattern(),
 
@@ -952,6 +1041,34 @@ impl Parser {
 
         let span = start.merge(end);
         Pattern::Tuple { elements, span }
+    }
+
+    /// Parses an array destructuring pattern: `#[p1, p2, ...]`
+    fn parse_array_pattern(&mut self) -> Pattern {
+        let start = self
+            .expect(&TokenKind::ArrayOpen, "Expected '#['")
+            .map_or_else(|| self.current_token().span(), |t: Token| t.span());
+
+        let mut elements = Vec::new();
+
+        if !self.check(&TokenKind::RightBracket) {
+            elements.push(self.parse_pattern());
+            while self.match_binary_selector(",") {
+                if self.check(&TokenKind::RightBracket) {
+                    break; // trailing comma
+                }
+                elements.push(self.parse_pattern());
+            }
+        }
+
+        let end = self
+            .expect(&TokenKind::RightBracket, "Expected ']'")
+            .map_or(start, |t: Token| t.span());
+
+        Pattern::Array {
+            elements,
+            span: start.merge(end),
+        }
     }
 
     /// Parses a binary pattern: `<<seg, seg, ...>>`

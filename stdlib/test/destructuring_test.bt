@@ -1,0 +1,178 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for destructuring assignment: tuple {a, b} := expr and array #[a, b] := expr
+
+TestCase subclass: DestructuringTest
+
+  // === Tuple destructuring ===
+  testTupleDestructuringBasic =>
+    {a, b} := Erlang erlang list_to_tuple: #(10, 20)
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testTupleDestructuringThreeElements =>
+    {a, b, c} := Erlang erlang list_to_tuple: #(1, 2, 3)
+    self assert: a equals: 1
+    self assert: b equals: 2
+    self assert: c equals: 3
+
+  testTupleDestructuringWithTaggedSymbol =>
+    {status, val} := Erlang erlang list_to_tuple: #(#ok, 42)
+    self assert: status equals: #ok
+    self assert: val equals: 42
+
+  testTupleDestructuringWithWildcard =>
+    {_, b} := Erlang erlang list_to_tuple: #(#ignore, 99)
+    self assert: b equals: 99
+
+  // === Array destructuring ===
+  testArrayDestructuringBasic =>
+    #[a, b] := #[10, 20]
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testArrayDestructuringThreeElements =>
+    #[a, b, c] := #[1, 2, 3]
+    self assert: a equals: 1
+    self assert: b equals: 2
+    self assert: c equals: 3
+
+  testArrayDestructuringWithWildcard =>
+    #[_, b] := #[99, 42]
+    self assert: b equals: 42
+
+  testArrayDestructuringExtraElements =>
+    // Array has more elements than pattern — that's fine, extras ignored
+    #[a, b] := #[10, 20, 30, 40]
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testArrayDestructuringStrings =>
+    #[first, second] := #["hello", "world"]
+    self assert: first equals: "hello"
+    self assert: second equals: "world"
+
+  // === Last-expression destructuring (RHS must be evaluated) ===
+  testTupleDestructuringOnlyStatement =>
+    // Destructuring as the only (and therefore last) statement in a method.
+    // Verifies the method compiles and runs without error.
+    {_, _} := Erlang erlang list_to_tuple: #(#ok, 42)
+
+  testArrayDestructuringOnlyStatement =>
+    // Same for array destructuring as the only statement.
+    #[_, _] := #[1, 2]
+
+  testTupleDestructuringVariablesUsedAfter =>
+    // Variables bound by destructuring are accessible in subsequent expressions.
+    {a, b} := Erlang erlang list_to_tuple: #(5, 10)
+    self assert: a equals: 5
+    self assert: b equals: 10
+
+  testArrayDestructuringVariablesUsedAfter =>
+    // Same for array destructuring.
+    #[x, y] := #[3, 7]
+    self assert: x equals: 3
+    self assert: y equals: 7
+
+  // === Sequential destructurings ===
+  testSequentialTupleDestructurings =>
+    // Multiple tuple destructurings in sequence all bind correctly.
+    {a, b} := Erlang erlang list_to_tuple: #(1, 2)
+    {c, d} := Erlang erlang list_to_tuple: #(3, 4)
+    self assert: a + b + c + d equals: 10
+
+  testSequentialArrayDestructurings =>
+    // Multiple array destructurings in sequence all bind correctly.
+    #[a, b] := #[1, 2]
+    #[c, d] := #[3, 4]
+    self assert: a + b + c + d equals: 10
+
+  testMixedDestructurings =>
+    // Mix of tuple and array destructuring in the same method.
+    {x, y} := Erlang erlang list_to_tuple: #(10, 20)
+    #[p, q] := #[100, 200]
+    self assert: x + y + p + q equals: 330
+
+  // === Destructuring inside block bodies ===
+  testArrayDestructuringNonLastInCollect =>
+    // Destructuring as non-last expression in a collect: block;
+    // the block binds pattern variables then returns a computed value.
+    result := #[#[1, 10], #[2, 20]]
+      collect: [:pair |
+        #[a, b] := pair
+        a + b
+      ]
+    self assert: result equals: #[11, 22]
+
+  testTupleDestructuringNonLastInCollect =>
+    // Tuple destructuring as non-last expression in a collect: block.
+    pair1 := Erlang erlang list_to_tuple: #(1, 10)
+    pair2 := Erlang erlang list_to_tuple: #(2, 20)
+    result := #[pair1, pair2]
+      collect: [:pair |
+        {a, b} := pair
+        a + b
+      ]
+    self assert: result equals: #[11, 22]
+
+  testArrayDestructuringNonLastInSelect =>
+    // Destructuring as non-last expression in a select: block;
+    // the last expression is the predicate that determines inclusion.
+    result := #[#[1, 10], #[15, 5], #[2, 20]]
+      select: [:pair |
+        #[a, b] := pair
+        a < b
+      ]
+    self assert: result equals: #[#[1, 10], #[2, 20]]
+
+  testTupleDestructuringNonLastInSelect =>
+    // Tuple destructuring as non-last expression in select: block.
+    pair1 := Erlang erlang list_to_tuple: #(1, 10)
+    pair2 := Erlang erlang list_to_tuple: #(15, 5)
+    pair3 := Erlang erlang list_to_tuple: #(2, 20)
+    result := #[pair1, pair2, pair3]
+      select: [:pair |
+        {a, b} := pair
+        a < b
+      ]
+    self assert: result equals: #[pair1, pair3]
+
+  testArrayDestructuringNonLastInInject =>
+    // Destructuring as non-last expression in inject:into: block;
+    // the last expression is the new accumulator value.
+    result := #[#[1, 10], #[2, 20]]
+      inject: 0
+      into: [:acc :pair |
+        #[a, b] := pair
+        acc + a + b
+      ]
+    self assert: result equals: 33
+
+  testTupleDestructuringNonLastInInject =>
+    // Tuple destructuring as non-last expression in inject:into: block.
+    pair1 := Erlang erlang list_to_tuple: #(1, 10)
+    pair2 := Erlang erlang list_to_tuple: #(2, 20)
+    result := #[pair1, pair2]
+      inject: 0
+      into: [:acc :pair |
+        {a, b} := pair
+        acc + a + b
+      ]
+    self assert: result equals: 33
+
+  testDestructuringVariablesAccessibleInSubsequentBlocks =>
+    // Variables bound by destructuring are visible to blocks that follow.
+    #[x, y] := #[5, 10]
+    doubled := #[x, y] collect: [:v | v * 2]
+    self assert: doubled equals: #[10, 20]
+
+  testNestedArrayDestructuringInCollect =>
+    // Destructuring that unpacks a pair and uses both parts in the result.
+    pairs := #[#[3, 4], #[5, 12], #[8, 15]]
+    sums := pairs
+      collect: [:pair |
+        #[a, b] := pair
+        a + b
+      ]
+    self assert: sums equals: #[7, 17, 23]

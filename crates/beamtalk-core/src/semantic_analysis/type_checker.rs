@@ -573,6 +573,12 @@ impl TypeChecker {
                     InferredType::Dynamic
                 }
             }
+
+            // Destructure assignment — infer value type, result is Dynamic (pattern may bind vars)
+            Expression::DestructureAssignment { value, .. } => {
+                self.infer_expr(value, hierarchy, env, in_abstract_method);
+                InferredType::Dynamic
+            }
         };
 
         // Record inferred type for the expression's full span for LSP queries

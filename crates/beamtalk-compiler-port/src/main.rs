@@ -710,6 +710,105 @@ fn handle_compile_expression(request: &Map) -> Term {
     }
 }
 
+/// Handle a `compile_expression_trace` request (BT-1238).
+///
+/// Same parsing/validation as `compile_expression` but generates a trace module
+/// whose `eval/1` returns `{[{<<"src0">>, V0}, ...], FinalState}` instead of
+/// `{Result, FinalState}`.
+///
+/// Returns the same `ok_response` format as `compile_expression` — the difference
+/// is in the generated module semantics, not the port protocol.
+fn handle_compile_expression_trace(request: &Map) -> Term {
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let Some(module_name) = map_get(request, "module").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'module' field".to_string()]);
+    };
+    let known_vars = map_get(request, "known_vars")
+        .and_then(term_to_string_list)
+        .unwrap_or_default();
+    let class_module_index = match map_get(request, "class_module_index") {
+        None => std::collections::HashMap::new(),
+        Some(term) => match term_to_string_map(term) {
+            Ok(map) => map,
+            Err(e) => return error_response(&[e]),
+        },
+    };
+    let pre_class_hierarchy = match map_get(request, "class_hierarchy") {
+        None => vec![],
+        Some(term) => parse_class_hierarchy_from_term(term),
+    };
+
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+    let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
+    let mut all_diagnostics =
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
+            &module,
+            parse_diagnostics,
+            &known_var_refs,
+            pre_class_hierarchy,
+        );
+
+    // Run @primitive validation (parity with compile_expression).
+    let options = beamtalk_core::CompilerOptions::default();
+    let primitive_diags =
+        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
+            &module, &options,
+        );
+    all_diagnostics.extend(primitive_diags);
+
+    let error_diags: Vec<&beamtalk_core::source_analysis::Diagnostic> = all_diagnostics
+        .iter()
+        .filter(|d| matches!(d.severity, beamtalk_core::source_analysis::Severity::Error))
+        .collect();
+    let warnings: Vec<String> = all_diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.severity,
+                beamtalk_core::source_analysis::Severity::Warning
+                    | beamtalk_core::source_analysis::Severity::Hint
+                    | beamtalk_core::source_analysis::Severity::Lint
+            )
+        })
+        .map(|d| d.message.to_string())
+        .collect();
+
+    if !error_diags.is_empty() {
+        return diagnostic_error_response(&error_diags, &source);
+    }
+
+    if !module.classes.is_empty() || !module.method_definitions.is_empty() {
+        return error_response(
+            &["trace mode does not support class or method definitions; \
+             use eval without trace to define classes"
+                .to_string()],
+        );
+    }
+
+    if module.expressions.is_empty() {
+        return error_response(&["No expressions to compile".to_string()]);
+    }
+
+    let expressions: Vec<_> = module
+        .expressions
+        .iter()
+        .map(|s| s.expression.clone())
+        .collect();
+    match beamtalk_core::erlang::generate_repl_expressions_traced(
+        &expressions,
+        &source,
+        &module_name,
+        class_module_index,
+    ) {
+        Ok(code) => ok_response(&code, &warnings),
+        Err(e) => error_response(&[format!("Code generation failed: {e}")]),
+    }
+}
+
 /// BT-571: Handle inline class definition in REPL expression context.
 /// Merges any standalone method definitions into the class, generates code,
 /// and returns a `class_definition` response.
@@ -1071,6 +1170,7 @@ fn handle_request(request_term: &Term) -> Term {
 
     match command {
         "compile_expression" => handle_compile_expression(map),
+        "compile_expression_trace" => handle_compile_expression_trace(map),
         "compile" => handle_compile(map),
         "diagnostics" => handle_diagnostics(map),
         "version" => handle_version(),
@@ -1432,6 +1532,63 @@ mod tests {
         assert_eq!(
             map_get(m, "class_name").and_then(term_to_string),
             Some("String".to_string())
+        );
+    }
+
+    /// BT-1238: `compile_expression_trace` produces Core Erlang with trace list return.
+    #[test]
+    fn compile_expression_trace_single_expression() {
+        use eetf::List;
+
+        let request = Map::from([
+            (atom("command"), atom("compile_expression_trace")),
+            (atom("source"), binary("1 + 1.")),
+            (atom("module"), binary("bt@trace_test")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+        ]);
+        let response = handle_compile_expression_trace(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "compile_expression_trace should succeed: {response:?}"
+        );
+        let core_erlang = map_get(m, "core_erlang")
+            .and_then(term_to_string)
+            .expect("core_erlang field must be present");
+        // Trace module must export eval/1 and return a steps list, not a plain {Result, State}.
+        assert!(
+            core_erlang.contains("'eval'/1"),
+            "Trace module must export eval/1: {core_erlang}"
+        );
+        // The return must be a cons list [...] wrapping step tuples, not a plain 2-tuple.
+        assert!(
+            core_erlang.contains("[{"),
+            "Trace return must be a list of step tuples: {core_erlang}"
+        );
+    }
+
+    /// BT-1238: `compile_expression_trace` rejects class definitions.
+    #[test]
+    fn compile_expression_trace_rejects_class_definition() {
+        use eetf::List;
+
+        let request = Map::from([
+            (atom("command"), atom("compile_expression_trace")),
+            (atom("source"), binary("Object subclass: Foo\n  bar => 42")),
+            (atom("module"), binary("bt@trace_class_test")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+        ]);
+        let response = handle_compile_expression_trace(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("error")),
+            "compile_expression_trace should reject class definitions: {response:?}"
         );
     }
 
