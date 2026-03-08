@@ -457,3 +457,49 @@ is_alpha_with_digits_test() ->
 
 is_alpha_empty_test() ->
     ?assertEqual(false, beamtalk_string:is_alpha(<<>>)).
+
+%%% ============================================================================
+%%% from_code_point/1
+%%% ============================================================================
+
+from_code_point_ascii_test() ->
+    ?assertEqual(<<"A">>, beamtalk_string:from_code_point(65)).
+
+from_code_point_lowercase_test() ->
+    ?assertEqual(<<"z">>, beamtalk_string:from_code_point(122)).
+
+from_code_point_multibyte_test() ->
+    ?assertEqual(<<"€"/utf8>>, beamtalk_string:from_code_point(8364)).
+
+from_code_point_emoji_test() ->
+    ?assertEqual(<<"😀"/utf8>>, beamtalk_string:from_code_point(128512)).
+
+from_code_point_zero_test() ->
+    ?assertEqual(<<0>>, beamtalk_string:from_code_point(0)).
+
+from_code_point_negative_raises_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'String', selector = 'fromCodePoint:'
+            }
+        },
+        beamtalk_string:from_code_point(-1)
+    ).
+
+%%% ============================================================================
+%%% from_code_points/1
+%%% ============================================================================
+
+from_code_points_ascii_list_test() ->
+    ?assertEqual(<<"Hi">>, beamtalk_string:from_code_points([72, 105])).
+
+from_code_points_braces_test() ->
+    ?assertEqual(<<"{}">>, beamtalk_string:from_code_points([123, 125])).
+
+from_code_points_empty_test() ->
+    ?assertEqual(<<>>, beamtalk_string:from_code_points([])).
+
+from_code_points_multibyte_test() ->
+    ?assertEqual(<<"€£"/utf8>>, beamtalk_string:from_code_points([8364, 163])).

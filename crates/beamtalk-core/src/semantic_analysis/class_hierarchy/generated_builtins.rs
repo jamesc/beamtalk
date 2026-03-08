@@ -45,7 +45,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "HTTPResponse"
             | "InstantiationError"
             | "Integer"
-            | "JSON"
+            | "Json"
             | "List"
             | "Metaclass"
             | "Number"
@@ -884,9 +884,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
-        "JSON".into(),
+        "Json".into(),
         ClassInfo {
-            name: "JSON".into(),
+            name: "Json".into(),
             superclass: Some("Object".into()),
             is_sealed: true,
             is_abstract: false,
@@ -896,9 +896,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::new(),
             methods: vec![],
             class_methods: vec![
-                MethodInfo { selector: "parse:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "JSON".into(), is_sealed: true, return_type: None, param_types: vec![Some("String".into())], doc: Some("Parse a JSON string into a Beamtalk value (class method).\n\nJSON objects become Dictionaries with String keys, arrays become\nLists, strings become Strings, numbers become Integer or Float,\nbooleans stay as true/false, null becomes nil.\n\n## Examples\n```beamtalk\nJSON parse: \"[1, 2, 3]\"            // => [1,2,3]\nJSON parse: \"42\"                   // => 42\nJSON parse: \"null\"                 // => nil\n```".into()) },
-                MethodInfo { selector: "generate:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "JSON".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("Object".into())], doc: Some("Generate a JSON string from a Beamtalk value (class method).\n\nDictionaries become JSON objects, Lists become arrays, Strings\nbecome JSON strings, Integer/Float become numbers, true/false\nbecome JSON booleans, nil becomes null.\n\n## Examples\n```beamtalk\nJSON generate: #(1, 2, 3)          // => [1,2,3]\nJSON generate: nil                 // => null\nJSON generate: 42                  // => 42\n```".into()) },
-                MethodInfo { selector: "prettyPrint:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "JSON".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("Object".into())], doc: Some("Generate a pretty-printed JSON string with indentation (class method).\n\n## Examples\n```beamtalk\nJSON prettyPrint: #{\"name\" => \"Ada\", \"age\" => 36}\n```".into()) },
+                MethodInfo { selector: "parse:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Json".into(), is_sealed: true, return_type: None, param_types: vec![Some("String".into())], doc: Some("Parse a JSON string into a Beamtalk value (class method).\n\nJSON objects become Dictionaries with String keys, arrays become\nLists, strings become Strings, numbers become Integer or Float,\nbooleans stay as true/false, null becomes nil.\n\n## Examples\n```beamtalk\nJson parse: \"[1, 2, 3]\"            // => [1,2,3]\nJson parse: \"42\"                   // => 42\nJson parse: \"null\"                 // => nil\n```".into()) },
+                MethodInfo { selector: "generate:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Json".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("Object".into())], doc: Some("Generate a JSON string from a Beamtalk value (class method).\n\nDictionaries become JSON objects, Lists become arrays, Strings\nbecome JSON strings, Integer/Float become numbers, true/false\nbecome JSON booleans, nil becomes null.\n\n## Examples\n```beamtalk\nJson generate: #(1, 2, 3)          // => [1,2,3]\nJson generate: nil                 // => null\nJson generate: 42                  // => 42\n```".into()) },
+                MethodInfo { selector: "prettyPrint:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Json".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("Object".into())], doc: Some("Generate a pretty-printed JSON string with indentation (class method).\n\n## Examples\n```beamtalk\nJson prettyPrint: #{\"name\" => \"Ada\", \"age\" => 36}\n```".into()) },
             ],
             class_variables: vec![],
         },
@@ -1423,6 +1423,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("List".into())], doc: Some("Create a String by joining a list of grapheme cluster strings.\n\nUseful for constructing a String from the result of `asList` or\n`select:` operations. Each element should be a grapheme string.\n\n## Examples\n```beamtalk\nString class withAll: #(\"h\", \"e\", \"l\", \"l\", \"o\")  // => \"hello\"\n```".into()) },
+                MethodInfo { selector: "fromCodePoint:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("Integer".into())], doc: Some("Create a single-character String from a Unicode code point integer.\n\n## Examples\n```beamtalk\nString fromCodePoint: 65    // => \"A\"\nString fromCodePoint: 8364  // => \"€\"\n```".into()) },
+                MethodInfo { selector: "fromCodePoints:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("List".into())], doc: Some("Create a String from a list of Unicode code point integers.\n\n## Examples\n```beamtalk\nString fromCodePoints: #(72, 105)   // => \"Hi\"\nString fromCodePoints: #(123, 125)  // => \"\\{\\}\"\n```".into()) },
             ],
             class_variables: vec![],
         },

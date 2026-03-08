@@ -28,6 +28,25 @@ sealed typed Collection subclass: String
   /// ```
   class withAll: list :: List -> String => @primitive "withAll:"
 
+  /// Create a single-character String from a Unicode code point integer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// String fromCodePoint: 65    // => "A"
+  /// String fromCodePoint: 8364  // => "€"
+  /// ```
+  class fromCodePoint: codePoint :: Integer -> String =>
+    @primitive "fromCodePoint:"
+
+  /// Create a String from a list of Unicode code point integers.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// String fromCodePoints: #(72, 105)   // => "Hi"
+  /// String fromCodePoints: #(123, 125)  // => "\{\}"
+  /// ```
+  class fromCodePoints: list :: List -> String => @primitive "fromCodePoints:"
+
   /// Test strict equality with another string.
   ///
   /// ## Examples

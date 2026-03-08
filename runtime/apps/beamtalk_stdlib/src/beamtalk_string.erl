@@ -33,7 +33,9 @@
     drop/2,
     is_blank/1,
     is_digit/1,
-    is_alpha/1
+    is_alpha/1,
+    from_code_point/1,
+    from_code_points/1
 ]).
 
 %% @doc 1-based grapheme access. Returns the grapheme at the given index.
@@ -224,6 +226,35 @@ is_alpha(Str) when is_binary(Str) ->
         end,
         as_list(Str)
     ).
+
+%% @doc Create a single-character UTF-8 binary from a Unicode code point.
+-spec from_code_point(integer()) -> binary().
+from_code_point(CodePoint) when is_integer(CodePoint), CodePoint >= 0 ->
+    case unicode:characters_to_binary([CodePoint]) of
+        Bin when is_binary(Bin) -> Bin;
+        _ ->
+            Error0 = beamtalk_error:new(type_error, 'String'),
+            Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoint:'),
+            Error2 = beamtalk_error:with_hint(Error1, <<"Invalid Unicode code point">>),
+            beamtalk_error:raise(Error2)
+    end;
+from_code_point(CodePoint) when is_integer(CodePoint) ->
+    Error0 = beamtalk_error:new(type_error, 'String'),
+    Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoint:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Code point must be a non-negative integer">>),
+    beamtalk_error:raise(Error2).
+
+%% @doc Create a UTF-8 binary from a list of Unicode code points.
+-spec from_code_points([integer()]) -> binary().
+from_code_points(List) when is_list(List) ->
+    case unicode:characters_to_binary(List) of
+        Bin when is_binary(Bin) -> Bin;
+        _ ->
+            Error0 = beamtalk_error:new(type_error, 'String'),
+            Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoints:'),
+            Error2 = beamtalk_error:with_hint(Error1, <<"Invalid Unicode code points in list">>),
+            beamtalk_error:raise(Error2)
+    end.
 
 %%% ============================================================================
 %%% Internal Functions

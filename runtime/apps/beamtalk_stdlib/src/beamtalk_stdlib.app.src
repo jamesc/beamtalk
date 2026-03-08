@@ -33,7 +33,7 @@
             {'bt@stdlib@httpresponse', 'HTTPResponse', 'Value'},
             {'bt@stdlib@instantiation_error', 'InstantiationError', 'Error'},
             {'bt@stdlib@integer', 'Integer', 'Number'},
-            {'bt@stdlib@json', 'JSON', 'Object'},
+            {'bt@stdlib@json', 'Json', 'Object'},
             {'bt@stdlib@list', 'List', 'Collection'},
             {'bt@stdlib@metaclass', 'Metaclass', 'Class'},
             {'bt@stdlib@number', 'Number', 'Value'},
