@@ -69,6 +69,10 @@ Object subclass: Ets
 
   /// Look up a key. Returns the value, or `nil` if the key is absent.
   ///
+  /// For `#bag` and `#duplicateBag` tables with multiple entries per key,
+  /// returns the first stored value. Use `keys` and iterate for full
+  /// multi-value access.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// cache at: "key"        // => value or nil
@@ -76,6 +80,12 @@ Object subclass: Ets
   at: key => (Erlang beamtalk_ets) lookup: self key: key
 
   /// Insert or replace a key-value pair. Returns `nil`.
+  ///
+  /// For `#bag` and `#duplicateBag` tables, all existing entries for `key`
+  /// are removed before the new entry is inserted, giving best-effort
+  /// upsert semantics. Concurrent writes from multiple actors to the same
+  /// key on a bag table are not serialized — interleaved operations may
+  /// result in multiple entries for that key.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -85,6 +95,9 @@ Object subclass: Ets
     (Erlang beamtalk_ets) insert: self key: key value: value
 
   /// Look up a key; if absent, evaluate the block and return its result.
+  ///
+  /// For `#bag` and `#duplicateBag` tables with multiple entries per key,
+  /// returns the first stored value (same as `at:`); the block is not called.
   ///
   /// ## Examples
   /// ```beamtalk

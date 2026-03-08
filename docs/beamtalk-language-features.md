@@ -1404,7 +1404,7 @@ cache at: "token"               // => "abc123"
 
 #### Table Lifecycle
 
-The owning process (the one that called `Ets new:type:`) holds the table. When that process terminates, the table is automatically deleted by the OTP runtime. Call `delete` explicitly to release memory before the process exits.
+The owning process (the one that called `Ets new:type:`) holds the table. When that process terminates, the table is automatically deleted by the OTP runtime. Only the owning actor may call `delete` on the table — other actors should request deletion by messaging the owner. Call `delete` explicitly in the owner to release memory before the process exits.
 
 ---
 

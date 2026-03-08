@@ -379,6 +379,47 @@ bag_keys_unique_test() ->
         catch ets:delete(bt_ets_test_bag_keys)
     end.
 
+%%% ============================================================================
+%%% Stale table errors (use after deleteTable or owner termination)
+%%% ============================================================================
+
+stale_table_lookup_test() ->
+    catch ets:delete(bt_ets_test_stale_lookup),
+    Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_lookup, set),
+    beamtalk_ets:deleteTable(Table),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
+        beamtalk_ets:lookup(Table, <<"key">>)
+    ).
+
+stale_table_insert_test() ->
+    catch ets:delete(bt_ets_test_stale_insert),
+    Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_insert, set),
+    beamtalk_ets:deleteTable(Table),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
+        beamtalk_ets:insert(Table, <<"key">>, <<"val">>)
+    ).
+
+stale_table_size_test() ->
+    catch ets:delete(bt_ets_test_stale_size),
+    Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_size, set),
+    beamtalk_ets:deleteTable(Table),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
+        beamtalk_ets:tableSize(Table)
+    ).
+
+stale_table_delete_test() ->
+    catch ets:delete(bt_ets_test_stale_delete),
+    Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_delete, set),
+    %% Delete the underlying table directly, then verify deleteTable raises permission_error
+    ets:delete(bt_ets_test_stale_delete),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = permission_error, class = 'Ets'}},
+        beamtalk_ets:deleteTable(Table)
+    ).
+
 duplicate_bag_insert_upsert_test() ->
     %% insert on a duplicate_bag table also replaces existing values (delete-then-insert)
     catch ets:delete(bt_ets_test_dupbag_upsert),

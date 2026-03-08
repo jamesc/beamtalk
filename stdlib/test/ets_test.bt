@@ -6,7 +6,9 @@
 TestCase subclass: EtsTest
   state: table = nil
 
-  setUp => self.table := Ets new: #etsTest type: #set
+  setUp =>
+    self.table := Ets new: #etsTest type: #set
+    self
 
   tearDown =>
     // Guard: testDelete sets self.table to nil after destroying it

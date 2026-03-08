@@ -5,10 +5,11 @@
 %%%
 %%% **DDD Context:** Object System Context
 %%%
-%%% Ets provides a value-type wrapper around OTP ets tables. Tables are
+%%% Ets is an Erlang-backed class wrapping OTP ets tables. Tables are
 %%% named and public by default, enabling cross-actor reads and writes
 %%% without message-passing overhead. The owning process holds the table;
 %%% when the owner terminates, the table is deleted automatically.
+%%% Only the owner process may call `deleteTable/1`.
 %%%
 %%% Ets objects are represented as tagged maps:
 %%% ```
@@ -142,9 +143,13 @@
 %% the first stored value. Use `keys` and iterate for full multi-value access.
 -spec lookup(map(), term()) -> term().
 lookup(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
-    case ets:lookup(TableName, Key) of
-        [{_K, Value} | _] -> Value;
-        [] -> nil
+    try
+        case ets:lookup(TableName, Key) of
+            [{_K, Value} | _] -> Value;
+            [] -> nil
+        end
+    catch
+        error:badarg -> stale_table_error('lookup:key:', TableName)
     end;
 lookup(_Self, _Key) ->
     Error0 = beamtalk_error:new(type_error, 'Ets'),
@@ -155,17 +160,24 @@ lookup(_Self, _Key) ->
 %% @doc Insert or update a key-value pair. Returns nil.
 %%
 %% For bag/duplicate_bag tables, deletes all existing entries for Key before
-%% inserting, giving consistent "last write wins" / upsert semantics.
+%% inserting, giving best-effort upsert semantics. Note: the delete and insert
+%% are two separate ETS operations. Concurrent writes from multiple actors to
+%% the same key on a bag table are not serialized — interleaved calls may
+%% result in multiple entries for the same key.
 -spec insert(map(), term(), term()) -> nil.
 insert(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Value) ->
-    case ets:info(TableName, type) of
-        T when T =:= bag; T =:= duplicate_bag ->
-            ets:delete(TableName, Key);
-        _ ->
-            ok
-    end,
-    ets:insert(TableName, {Key, Value}),
-    nil;
+    try
+        case ets:info(TableName, type) of
+            T when T =:= bag; T =:= duplicate_bag ->
+                ets:delete(TableName, Key);
+            _ ->
+                ok
+        end,
+        ets:insert(TableName, {Key, Value}),
+        nil
+    catch
+        error:badarg -> stale_table_error('insert:key:value:', TableName)
+    end;
 insert(_Self, _Key, _Value) ->
     Error0 = beamtalk_error:new(type_error, 'Ets'),
     Error1 = beamtalk_error:with_selector(Error0, 'at:put:'),
@@ -177,9 +189,13 @@ insert(_Self, _Key, _Value) ->
 lookupIfAbsent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
     is_function(Block, 0)
 ->
-    case ets:lookup(TableName, Key) of
-        [{_K, Value} | _] -> Value;
-        [] -> Block()
+    try
+        case ets:lookup(TableName, Key) of
+            [{_K, Value} | _] -> Value;
+            [] -> Block()
+        end
+    catch
+        error:badarg -> stale_table_error('lookupIfAbsent:key:block:', TableName)
     end;
 lookupIfAbsent(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
     Error0 = beamtalk_error:new(type_error, 'Ets'),
@@ -195,7 +211,11 @@ lookupIfAbsent(_Self, _Key, _Block) ->
 %% @doc Test whether a key exists in the table.
 -spec includesKey(map(), term()) -> boolean().
 includesKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
-    ets:member(TableName, Key);
+    try
+        ets:member(TableName, Key)
+    catch
+        error:badarg -> stale_table_error('includesKey:key:', TableName)
+    end;
 includesKey(_Self, _Key) ->
     Error0 = beamtalk_error:new(type_error, 'Ets'),
     Error1 = beamtalk_error:with_selector(Error0, 'includesKey:'),
@@ -205,8 +225,12 @@ includesKey(_Self, _Key) ->
 %% @doc Remove the entry for key. Returns nil.
 -spec removeKey(map(), term()) -> nil.
 removeKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
-    ets:delete(TableName, Key),
-    nil;
+    try
+        ets:delete(TableName, Key),
+        nil
+    catch
+        error:badarg -> stale_table_error('removeKey:key:', TableName)
+    end;
 removeKey(_Self, _Key) ->
     Error0 = beamtalk_error:new(type_error, 'Ets'),
     Error1 = beamtalk_error:with_selector(Error0, 'removeKey:'),
@@ -219,7 +243,11 @@ removeKey(_Self, _Key) ->
 %% appears only once. Order is unspecified for set/bag tables; sorted for orderedSet.
 -spec keys(map()) -> list().
 keys(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
-    lists:usort(ets:select(TableName, [{{'$1', '_'}, [], ['$1']}]));
+    try
+        lists:usort(ets:select(TableName, [{{'$1', '_'}, [], ['$1']}]))
+    catch
+        error:badarg -> stale_table_error('keys:', TableName)
+    end;
 keys(_Self) ->
     Error0 = beamtalk_error:new(type_error, 'Ets'),
     Error1 = beamtalk_error:with_selector(Error0, 'keys'),
@@ -231,7 +259,10 @@ keys(_Self) ->
 %% Named `tableSize` to avoid shadowing the deprecated `erlang:size/1` BIF.
 -spec tableSize(map()) -> non_neg_integer().
 tableSize(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
-    ets:info(TableName, size);
+    case ets:info(TableName, size) of
+        undefined -> stale_table_error('tableSize:', TableName);
+        Size -> Size
+    end;
 tableSize(_Self) ->
     Error0 = beamtalk_error:new(type_error, 'Ets'),
     Error1 = beamtalk_error:with_selector(Error0, 'size'),
@@ -243,8 +274,19 @@ tableSize(_Self) ->
 %% Named `deleteTable` to avoid shadowing `ets:delete/1` in call sites.
 -spec deleteTable(map()) -> nil.
 deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
-    ets:delete(TableName),
-    nil;
+    try
+        ets:delete(TableName),
+        nil
+    catch
+        error:badarg ->
+            Error0 = beamtalk_error:new(permission_error, 'Ets'),
+            Error1 = beamtalk_error:with_selector(Error0, 'delete'),
+            Error2 = beamtalk_error:with_hint(
+                Error1,
+                <<"Caller is not the owner of the ETS table, or the table has already been deleted">>
+            ),
+            beamtalk_error:raise(Error2)
+    end;
 deleteTable(_Self) ->
     Error0 = beamtalk_error:new(type_error, 'Ets'),
     Error1 = beamtalk_error:with_selector(Error0, 'delete'),
@@ -272,6 +314,24 @@ named(Name) -> 'named:'(Name).
 %%% ============================================================================
 %%% Internal Helpers
 %%% ============================================================================
+
+%% @private
+%% @doc Build a structured error for a stale or deleted ETS table.
+%%
+%% Used when an ETS operation raises `error:badarg` because the table no
+%% longer exists (owner terminated or `deleteTable/1` was called).
+-spec stale_table_error(atom(), atom()) -> no_return().
+stale_table_error(Selector, TableName) ->
+    Error0 = beamtalk_error:new(stale_table, 'Ets'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        iolist_to_binary([
+            <<"ETS table is stale or has been deleted: ">>,
+            atom_to_binary(TableName, utf8)
+        ])
+    ),
+    beamtalk_error:raise(Error2).
 
 %% @private
 %% @doc Build an Ets tagged map for the given table name.
