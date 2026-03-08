@@ -347,12 +347,15 @@ impl ReplClient {
     /// interrupt cannot preempt an in-flight eval on the same connection.
     /// This is suitable for canceling evaluations from separate MCP tool
     /// invocations or when no eval is in progress.
+    ///
+    /// Uses [`send_once`] (no retry) — a retry after reconnect could cancel
+    /// a different evaluation that started after the session was resumed.
     pub async fn interrupt(&self) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "interrupt",
             "id": next_msg_id()
         });
-        self.send(&request).await
+        self.send_once(&request).await
     }
 
     /// Send a show-codegen operation to inspect generated Core Erlang.
@@ -454,7 +457,7 @@ impl ReplClient {
     /// [`send`] which retries once after transient I/O failures.
     ///
     /// Used by: [`eval`], [`evaluate_with_options`], [`load_file`], [`load_project`],
-    /// [`reload`], [`clear`], [`unload`], [`test_class`], [`test_file`], [`test_all`].
+    /// [`reload`], [`clear`], [`unload`], [`interrupt`], [`test_class`], [`test_file`], [`test_all`].
     async fn send_once(&self, request: &serde_json::Value) -> Result<ReplResponse, String> {
         let request_str =
             serde_json::to_string(request).map_err(|e| format!("Failed to serialize: {e}"))?;
