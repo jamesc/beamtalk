@@ -7,6 +7,7 @@
 
 -module(beamtalk_repl_eval_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%====================================================================
 %% Helpers
@@ -1252,10 +1253,10 @@ do_eval_trace_increments_counter_test() ->
     ?assertEqual(InitialCounter + 1, beamtalk_repl_state:get_eval_counter(NewState)).
 
 do_eval_trace_compile_error_without_server_test() ->
-    %% Without compiler server, compile_expression_trace returns a compile_error
+    %% Without compiler server, compile_expression_trace returns a structured compile_error
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval_trace("1 + 2", State),
-    ?assertMatch({error, {compile_error, _}, _, _, _}, Result).
+    ?assertMatch({error, #beamtalk_error{kind = compile_error}, _, _, _}, Result).
 
 do_eval_trace_compile_error_includes_empty_output_test() ->
     %% Output should be <<>> when compilation fails before IO capture starts

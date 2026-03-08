@@ -183,10 +183,16 @@ do_eval_trace(Expression, State) ->
                             {error, WrappedReason, Output, Warnings, ErrorState}
                     end;
                 {error, Reason} ->
-                    {error, {load_error, Reason}, <<>>, [], NewState}
+                    WrappedLoadErr = beamtalk_repl_errors:ensure_structured_error(
+                        {load_error, Reason}
+                    ),
+                    {error, WrappedLoadErr, <<>>, [], NewState}
             end;
         {error, Reason} ->
-            {error, {compile_error, Reason}, <<>>, [], NewState}
+            WrappedCompileErr = beamtalk_repl_errors:ensure_structured_error(
+                {compile_error, Reason}
+            ),
+            {error, WrappedCompileErr, <<>>, [], NewState}
     end.
 
 %% @doc Compile a Beamtalk expression and return Core Erlang source (BT-700).
