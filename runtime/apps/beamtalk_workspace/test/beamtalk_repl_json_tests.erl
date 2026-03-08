@@ -882,6 +882,13 @@ format_error_message_parse_error_v2_test() ->
     Msg = beamtalk_repl_json:format_error_message({parse_error, syntax}),
     ?assert(binary:match(Msg, <<"Parse error">>) =/= nomatch).
 
+format_error_message_compile_error_structured_diagnostics_test() ->
+    %% BT-1235: structured diagnostic maps extract first message
+    Msg = beamtalk_repl_json:format_error_message(
+        {compile_error, [#{message => <<"Unused variable `x`">>, line => 3}]}
+    ),
+    ?assertEqual(<<"Unused variable `x`">>, Msg).
+
 format_error_message_compile_error_list_test() ->
     Msg = beamtalk_repl_json:format_error_message({compile_error, "something wrong"}),
     ?assertEqual(<<"something wrong">>, Msg).

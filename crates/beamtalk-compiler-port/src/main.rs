@@ -473,11 +473,13 @@ fn error_response(diagnostics: &[String]) -> Term {
 }
 
 /// Compute 1-based line number for a byte offset in source text.
+/// Uses byte scanning (`\n` is always 0x0A in UTF-8) so there is no panic
+/// risk from non-char-boundary offsets.
 fn byte_offset_to_line(source: &str, offset: u32) -> u32 {
     let offset_clamped = (offset as usize).min(source.len());
-    let newlines = source[..offset_clamped]
-        .chars()
-        .filter(|c| *c == '\n')
+    let newlines = source.as_bytes()[..offset_clamped]
+        .iter()
+        .filter(|&&b| b == b'\n')
         .count();
     u32::try_from(newlines)
         .unwrap_or(u32::MAX)
