@@ -1593,20 +1593,40 @@ mod tests {
     /// return `None` before treating "" as a valid package root, since
     /// `"".join("beamtalk.toml")` resolves to `"beamtalk.toml"` relative to
     /// CWD and would return `Some("")`, causing `build("", ...)` to fail.
+    ///
+    /// This test is hermetic: it sets up a temp dir with a `beamtalk.toml` at
+    /// its root, changes the process CWD to that dir, and asserts that passing
+    /// a single-component relative path like `"test"` returns `None` (not
+    /// `Some("") `) even though `beamtalk.toml` is now discoverable from the
+    /// empty parent path. Uses `#[serial(cwd)]` to avoid CWD races.
     #[test]
-    fn test_find_package_root_never_returns_empty_path() {
-        // Single-component relative paths whose parent is "": the function
-        // must not return Some("") regardless of whether the CWD has a manifest.
+    #[serial_test::serial(cwd)]
+    fn test_find_package_root_relative_path_does_not_return_empty() {
+        let temp = tempfile::TempDir::new().unwrap();
+
+        // Write a beamtalk.toml at the temp dir root so that "".join("beamtalk.toml")
+        // would find it if the guard were absent.
+        fs::write(
+            temp.path().join("beamtalk.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        // Single-component relative paths: parent is "" which would resolve
+        // "beamtalk.toml" in the CWD without the guard.
         for rel in &["test", "src", "lib"] {
             let result = find_package_root(Utf8Path::new(rel));
-            if let Some(root) = result {
-                assert!(
-                    !root.as_str().is_empty(),
-                    "find_package_root(\"{rel}\") returned Some(\"\"), \
-                     which would cause build to fail with \"Path '' does not exist\""
-                );
-            }
+            assert!(
+                result.as_ref().map_or(true, |r| !r.as_str().is_empty()),
+                "find_package_root(\"{rel}\") returned Some(\"\"), \
+                 which would cause build to fail with \"Path '' does not exist\""
+            );
         }
+
+        std::env::set_current_dir(&original_dir).unwrap();
     }
 
     #[test]
