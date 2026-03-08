@@ -156,47 +156,66 @@ handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
     %% `class` takes priority when both are present; empty string is treated as absent.
     ClassBin = nonempty_or_undefined(maps:get(<<"class">>, Params, undefined)),
     CodeBin = maps:get(<<"code">>, Params, undefined),
-    case {ClassBin, CodeBin} of
-        {CB, _} when CB =/= undefined ->
-            SelectorBin = maps:get(<<"selector">>, Params, undefined),
-            show_codegen_class_method(CB, SelectorBin, Msg);
-        {undefined, CB} when CB =/= undefined ->
-            Code = binary_to_list(CB),
-            case Code of
-                [] ->
-                    Err = beamtalk_error:new(empty_expression, 'REPL'),
-                    Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
-                    Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to compile.">>),
-                    beamtalk_repl_protocol:encode_error(
-                        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
-                    );
-                _ ->
-                    case beamtalk_repl_shell:show_codegen(SessionPid, Code) of
-                        {ok, CoreErlang, Warnings} ->
-                            encode_codegen_response(CoreErlang, Warnings, Msg);
-                        {error, ErrorReason, Warnings} ->
-                            WrappedReason = beamtalk_repl_errors:ensure_structured_error(
-                                ErrorReason
-                            ),
-                            beamtalk_repl_protocol:encode_error(
-                                WrappedReason,
-                                Msg,
-                                fun beamtalk_repl_json:format_error_message/1,
-                                <<>>,
-                                Warnings
-                            )
-                    end
-            end;
-        {undefined, undefined} ->
-            Err = beamtalk_error:new(empty_expression, 'REPL'),
-            Err1 = beamtalk_error:with_message(Err, <<"Missing required parameter">>),
+    SelectorBin = nonempty_or_undefined(maps:get(<<"selector">>, Params, undefined)),
+    %% Reject orphaned selector at the Erlang boundary, mirroring the Rust MCP guard,
+    %% so behaviour is consistent regardless of which entry point is used.
+    case {SelectorBin, ClassBin} of
+        {SB, undefined} when SB =/= undefined ->
+            Err = beamtalk_error:new(invalid_argument, 'REPL'),
+            Err1 = beamtalk_error:with_message(
+                Err, <<"'selector' requires 'class' to be specified">>
+            ),
             Err2 = beamtalk_error:with_hint(
                 Err1,
-                <<"Provide 'code' to compile an expression, or 'class' to inspect a loaded class.">>
+                <<"Provide 'class' along with 'selector' to inspect a specific method.">>
             ),
             beamtalk_repl_protocol:encode_error(
                 Err2, Msg, fun beamtalk_repl_json:format_error_message/1
-            )
+            );
+        _ ->
+            case {ClassBin, CodeBin} of
+                {CB, _} when CB =/= undefined ->
+                    show_codegen_class_method(CB, SelectorBin, Msg);
+                {undefined, CB} when CB =/= undefined ->
+                    Code = binary_to_list(CB),
+                    case Code of
+                        [] ->
+                            Err = beamtalk_error:new(empty_expression, 'REPL'),
+                            Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
+                            Err2 = beamtalk_error:with_hint(
+                                Err1, <<"Enter an expression to compile.">>
+                            ),
+                            beamtalk_repl_protocol:encode_error(
+                                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+                            );
+                        _ ->
+                            case beamtalk_repl_shell:show_codegen(SessionPid, Code) of
+                                {ok, CoreErlang, Warnings} ->
+                                    encode_codegen_response(CoreErlang, Warnings, Msg);
+                                {error, ErrorReason, Warnings} ->
+                                    WrappedReason = beamtalk_repl_errors:ensure_structured_error(
+                                        ErrorReason
+                                    ),
+                                    beamtalk_repl_protocol:encode_error(
+                                        WrappedReason,
+                                        Msg,
+                                        fun beamtalk_repl_json:format_error_message/1,
+                                        <<>>,
+                                        Warnings
+                                    )
+                            end
+                    end;
+                {undefined, undefined} ->
+                    Err = beamtalk_error:new(empty_expression, 'REPL'),
+                    Err1 = beamtalk_error:with_message(Err, <<"Missing required parameter">>),
+                    Err2 = beamtalk_error:with_hint(
+                        Err1,
+                        <<"Provide 'code' to compile an expression, or 'class' to inspect a loaded class.">>
+                    ),
+                    beamtalk_repl_protocol:encode_error(
+                        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+                    )
+            end
     end;
 handle(<<"methods">>, Params, Msg, _SessionPid) ->
     %% BT-1026: Return instance and class-side methods for a loaded class.

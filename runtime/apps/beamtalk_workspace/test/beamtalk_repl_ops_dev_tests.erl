@@ -332,8 +332,8 @@ handle_show_codegen_empty_class_falls_back_to_code_test() ->
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
 handle_show_codegen_selector_without_class_test() ->
-    %% Providing selector without class is caught at Erlang level:
-    %% empty/absent class falls through to the "missing required parameter" error.
+    %% Providing selector without class returns a specific "selector requires class" error,
+    %% not the generic missing-parameter error — consistent with the Rust MCP boundary.
     Msg = make_msg(<<"show-codegen">>, <<"sc-7">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>,
@@ -342,7 +342,10 @@ handle_show_codegen_selector_without_class_test() ->
         self()
     ),
     Decoded = jsx:decode(Result, [return_maps]),
-    ?assert(maps:is_key(<<"error">>, Decoded)).
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    %% The error message must mention "selector" (not a generic missing-parameter message).
+    ErrorMsg = maps:get(<<"error">>, Decoded),
+    ?assert(binary:match(ErrorMsg, <<"selector">>) =/= nomatch).
 
 validate_selector_undefined_returns_ok_test() ->
     %% When SelectorBin is undefined, no validation is needed.
