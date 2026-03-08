@@ -485,9 +485,14 @@ pub fn generate_module_with_warnings(
 
     // BT-1005: Writeback inferred return types into the AST before codegen so
     // that unannotated methods appear in the emitted `method_return_types` map.
+    // BT-1218: Also writeback supervisor_kind for Supervisor/DynamicSupervisor subclasses.
     // We clone to avoid mutating the caller's Module.
     let mut module_with_writeback = module.clone();
     crate::semantic_analysis::apply_return_type_writeback(&mut module_with_writeback, &hierarchy);
+    crate::semantic_analysis::apply_supervisor_kind_writeback(
+        &mut module_with_writeback,
+        &hierarchy,
+    );
     let module = &module_with_writeback;
 
     // BT-213: Route based on whether class is actor or value type
@@ -854,6 +859,12 @@ pub(super) struct CoreErlangGenerator {
     /// from self-sends within the same class. Populated by `scan_class_for_tier2_blocks`
     /// before method body generation.
     tier2_method_info: std::collections::HashMap<String, Vec<usize>>,
+    /// BT-1218: Whether to synthesize `class_supervisionSpec/2` for the current actor module.
+    ///
+    /// Set by `generate_actor_module` when the class has no explicit `supervisionSpec` class
+    /// method. Read by `generate_meta_function` and `generate_register_class` to include
+    /// the synthesized method entry in `class_method_info`.
+    synthesize_supervision_spec: bool,
     /// BT-855: Diagnostic warnings emitted during code generation.
     ///
     /// Collected during generation and returned to callers via
@@ -894,6 +905,7 @@ impl CoreErlangGenerator {
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
             tier2_method_info: std::collections::HashMap::new(),
+            synthesize_supervision_spec: false,
             codegen_warnings: Vec::new(),
         }
     }
@@ -929,6 +941,7 @@ impl CoreErlangGenerator {
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
             tier2_method_info: std::collections::HashMap::new(),
+            synthesize_supervision_spec: false,
             codegen_warnings: Vec::new(),
         }
     }

@@ -1674,6 +1674,7 @@ mod tests {
                 is_abstract: false,
                 is_sealed: false,
                 is_typed: false,
+                supervisor_kind: None,
                 state: vec![],
                 methods: vec![MethodDefinition {
                     selector: MessageSelector::Unary("increment".into()),
@@ -1909,6 +1910,7 @@ mod tests {
                 is_abstract: false,
                 is_sealed: false,
                 is_typed: false,
+                supervisor_kind: None,
                 state: vec![],
                 methods: vec![MethodDefinition {
                     selector: MessageSelector::Unary("greet".into()),
@@ -2065,6 +2067,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: instance_methods,
             class_methods,
@@ -2233,6 +2236,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
@@ -2261,6 +2265,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
@@ -2310,6 +2315,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
@@ -2336,6 +2342,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
@@ -3339,6 +3346,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state,
             methods,
             class_methods: vec![],
@@ -4102,6 +4110,7 @@ Object subclass: Foo
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: instance_methods,
             class_methods: vec![],

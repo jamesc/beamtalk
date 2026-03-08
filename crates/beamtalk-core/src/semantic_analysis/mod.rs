@@ -31,6 +31,7 @@ pub mod primitive_validator;
 pub mod return_type_writeback;
 pub(crate) mod scope;
 pub(crate) mod string_utils;
+pub mod supervisor_kind_writeback;
 pub mod type_checker;
 pub(crate) mod validators;
 
@@ -46,6 +47,7 @@ pub use name_resolver::NameResolver;
 pub use pattern_bindings::extract_pattern_bindings;
 pub use return_type_writeback::apply_return_type_writeback;
 pub use scope::BindingKind;
+pub use supervisor_kind_writeback::apply_supervisor_kind_writeback;
 pub use type_checker::{
     InferredType, MethodReturnKey, TypeChecker, TypeMap, infer_method_return_types, infer_types,
     infer_types_and_returns,
@@ -318,6 +320,13 @@ fn analyse_full(
     validators::check_literal_boolean_condition(module, &mut result.diagnostics);
     // BT-1052: Error on -> Nil return type on Value instance methods
     validators::check_value_nil_return(module, &result.class_hierarchy, &mut result.diagnostics);
+    // BT-1218: Validate supervisionPolicy overrides + warn for children without explicit policy
+    validators::check_supervision_policy_override(module, &mut result.diagnostics);
+    validators::check_children_supervision_policy(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
 
     // BT-951/BT-979: Lint on effect-free statements (suppressed during normal compile).
     // Module-level expressions are checked by default; set skip_module_expression_lint
@@ -1403,6 +1412,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![state_decl],
             methods: vec![get_value_method],
             class_methods: vec![],
@@ -1773,6 +1783,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![StateDeclaration {
                 name: Identifier::new("count", test_span()),
                 type_annotation: None,
@@ -1837,6 +1848,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![],
             class_methods: vec![],
@@ -2110,6 +2122,7 @@ mod tests {
             is_abstract: true,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("area".into()),
@@ -2201,6 +2214,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![StateDeclaration {
                 name: Identifier::new("value", test_span()),
                 type_annotation: None,
@@ -2264,6 +2278,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![StateDeclaration {
                 name: Identifier::new("value", test_span()),
                 type_annotation: None,
@@ -2339,6 +2354,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -2393,6 +2409,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("doSomething".into()),
@@ -2445,6 +2462,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
@@ -2501,6 +2519,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
@@ -2555,6 +2574,7 @@ mod tests {
             class_kind: crate::ast::ClassKind::Actor,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
@@ -2613,6 +2633,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
@@ -2674,6 +2695,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
@@ -2733,6 +2755,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![],
             class_methods: vec![MethodDefinition {
@@ -2791,6 +2814,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -2846,6 +2870,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -2902,6 +2927,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -2963,6 +2989,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3030,6 +3057,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3097,6 +3125,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3157,6 +3186,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
@@ -3204,6 +3234,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("getValue".into()),
@@ -3277,6 +3308,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("reset".into()),
@@ -3376,6 +3408,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
@@ -3446,6 +3479,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
@@ -3514,6 +3548,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: MessageSelector::Unary("test".into()),
@@ -3667,6 +3702,7 @@ mod tests {
             is_abstract: true,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![],
             class_methods: vec![],
@@ -3833,6 +3869,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![],
             class_methods: vec![],

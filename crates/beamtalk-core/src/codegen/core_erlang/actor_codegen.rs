@@ -43,6 +43,14 @@ impl CoreErlangGenerator {
         let sealed_export_doc = self.build_sealed_export_doc(module);
         // BT-411: Build class method exports
         let class_method_export_doc = Self::build_class_method_export_doc(module);
+        // BT-1218: Synthesize class_supervisionSpec for Actor subclasses that don't define it
+        let needs_spec_synthesis = Self::needs_supervision_spec_synthesis(module);
+        self.synthesize_supervision_spec = needs_spec_synthesis;
+        let supervision_spec_export: Document<'static> = if needs_spec_synthesis {
+            Document::Str(", 'class_supervisionSpec'/2")
+        } else {
+            Document::Nil
+        };
         // BT-105: Check if class is abstract
         let is_abstract = module.classes.first().is_some_and(|c| c.is_abstract);
 
@@ -102,6 +110,7 @@ impl CoreErlangGenerator {
                 base_exports,
                 sealed_export_doc,
                 class_method_export_doc,
+                supervision_spec_export,
                 ", 'register_class'/0]",
                 "\n",
                 "  attributes ['behaviour' = ['gen_server'], \
@@ -120,6 +129,7 @@ impl CoreErlangGenerator {
                 base_exports,
                 sealed_export_doc,
                 class_method_export_doc,
+                supervision_spec_export,
                 "]",
                 "\n",
                 "  attributes ['behaviour' = ['gen_server']",
@@ -185,6 +195,17 @@ impl CoreErlangGenerator {
             if !class.class_methods.is_empty() {
                 docs.push(self.generate_class_method_functions(class)?);
             }
+        }
+
+        // BT-1218: Synthesize class_supervisionSpec for Actor subclasses
+        if needs_spec_synthesis {
+            docs.push(Document::Str("\n"));
+            let has_policy_override = module.classes.first().is_some_and(|c| {
+                c.class_methods
+                    .iter()
+                    .any(|m| m.selector.name() == "supervisionPolicy")
+            });
+            docs.push(self.generate_supervision_spec_synthesis(has_policy_override));
         }
 
         // Generate class registration and metadata functions
@@ -439,5 +460,70 @@ impl CoreErlangGenerator {
         }
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Returns true if this actor module needs a synthesized `class_supervisionSpec/2`.
+    ///
+    /// Synthesis is skipped when the class already defines `class supervisionSpec`
+    /// explicitly (e.g. the `Actor` base class itself).
+    fn needs_supervision_spec_synthesis(module: &Module) -> bool {
+        let Some(class) = module.classes.first() else {
+            return false;
+        };
+        // Skip if the class already defines supervisionSpec as a class method
+        !class
+            .class_methods
+            .iter()
+            .any(|m| m.selector.name() == "supervisionSpec")
+    }
+
+    /// Generates the synthesized `class_supervisionSpec/2` function (BT-1218).
+    ///
+    /// Calls `class_supervisionPolicy` **directly** to avoid a `gen_server` re-entrant
+    /// deadlock: class methods execute inside a `gen_server:call` handler, so routing
+    /// back through `class_send` would block the process waiting for itself.
+    ///
+    /// When `has_policy_override` is true, calls the current module's own
+    /// `class_supervisionPolicy` (the subclass override). When false, the subclass
+    /// has no override and inherits from Actor, so we call Actor's function directly
+    /// which returns `#temporary`.
+    ///
+    /// ```erlang
+    /// %% With override (has_policy_override = true):
+    /// 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
+    ///     let CMR = call 'bt@my_actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
+    ///     ...
+    ///
+    /// %% Without override (has_policy_override = false):
+    /// 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
+    ///     let CMR = call 'bt@stdlib@actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
+    ///     ...
+    /// ```
+    fn generate_supervision_spec_synthesis(&self, has_policy_override: bool) -> Document<'static> {
+        let spec_mod = self.compiled_module_name("SupervisionSpec");
+        let policy_mod: Document<'static> = if has_policy_override {
+            Document::String(self.module_name.clone())
+        } else {
+            Document::String(self.compiled_module_name("Actor"))
+        };
+        docvec![
+            "'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->\n",
+            "    let CMR = call '",
+            policy_mod,
+            "':'class_supervisionPolicy'(ClassSelf, ClassVars) in\n",
+            "    let Policy = case CMR of\n",
+            "      <{'class_var_result', Res, _}> when 'true' -> Res\n",
+            "      <PR> when 'true' -> PR\n",
+            "    end in\n",
+            "    let Spec0 = call '",
+            Document::String(spec_mod.clone()),
+            "':'new'() in\n",
+            "    let Spec1 = call '",
+            Document::String(spec_mod.clone()),
+            "':'withActorClass:'(Spec0, ClassSelf) in\n",
+            "    call '",
+            Document::String(spec_mod),
+            "':'withRestart:'(Spec1, Policy)\n",
+        ]
     }
 }

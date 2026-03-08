@@ -1282,6 +1282,117 @@ fn check_method_nil_return(
     );
 }
 
+/// BT-1218: Validate that `class supervisionPolicy` override returns a valid symbol.
+///
+/// When a class defines `class supervisionPolicy -> Symbol => #value`, checks that
+/// `#value` is one of `#permanent`, `#transient`, or `#temporary`. Only validates
+/// when the method body is a single symbol literal (static check).
+pub(crate) fn check_supervision_policy_override(
+    module: &Module,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        for method in &class.class_methods {
+            if method.selector.name() != "supervisionPolicy" {
+                continue;
+            }
+            if method.body.len() != 1 {
+                continue;
+            }
+            let Expression::Literal(crate::ast::Literal::Symbol(sym), _) =
+                &method.body[0].expression
+            else {
+                continue;
+            };
+            if !matches!(sym.as_str(), "permanent" | "transient" | "temporary") {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "supervisionPolicy must return #permanent, #transient, or #temporary; \
+                             got #{sym}"
+                        ),
+                        method.body[0].expression.span(),
+                    )
+                    .with_hint(
+                        "Change the return value to one of: #permanent, #transient, #temporary",
+                    ),
+                );
+            }
+        }
+    }
+}
+
+/// BT-1218: Warn when an Actor subclass in a static `children` array literal
+/// has no explicit `supervisionPolicy` override.
+///
+/// The default policy is `#temporary` (not restarted on crash). Developers often
+/// want `#permanent` for long-lived actors. The warning nudges them to be explicit.
+///
+/// Only checks bare class-reference literals in `children` method bodies where the
+/// class is an Actor subclass visible in the hierarchy.
+pub(crate) fn check_children_supervision_policy(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        // Look for `class children` methods in Supervisor subclasses
+        if !hierarchy.is_supervisor_subclass(class.name.name.as_str()) {
+            continue;
+        }
+        for method in &class.class_methods {
+            if method.selector.name() != "children" {
+                continue;
+            }
+            // Walk the method body looking for an array literal
+            for stmt in &method.body {
+                check_children_array_for_policy(&stmt.expression, hierarchy, diagnostics);
+            }
+        }
+    }
+}
+
+fn check_children_array_for_policy(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Expression::ArrayLiteral { elements, .. } = expr else {
+        return;
+    };
+    for element in elements {
+        let Expression::Identifier(id) = element else {
+            continue;
+        };
+        let class_name = id.name.as_str();
+        // Only warn for Actor subclasses visible in the hierarchy
+        if !hierarchy.is_actor_subclass(class_name) {
+            continue;
+        }
+        // Check if the class has an explicit supervisionPolicy class method
+        let has_explicit_policy = hierarchy.get_class(class_name).is_some_and(|info| {
+            info.class_methods
+                .iter()
+                .any(|m| m.selector == "supervisionPolicy")
+        });
+        if !has_explicit_policy {
+            diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "Actor subclass `{class_name}` has no explicit `class supervisionPolicy` \
+                         override; default is `#temporary` (not restarted on crash)"
+                    ),
+                    id.span,
+                )
+                .with_hint(
+                    "Add `class supervisionPolicy -> Symbol => #permanent` (or `#transient`) \
+                     to declare the restart behaviour explicitly",
+                ),
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
