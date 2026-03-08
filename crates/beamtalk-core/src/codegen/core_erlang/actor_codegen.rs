@@ -201,13 +201,22 @@ impl CoreErlangGenerator {
         if needs_spec_synthesis {
             docs.push(Document::Str("\n"));
             // Determine which module's class_supervisionPolicy to call.
-            // We check within the current file's AST; cross-file inherited
-            // overrides are not resolved here (BT-1218 Phase 1 limitation —
-            // see the doc comment on generate_supervision_spec_synthesis).
+            // We check within the current file's AST (both inline class methods and
+            // standalone method definitions); cross-file inherited overrides are not
+            // resolved here (BT-1218 Phase 1 limitation — see the doc comment on
+            // generate_supervision_spec_synthesis).
             let has_local_policy_override = module.classes.first().is_some_and(|c| {
-                c.class_methods
+                let class_name = &c.name.name;
+                let has_inline = c
+                    .class_methods
                     .iter()
-                    .any(|m| m.selector.name() == "supervisionPolicy")
+                    .any(|m| m.selector.name() == "supervisionPolicy");
+                let has_standalone = module.method_definitions.iter().any(|md| {
+                    md.is_class_method
+                        && &md.class_name.name == class_name
+                        && md.method.selector.name() == "supervisionPolicy"
+                });
+                has_inline || has_standalone
             });
             docs.push(self.generate_supervision_spec_synthesis(has_local_policy_override));
         }
@@ -469,16 +478,25 @@ impl CoreErlangGenerator {
     /// Returns true if this actor module needs a synthesized `class_supervisionSpec/2`.
     ///
     /// Synthesis is skipped when the class already defines `class supervisionSpec`
-    /// explicitly (e.g. the `Actor` base class itself).
+    /// explicitly (e.g. the `Actor` base class itself), either as an inline class
+    /// method or as a standalone class-side method definition.
     fn needs_supervision_spec_synthesis(module: &Module) -> bool {
         let Some(class) = module.classes.first() else {
             return false;
         };
-        // Skip if the class already defines supervisionSpec as a class method
-        !class
+        let class_name = &class.name.name;
+        // Skip if supervisionSpec is defined as an inline class method
+        let has_inline = class
             .class_methods
             .iter()
-            .any(|m| m.selector.name() == "supervisionSpec")
+            .any(|m| m.selector.name() == "supervisionSpec");
+        // Skip if supervisionSpec is defined as a standalone class-side method
+        let has_standalone = module.method_definitions.iter().any(|md| {
+            md.is_class_method
+                && &md.class_name.name == class_name
+                && md.method.selector.name() == "supervisionSpec"
+        });
+        !has_inline && !has_standalone
     }
 
     /// Generates the synthesized `class_supervisionSpec/2` function (BT-1218).

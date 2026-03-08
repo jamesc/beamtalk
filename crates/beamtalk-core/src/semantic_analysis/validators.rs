@@ -1287,78 +1287,113 @@ fn check_method_nil_return(
 /// When a class defines `class supervisionPolicy -> Symbol => #value`, checks that
 /// `#value` is one of `#permanent`, `#transient`, or `#temporary`. Only validates
 /// when the method body is a single symbol literal (static check).
+///
+/// Checks both inline class-side methods (`class supervisionPolicy => ...` in the
+/// class body) and standalone class-side method definitions
+/// (`MyActor class >> supervisionPolicy => ...`).
 pub(crate) fn check_supervision_policy_override(
     module: &Module,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // Collect all class-side supervisionPolicy method bodies to validate.
+    // Includes both inline (class.class_methods) and standalone method definitions.
+    let mut methods_to_check: Vec<&MethodDefinition> = Vec::new();
+
     for class in &module.classes {
         for method in &class.class_methods {
-            if method.selector.name() != "supervisionPolicy" {
-                continue;
+            if method.selector.name() == "supervisionPolicy" {
+                methods_to_check.push(method);
             }
-            if method.body.len() != 1 {
-                continue;
-            }
-            let Expression::Literal(crate::ast::Literal::Symbol(sym), _) =
-                &method.body[0].expression
-            else {
-                continue;
-            };
-            if !matches!(sym.as_str(), "permanent" | "transient" | "temporary") {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "supervisionPolicy must return #permanent, #transient, or #temporary; \
-                             got #{sym}"
-                        ),
-                        method.body[0].expression.span(),
-                    )
-                    .with_hint(
-                        "Change the return value to one of: #permanent, #transient, #temporary",
+        }
+    }
+    for standalone in &module.method_definitions {
+        if standalone.is_class_method && standalone.method.selector.name() == "supervisionPolicy" {
+            methods_to_check.push(&standalone.method);
+        }
+    }
+
+    for method in methods_to_check {
+        if method.body.len() != 1 {
+            continue;
+        }
+        let Expression::Literal(crate::ast::Literal::Symbol(sym), _) = &method.body[0].expression
+        else {
+            continue;
+        };
+        if !matches!(sym.as_str(), "permanent" | "transient" | "temporary") {
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "supervisionPolicy must return #permanent, #transient, or #temporary; \
+                         got #{sym}"
                     ),
-                );
-            }
+                    method.body[0].expression.span(),
+                )
+                .with_hint("Change the return value to one of: #permanent, #transient, #temporary"),
+            );
         }
     }
 }
 
-/// BT-1218: Warn when an Actor subclass in a static `children` array literal
+/// BT-1218: Warn when an Actor subclass in a static `children` list/array literal
 /// has no explicit `supervisionPolicy` override.
 ///
 /// The default policy is `#temporary` (not restarted on crash). Developers often
 /// want `#permanent` for long-lived actors. The warning nudges them to be explicit.
 ///
-/// Only checks bare class-reference literals in `children` method bodies where the
-/// class is an Actor subclass visible in the hierarchy.
+/// Checks both inline class-side methods (`class children => ...` in the class body)
+/// and standalone class-side method definitions (`MySup class >> children => ...`).
+/// Recognises both `#(Worker)` list literals and `#[Worker]` array literals.
 pub(crate) fn check_children_supervision_policy(
     module: &Module,
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for class in &module.classes {
+        let class_name = class.name.name.as_str();
         // Look for `class children` methods in Supervisor subclasses
-        if !hierarchy.is_supervisor_subclass(class.name.name.as_str()) {
+        if !hierarchy.is_supervisor_subclass(class_name) {
             continue;
         }
+        // Check inline class-side methods
         for method in &class.class_methods {
             if method.selector.name() != "children" {
                 continue;
             }
-            // Walk the method body looking for an array literal
             for stmt in &method.body {
-                check_children_array_for_policy(&stmt.expression, hierarchy, diagnostics);
+                check_children_literal_for_policy(&stmt.expression, hierarchy, diagnostics);
+            }
+        }
+        // Check standalone class-side method definitions
+        for standalone in &module.method_definitions {
+            if !standalone.is_class_method {
+                continue;
+            }
+            if standalone.class_name.name.as_str() != class_name {
+                continue;
+            }
+            if standalone.method.selector.name() != "children" {
+                continue;
+            }
+            for stmt in &standalone.method.body {
+                check_children_literal_for_policy(&stmt.expression, hierarchy, diagnostics);
             }
         }
     }
 }
 
-fn check_children_array_for_policy(
+fn check_children_literal_for_policy(
     expr: &Expression,
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let Expression::ArrayLiteral { elements, .. } = expr else {
-        return;
+    // Supervisor.children should return a List (#() syntax), but also handle
+    // Array literals (#[] syntax) defensively.
+    let elements: &[Expression] = match expr {
+        Expression::ListLiteral { elements, .. } | Expression::ArrayLiteral { elements, .. } => {
+            elements
+        }
+        _ => return,
     };
     for element in elements {
         let (class_name, span) = match element {
@@ -2744,7 +2779,7 @@ mod tests {
     /// Actor subclass in children array with no policy override → warning.
     #[test]
     fn children_actor_without_policy_warns() {
-        let src = "Actor subclass: Worker\n  go => nil\nSupervisor subclass: MySup\n  class children => #[Worker]";
+        let src = "Actor subclass: Worker\n  go => nil\nSupervisor subclass: MySup\n  class children => #(Worker)";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -2768,7 +2803,7 @@ mod tests {
     /// Actor subclass with explicit policy override → no warning.
     #[test]
     fn children_actor_with_policy_no_warning() {
-        let src = "Actor subclass: Worker\n  class supervisionPolicy -> Symbol => #permanent\n  go => nil\nSupervisor subclass: MySup\n  class children => #[Worker]";
+        let src = "Actor subclass: Worker\n  class supervisionPolicy -> Symbol => #permanent\n  go => nil\nSupervisor subclass: MySup\n  class children => #(Worker)";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");

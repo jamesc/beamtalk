@@ -24,11 +24,17 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 pub fn apply_supervisor_kind_writeback(module: &mut Module, hierarchy: &ClassHierarchy) {
     for class in &mut module.classes {
         let name = class.name.name.as_str();
-        if hierarchy.is_supervisor_subclass(name) {
-            class.supervisor_kind = Some(SupervisorKind::Static);
-        } else if hierarchy.is_dynamic_supervisor_subclass(name) {
-            class.supervisor_kind = Some(SupervisorKind::Dynamic);
-        }
+        // Always reassign so the pass is idempotent: a class that no longer inherits
+        // from Supervisor/DynamicSupervisor (e.g. after a module edit) must not keep
+        // a stale SupervisorKind from a previous run. Check DynamicSupervisor first
+        // so a future DynamicSupervisor <: Supervisor reclassification stays accurate.
+        class.supervisor_kind = if hierarchy.is_dynamic_supervisor_subclass(name) {
+            Some(SupervisorKind::Dynamic)
+        } else if hierarchy.is_supervisor_subclass(name) {
+            Some(SupervisorKind::Static)
+        } else {
+            None
+        };
     }
 }
 
@@ -74,5 +80,36 @@ mod tests {
             module.classes[0].supervisor_kind,
             Some(SupervisorKind::Dynamic)
         );
+    }
+
+    /// Running the pass twice must produce the same result (idempotent).
+    #[test]
+    fn test_writeback_is_idempotent() {
+        let source = "Supervisor subclass: WebApp";
+        let tokens = lex_with_eof(source);
+        let (mut module, _) = parse(tokens);
+        let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
+        let hierarchy = hierarchy_result.unwrap();
+        apply_supervisor_kind_writeback(&mut module, &hierarchy);
+        apply_supervisor_kind_writeback(&mut module, &hierarchy);
+        assert_eq!(
+            module.classes[0].supervisor_kind,
+            Some(SupervisorKind::Static)
+        );
+    }
+
+    /// A class with a stale Some(Static) must be cleared to None when it no longer
+    /// inherits from Supervisor (simulated by manually setting a stale value).
+    #[test]
+    fn test_writeback_clears_stale_kind() {
+        let source = "Actor subclass: Counter";
+        let tokens = lex_with_eof(source);
+        let (mut module, _) = parse(tokens);
+        // Simulate stale state from a previous pass.
+        module.classes[0].supervisor_kind = Some(SupervisorKind::Static);
+        let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
+        let hierarchy = hierarchy_result.unwrap();
+        apply_supervisor_kind_writeback(&mut module, &hierarchy);
+        assert_eq!(module.classes[0].supervisor_kind, None);
     }
 }
