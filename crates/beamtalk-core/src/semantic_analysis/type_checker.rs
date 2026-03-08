@@ -4346,10 +4346,7 @@ Object subclass: Foo
 
     fn array_pattern(names: &[&str]) -> Pattern {
         Pattern::Array {
-            elements: names
-                .iter()
-                .map(|n| Pattern::Variable(ident(n)))
-                .collect(),
+            elements: names.iter().map(|n| Pattern::Variable(ident(n))).collect(),
             span: span(),
         }
     }
@@ -4374,10 +4371,7 @@ Object subclass: Foo
                 // {x, _} := someValue  — shadows field `x` with local
                 destructure_assign(
                     Pattern::Tuple {
-                        elements: vec![
-                            Pattern::Variable(ident("x")),
-                            Pattern::Wildcard(span()),
-                        ],
+                        elements: vec![Pattern::Variable(ident("x")), Pattern::Wildcard(span())],
                         span: span(),
                     },
                     int_lit(0),
@@ -4398,8 +4392,7 @@ Object subclass: Foo
             .collect();
         assert!(
             dnu_warnings.is_empty(),
-            "destructured local `x` should shadow field and be Dynamic (no DNU): {:?}",
-            dnu_warnings
+            "destructured local `x` should shadow field and be Dynamic (no DNU): {dnu_warnings:?}"
         );
     }
 
@@ -4441,10 +4434,7 @@ Object subclass: Foo
             vec![
                 destructure_assign(
                     Pattern::Tuple {
-                        elements: vec![
-                            Pattern::Wildcard(span()),
-                            Pattern::Variable(ident("y")),
-                        ],
+                        elements: vec![Pattern::Wildcard(span()), Pattern::Variable(ident("y"))],
                         span: span(),
                     },
                     int_lit(0),
@@ -4466,8 +4456,7 @@ Object subclass: Foo
             .collect();
         assert!(
             dnu.is_empty(),
-            "wildcard skip + Dynamic y: no DNU expected: {:?}",
-            dnu
+            "wildcard skip + Dynamic y: no DNU expected: {dnu:?}"
         );
     }
 }
