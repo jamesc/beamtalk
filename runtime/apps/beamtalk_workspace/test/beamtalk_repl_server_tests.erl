@@ -252,12 +252,17 @@ parse_request_op_complete_test() ->
 parse_request_op_docs_test() ->
     Request = <<"{\"op\": \"docs\", \"class\": \"Integer\"}">>,
     Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({get_docs, <<"Integer">>, undefined}, Result).
+    ?assertMatch({get_docs, <<"Integer">>, undefined, false}, Result).
 
 parse_request_op_docs_with_selector_test() ->
     Request = <<"{\"op\": \"docs\", \"class\": \"Integer\", \"selector\": \"+\"}">>,
     Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({get_docs, <<"Integer">>, <<"+">>}, Result).
+    ?assertMatch({get_docs, <<"Integer">>, <<"+">>, false}, Result).
+
+parse_request_op_docs_class_side_test() ->
+    Request = <<"{\"op\": \"docs\", \"class\": \"Integer\", \"class_side\": true}">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    ?assertMatch({get_docs, <<"Integer">>, undefined, true}, Result).
 
 %%% BT-520: Additional parse_request edge cases
 

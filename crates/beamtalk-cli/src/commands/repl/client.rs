@@ -318,12 +318,20 @@ impl ReplClient {
     }
 
     /// Get documentation for a class or method.
-    pub(crate) fn get_docs(&mut self, class: &str, selector: Option<&str>) -> Result<ReplResponse> {
+    pub(crate) fn get_docs(
+        &mut self,
+        class: &str,
+        class_side: bool,
+        selector: Option<&str>,
+    ) -> Result<ReplResponse> {
         let mut req = serde_json::json!({
             "op": "docs",
             "id": protocol::next_msg_id(),
             "class": class
         });
+        if class_side {
+            req["class_side"] = serde_json::Value::Bool(true);
+        }
         if let Some(sel) = selector {
             req["selector"] = serde_json::Value::String(sel.to_string());
         }

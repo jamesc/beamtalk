@@ -431,5 +431,83 @@ format_method_doc_known_test_() ->
                 {error, {method_not_found, 'Integer', <<"xyzzy_not_a_method">>}},
                 beamtalk_repl_docs:format_method_doc('Integer', <<"xyzzy_not_a_method">>)
             )
+        end},
+        {"format_method_doc returns error for allMethods (not an instance method)", fun() ->
+            %% allMethods is a class-side method; :h Integer allMethods should DNU
+            ?assertMatch(
+                {error, {method_not_found, 'Integer', <<"allMethods">>}},
+                beamtalk_repl_docs:format_method_doc('Integer', <<"allMethods">>)
+            )
+        end},
+        {"format_method_doc returns error for name (not an instance method)", fun() ->
+            %% name is a class-side method; :h Integer name should DNU
+            ?assertMatch(
+                {error, {method_not_found, 'Integer', <<"name">>}},
+                beamtalk_repl_docs:format_method_doc('Integer', <<"name">>)
+            )
+        end},
+        {"format_method_doc returns error for reload (not an instance method)", fun() ->
+            %% reload is a class-side method (Behaviour); :h Integer reload should DNU
+            ?assertMatch(
+                {error, {method_not_found, 'Integer', <<"reload">>}},
+                beamtalk_repl_docs:format_method_doc('Integer', <<"reload">>)
+            )
+        end}
+    ]}.
+
+format_method_doc_class_side_test_() ->
+    {setup, fun integration_setup/0, fun(_) -> ok end, [
+        {"format_method_doc_class_side resolves allMethods on Integer", fun() ->
+            {ok, Result} = beamtalk_repl_docs:format_method_doc_class_side(
+                'Integer', <<"allMethods">>
+            ),
+            ?assert(is_binary(Result)),
+            ?assert(binary:match(Result, <<"allMethods">>) =/= nomatch)
+        end},
+        {"format_method_doc_class_side resolves name on Integer", fun() ->
+            {ok, Result} = beamtalk_repl_docs:format_method_doc_class_side('Integer', <<"name">>),
+            ?assert(is_binary(Result)),
+            ?assert(binary:match(Result, <<"name">>) =/= nomatch)
+        end},
+        {"format_method_doc_class_side returns error for unknown class", fun() ->
+            ?assertMatch(
+                {error, {class_not_found, 'NoSuchClass12345'}},
+                beamtalk_repl_docs:format_method_doc_class_side('NoSuchClass12345', <<"foo">>)
+            )
+        end},
+        {"format_method_doc_class_side resolves reload on Integer", fun() ->
+            {ok, Result} = beamtalk_repl_docs:format_method_doc_class_side(
+                'Integer', <<"reload">>
+            ),
+            ?assert(is_binary(Result)),
+            ?assert(binary:match(Result, <<"reload">>) =/= nomatch)
+        end},
+        {"format_method_doc_class_side returns error for unknown method", fun() ->
+            ?assertMatch(
+                {error, {method_not_found, 'Integer', <<"xyzzy_not_a_class_method">>}},
+                beamtalk_repl_docs:format_method_doc_class_side(
+                    'Integer', <<"xyzzy_not_a_class_method">>
+                )
+            )
+        end}
+    ]}.
+
+format_class_docs_class_side_test_() ->
+    {setup, fun integration_setup/0, fun(_) -> ok end, [
+        {"format_class_docs_class_side returns class-side listing for Integer", fun() ->
+            {ok, Result} = beamtalk_repl_docs:format_class_docs_class_side('Integer'),
+            ?assert(is_binary(Result)),
+            ?assert(binary:match(Result, <<"Integer class">>) =/= nomatch)
+        end},
+        {"format_class_docs_class_side returns error for unknown class", fun() ->
+            ?assertMatch(
+                {error, {class_not_found, 'NoSuchClass12345'}},
+                beamtalk_repl_docs:format_class_docs_class_side('NoSuchClass12345')
+            )
+        end},
+        {"format_class_docs_class_side Metaclass returns metaclass docs", fun() ->
+            {ok, Result} = beamtalk_repl_docs:format_class_docs_class_side('Metaclass'),
+            ?assert(is_binary(Result)),
+            ?assert(binary:match(Result, <<"== Metaclass ==">>) =/= nomatch)
         end}
     ]}.
