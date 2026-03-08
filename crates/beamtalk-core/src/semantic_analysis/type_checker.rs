@@ -19,7 +19,7 @@
 //! - `docs/ADR/0025-gradual-typing-and-protocols.md` — Phase 1
 
 use crate::ast::{
-    Expression, ExpressionStatement, Literal, MessageSelector, Module, TypeAnnotation,
+    Expression, ExpressionStatement, Literal, MessageSelector, Module, Pattern, TypeAnnotation,
 };
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::string_utils::edit_distance;
@@ -574,9 +574,10 @@ impl TypeChecker {
                 }
             }
 
-            // Destructure assignment — infer value type, result is Dynamic (pattern may bind vars)
-            Expression::DestructureAssignment { value, .. } => {
+            // Destructure assignment — infer value type, bind pattern variables into TypeEnv
+            Expression::DestructureAssignment { pattern, value, .. } => {
                 self.infer_expr(value, hierarchy, env, in_abstract_method);
+                Self::bind_pattern_vars(pattern, env);
                 InferredType::Dynamic
             }
         };
@@ -584,6 +585,30 @@ impl TypeChecker {
         // Record inferred type for the expression's full span for LSP queries
         self.type_map.insert(expr.span(), ty.clone());
         ty
+    }
+
+    /// Bind all named variables in a destructuring `pattern` into `env` as `Dynamic`.
+    /// Wildcards (`_`) and non-variable leaf patterns are skipped.
+    fn bind_pattern_vars(pattern: &Pattern, env: &mut TypeEnv) {
+        match pattern {
+            Pattern::Variable(id) => {
+                env.set(&id.name, InferredType::Dynamic);
+            }
+            Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
+                for elem in elements {
+                    Self::bind_pattern_vars(elem, env);
+                }
+            }
+            Pattern::List { elements, tail, .. } => {
+                for elem in elements {
+                    Self::bind_pattern_vars(elem, env);
+                }
+                if let Some(t) = tail {
+                    Self::bind_pattern_vars(t, env);
+                }
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Binary { .. } => {}
+        }
     }
 
     /// Infer the type of a message send and validate the selector.
@@ -4306,6 +4331,143 @@ Object subclass: Foo
         assert!(
             !type_map.types.is_empty() || returns.len() == 1,
             "combined function should produce valid outputs from a single pass"
+        );
+    }
+
+    // ---- Destructure assignment TypeEnv binding tests ----
+
+    fn destructure_assign(pattern: Pattern, value: Expression) -> Expression {
+        Expression::DestructureAssignment {
+            pattern,
+            value: Box::new(value),
+            span: span(),
+        }
+    }
+
+    fn array_pattern(names: &[&str]) -> Pattern {
+        Pattern::Array {
+            elements: names
+                .iter()
+                .map(|n| Pattern::Variable(ident(n)))
+                .collect(),
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn test_tuple_destructure_binds_vars_in_env() {
+        // {x, y} := someValue
+        // x foo   <- x is Dynamic (local), not a field; no DNU warning expected
+        //
+        // Without the fix, x is unbound and the lookup falls back to self-field lookup.
+        // If a class field named `x` were Integer, `x foo` would warn. With the fix,
+        // x is bound as Dynamic and no warning is produced.
+        let state = vec![StateDeclaration::with_type_and_default(
+            ident("x"),
+            TypeAnnotation::simple("Integer", span()),
+            int_lit(0),
+            span(),
+        )];
+        let method = make_method(
+            "doWork",
+            vec![
+                // {x, _} := someValue  — shadows field `x` with local
+                destructure_assign(
+                    Pattern::Tuple {
+                        elements: vec![
+                            Pattern::Variable(ident("x")),
+                            Pattern::Wildcard(span()),
+                        ],
+                        span: span(),
+                    },
+                    int_lit(0),
+                ),
+                // x foo — x is Dynamic (local), should NOT produce a DNU warning
+                msg_send(var("x"), MessageSelector::Unary("foo".into()), vec![]),
+            ],
+        );
+        let class = counter_class_with_typed_state(vec![method], state);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let dnu_warnings: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu_warnings.is_empty(),
+            "destructured local `x` should shadow field and be Dynamic (no DNU): {:?}",
+            dnu_warnings
+        );
+    }
+
+    #[test]
+    fn test_array_destructure_binds_vars_in_env() {
+        // #[first, second] := someValue
+        // first + 1 — first is Dynamic, no warnings expected
+        let method = make_method(
+            "doWork",
+            vec![
+                destructure_assign(array_pattern(&["first", "second"]), int_lit(0)),
+                msg_send(
+                    var("first"),
+                    MessageSelector::Binary("+".into()),
+                    vec![int_lit(1)],
+                ),
+            ],
+        );
+        let class = make_class_with_methods("Thing", vec![method]);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "array-destructured vars should be Dynamic — no warnings: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_wildcard_not_bound_in_destructure() {
+        // {_, y} := someValue — `_` must NOT be inserted into TypeEnv
+        // This test verifies bind_pattern_vars skips Wildcard patterns.
+        // If `_` were bound, a subsequent `_ + 1` would silently resolve;
+        // if not bound it remains Dynamic (no DNU). Either way no crash.
+        let method = make_method(
+            "doWork",
+            vec![
+                destructure_assign(
+                    Pattern::Tuple {
+                        elements: vec![
+                            Pattern::Wildcard(span()),
+                            Pattern::Variable(ident("y")),
+                        ],
+                        span: span(),
+                    },
+                    int_lit(0),
+                ),
+                // y is reachable as Dynamic
+                msg_send(var("y"), MessageSelector::Unary("inspect".into()), vec![]),
+            ],
+        );
+        let class = make_class_with_methods("Thing", vec![method]);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut checker = TypeChecker::new();
+        // Should not crash; y is Dynamic → no warnings
+        checker.check_module(&module, &hierarchy);
+        let dnu: Vec<_> = checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("does not understand"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "wildcard skip + Dynamic y: no DNU expected: {:?}",
+            dnu
         );
     }
 }
