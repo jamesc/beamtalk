@@ -1247,8 +1247,9 @@ verify_class_present_empty_classes_test() ->
 do_eval_trace_increments_counter_test() ->
     %% do_eval_trace should increment the eval counter even on compile error
     State = beamtalk_repl_state:new(undefined, 0),
+    InitialCounter = beamtalk_repl_state:get_eval_counter(State),
     {error, _, _, _, NewState} = beamtalk_repl_eval:do_eval_trace("1 + 2", State),
-    ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)).
+    ?assertEqual(InitialCounter + 1, beamtalk_repl_state:get_eval_counter(NewState)).
 
 do_eval_trace_compile_error_without_server_test() ->
     %% Without compiler server, compile_expression_trace returns a compile_error
