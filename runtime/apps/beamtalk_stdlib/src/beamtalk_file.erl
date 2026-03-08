@@ -457,7 +457,7 @@ handle_has_method(_) -> false.
                 false ->
                     case file:list_dir(ValidPath) of
                         {ok, Entries} ->
-                            [list_to_binary(E) || E <- Entries];
+                            [unicode:characters_to_binary(E) || E <- Entries];
                         {error, enoent} ->
                             Error0 = beamtalk_error:new(directory_not_found, 'File'),
                             Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
@@ -669,7 +669,7 @@ handle_has_method(_) -> false.
     case validate_path(Path) of
         {ok, ValidPath} ->
             AbsPath = filename:absname(ValidPath),
-            list_to_binary(AbsPath);
+            unicode:characters_to_binary(AbsPath);
         {error, Reason} ->
             raise_invalid_path(Reason, Path, 'absolutePath:')
     end;
@@ -685,8 +685,10 @@ handle_has_method(_) -> false.
 -spec 'cwd'() -> binary().
 'cwd'() ->
     case file:get_cwd() of
+        {ok, Dir} when is_binary(Dir) ->
+            Dir;
         {ok, Dir} ->
-            list_to_binary(Dir);
+            unicode:characters_to_binary(Dir);
         {error, Reason} ->
             Error0 = beamtalk_error:new(io_error, 'File'),
             Error1 = beamtalk_error:with_selector(Error0, 'cwd'),
@@ -723,7 +725,7 @@ handle_has_method(_) -> false.
             V ->
                 V
         end,
-    list_to_binary(Dir).
+    unicode:characters_to_binary(Dir).
 
 %%% ============================================================================
 %%% FFI Shims
