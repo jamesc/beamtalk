@@ -41,7 +41,8 @@ Collection subclass: Bag
   /// (Bag withAll: #(1, 1, 2)) occurrencesOf: 1   // => 2
   /// (Bag withAll: #(1, 1, 2)) occurrencesOf: 3   // => 0
   /// ```
-  occurrencesOf: element :: Object -> Integer => self.counts at: element ifAbsent: [0]
+  occurrencesOf: element :: Object -> Integer =>
+    self.counts at: element ifAbsent: [0]
 
   /// Test if the bag contains at least one occurrence of `element`.
   ///
