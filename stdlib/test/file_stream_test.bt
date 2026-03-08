@@ -107,3 +107,14 @@ TestCase subclass: FileStreamTest
   testUnicodeFileContent =>
     // Unicode content (multi-byte UTF-8) reads correctly through streams
     self assert: (File lines: "test/fixtures/stream_unicode.txt") isOk
+
+  testOpenDoConcreteReturnValueCheck =>
+    // BT-1273: File open:do: returns Result; unwrap gives the block value.
+    // With @expect type, we can call concrete methods on the unwrapped result.
+    result := (File open: "test/fixtures/stream_test.txt" do: [:handle |
+      handle lines asList
+    ]) unwrap
+    // result is typed as Object — calling size produces a DNU hint at the
+    // type-erasure boundary. @expect type suppresses it.
+    @expect type
+    self assert: result size equals: 3
