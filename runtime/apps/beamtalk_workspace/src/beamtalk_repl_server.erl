@@ -426,26 +426,11 @@ handle_op(<<"docs">>, Params, Msg, SessionPid) ->
         []
     ),
     beamtalk_repl_ops_dev:handle(<<"docs">>, Params, Msg, SessionPid);
-handle_op(Op, Params, Msg, _SessionPid) when Op =:= <<"unload">> ->
-    %% BT-785: :unload removed — suggest removeFromSystem instead
-    Module = maps:get(<<"module">>, Params, <<>>),
-    Err0 = beamtalk_error:new(runtime_error, 'REPL'),
-    Err1 = beamtalk_error:with_message(
-        Err0,
-        <<"':unload' has been removed. Use `removeFromSystem` instead.">>
-    ),
-    HintBody =
-        case Module of
-            <<>> -> <<"MyClass removeFromSystem">>;
-            _ -> iolist_to_binary([Module, <<" removeFromSystem">>])
-        end,
-    Err2 = beamtalk_error:with_hint(
-        Err1,
-        iolist_to_binary([<<"Example: ">>, HintBody])
-    ),
-    beamtalk_repl_protocol:encode_error(
-        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
-    );
+handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"unload">> ->
+    %% BT-1239: Restored — fully removes class from the system (actors, gen_server,
+    %% BEAM module, workspace_meta, session tracker). Previously returned a deprecation
+    %% error (BT-785) but that left orphaned bt@* BEAM modules.
+    beamtalk_repl_ops_load:handle(<<"unload">>, Params, Msg, SessionPid);
 handle_op(Op, _Params, Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
     Err1 = beamtalk_error:with_message(

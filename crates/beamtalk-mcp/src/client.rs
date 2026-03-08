@@ -1036,15 +1036,10 @@ mod tests {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie).await?;
 
-        // BT-785: :unload was removed in favour of `removeFromSystem`.
-        // The op now always returns an error with a deprecation hint.
-        let resp = client.unload("Counter").await.unwrap();
-        assert!(resp.is_error(), "unload should return a deprecation error");
-        let err = resp.error.expect("error message should be present");
-        assert!(
-            err.contains("removeFromSystem"),
-            "error should mention removeFromSystem: {err}"
-        );
+        // BT-1239: unload op is restored — stdlib classes cannot be removed.
+        // Integer is a stdlib class (bt@stdlib@Integer) and must be rejected.
+        let resp = client.unload("Integer").await.unwrap();
+        assert!(resp.is_error(), "stdlib class cannot be unloaded");
         Ok(())
     }
 
