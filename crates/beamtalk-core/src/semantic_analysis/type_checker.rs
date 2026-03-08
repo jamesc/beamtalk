@@ -3046,6 +3046,47 @@ mod tests {
     }
 
     #[test]
+    fn test_expect_type_suppresses_dnu_at_type_erasure_boundary() {
+        // BT-1273: @expect type also suppresses method-not-found (DNU) hints.
+        // At type-erasure boundaries (e.g. Object returned by Result.unwrap),
+        // the author knows the true type but the type system sees Object.
+        // @expect type is the natural annotation for these sites.
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // Without @expect: calling unknownMethod on Integer (known type) produces DNU hint
+        let module_bare = parse_source("42 unknownMethod");
+        let diags_without = run_with_expect(&module_bare, &hierarchy);
+        assert!(
+            !diags_without.is_empty(),
+            "42 unknownMethod should produce a DNU hint without @expect"
+        );
+
+        // With @expect type: should also suppress the DNU hint
+        let module_with = parse_source("@expect type\n42 unknownMethod");
+        let diags_with = run_with_expect(&module_with, &hierarchy);
+        assert!(
+            diags_with.is_empty(),
+            "@expect type should suppress DNU hint, got: {diags_with:?}"
+        );
+    }
+
+    #[test]
+    fn test_expect_type_stale_when_no_dnu_or_type_diagnostic() {
+        // BT-1273: @expect type is stale when the following expression has
+        // neither a type warning nor a DNU hint.
+        let hierarchy = ClassHierarchy::with_builtins();
+
+        // 42 alone produces no diagnostic — @expect type should be stale
+        let module = parse_source("@expect type\n42");
+        let diags = run_with_expect(&module, &hierarchy);
+        let has_stale = diags.iter().any(|d| d.message.contains("stale @expect"));
+        assert!(
+            has_stale,
+            "@expect type on `42` (no diagnostic) must emit stale error, got: {diags:?}"
+        );
+    }
+
+    #[test]
     fn test_expect_does_not_suppress_next_next_expression() {
         // @expect dnu only suppresses the immediately following expression.
         // Here @expect applies to `42` (no DNU) → stale error is emitted,
