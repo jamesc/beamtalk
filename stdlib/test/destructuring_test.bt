@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests for destructuring assignment: tuple {a, b} := expr and array #[a, b] := expr
+// Tests for destructuring assignment: tuple {a, b} := expr, array #[a, b] := expr, and list #(a, b) := expr
 
 TestCase subclass: DestructuringTest
 
@@ -189,3 +189,33 @@ TestCase subclass: DestructuringTest
         a + b
       ]
     self assert: sums equals: #[7, 17, 23]
+
+  // === List destructuring (#(...) syntax, BT-1279) ===
+  testListDestructuringBasic =>
+    #(a, b) := #(10, 20)
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testListDestructuringThreeElements =>
+    #(a, b, c) := #(1, 2, 3)
+    self assert: a equals: 1
+    self assert: b equals: 2
+    self assert: c equals: 3
+
+  testListDestructuringWithWildcard =>
+    #(_, b) := #(99, 42)
+    self assert: b equals: 42
+
+  testListDestructuringOnArray =>
+    // Duck-typed: #(...) destructuring calls at: on any collection — works on Array too
+    #(a, b) := #[10, 20]
+    self assert: a equals: 10
+    self assert: b equals: 20
+
+  testListDestructuringInBlock =>
+    result := #(#(1, 10), #(2, 20))
+      collect: [:pair |
+        #(a, b) := pair
+        a + b
+      ]
+    self assert: result equals: #(11, 22)

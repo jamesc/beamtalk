@@ -129,12 +129,22 @@ impl Parser {
         // Check for assignment operators
         if self.match_token(&TokenKind::Assign) {
             // Array destructuring: `#[a, b] := expr`
+            // List destructuring: `#(a, b) := expr` (BT-1279)
+            // Both use the same Pattern::Array node and at:-based codegen.
+            // The `list_syntax` flag preserves the original delimiter for
+            // round-trip formatting and future type checking.
+            let list_syntax = matches!(&expr, Expression::ListLiteral { tail: None, .. });
             if let Expression::ArrayLiteral {
                 elements,
                 span: lhs_span,
+            }
+            | Expression::ListLiteral {
+                elements,
+                tail: None,
+                span: lhs_span,
             } = &expr
             {
-                match Self::array_elements_to_pattern(elements, *lhs_span) {
+                match Self::collection_elements_to_pattern(elements, *lhs_span, list_syntax) {
                     Ok(pattern) => {
                         if let Err(error) = self.enter_nesting(*lhs_span) {
                             return error;
@@ -194,12 +204,17 @@ impl Parser {
         expr
     }
 
-    /// Converts array literal elements to a destructuring pattern.
+    /// Converts collection literal elements to a destructuring pattern.
     ///
     /// Returns `Ok(Pattern::Array)` if all elements are valid pattern positions
     /// (identifiers, `_`, or literals), or `Err(span)` pointing at the first
-    /// invalid element.
-    fn array_elements_to_pattern(elements: &[Expression], span: Span) -> Result<Pattern, Span> {
+    /// invalid element. The `list_syntax` flag preserves whether the source
+    /// used `#(...)` or `#[...]` delimiters.
+    fn collection_elements_to_pattern(
+        elements: &[Expression],
+        span: Span,
+        list_syntax: bool,
+    ) -> Result<Pattern, Span> {
         let mut patterns = Vec::new();
         for elem in elements {
             let pat = match elem {
@@ -212,6 +227,7 @@ impl Parser {
         }
         Ok(Pattern::Array {
             elements: patterns,
+            list_syntax,
             span,
         })
     }
@@ -1067,6 +1083,7 @@ impl Parser {
 
         Pattern::Array {
             elements,
+            list_syntax: false,
             span: start.merge(end),
         }
     }

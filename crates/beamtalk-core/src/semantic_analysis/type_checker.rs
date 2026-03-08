@@ -4384,6 +4384,7 @@ Object subclass: Foo
     fn array_pattern(names: &[&str]) -> Pattern {
         Pattern::Array {
             elements: names.iter().map(|n| Pattern::Variable(ident(n))).collect(),
+            list_syntax: false,
             span: span(),
         }
     }

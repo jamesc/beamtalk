@@ -1109,10 +1109,18 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
             let joined = join_docs(seg_docs, ", ");
             docvec!["<<", joined, ">>"]
         }
-        Pattern::Array { elements, .. } => {
+        Pattern::Array {
+            elements,
+            list_syntax,
+            ..
+        } => {
             let elem_docs: Vec<Document<'static>> = elements.iter().map(unparse_pattern).collect();
             let joined = join_docs(elem_docs, ", ");
-            docvec!["#[", joined, "]"]
+            if *list_syntax {
+                docvec!["#(", joined, ")"]
+            } else {
+                docvec!["#[", joined, "]"]
+            }
         }
     }
 }

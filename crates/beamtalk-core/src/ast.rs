@@ -1440,12 +1440,19 @@ pub enum Pattern {
         span: Span,
     },
 
-    /// Array destructuring pattern.
+    /// Collection destructuring pattern (array or list).
     ///
-    /// Example: `#[first, second, _]`
+    /// Example: `#[first, second, _]` or `#(first, second, _)`
+    ///
+    /// Both forms use `at:` message dispatch for element access.
+    /// The `list_syntax` flag tracks whether the source used `#(...)` (list)
+    /// or `#[...]` (array) syntax, for round-trip formatting fidelity
+    /// and future type checking.
     Array {
-        /// Elements of the array pattern.
+        /// Elements of the pattern.
         elements: Vec<Pattern>,
+        /// Whether the source used `#(...)` list syntax (vs `#[...]` array syntax).
+        list_syntax: bool,
         /// Source location.
         span: Span,
     },
