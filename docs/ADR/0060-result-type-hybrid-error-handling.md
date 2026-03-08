@@ -83,17 +83,17 @@ Introduce a `Result` value class for operations where failure is a normal, expec
 ```beamtalk
 // stdlib/src/Result.bt
 sealed Value subclass: Result
+  state: okValue :: Object = nil
+  state: errReason :: Object = nil
   state: isOk :: Boolean = true
-  state: value :: Object = nil
-  state: error :: Object = nil
 
   // --- Constructors (class-side) ---
 
   /// Create a successful Result wrapping a value.
-  class ok: value -> Result => Result new: #{ #isOk => true, #value => value }
+  class ok: value -> Result => Result new: #{ #isOk => true, #okValue => value }
 
   /// Create a failed Result wrapping an error reason.
-  class error: reason -> Result => Result new: #{ #isOk => false, #error => reason }
+  class error: reason -> Result => Result new: #{ #isOk => false, #errReason => reason }
 
   // --- Querying ---
 
@@ -103,20 +103,38 @@ sealed Value subclass: Result
   /// True if this Result holds an error.
   sealed isError -> Boolean => self isOk not
 
+  // --- Guarded accessors ---
+  // Named `value` and `error` for ergonomics, but guarded to prevent
+  // silent nil when accessing the wrong state. The internal fields
+  // (okValue, errReason) are available but undocumented — public API
+  // is via these guarded methods or the safe combinators below.
+
+  /// The success value. Raises if this is an error Result.
+  sealed value -> Object =>
+    self isOk ifTrue: [self okValue] ifFalse: [
+      Exception signal: "Cannot access 'value' on Result error — use valueOr:, ifOk:ifError:, or unwrap"
+    ]
+
+  /// The error reason. Raises if this is an ok Result.
+  sealed error -> Object =>
+    self isOk ifFalse: [self errReason] ifTrue: [
+      Exception signal: "Cannot access 'error' on Result ok — use ifOk:ifError: or mapError:"
+    ]
+
   // --- Extracting ---
 
   /// Unwrap the success value, or return the default if error.
   sealed valueOr: default -> Object =>
-    self isOk ifTrue: [self value] ifFalse: [default]
+    self isOk ifTrue: [self okValue] ifFalse: [default]
 
   /// Unwrap the success value, or evaluate a block with the error.
   sealed valueOrDo: block -> Object =>
-    self isOk ifTrue: [self value] ifFalse: [block value: self error]
+    self isOk ifTrue: [self okValue] ifFalse: [block value: self errReason]
 
   /// Unwrap the success value, or raise an exception.
   sealed unwrap -> Object =>
-    self isOk ifTrue: [self value] ifFalse: [
-      Exception signal: "unwrap called on Result error: " ++ self error printString
+    self isOk ifTrue: [self okValue] ifFalse: [
+      Exception signal: "unwrap called on Result error: " ++ self errReason printString
     ]
 
   // --- Transforming ---
@@ -124,32 +142,32 @@ sealed Value subclass: Result
   /// Apply a block to the success value, wrapping the result in a new Result.
   /// If this is an error, return self unchanged.
   sealed map: block -> Result =>
-    self isOk ifTrue: [Result ok: (block value: self value)] ifFalse: [self]
+    self isOk ifTrue: [Result ok: (block value: self okValue)] ifFalse: [self]
 
   /// Apply a block that itself returns a Result. Flattens the nesting.
   /// If this is an error, return self unchanged.
   sealed andThen: block -> Result =>
-    self isOk ifTrue: [block value: self value] ifFalse: [self]
+    self isOk ifTrue: [block value: self okValue] ifFalse: [self]
 
   /// Apply a block to the error, wrapping the result in a new error Result.
   /// If this is ok, return self unchanged.
   sealed mapError: block -> Result =>
-    self isOk ifTrue: [self] ifFalse: [Result error: (block value: self error)]
+    self isOk ifTrue: [self] ifFalse: [Result error: (block value: self errReason)]
 
   // --- Pattern matching ---
 
   /// Handle both cases with blocks.
   sealed ifOk: okBlock ifError: errorBlock -> Object =>
     self isOk
-      ifTrue: [okBlock value: self value]
-      ifFalse: [errorBlock value: self error]
+      ifTrue: [okBlock value: self okValue]
+      ifFalse: [errorBlock value: self errReason]
 
   // --- Display ---
 
   sealed printString -> String =>
     self isOk
-      ifTrue: ["Result ok: " ++ self value printString]
-      ifFalse: ["Result error: " ++ self error printString]
+      ifTrue: ["Result ok: " ++ self okValue printString]
+      ifFalse: ["Result error: " ++ self errReason printString]
 ```
 
 ### 2. REPL Usage
@@ -206,13 +224,20 @@ Erlang modules that return `{ok, V} | {error, R}` can surface these as Results v
 -module(beamtalk_result).
 -export([from_tagged_tuple/1]).
 
-%% Convert Erlang {ok, V} | {error, R} | ok to Result tagged maps
+%% Convert Erlang {ok, V} | {error, R} | ok to Result tagged maps.
+%% Uses internal field names (okValue, errReason) to prevent unguarded
+%% field access — the public API goes through guarded value/error methods.
+%%
+%% NOTE: from_tagged_tuple/1 only handles the standard Erlang convention.
+%% For functions returning bare ok atoms, {ok, V1, V2} multi-value tuples,
+%% or other shapes, FFI authors must construct the Result manually or
+%% normalize the return value before calling from_tagged_tuple/1.
 from_tagged_tuple({ok, Value}) ->
-    #{'$beamtalk_class' => 'Result', 'isOk' => true, 'value' => Value, 'error' => nil};
+    #{'$beamtalk_class' => 'Result', 'isOk' => true, 'okValue' => Value, 'errReason' => nil};
 from_tagged_tuple(ok) ->
-    #{'$beamtalk_class' => 'Result', 'isOk' => true, 'value' => true, 'error' => nil};
+    #{'$beamtalk_class' => 'Result', 'isOk' => true, 'okValue' => true, 'errReason' => nil};
 from_tagged_tuple({error, Reason}) ->
-    #{'$beamtalk_class' => 'Result', 'isOk' => false, 'value' => nil, 'error' => Reason}.
+    #{'$beamtalk_class' => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => Reason}.
 ```
 
 Usage in FFI modules:
@@ -227,6 +252,8 @@ Usage in FFI modules:
             beamtalk_result:from_tagged_tuple({error, format_file_error(Reason, Path)})
     end.
 ```
+
+**Scope of `from_tagged_tuple/1`:** This helper covers the standard `{ok, V} | {error, R}` convention only. Erlang functions that return bare `ok` atoms, multi-value tuples `{ok, V1, V2}`, or other shapes must be normalized by the FFI author before calling `from_tagged_tuple/1`. Functions that crash on failure (e.g., `erlang:binary_to_integer/1` raising `badarg`) should use `tryDo:` instead.
 
 This replaces the current 5-line error builder chain per error case:
 
@@ -270,6 +297,9 @@ Implementation in Erlang:
     catch
         error:Reason:_Stack ->
             ExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
+            from_tagged_tuple({error, ExObj});
+        throw:Reason:_Stack ->
+            ExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
             from_tagged_tuple({error, ExObj})
     end.
 ```
@@ -307,7 +337,73 @@ fetchCandidateIssues =>
     andThen: [:issues | self filterCandidates: issues]
 ```
 
-### 7. Guidelines: When to Use Which
+### 7. Actor Methods Returning Result
+
+An actor method can return a Result. This is a normal return value — it flows through `gen_server:call` as `{ok, ResultMap}` and is unwrapped by `sync_send/3` to just `ResultMap`. Crucially:
+
+- **A `Result error:` from an actor method does NOT trigger a supervisor restart.** The actor handled the message successfully — it just returned a value indicating the operation failed.
+- **An exception from an actor method DOES trigger a restart** (via the normal `{error, Error}` reply path).
+- This is the correct semantics: expected failures (file not found, parse error) should not crash the actor. Bugs (wrong message, type error) should.
+
+```beamtalk
+// Actor method returns Result — actor stays alive
+readConfig =>
+  (File readAll: self configPath)
+    map: [:content | Yaml parse: content]
+
+// Caller handles the Result
+config := worker readConfig
+config ifOk: [:c | use: c] ifError: [:e | useDefaults]
+// worker is still alive regardless of the Result
+```
+
+**Caution — self-sends inside `andThen:` blocks:** If an actor chains `andThen:` blocks that send messages back to self, the same deadlock risk applies as with any self-send inside a block (known issue — synchronous gen_server:call to self blocks). This is not unique to Result but is more likely with `andThen:` chains:
+
+```beamtalk
+// DEADLOCK RISK: self-send inside andThen: block in an actor method
+processFile: path =>
+  (File readAll: path)
+    andThen: [:content | self validate: content]   // self-send — deadlocks!
+
+// SAFE: extract to local variable or use map: for pure transforms
+processFile: path =>
+  result := File readAll: path
+  result andThen: [:content | self validate: content]  // same deadlock — still a self-send
+  // Solution: don't self-send in fallible chains. Use pure functions or refactor.
+```
+
+### 8. REPL Display of Result Errors
+
+When a Result error is returned at the REPL, it is displayed as a **normal result** (not an error):
+
+```
+> File readAll: "/nonexistent"
+// => Result error: #file_not_found     (displayed as a value, not an error)
+> _
+// => Result error: #file_not_found     (bound to _ as last result)
+> _error
+// => nil                               (_error is NOT set — no exception occurred)
+```
+
+This is correct: the expression evaluated successfully and returned a Result value. `_error` is only set when an exception is raised. Users coming from exception-based error handling may initially expect `_error` to be set — the documentation should clarify this distinction.
+
+**Future consideration:** The REPL could render `Result error:` values with different formatting (e.g., yellow text vs green) to visually signal that the result represents a failure. This is a UX enhancement, not a semantic change.
+
+### 9. Forward Compatibility: Parameterized Result Types
+
+The current design uses `-> Result` as the return type annotation, which doesn't express what types the ok value and error carry. When gradual typing (ADR 0025) matures, Result should support parameterized type annotations:
+
+```beamtalk
+// Current (unparameterized)
+sealed readAll: path :: String -> Result => ...
+
+// Future (parameterized, when ADR 0025 supports it)
+sealed readAll: path :: String -> Result(String, IOError) => ...
+```
+
+The runtime representation (tagged map with `isOk`, `okValue`, `errReason` fields) is compatible with future type parameterization — the type parameters constrain what values the fields may hold, they don't change the representation. No runtime changes will be needed; this is purely a type-system concern.
+
+### 10. Guidelines: When to Use Which
 
 | Situation | Use | Why |
 |---|---|---|
@@ -323,7 +419,23 @@ fetchCandidateIssues =>
 | Regex pattern is invalid | `Result` | Expected — user-supplied pattern |
 | JSON parse of user input | `Result` | Expected — untrusted input |
 
-**Rule of thumb:** If you'd put the operation in a `try` block in Elixir or use `?` in Rust, it should return a Result in Beamtalk. If you'd `raise` in Elixir or `panic!` in Rust, it should be an exception in Beamtalk.
+**Heuristic — the boundary test:** If the method's primary input comes from outside the program's control (user input, filesystem, network, external process), return Result. If the method operates on already-validated internal data, raise exceptions. Concretely:
+
+- **External input → Result:** The caller passes data that might be malformed, missing, or inaccessible. The method cannot assume the input is valid.
+- **Internal contract → Exception:** The caller passes data that the program itself produced and should have validated. A failure here means a bug in the program, not bad input.
+
+**Edge cases and how to resolve them:**
+
+| Situation | Result or Exception? | Why |
+|---|---|---|
+| `Integer parse: userInput` | **Result** | User input — might not be a number |
+| `42 + "abc"` | **Exception** | Internal — program passed wrong type |
+| `HTTPClient get: url` (timeout) | **Result** | Network — external, inherently unreliable |
+| `actor someMethod` (gen_server timeout) | **Exception** | Internal — actor should have responded |
+| `File readAll: path` (from config) | **Result** | Filesystem — file might not exist |
+| `dict at: key` (key from user) | Existing `ifAbsent:` pattern | Already handled by block fallback |
+| `Yaml parse: content` (from API) | **Result** | External data — might be malformed |
+| `Yaml parse: content` (from own code) | Use `unwrap` or `tryDo:` | You trust your own data but can assert |
 
 ## Prior Art
 
@@ -460,11 +572,22 @@ Newspeak uses promises for asynchronous operations: if processing produces a res
 
 | Cohort | Strongest argument |
 |--------|-------------------|
-| **Newcomer** | "One error system is simpler than two. I just learn `on:do:` and I'm done." |
+| **Newcomer** | "One error system is simpler than two. I don't want to learn BOTH `on:do:` AND Result — which do I use when?" |
+| **Smalltalk purist** | "Result is a Haskell monad in Smalltalk clothing. Blocks + `on:do:` IS the Smalltalk way. The Symphony pain could be solved by a `pipeline:steps:` method that chains `on:do:` wrappers, not by importing Rust's type system." |
 | **BEAM veteran** | "Let it crash works. If you're catching expected errors, you're doing it wrong — design your system so failures restart cleanly." |
 | **Operator** | "Fewer moving parts, fewer surprises. One error path to monitor and alert on." |
 
-**Tension:** The status quo is defensible for small programs but breaks down at application scale (Symphony). The real-world evidence of three incompatible conventions emerging organically demonstrates that the language needs to provide a standard mechanism before users invent ad-hoc ones.
+**Tension:** The status quo is defensible for small programs but breaks down at application scale (Symphony). The real-world evidence of three incompatible conventions emerging organically demonstrates that the language needs to provide a standard mechanism before users invent ad-hoc ones. The Smalltalk purist's pipeline suggestion is worth exploring but would need its own design — and it still doesn't solve the FFI impedance mismatch with `{ok, V} | {error, R}`.
+
+### Option E: `tryDo:` Only (Minimal Phase 1 as Final State)
+
+| Cohort | Strongest argument |
+|--------|-------------------|
+| **Newcomer** | "I wrap things in `tryDo:` when I want to chain them — one new concept, not a whole new error system." |
+| **BEAM veteran** | "No breaking changes to existing APIs. The FFI modules keep working. I add composition on top without touching the foundation." |
+| **Operator** | "Zero migration risk. Existing crash logs don't change. New code CAN use Result if it wants." |
+
+**Tension:** `tryDo:` alone provides 80% of the composability value with 0% breaking changes. The argument for native Result returns (Phases 2-3) is primarily performance — avoiding the exception construction + catch + wrap round-trip — and ergonomics — `File readAll: path` reading more naturally than `Result tryDo: [File readAll: path]`. If the performance argument is weak (error paths are already slow), `tryDo:`-only may be sufficient for a long time.
 
 ### Tension Points
 
@@ -508,7 +631,42 @@ result first =:= #ok ifTrue: [process: result second]
 
 **Rejected because:** Raw tuples are not objects — they don't respond to `map:`, `andThen:`, `ifOk:ifError:`. This violates "everything is an object" (Principle 6). Pattern matching on tuple position is fragile and unreadable. It's the anti-pattern that both Gleam and Beamtalk's object model are designed to improve upon.
 
-### Alternative D: Optional/Maybe Type (Separate from Result)
+### Alternative D: Dual API Convention (Elixir `!` Pattern)
+
+Provide both exception-raising and Result-returning variants of every fallible method:
+
+```beamtalk
+// Result-returning (new)
+result := File readAll: path
+result ifOk: [:content | process: content] ifError: [:e | handleError: e]
+
+// Exception-raising (existing, kept as convenience)
+content := File readAllOrRaise: path   // raises IOError on failure
+```
+
+This follows Elixir's `File.read/1` vs `File.read!/1` convention. The caller chooses the error handling style at the call site.
+
+**Not adopted as the primary pattern because:** API surface doubles — every fallible method needs two variants. The naming convention (`readAllOrRaise:` or `readAll!:`) is un-Smalltalk-like. And `unwrap` already provides the "I want an exception" escape hatch: `(File readAll: path) unwrap`.
+
+**However:** The adversarial review correctly notes that `unwrap` produces a generic error message ("unwrap called on Result error: ...") that loses the original error context (file path, hint text). Implementation should consider whether `unwrap` can preserve the original error context — e.g., if the error reason is an Exception object (from `tryDo:`), re-raise it directly rather than wrapping in a new signal.
+
+### Alternative E: `tryDo:` Only (Minimal Approach)
+
+Ship only `Result.bt` and `tryDo:`. Don't migrate any FFI modules. Users compose via `tryDo:` wrapping:
+
+```beamtalk
+(Result tryDo: [File readAll: path])
+  andThen: [:content | Result tryDo: [Yaml parse: content]]
+  andThen: [:parsed  | self buildDefinition: parsed]
+```
+
+This provides composability with **zero breaking changes** — all existing APIs keep raising exceptions, and `tryDo:` wraps them into Results at the call site.
+
+**Not adopted as the final state because:** Every `tryDo:` pays the cost of constructing a `#beamtalk_error{}`, raising it, catching it, and wrapping it — when the FFI could return a Result directly from `{ok, V} | {error, R}` without the exception round-trip. For methods called in tight loops (e.g., parsing each line of a file), this overhead matters.
+
+**However:** This IS the right Phase 1. Ship `Result.bt` + `tryDo:` first, validate the design in real use, then migrate FFI modules in later phases only where the performance or ergonomic benefit justifies the breaking change. The ADR's phased rollout already captures this — Phase 1 introduces Result with no API changes; Phases 2-3 migrate FFI methods where justified.
+
+### Alternative F: Optional/Maybe Type (Separate from Result)
 
 Add `Optional` for "might be nil" and `Result` for "might fail with a reason":
 
@@ -542,6 +700,9 @@ content := File readAll: path  // => Result ok: "..." or Result error: #file_not
 - **New dependency in stdlib** — Result must load before any Result-returning class (File, Yaml, etc.)
 - **Unwrap-induced crashes** — `unwrap` on a Result error crashes with an exception. Developers who overuse `unwrap` get the worst of both worlds
 - **API documentation effort** — Every method migrated to Result needs updated docs and examples
+- **`unwrap` loses error context** — `Exception: unwrap called on Result error: #file_not_found` is less informative than `IOError: File not found at /path/to/file` with details and hint. The original structured error is compressed into a generic signal. Implementation should mitigate this by re-raising the original Exception when the error reason is an Exception object
+- **REPL confusion for Result errors** — `_error` is not set when a Result error is returned (it's a successful evaluation). Users expecting `_error` will find `nil`. Documentation must address this
+- **Gradual typing gap** — `-> Result` doesn't express what types the ok value and error carry. Future parameterized types (`-> Result(String, IOError)`) will be needed for full type safety; the current design must be forward-compatible with this
 
 ### Neutral
 
