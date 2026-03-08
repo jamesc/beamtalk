@@ -259,8 +259,10 @@ impl ExpressionStatement {
 /// The kind of supervisor based on ancestry (BT-1218, ADR 0059 Phase 1).
 ///
 /// Set by semantic analysis when a class is found to inherit from
-/// `Supervisor` or `DynamicSupervisor`. `None` for non-supervisor Actor
-/// subclasses and all non-actor classes.
+/// `Supervisor` or `DynamicSupervisor` (which are themselves `Object`
+/// subclasses, not `Actor` subclasses). `None` for all other classes —
+/// including non-supervisor `Actor` subclasses and non-supervisor classes
+/// that do not descend from `Supervisor` or `DynamicSupervisor`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SupervisorKind {
     /// Inherits from `Supervisor` (static child list).

@@ -200,12 +200,16 @@ impl CoreErlangGenerator {
         // BT-1218: Synthesize class_supervisionSpec for Actor subclasses
         if needs_spec_synthesis {
             docs.push(Document::Str("\n"));
-            let has_policy_override = module.classes.first().is_some_and(|c| {
+            // Determine which module's class_supervisionPolicy to call.
+            // We check within the current file's AST; cross-file inherited
+            // overrides are not resolved here (BT-1218 Phase 1 limitation —
+            // see the doc comment on generate_supervision_spec_synthesis).
+            let has_local_policy_override = module.classes.first().is_some_and(|c| {
                 c.class_methods
                     .iter()
                     .any(|m| m.selector.name() == "supervisionPolicy")
             });
-            docs.push(self.generate_supervision_spec_synthesis(has_policy_override));
+            docs.push(self.generate_supervision_spec_synthesis(has_local_policy_override));
         }
 
         // Generate class registration and metadata functions
@@ -483,25 +487,36 @@ impl CoreErlangGenerator {
     /// deadlock: class methods execute inside a `gen_server:call` handler, so routing
     /// back through `class_send` would block the process waiting for itself.
     ///
-    /// When `has_policy_override` is true, calls the current module's own
+    /// When `has_local_policy_override` is true, calls the current module's own
     /// `class_supervisionPolicy` (the subclass override). When false, the subclass
-    /// has no override and inherits from Actor, so we call Actor's function directly
+    /// has no local override, so we call Actor's `class_supervisionPolicy` directly
     /// which returns `#temporary`.
     ///
+    /// **Phase 1 limitation**: Only local (same-file) `class supervisionPolicy`
+    /// overrides are detected. If an intermediate superclass in another file defines
+    /// `supervisionPolicy`, the synthesized `class_supervisionSpec` will call Actor's
+    /// default and return `#temporary` instead of the inherited policy. This affects
+    /// multi-level inheritance hierarchies where the intermediate class is compiled
+    /// separately. A future phase should resolve the defining class via the full
+    /// cross-module class hierarchy and call the correct module directly.
+    ///
     /// ```erlang
-    /// %% With override (has_policy_override = true):
+    /// %% With local override (has_local_policy_override = true):
     /// 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
     ///     let CMR = call 'bt@my_actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
     ///     ...
     ///
-    /// %% Without override (has_policy_override = false):
+    /// %% Without local override (has_local_policy_override = false):
     /// 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
     ///     let CMR = call 'bt@stdlib@actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
     ///     ...
     /// ```
-    fn generate_supervision_spec_synthesis(&self, has_policy_override: bool) -> Document<'static> {
+    fn generate_supervision_spec_synthesis(
+        &self,
+        has_local_policy_override: bool,
+    ) -> Document<'static> {
         let spec_mod = self.compiled_module_name("SupervisionSpec");
-        let policy_mod: Document<'static> = if has_policy_override {
+        let policy_mod: Document<'static> = if has_local_policy_override {
             Document::String(self.module_name.clone())
         } else {
             Document::String(self.compiled_module_name("Actor"))
