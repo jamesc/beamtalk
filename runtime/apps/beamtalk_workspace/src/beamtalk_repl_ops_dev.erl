@@ -1100,6 +1100,9 @@ describe_ops() ->
             <<"deprecated">> => true,
             <<"migrate_to">> => <<"eval: Workspace classes">>
         },
+        <<"actors">> => #{<<"params">> => []},
+        <<"inspect">> => #{<<"params">> => [<<"actor">>]},
+        <<"kill">> => #{<<"params">> => [<<"actor">>]},
         <<"unload">> => #{<<"params">> => [<<"module">>]},
         <<"health">> => #{<<"params">> => []},
         <<"methods">> => #{<<"params">> => [<<"class">>]},
