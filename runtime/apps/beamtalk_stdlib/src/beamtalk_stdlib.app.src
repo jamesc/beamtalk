@@ -23,6 +23,7 @@
             {'bt@stdlib@erlang', 'Erlang', 'ProtoObject'},
             {'bt@stdlib@erlang_module', 'ErlangModule', 'ProtoObject'},
             {'bt@stdlib@error', 'Error', 'Exception'},
+            {'bt@stdlib@ets', 'Ets', 'Object'},
             {'bt@stdlib@exception', 'Exception', 'Object'},
             {'bt@stdlib@exit_error', 'ExitError', 'BEAMError'},
             {'bt@stdlib@false', 'False', 'Boolean'},
