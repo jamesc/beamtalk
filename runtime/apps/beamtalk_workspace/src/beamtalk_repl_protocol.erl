@@ -36,6 +36,7 @@
     encode_docs/2,
     encode_describe/3,
     encode_test_results/2,
+    encode_trace_result/5,
     is_legacy/1,
     get_op/1,
     get_id/1,
@@ -528,6 +529,28 @@ encode_test_entry(Entry) ->
     %% Fallback for unexpected shapes
     Name = maps:get(name, Entry, unknown),
     #{<<"name">> => atom_to_binary(Name, utf8), <<"status">> => <<"unknown">>}.
+
+%% @doc Encode a trace result response (BT-1238).
+%%
+%% `Steps' is `[{SourceBin, Value}]' — one entry per top-level statement.
+%% The response includes a `steps' array where each entry has `src' and `value' fields.
+-spec encode_trace_result(
+    [{binary(), term()}], protocol_msg(), fun((term()) -> term()), binary(), [binary()]
+) -> binary().
+encode_trace_result(Steps, Msg, TermToJson, Output, Warnings) ->
+    JsonSteps = [
+        #{<<"src">> => Src, <<"value">> => TermToJson(Val)}
+     || {Src, Val} <- Steps
+    ],
+    case Msg#protocol_msg.legacy of
+        true ->
+            Base = #{<<"type">> => <<"result">>, <<"steps">> => JsonSteps},
+            jsx:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings));
+        false ->
+            Base = base_response(Msg),
+            Full = Base#{<<"steps">> => JsonSteps, <<"status">> => [<<"done">>]},
+            jsx:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
+    end.
 
 %%% Internal functions
 

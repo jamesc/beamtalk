@@ -919,6 +919,25 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A destructuring assignment (`{a, b} := expr` or `#[a, b] := expr`).
+    ///
+    /// Binds multiple variables from a tuple or array in a single statement.
+    ///
+    /// Examples:
+    /// ```beamtalk
+    /// {a, b} := someTuple
+    /// #[first, second] := someArray
+    /// {#ok, val} := erlangResult
+    /// ```
+    DestructureAssignment {
+        /// The destructuring pattern.
+        pattern: Pattern,
+        /// The value being destructured.
+        value: Box<Expression>,
+        /// Source location.
+        span: Span,
+    },
+
     /// A return statement.
     Return {
         /// The value being returned.
@@ -1059,6 +1078,7 @@ impl Expression {
             | Self::FieldAccess { span, .. }
             | Self::MessageSend { span, .. }
             | Self::Assignment { span, .. }
+            | Self::DestructureAssignment { span, .. }
             | Self::Return { span, .. }
             | Self::Cascade { span, .. }
             | Self::Parenthesized { span, .. }
@@ -1397,6 +1417,16 @@ pub enum Pattern {
         span: Span,
     },
 
+    /// Array destructuring pattern.
+    ///
+    /// Example: `#[first, second, _]`
+    Array {
+        /// Elements of the array pattern.
+        elements: Vec<Pattern>,
+        /// Source location.
+        span: Span,
+    },
+
     /// List pattern - matches list structure.
     ///
     /// Example: `[head | tail]`
@@ -1429,6 +1459,7 @@ impl Pattern {
             Self::Wildcard(span)
             | Self::Literal(_, span)
             | Self::Tuple { span, .. }
+            | Self::Array { span, .. }
             | Self::List { span, .. }
             | Self::Binary { span, .. } => *span,
         }

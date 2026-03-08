@@ -888,6 +888,22 @@ impl CoreErlangGenerator {
                         Document::String(final_self),
                         "}\n",
                     ]);
+                } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                    // Destructuring as last expression: emit bindings then return Self
+                    let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                    for d in binding_docs {
+                        body_parts.push(docvec!["    ", d]);
+                    }
+                    let final_self = self.current_self_var();
+                    if nlr_token_var.is_some() {
+                        body_parts.push(docvec![
+                            "    {'nil', ",
+                            Document::String(final_self),
+                            "}\n",
+                        ]);
+                    } else {
+                        body_parts.push(docvec!["    ", Document::String(final_self), "\n"]);
+                    }
                 } else {
                     let expr_code = self.capture_expression(expr)?;
                     if i > 0 {
@@ -913,6 +929,11 @@ impl CoreErlangGenerator {
                         self.bind_var(var_name, &core_var);
                         body_parts.push(docvec!["    let ", core_var, " = ", val_doc, " in\n",]);
                     }
+                }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    body_parts.push(d);
                 }
             } else if self.is_do_with_vt_local_threading(expr) {
                 // BT-1053: Non-last `do:` loop that mutates captured outer locals.
@@ -1232,6 +1253,9 @@ impl CoreErlangGenerator {
                 StringSegment::Literal(_) => false,
                 StringSegment::Interpolation(e) => Self::expr_has_block_nlr(e, inside_block),
             }),
+            Expression::DestructureAssignment { value, .. } => {
+                Self::expr_has_block_nlr(value, inside_block)
+            }
             // True leaf expressions — cannot contain sub-expressions.
             Expression::Literal(..)
             | Expression::Identifier(..)

@@ -242,6 +242,27 @@ sealed Number subclass: Integer
       ]
       ifFalse: [nil]
 
+  /// Return an Interval from the receiver to `stop` with step 1.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 to: 10   // => (1 to: 10)
+  /// ```
+  to: stop :: Integer -> Interval =>
+    Interval new: #{#from => self, #to => stop, #step => 1}
+
+  /// Return an Interval from the receiver to `stop` with the given step.
+  ///
+  /// Raises an error if `step` is zero.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 to: 10 by: 2   // => (1 to: 10 by: 2)
+  /// ```
+  to: stop :: Integer by: step :: Integer -> Interval =>
+    step =:= 0 ifTrue: [self error: "Interval step cannot be zero"]
+    Interval new: #{#from => self, #to => stop, #step => step}
+
   /// Convert the receiver to a Float.
   ///
   /// ## Examples

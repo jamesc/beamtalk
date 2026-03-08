@@ -179,6 +179,11 @@ impl CoreErlangGenerator {
                     let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
                     docs.push(assign_doc);
                 }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
+                }
             } else if is_last && !has_direct_field_assignments {
                 // BT-478/BT-483: Last expression with no direct field assignments in body.
                 // Mutations come from nested constructs (e.g., inner to:do:).
@@ -359,6 +364,11 @@ impl CoreErlangGenerator {
                     let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
                     docs.push(assign_doc);
                     docs.push(Document::Str(" "));
+                }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
                 }
             } else {
                 // Non-assignment expression (could be a nested control flow construct)

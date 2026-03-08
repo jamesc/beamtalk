@@ -288,6 +288,11 @@ fn analyze_expression(
                 analyze_expression(elem, analysis, ctx);
             }
         }
+
+        Expression::DestructureAssignment { value, .. } => {
+            // Destructure assignment: walk into value; does not mutate fields
+            analyze_expression(value, analysis, ctx);
+        }
     }
 }
 
