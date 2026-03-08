@@ -187,13 +187,17 @@ module 'workspace_binding_send' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
 
 'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->
     let CMR = call 'bt@stdlib@actor':'class_supervisionPolicy'(ClassSelf, ClassVars) in
-    let Policy = case CMR of
-      <{'class_var_result', Res, _}> when 'true' -> Res
-      <PR> when 'true' -> PR
-    end in
-    let Spec0 = call 'bt@stdlib@supervision_spec':'new'() in
-    let Spec1 = call 'bt@stdlib@supervision_spec':'withActorClass:'(Spec0, ClassSelf) in
-    call 'bt@stdlib@supervision_spec':'withRestart:'(Spec1, Policy)
+    case CMR of
+      <{'class_var_result', Policy, NewClassVars}> when 'true' ->
+        let Spec0 = call 'bt@stdlib@supervision_spec':'new'() in
+        let Spec1 = call 'bt@stdlib@supervision_spec':'withActorClass:'(Spec0, ClassSelf) in
+        let Spec2 = call 'bt@stdlib@supervision_spec':'withRestart:'(Spec1, Policy) in
+        {'class_var_result', Spec2, NewClassVars}
+      <Policy> when 'true' ->
+        let Spec0 = call 'bt@stdlib@supervision_spec':'new'() in
+        let Spec1 = call 'bt@stdlib@supervision_spec':'withActorClass:'(Spec0, ClassSelf) in
+        call 'bt@stdlib@supervision_spec':'withRestart:'(Spec1, Policy)
+    end
 
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'Greeter',
