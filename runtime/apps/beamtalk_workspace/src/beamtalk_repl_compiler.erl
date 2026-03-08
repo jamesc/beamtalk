@@ -98,7 +98,9 @@ format_diagnostic_text(D) when is_map(D) ->
         error -> Msg
     end;
 format_diagnostic_text(D) when is_binary(D) ->
-    D.
+    D;
+format_diagnostic_text(D) ->
+    iolist_to_binary(io_lib:format("~p", [D])).
 
 %% @doc Check if a binding key is internal (not a user variable).
 -spec is_internal_key(atom()) -> boolean().

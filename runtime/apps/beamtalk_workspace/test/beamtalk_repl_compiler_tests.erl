@@ -51,6 +51,12 @@ format_diagnostics_map_multiple_test() ->
     ]),
     ?assertEqual(<<"Error 1\n\nError 2">>, Result).
 
+format_diagnostics_unexpected_type_test() ->
+    %% BT-1235: unexpected diagnostic types are formatted via ~p fallback
+    Result = beamtalk_repl_compiler:format_formatted_diagnostics([some_atom]),
+    ?assert(is_binary(Result)),
+    ?assert(byte_size(Result) > 0).
+
 %%====================================================================
 %% is_internal_key/1
 %%====================================================================

@@ -273,7 +273,8 @@ normalize_diagnostics(Diagnostics) when is_list(Diagnostics) ->
 
 -spec normalize_diagnostic(term()) -> map().
 normalize_diagnostic(D) when is_map(D) -> D;
-normalize_diagnostic(D) when is_binary(D) -> #{message => D}.
+normalize_diagnostic(D) when is_binary(D) -> #{message => D};
+normalize_diagnostic(D) -> #{message => iolist_to_binary(io_lib:format("~p", [D]))}.
 
 %% Try to pretty-print textual Core Erlang using Erlang's core parser/pretty-printer.
 %% Falls back to the original Core Erlang text on any failure.

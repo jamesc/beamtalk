@@ -175,6 +175,13 @@ handle_response_error_structured_test() ->
         beamtalk_compiler_port:handle_response(Response)
     ).
 
+handle_response_error_unexpected_type_test() ->
+    %% BT-1235: unexpected diagnostic types are formatted as ~p
+    Response = #{status => error, diagnostics => [some_atom]},
+    {error, [Diag]} = beamtalk_compiler_port:handle_response(Response),
+    ?assert(is_map(Diag)),
+    ?assert(is_binary(maps:get(message, Diag))).
+
 handle_response_unexpected_test() ->
     Response = #{bogus => true},
     ?assertMatch(

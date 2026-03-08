@@ -264,6 +264,7 @@ encode_error(Reason, Msg, FormatError, Output, Warnings, Metadata) ->
     Message = FormatError(Reason),
     case Msg#protocol_msg.legacy of
         true ->
+            %% Legacy protocol does not support extra metadata (line/hint)
             Base = #{<<"type">> => <<"error">>, <<"message">> => Message},
             jsx:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings));
         false ->
