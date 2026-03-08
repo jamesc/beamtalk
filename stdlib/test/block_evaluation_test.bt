@@ -35,3 +35,15 @@ TestCase subclass: BlockEvaluationTest
     self assert: ([:x | x + baseValue] value: 50) equals: 150
     // Value still accessible
     self assert: baseValue equals: 100
+
+  testValueKeywordOnBlockVariable =>
+    // BT-1260: value:/value:value:/value:value:value: on a variable holding a block
+    // emits a runtime is_function guard (apply if function, send if not).
+    // Before BT-1260, this fell through to the same apply path as block literals;
+    // now the guard is explicit so non-function receivers dispatch correctly too.
+    oneArg := [:x | x * 3]
+    self assert: (oneArg value: 7) equals: 21
+    twoArg := [:a :b | a + b]
+    self assert: (twoArg value: 4 value: 5) equals: 9
+    threeArg := [:a :b :c | a * b + c]
+    self assert: (threeArg value: 2 value: 3 value: 1) equals: 7

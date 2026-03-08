@@ -196,6 +196,10 @@ impl ReplClient {
     }
 
     /// Send an eval operation.
+    ///
+    /// Uses [`send_once`] (no retry) because eval mutates workspace bindings.
+    /// A retry after reconnect would re-execute the same code if the server
+    /// already processed the request before the connection dropped.
     // Used in integration tests (#[cfg(test)]) — suppress dead_code lint for binary crate.
     #[allow(dead_code)]
     pub async fn eval(&self, code: &str) -> Result<ReplResponse, String> {
@@ -204,7 +208,7 @@ impl ReplClient {
             "id": next_msg_id(),
             "code": code
         });
-        self.send(&request).await
+        self.send_once(&request).await
     }
 
     /// Evaluate an expression with optional trace mode (BT-1238).
@@ -212,6 +216,8 @@ impl ReplClient {
     /// Unified entry point used by the MCP evaluate tool. When `trace` is false,
     /// behaves identically to the plain `eval` operation. When true, sets
     /// `trace: true` in the protocol request and returns `steps` in the response.
+    ///
+    /// Uses [`send_once`] (no retry) — see [`eval`] for rationale.
     pub async fn evaluate_with_options(
         &self,
         code: &str,
@@ -225,7 +231,7 @@ impl ReplClient {
         if trace {
             request["trace"] = serde_json::Value::Bool(true);
         }
-        self.send(&request).await
+        self.send_once(&request).await
     }
 
     /// Send a complete operation.
@@ -247,13 +253,17 @@ impl ReplClient {
     }
 
     /// Send a load-file operation.
+    ///
+    /// Uses [`send_once`] (no retry) because loading a file defines classes on
+    /// the server. A retry after partial success would redefine already-loaded
+    /// classes and produce duplicate errors.
     pub async fn load_file(&self, path: &str) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "load-file",
             "id": next_msg_id(),
             "path": path
         });
-        self.send(&request).await
+        self.send_once(&request).await
     }
 
     /// Send an inspect operation.
@@ -294,32 +304,41 @@ impl ReplClient {
     }
 
     /// Send a reload operation.
+    ///
+    /// Uses [`send_once`] (no retry) — reloading a module is a mutating operation;
+    /// a retry could reload an already-updated module with stale bytecode.
     pub async fn reload(&self, module: &str) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "reload",
             "id": next_msg_id(),
             "module": module
         });
-        self.send(&request).await
+        self.send_once(&request).await
     }
 
     /// Send a clear operation to reset REPL bindings.
+    ///
+    /// Uses [`send_once`] (no retry) — clearing bindings is a mutating operation
+    /// that could interleave badly with other operations on reconnect.
     pub async fn clear(&self) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "clear",
             "id": next_msg_id()
         });
-        self.send(&request).await
+        self.send_once(&request).await
     }
 
     /// Send an unload operation to remove a module from the workspace.
+    ///
+    /// Uses [`send_once`] (no retry) — a retry after the module was already
+    /// unloaded would produce a not-found error.
     pub async fn unload(&self, module: &str) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "unload",
             "id": next_msg_id(),
             "module": module
         });
-        self.send(&request).await
+        self.send_once(&request).await
     }
 
     /// Send an interrupt operation to cancel a running evaluation.
@@ -328,12 +347,15 @@ impl ReplClient {
     /// interrupt cannot preempt an in-flight eval on the same connection.
     /// This is suitable for canceling evaluations from separate MCP tool
     /// invocations or when no eval is in progress.
+    ///
+    /// Uses [`send_once`] (no retry) — a retry after reconnect could cancel
+    /// a different evaluation that started after the session was resumed.
     pub async fn interrupt(&self) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "interrupt",
             "id": next_msg_id()
         });
-        self.send(&request).await
+        self.send_once(&request).await
     }
 
     /// Send a show-codegen operation to inspect generated Core Erlang.
@@ -364,32 +386,39 @@ impl ReplClient {
     }
 
     /// Send a test operation to run `BUnit` tests for a specific class.
+    ///
+    /// Uses [`send_once`] (no retry) — tests may have side effects; a retry
+    /// could run the same test suite twice and produce misleading results.
     pub async fn test_class(&self, class: &str) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "test",
             "id": next_msg_id(),
             "class": class
         });
-        self.send(&request).await
+        self.send_once(&request).await
     }
 
     /// Send a test operation scoped to a specific source file path.
+    ///
+    /// Uses [`send_once`] (no retry) — see [`test_class`] for rationale.
     pub async fn test_file(&self, file: &str) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "test",
             "id": next_msg_id(),
             "file": file
         });
-        self.send(&request).await
+        self.send_once(&request).await
     }
 
     /// Send a test-all operation to run all `BUnit` tests.
+    ///
+    /// Uses [`send_once`] (no retry) — see [`test_class`] for rationale.
     pub async fn test_all(&self) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "test-all",
             "id": next_msg_id()
         });
-        self.send(&request).await
+        self.send_once(&request).await
     }
 
     /// Send a describe operation for capability discovery.
@@ -426,6 +455,9 @@ impl ReplClient {
     /// Suitable for non-idempotent operations where a retry after partial
     /// success could cause duplicate side effects. For ordinary ops use
     /// [`send`] which retries once after transient I/O failures.
+    ///
+    /// Used by: [`eval`], [`evaluate_with_options`], [`load_file`], [`load_project`],
+    /// [`reload`], [`clear`], [`unload`], [`interrupt`], [`test_class`], [`test_file`], [`test_all`].
     async fn send_once(&self, request: &serde_json::Value) -> Result<ReplResponse, String> {
         let request_str =
             serde_json::to_string(request).map_err(|e| format!("Failed to serialize: {e}"))?;
