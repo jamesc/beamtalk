@@ -151,39 +151,50 @@ handle(<<"docs">>, Params, Msg, _SessionPid) ->
     end;
 handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
     %% BT-700: Compile expression and return Core Erlang source without evaluating.
-    Code = binary_to_list(maps:get(<<"code">>, Params, <<>>)),
-    case Code of
-        [] ->
+    %% BT-1236: Also accepts class+selector to inspect a loaded class method.
+    ClassBin = maps:get(<<"class">>, Params, undefined),
+    CodeBin = maps:get(<<"code">>, Params, undefined),
+    case {ClassBin, CodeBin} of
+        {CB, _} when CB =/= undefined ->
+            SelectorBin = maps:get(<<"selector">>, Params, undefined),
+            show_codegen_class_method(CB, SelectorBin, Msg);
+        {undefined, CB} when CB =/= undefined ->
+            Code = binary_to_list(CB),
+            case Code of
+                [] ->
+                    Err = beamtalk_error:new(empty_expression, 'REPL'),
+                    Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
+                    Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to compile.">>),
+                    beamtalk_repl_protocol:encode_error(
+                        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+                    );
+                _ ->
+                    case beamtalk_repl_shell:show_codegen(SessionPid, Code) of
+                        {ok, CoreErlang, Warnings} ->
+                            encode_codegen_response(CoreErlang, Warnings, Msg);
+                        {error, ErrorReason, Warnings} ->
+                            WrappedReason = beamtalk_repl_errors:ensure_structured_error(
+                                ErrorReason
+                            ),
+                            beamtalk_repl_protocol:encode_error(
+                                WrappedReason,
+                                Msg,
+                                fun beamtalk_repl_json:format_error_message/1,
+                                <<>>,
+                                Warnings
+                            )
+                    end
+            end;
+        {undefined, undefined} ->
             Err = beamtalk_error:new(empty_expression, 'REPL'),
-            Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
-            Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to compile.">>),
+            Err1 = beamtalk_error:with_message(Err, <<"Missing required parameter">>),
+            Err2 = beamtalk_error:with_hint(
+                Err1,
+                <<"Provide 'code' to compile an expression, or 'class' to inspect a loaded class.">>
+            ),
             beamtalk_repl_protocol:encode_error(
                 Err2, Msg, fun beamtalk_repl_json:format_error_message/1
-            );
-        _ ->
-            case beamtalk_repl_shell:show_codegen(SessionPid, Code) of
-                {ok, CoreErlang, Warnings} ->
-                    Base = beamtalk_repl_protocol:base_response(Msg),
-                    Result = Base#{
-                        <<"core_erlang">> => CoreErlang,
-                        <<"status">> => [<<"done">>]
-                    },
-                    Result1 =
-                        case Warnings of
-                            [] -> Result;
-                            _ -> Result#{<<"warnings">> => Warnings}
-                        end,
-                    jsx:encode(Result1);
-                {error, ErrorReason, Warnings} ->
-                    WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
-                    beamtalk_repl_protocol:encode_error(
-                        WrappedReason,
-                        Msg,
-                        fun beamtalk_repl_json:format_error_message/1,
-                        <<>>,
-                        Warnings
-                    )
-            end
+            )
     end;
 handle(<<"methods">>, Params, Msg, _SessionPid) ->
     %% BT-1026: Return instance and class-side methods for a loaded class.
@@ -212,6 +223,120 @@ handle(<<"describe">>, _Params, Msg, _SessionPid) ->
         <<"beamtalk">> => BeamtalkVsnBin
     },
     beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg).
+
+%%% show-codegen helpers
+
+%% @private
+%% @doc Encode a successful Core Erlang codegen response.
+-spec encode_codegen_response(binary(), [binary()], beamtalk_repl_protocol:protocol_msg()) ->
+    binary().
+encode_codegen_response(CoreErlang, Warnings, Msg) ->
+    Base = beamtalk_repl_protocol:base_response(Msg),
+    Result = Base#{<<"core_erlang">> => CoreErlang, <<"status">> => [<<"done">>]},
+    Result1 =
+        case Warnings of
+            [] -> Result;
+            _ -> Result#{<<"warnings">> => Warnings}
+        end,
+    jsx:encode(Result1).
+
+%% @private
+%% @doc Handle show-codegen for a loaded class method (BT-1236).
+%%
+%% Looks up the class in the runtime, finds its source file via the
+%% beamtalk_source module attribute, re-compiles the source for codegen,
+%% and returns the Core Erlang. The selector parameter is informational —
+%% the full module Core Erlang is returned (Core Erlang is module-scoped).
+-spec show_codegen_class_method(
+    binary(), binary() | undefined, beamtalk_repl_protocol:protocol_msg()
+) -> binary().
+show_codegen_class_method(ClassBin, _SelectorBin, Msg) ->
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
+        {error, badarg} ->
+            beamtalk_repl_protocol:encode_error(
+                make_class_not_found_error(ClassBin),
+                Msg,
+                fun beamtalk_repl_json:format_error_message/1
+            );
+        {ok, ClassAtom} ->
+            case beamtalk_runtime_api:whereis_class(ClassAtom) of
+                undefined ->
+                    beamtalk_repl_protocol:encode_error(
+                        make_class_not_found_error(ClassBin),
+                        Msg,
+                        fun beamtalk_repl_json:format_error_message/1
+                    );
+                ClassPid ->
+                    ModuleName = beamtalk_runtime_api:module_name(ClassPid),
+                    SourcePath = resolve_class_source_path(ModuleName),
+                    case SourcePath of
+                        "unknown" ->
+                            Err0 = beamtalk_error:new(runtime_error, ClassAtom),
+                            Err1 = beamtalk_error:with_message(
+                                Err0,
+                                iolist_to_binary([
+                                    <<"No source file for ">>,
+                                    ClassBin,
+                                    <<". Class may have been defined inline.">>
+                                ])
+                            ),
+                            beamtalk_repl_protocol:encode_error(
+                                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+                            );
+                        _ ->
+                            case file:read_file(SourcePath) of
+                                {ok, SourceBin} ->
+                                    case
+                                        beamtalk_repl_compiler:compile_file_for_codegen(
+                                            SourceBin, SourcePath
+                                        )
+                                    of
+                                        {ok, CoreErlang, Warnings} ->
+                                            encode_codegen_response(CoreErlang, Warnings, Msg);
+                                        {error, ErrorReason} ->
+                                            WrappedReason =
+                                                beamtalk_repl_errors:ensure_structured_error(
+                                                    ErrorReason
+                                                ),
+                                            beamtalk_repl_protocol:encode_error(
+                                                WrappedReason,
+                                                Msg,
+                                                fun beamtalk_repl_json:format_error_message/1
+                                            )
+                                    end;
+                                {error, Reason} ->
+                                    Err0 = beamtalk_error:new(runtime_error, ClassAtom),
+                                    Err1 = beamtalk_error:with_message(
+                                        Err0,
+                                        iolist_to_binary(
+                                            io_lib:format(
+                                                "Cannot read source file ~s: ~p",
+                                                [SourcePath, Reason]
+                                            )
+                                        )
+                                    ),
+                                    beamtalk_repl_protocol:encode_error(
+                                        Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+                                    )
+                            end
+                    end
+            end
+    end.
+
+%% @private
+%% @doc Resolve the source file path for a loaded Erlang module.
+%% Reads the beamtalk_source attribute embedded by the compiler (BT-845/BT-860).
+-spec resolve_class_source_path(atom()) -> string().
+resolve_class_source_path(ModName) ->
+    try
+        Attrs = erlang:get_module_info(ModName, attributes),
+        case proplists:get_value(beamtalk_source, Attrs) of
+            [Path] when is_list(Path), Path =/= "" -> Path;
+            _ -> "unknown"
+        end
+    catch
+        _:_ -> "unknown"
+    end.
 
 %%% Test op helpers
 
@@ -1052,7 +1177,10 @@ describe_ops() ->
         <<"unload">> => #{<<"params">> => [<<"module">>]},
         <<"health">> => #{<<"params">> => []},
         <<"methods">> => #{<<"params">> => [<<"class">>]},
-        <<"show-codegen">> => #{<<"params">> => [<<"code">>]},
+        <<"show-codegen">> => #{
+            <<"params">> => [],
+            <<"optional">> => [<<"code">>, <<"class">>, <<"selector">>]
+        },
         <<"describe">> => #{<<"params">> => []},
         <<"shutdown">> => #{<<"params">> => [<<"cookie">>]}
     }.

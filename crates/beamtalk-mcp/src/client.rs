@@ -323,6 +323,23 @@ impl ReplClient {
         self.send(&request).await
     }
 
+    /// Send a show-codegen operation for a loaded class (BT-1236).
+    pub async fn show_codegen_class(
+        &self,
+        class: &str,
+        selector: Option<&str>,
+    ) -> Result<ReplResponse, String> {
+        let mut request = serde_json::json!({
+            "op": "show-codegen",
+            "id": next_msg_id(),
+            "class": class
+        });
+        if let Some(sel) = selector {
+            request["selector"] = serde_json::Value::String(sel.to_owned());
+        }
+        self.send(&request).await
+    }
+
     /// Send a test operation to run `BUnit` tests for a specific class.
     pub async fn test_class(&self, class: &str) -> Result<ReplResponse, String> {
         let request = serde_json::json!({

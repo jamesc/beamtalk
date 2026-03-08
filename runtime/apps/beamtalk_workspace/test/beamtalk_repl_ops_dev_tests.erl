@@ -276,6 +276,47 @@ handle_show_codegen_missing_code_error_test() ->
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
 %%====================================================================
+%% handle/4 -- show-codegen class+selector (BT-1236)
+%%====================================================================
+
+handle_show_codegen_class_not_found_error_test() ->
+    %% Non-existent class name -> class not found error
+    Msg = make_msg(<<"show-codegen">>, <<"sc-3">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>,
+        #{<<"class">> => <<"NonExistentClass99999">>},
+        Msg,
+        self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+handle_show_codegen_class_with_selector_no_class_found_test() ->
+    %% class+selector where class doesn't exist -> error
+    Msg = make_msg(<<"show-codegen">>, <<"sc-4">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>,
+        #{<<"class">> => <<"NonExistentClass99999">>, <<"selector">> => <<"someMethod">>},
+        Msg,
+        self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+handle_show_codegen_class_takes_priority_over_code_test() ->
+    %% When both class and code are given, class takes priority and errors (non-existent class)
+    Msg = make_msg(<<"show-codegen">>, <<"sc-5">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>,
+        #{<<"class">> => <<"NonExistentClass99999">>, <<"code">> => <<"1 + 2">>},
+        Msg,
+        self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    %% class path taken, returns error for non-existent class
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+%%====================================================================
 %% handle/4 -- complete with old protocol (no cursor field)
 %%====================================================================
 

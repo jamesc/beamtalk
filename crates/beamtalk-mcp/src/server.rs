@@ -105,11 +105,26 @@ pub struct DocsParams {
 }
 
 /// Parameters for the `show_codegen` MCP tool.
+///
+/// Either `code` (expression snippet) or `class` (loaded class name) must be provided.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ShowCodegenParams {
-    /// Beamtalk code to compile and show the generated Core Erlang for.
-    #[schemars(description = "Beamtalk code to compile and show the generated Core Erlang for")]
-    pub code: String,
+    /// Beamtalk code snippet to compile and show the generated Core Erlang for.
+    /// Mutually exclusive with `class`.
+    #[schemars(
+        description = "Beamtalk code snippet to compile and show generated Core Erlang for. Use this for expressions. Mutually exclusive with 'class'."
+    )]
+    pub code: Option<String>,
+    /// Name of a loaded Beamtalk class to inspect. Mutually exclusive with `code`.
+    #[schemars(
+        description = "Name of a loaded Beamtalk class to show generated Core Erlang for. Mutually exclusive with 'code'."
+    )]
+    pub class: Option<String>,
+    /// Optional method selector when using `class`. If omitted, shows the full module.
+    #[schemars(
+        description = "Optional method selector when inspecting a class. Narrows context but full module Core Erlang is returned."
+    )]
+    pub selector: Option<String>,
 }
 
 /// Parameters for the `test` MCP tool.
@@ -609,19 +624,28 @@ impl BeamtalkMcp {
         )]))
     }
 
-    /// Inspect the generated Core Erlang code for a beamtalk expression.
+    /// Inspect the generated Core Erlang code for a beamtalk expression or loaded class.
     #[tool(
-        description = "Show the generated Core Erlang code for a beamtalk expression or class definition. Useful for debugging codegen and understanding compilation."
+        description = "Show the generated Core Erlang code for a beamtalk expression or loaded class. Use 'code' to compile an expression snippet, or 'class' (+ optional 'selector') to inspect a class already loaded in the session. Useful for debugging codegen and understanding compilation."
     )]
     async fn show_codegen(
         &self,
         Parameters(params): Parameters<ShowCodegenParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let response = self
-            .client
-            .show_codegen(&params.code)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let response = match (&params.class, &params.code) {
+            (Some(class), _) => {
+                self.client
+                    .show_codegen_class(class, params.selector.as_deref())
+                    .await
+            }
+            (None, Some(code)) => self.client.show_codegen(code).await,
+            (None, None) => {
+                return Ok(error_result(
+                    "ERROR: Provide 'code' to compile an expression or 'class' to inspect a loaded class.",
+                ));
+            }
+        }
+        .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
         if response.is_error() {
             let msg = response
@@ -929,7 +953,7 @@ impl ServerHandler for BeamtalkMcp {
                  'list_actors' to see running actors, 'inspect' to examine actor state, \
                  'reload_module' for hot code reloading, 'test' to run BUnit tests, \
                  'lint' to run style/redundancy checks on .bt source files, \
-                 'show_codegen' to inspect generated Core Erlang, 'info' for symbol details, \
+                 'show_codegen' to inspect generated Core Erlang (use class+selector for loaded classes), 'info' for symbol details, \
                  'describe' for capability discovery, 'clear' to reset bindings, \
                  'unload' to remove a module, and 'interrupt' to cancel evaluations."
                     .to_string(),

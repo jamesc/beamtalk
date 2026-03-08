@@ -2561,7 +2561,13 @@ handle_op_show_codegen_in_describe_test() ->
     Decoded = jsx:decode(Result, [return_maps]),
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"show-codegen">>, Ops)),
-    ?assertMatch(#{<<"params">> := [<<"code">>]}, maps:get(<<"show-codegen">>, Ops)).
+    ShowCodegenOp = maps:get(<<"show-codegen">>, Ops),
+    %% BT-1236: show-codegen now accepts code, class, or selector (all optional)
+    ?assertEqual([], maps:get(<<"params">>, ShowCodegenOp)),
+    Optional = maps:get(<<"optional">>, ShowCodegenOp),
+    ?assert(lists:member(<<"code">>, Optional)),
+    ?assert(lists:member(<<"class">>, Optional)),
+    ?assert(lists:member(<<"selector">>, Optional)).
 
 %% ===================================================================
 %% handle_protocol_request direct test (BT-627)
