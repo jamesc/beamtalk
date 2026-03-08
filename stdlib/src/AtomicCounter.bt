@@ -1,0 +1,121 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// AtomicCounter — named integer counter backed by ETS for lock-free increments.
+///
+/// AtomicCounter provides a shared integer counter safely incremented and
+/// decremented from multiple actors without message-passing overhead. Backed
+/// by `ets:update_counter`, which is an atomic ETS operation.
+///
+/// Each counter is identified by a Symbol name and owns its own ETS table.
+/// Counters start at 0 and support atomic increments, decrements, and reset.
+///
+/// ## Examples
+/// ```beamtalk
+/// c := AtomicCounter new: #requests
+/// c increment                    // => 1
+/// c incrementBy: 5               // => 6
+/// c value                        // => 6
+/// c reset
+/// c value                        // => 0
+/// c delete
+/// ```
+///
+/// ## Cross-Actor Use
+/// ```beamtalk
+/// // Actor A — create
+/// c := AtomicCounter new: #hits
+///
+/// // Actor B — look up by name
+/// c := AtomicCounter named: #hits
+/// c increment
+/// ```
+Object subclass: AtomicCounter
+
+  /// Create a new named counter starting at 0 (class method).
+  ///
+  /// Raises `already_exists` if a counter with this name already exists.
+  /// Raises `type_error` if the argument is not a Symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c := AtomicCounter new: #requests
+  /// ```
+  class sealed new: name :: Symbol -> AtomicCounter =>
+    (Erlang beamtalk_atomic_counter) new: name
+
+  /// Look up an existing counter by name (class method).
+  ///
+  /// Raises `not_found` if no counter with this name exists.
+  /// Raises `type_error` if the argument is not a Symbol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c := AtomicCounter named: #requests
+  /// ```
+  class sealed named: name :: Symbol -> AtomicCounter =>
+    (Erlang beamtalk_atomic_counter) named: name
+
+  /// Atomically add 1. Returns the new value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c increment    // => 1
+  /// ```
+  increment -> Integer => (Erlang beamtalk_atomic_counter) increment: self
+
+  /// Atomically add N. Returns the new value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c incrementBy: 5    // => 6
+  /// ```
+  incrementBy: n :: Integer -> Integer =>
+    (Erlang beamtalk_atomic_counter) incrementBy: self by: n
+
+  /// Atomically subtract 1. Returns the new value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c decrement    // => -1
+  /// ```
+  decrement -> Integer => (Erlang beamtalk_atomic_counter) decrement: self
+
+  /// Atomically subtract N. Returns the new value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c decrementBy: 3    // => -3
+  /// ```
+  decrementBy: n :: Integer -> Integer =>
+    (Erlang beamtalk_atomic_counter) decrementBy: self by: n
+
+  /// Read the current value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c value    // => 42
+  /// ```
+  value -> Integer => (Erlang beamtalk_atomic_counter) readValue: self
+
+  /// Reset the counter to 0. Returns nil.
+  ///
+  /// Note: reset is not atomic with respect to concurrent increment/decrement
+  /// operations. Under concurrent access, increments may be lost if they race
+  /// with a reset.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c reset
+  /// ```
+  reset -> Nil => (Erlang beamtalk_atomic_counter) reset: self
+
+  /// Destroy the backing ETS table. Returns nil.
+  ///
+  /// After calling `delete`, this AtomicCounter instance is stale.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// c delete
+  /// ```
+  delete -> Nil => (Erlang beamtalk_atomic_counter) delete: self
