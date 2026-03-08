@@ -1,0 +1,196 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Result class (BT-1254, ADR 0060).
+
+TestCase subclass: ResultTest
+
+  // =========================================================================
+  // CONSTRUCTORS AND QUERYING
+  // =========================================================================
+  testOkConstructorIsOk =>
+    r := Result ok: 42
+    self assert: r ok
+
+  testOkConstructorIsNotError =>
+    r := Result ok: 42
+    self deny: r isError
+
+  testErrorConstructorIsError =>
+    r := Result error: #not_found
+    self assert: r isError
+
+  testErrorConstructorIsNotOk =>
+    r := Result error: #not_found
+    self deny: r ok
+
+  testOkWithNilValue =>
+    r := Result ok: nil
+    self assert: r ok
+    self assert: r value equals: nil
+
+  testOkWithStringValue =>
+    r := Result ok: "hello"
+    self assert: r value equals: "hello"
+
+  // =========================================================================
+  // GUARDED ACCESSORS
+  // =========================================================================
+  testValueOnOkResult =>
+    r := Result ok: 42
+    self assert: r value equals: 42
+
+  testValueOnErrorResultRaises =>
+    self should: [(Result error: #x) value] raise: #signal
+
+  testErrorOnErrorResult =>
+    r := Result error: #not_found
+    self assert: r error equals: #not_found
+
+  testErrorOnOkResultRaises =>
+    self should: [(Result ok: 42) error] raise: #signal
+
+  // =========================================================================
+  // SAFE EXTRACTORS
+  // =========================================================================
+  testValueOrOnOkReturnsValue =>
+    self assert: ((Result ok: 42) valueOr: 0) equals: 42
+
+  testValueOrOnErrorReturnsDefault =>
+    self assert: ((Result error: #x) valueOr: 0) equals: 0
+
+  testValueOrDoOnOkReturnsValue =>
+    self assert: ((Result ok: 42) valueOrDo: [:e | -1]) equals: 42
+
+  testValueOrDoOnErrorEvaluatesBlock =>
+    self assert: ((Result error: #x) valueOrDo: [:e | -1]) equals: -1
+
+  testValueOrDoPassesErrorToBlock =>
+    result := (Result error: #my_error) valueOrDo: [:e | e printString]
+    self assert: result equals: "#my_error"
+
+  // =========================================================================
+  // UNWRAP
+  // =========================================================================
+  testUnwrapOnOkReturnsValue => self assert: (Result ok: 99) unwrap equals: 99
+
+  testUnwrapOnErrorWithRawSymbolRaises =>
+    self should: [(Result error: #oops) unwrap] raise: #signal
+
+  testUnwrapOnErrorWithExceptionReRaises =>
+    // Result tryDo: captures an exception — unwrap re-raises it
+    r := Result tryDo: [Exception new signal: "test error"]
+    self should: [r unwrap] raise: #signal
+
+  // =========================================================================
+  // TRANSFORMERS — map:
+  // =========================================================================
+  testMapOnOkTransformsValue =>
+    r := (Result ok: 42) map: [:v | v + 1]
+    self assert: r ok
+    self assert: r value equals: 43
+
+  testMapOnErrorPropagatesError =>
+    r := (Result error: #x) map: [:v | v + 1]
+    self assert: r isError
+    self assert: r error equals: #x
+
+  testMapChain =>
+    r := (Result ok: 10) map: [:v | v * 2]
+    r2 := r map: [:v | v + 5]
+    self assert: r2 value equals: 25
+
+  // =========================================================================
+  // TRANSFORMERS — andThen:
+  // =========================================================================
+  testAndThenOnOkChainsBlock =>
+    r := (Result ok: 42) andThen: [:v | Result ok: v * 2]
+    self assert: r ok
+    self assert: r value equals: 84
+
+  testAndThenOnErrorPropagatesError =>
+    r := (Result error: #x) andThen: [:v | Result ok: v * 2]
+    self assert: r isError
+    self assert: r error equals: #x
+
+  testAndThenFlattensProperly =>
+    // The block returns a Result — andThen: does not double-wrap
+    r := (Result ok: 5) andThen: [:v | Result ok: v + 1]
+    self assert: r value equals: 6
+
+  testAndThenPropagatesInnerError =>
+    r := (Result ok: 42) andThen: [:v | Result error: #inner_error]
+    self assert: r isError
+    self assert: r error equals: #inner_error
+
+  // =========================================================================
+  // TRANSFORMERS — mapError:
+  // =========================================================================
+  testMapErrorOnErrorTransformsReason =>
+    r := (Result error: #old) mapError: [:e | #new]
+    self assert: r isError
+    self assert: r error equals: #new
+
+  testMapErrorOnOkLeavesOkUnchanged =>
+    r := (Result ok: 42) mapError: [:e | #transformed]
+    self assert: r ok
+    self assert: r value equals: 42
+
+  // =========================================================================
+  // PATTERN MATCHING — ifOk:ifError:
+  // =========================================================================
+  testIfOkIfErrorWithOkEvaluatesOkBlock =>
+    result := (Result ok: 42) ifOk: [:v | v + 1] ifError: [:e | -1]
+    self assert: result equals: 43
+
+  testIfOkIfErrorWithErrorEvaluatesErrorBlock =>
+    result := (Result error: #x) ifOk: [:v | v + 1] ifError: [:e | -1]
+    self assert: result equals: -1
+
+  testIfOkIfErrorPassesValueToOkBlock =>
+    result := (Result ok: "hello") ifOk: [:v | v ++ "!"] ifError: [:e | ""]
+    self assert: result equals: "hello!"
+
+  testIfOkIfErrorPassesReasonToErrorBlock =>
+    result := (Result error: #my_err) ifOk: [:v |
+      "ok"
+    ] ifError: [:e | e printString]
+    self assert: result equals: "#my_err"
+
+  // =========================================================================
+  // tryDo:
+  // =========================================================================
+  testTryDoWithSuccessfulBlock =>
+    r := Result tryDo: [42]
+    self assert: r ok
+    self assert: r value equals: 42
+
+  testTryDoWithExceptionReturnsError =>
+    r := Result tryDo: [Exception new signal: "boom"]
+    self assert: r isError
+
+  testTryDoErrorReasonIsException =>
+    // isKindOf: does not work for actor-based class instances (Exception);
+    // verify the error reason is non-nil (not nil) instead.
+    r := Result tryDo: [Exception new signal: "boom"]
+    self deny: r error isNil
+
+  testTryDoCanUnwrapException =>
+    r := Result tryDo: [Exception new signal: "boom"]
+    self should: [r unwrap] raise: #signal
+
+  // =========================================================================
+  // printString
+  // =========================================================================
+  testPrintStringOk =>
+    self assert: (Result ok: 42) printString equals: "Result ok: 42"
+
+  testPrintStringError =>
+    self assert: (Result error: #not_found) printString equals: "Result error: #not_found"
+
+  testPrintStringOkString =>
+    // "hello" printString produces "hello" (with embedded quotes)
+    // In Beamtalk triple-quoted form, that becomes: """hello"""
+    // So (Result ok: "hello") printString = "Result ok: " ++ """hello"""
+    expected := "Result ok: " ++ """hello"""
+    self assert: (Result ok: "hello") printString equals: expected
