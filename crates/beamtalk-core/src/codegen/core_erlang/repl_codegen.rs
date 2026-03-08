@@ -39,6 +39,17 @@ impl CoreErlangGenerator {
         &mut self,
         expression: &Expression,
     ) -> Result<Document<'static>> {
+        // Destructuring assignments are not yet supported in the REPL.
+        // They work in compiled class methods and test-eval modules, but the REPL's
+        // state-map threading model requires dedicated codegen (BT-1264).
+        if matches!(expression, Expression::DestructureAssignment { .. }) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "Destructuring assignment in REPL (use in class methods instead)"
+                    .to_string(),
+                location: format!("{:?}", expression.span()),
+            });
+        }
+
         let previous_is_repl_mode = self.is_repl_mode;
         self.context = CodeGenContext::Repl;
         self.is_repl_mode = true;
@@ -292,17 +303,6 @@ impl CoreErlangGenerator {
 
     /// Common eval module body shared by REPL and test codegen.
     fn generate_eval_module_body(&mut self, expression: &Expression) -> Result<Document<'static>> {
-        // Destructuring assignments are not yet supported in the REPL.
-        // They work in compiled class methods and blocks, but the REPL's
-        // state-map threading model requires dedicated codegen.
-        if matches!(expression, Expression::DestructureAssignment { .. }) {
-            return Err(CodeGenError::UnsupportedFeature {
-                feature: "Destructuring assignment in REPL (use in class methods instead)"
-                    .to_string(),
-                location: format!("{:?}", expression.span()),
-            });
-        }
-
         // Register Bindings in scope for variable lookups
         self.push_scope();
         self.bind_var("__bindings__", "Bindings");
