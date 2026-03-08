@@ -134,9 +134,45 @@ handle(<<"reload">>, Params, Msg, SessionPid) ->
             PathStr = binary_to_list(Path),
             do_reload(PathStr, undefined, Msg, SessionPid)
     end;
+handle(<<"unload">>, Params, Msg, SessionPid) ->
+    %% BT-1239: Restore unload op — fully removes class from system (actors, gen_server,
+    %% BEAM module, workspace_meta, session tracker).
+    ClassNameBin = maps:get(<<"module">>, Params, <<>>),
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
+        {error, badarg} ->
+            Err0 = beamtalk_error:new(class_not_found, 'REPL'),
+            Err1 = beamtalk_error:with_message(
+                Err0,
+                iolist_to_binary([<<"Class not found: '">>, ClassNameBin, <<"'">>])
+            ),
+            beamtalk_repl_protocol:encode_error(
+                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+            );
+        {ok, ClassName} ->
+            case beamtalk_runtime_api:remove_class_from_system(ClassName) of
+                {ok, ModuleName} ->
+                    %% Clean up workspace-level and session-level tracking.
+                    beamtalk_workspace_meta:unregister_module(ModuleName),
+                    beamtalk_repl_shell:remove_from_tracker(SessionPid, ModuleName),
+                    beamtalk_repl_protocol:encode_result(
+                        iolist_to_binary([
+                            <<"Class '">>, ClassNameBin, <<"' removed from system">>
+                        ]),
+                        Msg,
+                        fun beamtalk_repl_json:term_to_json/1
+                    );
+                {error, Err} ->
+                    beamtalk_repl_protocol:encode_error(
+                        Err, Msg, fun beamtalk_repl_json:format_error_message/1
+                    )
+            end
+    end;
 handle(<<"modules">>, _Params, Msg, SessionPid) ->
     {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(SessionPid),
-    TrackedModules = beamtalk_repl_modules:list_modules(Tracker),
+    %% BT-1239: Filter out stale tracker entries for modules purged via removeFromSystem.
+    %% code:is_loaded/1 returns false for modules that have been code:delete'd.
+    AllTrackedModules = beamtalk_repl_modules:list_modules(Tracker),
+    TrackedModules = lists:filter(fun({N, _}) -> code:is_loaded(N) =/= false end, AllTrackedModules),
     RegistryPid = whereis(beamtalk_actor_registry),
     %% Build a module-atom → Beamtalk-class-name map so the UI shows class names,
     %% not BEAM module atoms. Without this, names like 'beamtalk_counter_v1_abc' appear
@@ -165,22 +201,29 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
                             true ->
                                 false;
                             false ->
-                                ClassName = maps:get(
-                                    ModName, ModToClass, atom_to_binary(ModName, utf8)
-                                ),
-                                ResolvedPath =
-                                    case SourcePath of
-                                        undefined -> resolve_source_path(ModName);
-                                        _ -> SourcePath
-                                    end,
-                                Info = #{
-                                    name => ClassName,
-                                    source_file => ResolvedPath,
-                                    actor_count => 0,
-                                    load_time => 0,
-                                    time_ago => "startup"
-                                },
-                                {true, {ModName, Info}}
+                                %% BT-1239: Skip stale workspace_meta entries for modules
+                                %% that have been purged (e.g. via removeFromSystem).
+                                case code:is_loaded(ModName) of
+                                    false ->
+                                        false;
+                                    _ ->
+                                        ClassName = maps:get(
+                                            ModName, ModToClass, atom_to_binary(ModName, utf8)
+                                        ),
+                                        ResolvedPath =
+                                            case SourcePath of
+                                                undefined -> resolve_source_path(ModName);
+                                                _ -> SourcePath
+                                            end,
+                                        Info = #{
+                                            name => ClassName,
+                                            source_file => ResolvedPath,
+                                            actor_count => 0,
+                                            load_time => 0,
+                                            time_ago => "startup"
+                                        },
+                                        {true, {ModName, Info}}
+                                end
                         end
                     end,
                     WsMods

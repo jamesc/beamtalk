@@ -79,6 +79,8 @@
     classDocForMethod/2,
     %% BT-785: Class removal
     classRemoveFromSystem/1,
+    %% BT-1239: Programmatic class removal by name (for workspace/MCP unload)
+    classRemoveFromSystemByName/1,
     %% BT-845: ADR 0040 Phase 2 — class-based reload
     classSourceFile/1,
     classReload/1
@@ -431,7 +433,20 @@ classDocForMethod(Self, Selector) ->
 %%
 %% BT-785: Implements `removeFromSystem` for class objects (Smalltalk convention).
 %%
+%% Delegates to classRemoveFromSystemByName/1 after extracting the class name.
+-spec classRemoveFromSystem(#beamtalk_object{}) -> 'nil'.
+classRemoveFromSystem(Self) ->
+    ClassPid = erlang:element(4, Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    classRemoveFromSystemByName(ClassName).
+
+%% @doc Remove a class from the system by name, performing full cleanup.
+%%
+%% BT-1239: Programmatic variant of removeFromSystem — used by the MCP/REPL
+%% unload op so workspace code can trigger removal without a Beamtalk object.
+%%
 %% Safety checks (raises errors for):
+%%   - Class not found in registry
 %%   - Stdlib classes (module name starts with `bt@stdlib@`)
 %%   - Classes with direct subclasses (must remove children first)
 %%
@@ -439,58 +454,70 @@ classDocForMethod(Self, Selector) ->
 %%   1. Stop all live actors of this class (via beamtalk_actor_registry)
 %%   2. Stop the class gen_server (terminate/2 removes ETS entry and pg group)
 %%   3. Purge the BEAM module (code:soft_purge + code:delete)
--spec classRemoveFromSystem(#beamtalk_object{}) -> 'nil'.
-classRemoveFromSystem(Self) ->
-    ClassPid = erlang:element(4, Self),
-    ClassName = gen_server:call(ClassPid, class_name),
-    Module = gen_server:call(ClassPid, module_name),
-    %% Safety: refuse to remove stdlib classes
-    case is_stdlib_module_name(Module) of
-        true ->
-            Error0 = beamtalk_error:new(runtime_error, ClassName),
+-spec classRemoveFromSystemByName(atom()) -> 'nil'.
+classRemoveFromSystemByName(ClassName) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            Error0 = beamtalk_error:new(class_not_found, ClassName),
             Error1 = beamtalk_error:with_message(
                 Error0,
                 iolist_to_binary([
-                    <<"Cannot remove stdlib class '">>,
+                    <<"Class not found: '">>,
                     atom_to_binary(ClassName, utf8),
                     <<"'">>
                 ])
             ),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
-                <<"Stdlib classes are protected and cannot be removed.">>
-            ),
-            beamtalk_error:raise(Error2);
-        false ->
-            %% Safety: refuse if class has direct subclasses
-            case beamtalk_class_registry:direct_subclasses(ClassName) of
-                [] ->
-                    %% Stop live actors of this class
-                    stop_class_actors(ClassName),
-                    %% Stop the class gen_server
-                    %% (terminate/2 in beamtalk_object_class removes ETS entry and pg group)
-                    gen_server:stop(ClassPid),
-                    %% Purge the BEAM module
-                    _ = code:soft_purge(Module),
-                    _ = code:delete(Module),
-                    nil;
-                Subclasses ->
-                    NameBins = [atom_to_binary(S, utf8) || S <- Subclasses],
-                    NamesStr = iolist_to_binary(lists:join(<<", ">>, NameBins)),
+            beamtalk_error:raise(Error1);
+        ClassPid ->
+            Module = gen_server:call(ClassPid, module_name),
+            %% Safety: refuse to remove stdlib classes
+            case is_stdlib_module_name(Module) of
+                true ->
                     Error0 = beamtalk_error:new(runtime_error, ClassName),
                     Error1 = beamtalk_error:with_message(
                         Error0,
                         iolist_to_binary([
-                            <<"Cannot remove class '">>,
+                            <<"Cannot remove stdlib class '">>,
                             atom_to_binary(ClassName, utf8),
-                            <<"' — it has subclasses">>
+                            <<"'">>
                         ])
                     ),
                     Error2 = beamtalk_error:with_hint(
                         Error1,
-                        iolist_to_binary([<<"Remove subclasses first: ">>, NamesStr])
+                        <<"Stdlib classes are protected and cannot be removed.">>
                     ),
-                    beamtalk_error:raise(Error2)
+                    beamtalk_error:raise(Error2);
+                false ->
+                    %% Safety: refuse if class has direct subclasses
+                    case beamtalk_class_registry:direct_subclasses(ClassName) of
+                        [] ->
+                            %% Stop live actors of this class
+                            stop_class_actors(ClassName),
+                            %% Stop the class gen_server
+                            %% (terminate/2 in beamtalk_object_class removes ETS entry and pg group)
+                            gen_server:stop(ClassPid),
+                            %% Purge the BEAM module
+                            _ = code:soft_purge(Module),
+                            _ = code:delete(Module),
+                            nil;
+                        Subclasses ->
+                            NameBins = [atom_to_binary(S, utf8) || S <- Subclasses],
+                            NamesStr = iolist_to_binary(lists:join(<<", ">>, NameBins)),
+                            Error0 = beamtalk_error:new(runtime_error, ClassName),
+                            Error1 = beamtalk_error:with_message(
+                                Error0,
+                                iolist_to_binary([
+                                    <<"Cannot remove class '">>,
+                                    atom_to_binary(ClassName, utf8),
+                                    <<"' — it has subclasses">>
+                                ])
+                            ),
+                            Error2 = beamtalk_error:with_hint(
+                                Error1,
+                                iolist_to_binary([<<"Remove subclasses first: ">>, NamesStr])
+                            ),
+                            beamtalk_error:raise(Error2)
+                    end
             end
     end.
 

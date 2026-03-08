@@ -53,6 +53,13 @@
 ]).
 
 %%% ===================================================================
+%%% Class Removal (BT-1239)
+%%% ===================================================================
+-export([
+    remove_class_from_system/1
+]).
+
+%%% ===================================================================
 %%% Class Introspection (docs, sealing, abstractness)
 %%% ===================================================================
 -export([
@@ -170,6 +177,30 @@ get_method_return_type(ClassName, Selector) ->
 -spec get_class_method_return_type(atom(), atom()) -> {ok, atom()} | {error, not_found}.
 get_class_method_return_type(ClassName, Selector) ->
     beamtalk_class_registry:get_class_method_return_type(ClassName, Selector).
+
+%%% ====================================================================
+%%% Class Removal (BT-1239)
+%%% ====================================================================
+
+%% @doc Remove a class from the system by name, with full cleanup.
+%%
+%% Returns the BEAM module atom of the removed class on success (so the caller
+%% can update its own tracking state), or {error, Reason} if the removal fails
+%% (class not found, stdlib class, has subclasses, etc.).
+-spec remove_class_from_system(atom()) -> {ok, module()} | {error, #beamtalk_error{}}.
+remove_class_from_system(ClassName) ->
+    %% Look up the module name before removal (gen_server will be gone afterwards).
+    ModuleName =
+        case beamtalk_class_registry:whereis_class(ClassName) of
+            undefined -> undefined;
+            ClassPid -> beamtalk_object_class:module_name(ClassPid)
+        end,
+    try
+        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName),
+        {ok, ModuleName}
+    catch
+        throw:{beamtalk_error, Error} -> {error, Error}
+    end.
 
 %%% ====================================================================
 %%% Class Object Delegators

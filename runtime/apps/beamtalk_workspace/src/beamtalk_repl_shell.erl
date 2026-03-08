@@ -32,6 +32,7 @@
     load_file/2,
     load_source/2,
     unload_module/2,
+    remove_from_tracker/2,
     get_module_tracker/1,
     show_codegen/2
 ]).
@@ -111,6 +112,14 @@ get_module_tracker(SessionPid) ->
 -spec unload_module(pid(), atom()) -> ok | {error, #beamtalk_error{}}.
 unload_module(SessionPid, Module) ->
     gen_server:call(SessionPid, {unload_module, Module}, 5000).
+
+%% @doc Remove a module from the session tracker only (no BEAM purge).
+%%
+%% BT-1239: Used when class removal has already purged the BEAM module
+%% (e.g., via removeFromSystem), so we only need to clean up the tracker.
+-spec remove_from_tracker(pid(), atom()) -> ok.
+remove_from_tracker(SessionPid, Module) ->
+    gen_server:call(SessionPid, {remove_from_tracker, Module}, 5000).
 
 %%% gen_server callbacks
 
@@ -227,6 +236,12 @@ handle_call({unload_module, Module}, _From, {SessionId, State, Worker}) ->
             ),
             {reply, {error, Err}, {SessionId, State, Worker}}
     end;
+handle_call({remove_from_tracker, Module}, _From, {SessionId, State, Worker}) ->
+    %% BT-1239: Remove module from tracker only (BEAM purge already done by caller).
+    Tracker = beamtalk_repl_state:get_module_tracker(State),
+    NewTracker = beamtalk_repl_modules:remove_module(Module, Tracker),
+    NewState = beamtalk_repl_state:set_module_tracker(NewTracker, State),
+    {reply, ok, {SessionId, NewState, Worker}};
 handle_call({show_codegen, _Expression}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
     %% Reject if eval is in progress
     Err0 = beamtalk_error:new(eval_busy, 'REPL'),

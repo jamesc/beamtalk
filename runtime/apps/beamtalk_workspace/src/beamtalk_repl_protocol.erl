@@ -75,6 +75,7 @@
     | {list_actors}
     | {kill_actor, string()}
     | {list_modules}
+    | {unload, binary()}
     | {get_docs, binary(), binary() | undefined}
     | {health}
     | {shutdown, string()}
@@ -127,6 +128,7 @@ parse_request(Data) when is_binary(Data) ->
     | {load_source, binary()}
     | {list_actors}
     | {list_modules}
+    | {unload, binary()}
     | {kill_actor, string()}
     | {get_docs, binary(), binary() | undefined}
     | {health}
@@ -161,6 +163,10 @@ op_to_request(<<"health">>, _Map) ->
 op_to_request(<<"shutdown">>, Map) ->
     Cookie = maps:get(<<"cookie">>, Map, <<>>),
     {shutdown, binary_to_list(Cookie)};
+op_to_request(<<"unload">>, Map) ->
+    %% BT-1239: Restored — was blocked in BT-785, now fully removes class from system.
+    Module = maps:get(<<"module">>, Map, <<>>),
+    {unload, Module};
 op_to_request(Op, _Map) ->
     {error, {unknown_op, Op}}.
 

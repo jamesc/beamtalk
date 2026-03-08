@@ -97,9 +97,9 @@ parse_request_op_kill_test() ->
     ?assertEqual({kill_actor, "<0.123.0>"}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_op_unload_test() ->
-    %% BT-785: :unload removed — now returns unknown_op error
+    %% BT-1239: unload op restored — parses module name for full class removal.
     Request = <<"{\"op\": \"unload\", \"module\": \"Counter\"}">>,
-    ?assertMatch({error, {unknown_op, <<"unload">>}}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch({unload, <<"Counter">>}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_op_unknown_test() ->
     Request = <<"{\"op\": \"foobar\"}">>,
@@ -279,9 +279,9 @@ parse_request_op_load_file_missing_path_test() ->
     ?assertEqual({load_file, ""}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_op_unload_missing_module_test() ->
-    %% BT-785: :unload removed — now returns unknown_op error
+    %% BT-1239: unload op restored — missing module defaults to empty binary.
     Request = <<"{\"op\": \"unload\"}">>,
-    ?assertMatch({error, {unknown_op, <<"unload">>}}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch({unload, <<>>}, beamtalk_repl_server:parse_request(Request)).
 
 parse_request_op_kill_with_pid_field_test() ->
     Request = <<"{\"op\": \"kill\", \"pid\": \"<0.99.0>\"}">>,
@@ -702,7 +702,8 @@ tcp_unload_empty_test(Port) ->
     ?assertMatch(#{<<"id">> := <<"t12">>}, Resp),
     ?assert(maps:is_key(<<"error">>, Resp)).
 
-%% Test: unload module that has active processes returns in-use error
+%% Test: unload a raw BEAM module (not a Beamtalk class) returns class_not_found error.
+%% BT-1239: The unload op requires the name to be a registered Beamtalk class.
 tcp_unload_in_use_test(Port) ->
     DummyMod = 'bt519_tcp_in_use',
     Forms = [
@@ -727,10 +728,8 @@ tcp_unload_in_use_test(Port) ->
         }),
         Resp = tcp_send_op(Port, Msg),
         ?assertMatch(#{<<"id">> := <<"t12b">>}, Resp),
-        ?assert(maps:is_key(<<"error">>, Resp)),
-        ErrorMsg = maps:get(<<"error">>, Resp),
-        %% BT-785: :unload was removed; now returns a deprecation message.
-        ?assert(binary:match(ErrorMsg, <<"removeFromSystem">>) =/= nomatch)
+        %% Raw BEAM modules are not Beamtalk classes → error (class not found).
+        ?assert(maps:is_key(<<"error">>, Resp))
     after
         LoopPid ! stop,
         timer:sleep(50),

@@ -359,6 +359,58 @@ register_module_when_not_started_test() ->
     %% Should not crash
     ?assertEqual(ok, beamtalk_workspace_meta:register_module(some_module)).
 
+%% BT-1239: unregister_module removes a module from the loaded_modules map.
+unregister_module_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        OldPid ->
+            gen_server:stop(OldPid),
+            timer:sleep(10)
+    end,
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+
+    ModuleName = list_to_atom(
+        "test_unrg_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ok = beamtalk_workspace_meta:register_module(ModuleName),
+    timer:sleep(50),
+    {ok, Modules1} = beamtalk_workspace_meta:loaded_modules(),
+    ?assert(lists:keymember(ModuleName, 1, Modules1)),
+
+    ok = beamtalk_workspace_meta:unregister_module(ModuleName),
+    timer:sleep(50),
+    {ok, Modules2} = beamtalk_workspace_meta:loaded_modules(),
+    ?assertNot(lists:keymember(ModuleName, 1, Modules2)),
+
+    gen_server:stop(Pid).
+
+unregister_module_nonexistent_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        OldPid ->
+            gen_server:stop(OldPid),
+            timer:sleep(10)
+    end,
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    %% Unregistering a module that was never registered should not crash.
+    ?assertEqual(ok, beamtalk_workspace_meta:unregister_module(never_registered_xyz)),
+    timer:sleep(50),
+
+    gen_server:stop(Pid).
+
+unregister_module_when_not_started_test() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        Pid ->
+            gen_server:stop(Pid),
+            timer:sleep(10)
+    end,
+    %% Should not crash when server is not running.
+    ?assertEqual(ok, beamtalk_workspace_meta:unregister_module(some_module)).
+
 %%% Persistence round-trip tests
 
 persist_and_restore_modules_test() ->
