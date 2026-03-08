@@ -133,6 +133,24 @@ from_tagged_tuple_error_already_wrapped_test() ->
     ?assertEqual(AlreadyWrapped, ErrReason).
 
 %%% ============================================================================
+%%% tryDo: — type guard (non-fun argument)
+%%% ============================================================================
+
+try_do_non_fun_raises_type_error_test() ->
+    %% Passing a non-block (e.g. an integer) raises type_error rather than badfun crash.
+    try
+        beamtalk_result:'tryDo:'(42)
+    catch
+        error:Caught ->
+            ?assertMatch(
+                #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}}, Caught
+            ),
+            #{error := Inner} = Caught,
+            ?assertEqual('Result', Inner#beamtalk_error.class),
+            ?assertEqual('tryDo:', Inner#beamtalk_error.selector)
+    end.
+
+%%% ============================================================================
 %%% class_tryDo:/3 — success path
 %%% ============================================================================
 

@@ -136,7 +136,7 @@ from_tagged_tuple({error, Reason}) ->
 %% Result tryDo: [1 / 0]                           // => Result error: <RuntimeError>
 %% ```
 -spec 'tryDo:'(function()) -> map().
-'tryDo:'(Block) ->
+'tryDo:'(Block) when is_function(Block, 0) ->
     try Block() of
         Value ->
             from_tagged_tuple({ok, Value})
@@ -151,7 +151,20 @@ from_tagged_tuple({error, Reason}) ->
         Class:Reason:Stack ->
             ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stack),
             from_tagged_tuple({error, ExObj})
-    end.
+    end;
+'tryDo:'(Block) ->
+    %% Block is not a zero-arity fun — raise a structured type error rather than crashing
+    %% with a bare `badfun` exception.
+    beamtalk_error:raise(#beamtalk_error{
+        kind = type_error,
+        class = 'Result',
+        selector = 'tryDo:',
+        message = iolist_to_binary(
+            io_lib:format("tryDo: expected a zero-arity block, got: ~p", [Block])
+        ),
+        hint = <<"Pass a Beamtalk block literal, e.g. Result tryDo: [expr]">>,
+        details = #{got => Block}
+    }).
 
 %% @doc Implements the error branch of `Result unwrap`.
 %%
@@ -172,8 +185,10 @@ from_tagged_tuple({error, Reason}) ->
 %%   % raises: "unwrap called on Result error: file_not_found"
 %% ```
 -spec 'unwrapError:'(term(), term()) -> no_return().
-'unwrapError:'(_Self, #{'$beamtalk_class' := _, error := Error}) ->
-    %% Already-wrapped Exception — re-raise preserving class, message, and hints
+'unwrapError:'(_Self, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Error}) ->
+    %% Already-wrapped Exception — re-raise preserving class, message, and hints.
+    %% Pattern requires error field to be a #beamtalk_error{} to avoid crashing on
+    %% malformed maps that happen to have an 'error' key with a non-record value.
     beamtalk_error:raise(Error);
 'unwrapError:'(_Self, ErrReason) ->
     %% Raw value (symbol, atom, etc.) — signal a generic descriptive error
