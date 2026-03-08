@@ -32,6 +32,12 @@ serde_json.workspace = true
 # CLI
 clap.workspace = true
 
+# Core compiler for lint passes in the lint MCP tool
+beamtalk-core.workspace = true
+
+# UTF-8 path handling for lint file collection
+camino.workspace = true
+
 # Shared workspace utilities (ID generation, port/cookie file I/O)
 beamtalk-workspace.workspace = true
 
