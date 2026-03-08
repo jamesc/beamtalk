@@ -168,12 +168,22 @@ pub fn apply_expect_directives(module: &Module, diagnostics: &mut Vec<Diagnostic
 }
 
 /// Returns true if the `@expect` category matches a diagnostic category.
+///
+/// `@expect type` matches both type-mismatch warnings (`DiagnosticCategory::Type`)
+/// and method-not-found hints (`DiagnosticCategory::Dnu`).  A common motivation
+/// for the latter is type-erasure boundaries — e.g. `Result.unwrap` returns
+/// `Object`, so any method call on the result produces a DNU hint — but the
+/// suppression applies unconditionally whenever `@expect type` is written.
 fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCategory>) -> bool {
     expect_cat == ExpectCategory::All
         || matches!(
             (expect_cat, diag_cat),
-            (ExpectCategory::Dnu, Some(DiagnosticCategory::Dnu))
-                | (ExpectCategory::Type, Some(DiagnosticCategory::Type))
+            // BT-1273: @expect type also covers method-not-found (Dnu) hints so that
+            // callers can use a single annotation for all type-related suppressions.
+            (
+                ExpectCategory::Dnu | ExpectCategory::Type,
+                Some(DiagnosticCategory::Dnu)
+            ) | (ExpectCategory::Type, Some(DiagnosticCategory::Type))
                 | (ExpectCategory::Unused, Some(DiagnosticCategory::Unused))
         )
 }
@@ -733,6 +743,50 @@ mod tests {
         assert!(
             !dnu,
             "DNU hint in method should be suppressed, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-1273: @expect type covers method-not-found at type-erasure boundaries ──
+
+    #[test]
+    fn expect_type_suppresses_dnu_hint() {
+        // BT-1273: @expect type suppresses DNU hints in addition to type-mismatch warnings.
+        let source = "@expect type\n42 unknownMethod";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let dnu = diagnostics
+            .iter()
+            .any(|d| d.message.contains("does not understand"));
+        assert!(
+            !dnu,
+            "@expect type should suppress DNU hint, got: {diagnostics:?}"
+        );
+        // And no stale error either
+        let stale = diagnostics
+            .iter()
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            !stale,
+            "@expect type must not be stale when DNU hint is present, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn expect_type_stale_when_neither_type_nor_dnu() {
+        // BT-1273: @expect type is still stale when there is no type or DNU diagnostic.
+        let source = "@expect type\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let stale = diagnostics
+            .iter()
+            .any(|d| d.message.contains("stale @expect"));
+        assert!(
+            stale,
+            "@expect type on `42` (no diagnostic) must emit stale error, got: {diagnostics:?}"
         );
     }
 }
