@@ -1104,6 +1104,7 @@ Core classes implemented and tested:
 | **Set** | Unordered unique elements |
 | **Stream** | Lazy, closure-based sequences ([ADR 0021](ADR/0021-streams-and-io-design.md)) |
 | **Nil** | Null object pattern |
+| **Result** | Typed success/error value for expected failures ([ADR 0060](ADR/0060-result-type-hybrid-error-handling.md)) |
 
 For detailed API documentation, see [API Reference](https://jamesc.github.io/beamtalk/apidocs/).
 

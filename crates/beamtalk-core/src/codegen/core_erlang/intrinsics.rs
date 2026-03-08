@@ -876,6 +876,11 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
+        // BT-1254: `error:` on a ClassReference is a class method call (e.g. `Result error: reason`),
+        // not the Object#error: error-signaling intrinsic. Skip so class method dispatch handles it.
+        if matches!(receiver, Expression::ClassReference { .. }) {
+            return Ok(None);
+        }
         match selector {
             MessageSelector::Keyword(parts) => {
                 let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
