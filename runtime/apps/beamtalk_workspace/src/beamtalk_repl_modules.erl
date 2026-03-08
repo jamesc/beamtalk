@@ -19,7 +19,8 @@
     module_exists/2,
     get_actor_count/3,
     format_module_info/2,
-    get_source_file/1
+    get_source_file/1,
+    resolve_source_path/1
 ]).
 
 -ifdef(TEST).

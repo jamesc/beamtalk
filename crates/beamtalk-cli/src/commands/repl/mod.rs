@@ -784,13 +784,18 @@ pub(crate) fn repl_loop(
                                 continue;
                             }
 
-                            // Parse "ClassName" or "ClassName selector"
-                            let (class_name, selector) = match args.split_once(' ') {
-                                Some((cls, sel)) => (cls.trim(), Some(sel.trim())),
-                                None => (args, None),
+                            // Parse "ClassName", "ClassName selector",
+                            // "ClassName class", or "ClassName class selector"
+                            let tokens: Vec<&str> = args.split_whitespace().collect();
+                            let (class_name, class_side, selector) = match tokens.as_slice() {
+                                [cls] => (*cls, false, None),
+                                [cls, sel] if *sel == "class" => (*cls, true, None),
+                                [cls, mid, sel, ..] if *mid == "class" => (*cls, true, Some(*sel)),
+                                [cls, sel, ..] => (*cls, false, Some(*sel)),
+                                _ => (args, false, None),
                             };
 
-                            match client.get_docs(class_name, selector) {
+                            match client.get_docs(class_name, class_side, selector) {
                                 Ok(response) => {
                                     if response.is_error() {
                                         if let Some(msg) = response.error_message() {

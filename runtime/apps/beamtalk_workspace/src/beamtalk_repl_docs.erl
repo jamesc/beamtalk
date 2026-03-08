@@ -15,7 +15,9 @@
 
 -export([
     format_class_docs/1,
-    format_method_doc/2
+    format_class_docs_class_side/1,
+    format_method_doc/2,
+    format_method_doc_class_side/2
 ]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -33,7 +35,9 @@
     format_method_output/4,
     format_metaclass_docs/0,
     format_metaclass_method_doc/1,
-    metaclass_method_doc/1
+    metaclass_method_doc/1,
+    format_selector_summary/2,
+    format_class_side_output/4
 ]).
 -endif.
 
@@ -122,48 +126,13 @@ format_method_doc(ClassName, SelectorBin) ->
                     {error, {method_not_found, ClassName, SelectorBin}};
                 {ok, SelectorAtom} ->
                     try
-                        %% Use >> to walk hierarchy and get CompiledMethod
-                        case beamtalk_method_resolver:resolve(ClassPid, SelectorAtom) of
-                            nil ->
-                                %% BT-990: Try class-side method before giving up
-                                case
-                                    gen_server:call(
-                                        ClassPid,
-                                        {class_method, SelectorAtom},
-                                        5000
-                                    )
-                                of
-                                    nil ->
-                                        {error, {method_not_found, ClassName, SelectorBin}};
-                                    ClassMethodObj when is_map(ClassMethodObj) ->
-                                        DefClass = find_defining_class_method(
-                                            ClassPid, SelectorAtom
-                                        ),
-                                        DocInfo = method_doc_info(
-                                            ClassMethodObj, SelectorAtom
-                                        ),
-                                        Output = format_method_output(
-                                            ClassName,
-                                            SelectorBin,
-                                            DefClass,
-                                            DocInfo
-                                        ),
-                                        {ok, Output}
-                                end;
-                            MethodObj when is_map(MethodObj) ->
-                                %% Find which class defines this method
-                                DefiningClass = find_defining_class(
-                                    ClassPid, SelectorAtom
-                                ),
-                                %% Extract doc, signature, and sealed from CompiledMethod
+                        case resolve_method_obj(ClassPid, SelectorAtom) of
+                            {ok, MethodObj, DefClass} ->
                                 DocInfo = method_doc_info(MethodObj, SelectorAtom),
-                                Output = format_method_output(
-                                    ClassName,
-                                    SelectorBin,
-                                    DefiningClass,
-                                    DocInfo
-                                ),
-                                {ok, Output}
+                                {ok,
+                                    format_method_output(ClassName, SelectorBin, DefClass, DocInfo)};
+                            not_found ->
+                                {error, {method_not_found, ClassName, SelectorBin}}
                         end
                     catch
                         exit:{timeout, _} ->
@@ -174,7 +143,131 @@ format_method_doc(ClassName, SelectorBin) ->
             end
     end.
 
+%% @doc Format documentation for a specific method on a class object (class-side).
+%% Uses the class-object lookup path (class methods + class-protocol fallthrough).
+%% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+-spec format_method_doc_class_side(atom(), binary()) -> {ok, binary()} | {error, term()}.
+format_method_doc_class_side('Metaclass', SelectorBin) ->
+    format_metaclass_method_doc(SelectorBin);
+format_method_doc_class_side(ClassName, SelectorBin) ->
+    case beamtalk_runtime_api:whereis_class(ClassName) of
+        undefined ->
+            {error, {class_not_found, ClassName}};
+        ClassPid ->
+            case safe_to_existing_atom(SelectorBin) of
+                {error, badarg} ->
+                    {error, {method_not_found, ClassName, SelectorBin}};
+                {ok, SelectorAtom} ->
+                    try
+                        case resolve_class_side_method_obj(ClassPid, SelectorAtom) of
+                            {ok, MethodObj, DefClass} ->
+                                DocInfo = method_doc_info(MethodObj, SelectorAtom),
+                                {ok,
+                                    format_method_output(
+                                        ClassName, SelectorBin, DefClass, DocInfo
+                                    )};
+                            not_found ->
+                                {error, {method_not_found, ClassName, SelectorBin}}
+                        end
+                    catch
+                        exit:{timeout, _} ->
+                            {error, {class_not_found, ClassName}};
+                        exit:{noproc, _} ->
+                            {error, {class_not_found, ClassName}}
+                    end
+            end
+    end.
+
+%% @doc Format documentation for the class-object side of a class (`:h ClassName class`).
+%% Shows class methods and class-protocol methods separately.
+%% Returns `{ok, FormattedBinary}` or `{error, Reason}`.
+-spec format_class_docs_class_side(atom()) -> {ok, binary()} | {error, term()}.
+format_class_docs_class_side('Metaclass') ->
+    {ok, format_metaclass_docs()};
+format_class_docs_class_side(ClassName) ->
+    case beamtalk_runtime_api:whereis_class(ClassName) of
+        undefined ->
+            {error, {class_not_found, ClassName}};
+        ClassPid ->
+            try
+                %% User-defined class methods walked up the superclass chain
+                FlatCM = collect_flattened_class_methods(ClassName, ClassPid),
+                {OwnCM, InhCM} = maps:fold(
+                    fun(Sel, DefClass, {OwnAcc, InhAcc}) ->
+                        case DefClass of
+                            ClassName -> {[Sel | OwnAcc], InhAcc};
+                            _ -> {OwnAcc, [{Sel, DefClass} | InhAcc]}
+                        end
+                    end,
+                    {[], []},
+                    FlatCM
+                ),
+                OwnCMSorted = lists:sort(OwnCM),
+                InhCMGrouped = group_by_class(lists:sort(InhCM)),
+
+                %% Class-protocol methods (Class→Behaviour→Object instance methods)
+                ProtoGrouped =
+                    case beamtalk_runtime_api:whereis_class('Class') of
+                        undefined ->
+                            [];
+                        ClassClassPid ->
+                            Proto = collect_flattened_methods('Class', ClassClassPid),
+                            group_by_class(
+                                lists:sort([{Sel, DC} || {Sel, {DC, _}} <- maps:to_list(Proto)])
+                            )
+                    end,
+
+                {ok, format_class_side_output(ClassName, OwnCMSorted, InhCMGrouped, ProtoGrouped)}
+            catch
+                exit:{timeout, _} -> {error, {class_not_found, ClassName}};
+                exit:{noproc, _} -> {error, {class_not_found, ClassName}}
+            end
+    end.
+
 %%% Internal functions
+
+%% @doc Try instance-side and class-side lookup strategies for a method:
+%%   1. Instance-side resolution  (42 foo — instance method chain)
+%%   2. Class-side lookup         (explicitly defined class methods, walked up hierarchy)
+%%
+%% Class-protocol fallthrough (Class→Behaviour→Object) is intentionally excluded:
+%% methods like `allMethods`, `name`, `reload` are class-object methods and should
+%% only appear under `:h ClassName class selector`, not `:h ClassName selector`.
+-spec resolve_method_obj(pid(), atom()) -> {ok, map(), atom()} | not_found.
+resolve_method_obj(ClassPid, Selector) ->
+    case beamtalk_method_resolver:resolve(ClassPid, Selector) of
+        MethodObj when is_map(MethodObj) ->
+            {ok, MethodObj, find_defining_class(ClassPid, Selector)};
+        nil ->
+            case gen_server:call(ClassPid, {class_method, Selector}, 5000) of
+                ClassMethodObj when is_map(ClassMethodObj) ->
+                    {ok, ClassMethodObj, find_defining_class_method(ClassPid, Selector)};
+                nil ->
+                    not_found
+            end
+    end.
+
+%% @doc Try class-side lookup strategies for a class object (Integer foo, not 42 foo):
+%%   1. Class-side methods (explicitly declared class methods, walked up hierarchy)
+%%   2. Class-protocol fallthrough (Class→Behaviour→Object instance methods)
+-spec resolve_class_side_method_obj(pid(), atom()) -> {ok, map(), atom()} | not_found.
+resolve_class_side_method_obj(ClassPid, Selector) ->
+    case gen_server:call(ClassPid, {class_method, Selector}, 5000) of
+        ClassMethodObj when is_map(ClassMethodObj) ->
+            {ok, ClassMethodObj, find_defining_class_method(ClassPid, Selector)};
+        nil ->
+            case beamtalk_runtime_api:whereis_class('Class') of
+                undefined ->
+                    not_found;
+                _ ->
+                    case beamtalk_method_resolver:resolve('Class', Selector) of
+                        ClassProtoObj when is_map(ClassProtoObj) ->
+                            {ok, ClassProtoObj, find_class_protocol_defining_class(Selector)};
+                        nil ->
+                            not_found
+                    end
+            end
+    end.
 
 %% @doc Return hardcoded documentation for the Metaclass terminal sentinel.
 -spec format_metaclass_docs() -> binary().
@@ -344,6 +437,21 @@ find_defining_class_method(ClassPid, Selector, Depth) ->
             end
     end.
 
+%% @doc Find which class in the Class chain defines a class-protocol method.
+%%
+%% Used by the class-side lookup path (`resolve_class_side_method_obj`).
+%% Class-protocol methods (name, printString, allMethods, methods, canUnderstand:,
+%% reload, etc.) are instance methods of the Class→Behaviour→Object chain that class
+%% objects inherit via the class-chain fallthrough mechanism (try_class_chain_fallthrough
+%% dispatches from 'Class'). This function walks from 'Class' upward to find the
+%% exact defining class.
+-spec find_class_protocol_defining_class(atom()) -> atom().
+find_class_protocol_defining_class(Selector) ->
+    case beamtalk_runtime_api:whereis_class('Class') of
+        undefined -> 'Class';
+        ClassPid -> find_defining_class(ClassPid, Selector, 0)
+    end.
+
 %% @doc Group inherited methods by defining class.
 -spec group_by_class([{atom(), atom()}]) -> [{atom(), [atom()]}].
 group_by_class(Methods) ->
@@ -418,37 +526,13 @@ format_class_output(ClassName, Superclass, Modifiers, ModuleDoc, OwnDocs, Inheri
         lists:map(
             fun({FromClass, Selectors}) ->
                 Count = length(Selectors),
-                Summary =
-                    case Count =< 5 of
-                        true ->
-                            %% Show all if 5 or fewer
-                            SelectorStrs = lists:map(
-                                fun(S) -> atom_to_binary(S, utf8) end,
-                                Selectors
-                            ),
-                            lists:join(<<", ">>, SelectorStrs);
-                        false ->
-                            %% Show first 3 + count of remaining
-                            {First3, _Rest} = lists:split(3, Selectors),
-                            Shown = lists:map(
-                                fun(S) -> atom_to_binary(S, utf8) end,
-                                First3
-                            ),
-                            Remaining = Count - 3,
-                            iolist_to_binary([
-                                lists:join(<<", ">>, Shown),
-                                <<", ... (">>,
-                                integer_to_binary(Remaining),
-                                <<" more)">>
-                            ])
-                    end,
                 iolist_to_binary([
                     <<"\nInherited from ">>,
                     atom_to_binary(FromClass, utf8),
                     <<" (">>,
                     integer_to_binary(Count),
                     <<" methods): ">>,
-                    Summary
+                    format_selector_summary(Count, Selectors)
                 ])
             end,
             InheritedGrouped
@@ -554,3 +638,105 @@ format_method_output(ClassName, SelectorBin, DefiningClass, {Signature, DocText,
             Text -> iolist_to_binary([<<"\n\n">>, Text])
         end,
     iolist_to_binary([Header, SealedLine, Inherited, SignatureLine, Doc]).
+
+%% @doc Format a summary of selectors: show all if ≤5, else first 3 + count.
+-spec format_selector_summary(non_neg_integer(), [atom()]) -> iolist().
+format_selector_summary(Count, Selectors) ->
+    case Count =< 5 of
+        true ->
+            lists:join(<<", ">>, [atom_to_binary(S, utf8) || S <- Selectors]);
+        false ->
+            {First3, _Rest} = lists:split(3, Selectors),
+            Remaining = Count - 3,
+            [
+                lists:join(<<", ">>, [atom_to_binary(S, utf8) || S <- First3]),
+                <<", ... (">>,
+                integer_to_binary(Remaining),
+                <<" more)">>
+            ]
+    end.
+
+%% @doc Format the class-object side documentation output.
+-spec format_class_side_output(atom(), [atom()], [{atom(), [atom()]}], [{atom(), [atom()]}]) ->
+    binary().
+format_class_side_output(ClassName, OwnCM, InhCMGrouped, ProtoGrouped) ->
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    Parts = [
+        iolist_to_binary([<<"== ">>, ClassNameBin, <<" class ==">>]),
+
+        case OwnCM of
+            [] ->
+                <<>>;
+            _ ->
+                Lines = [iolist_to_binary([<<"  ">>, atom_to_binary(S, utf8)]) || S <- OwnCM],
+                iolist_to_binary([<<"\nClass methods:\n">>, lists:join(<<"\n">>, Lines)])
+        end,
+
+        lists:map(
+            fun({FromClass, Selectors}) ->
+                Count = length(Selectors),
+                iolist_to_binary([
+                    <<"\nInherited class methods from ">>,
+                    atom_to_binary(FromClass, utf8),
+                    <<" (">>,
+                    integer_to_binary(Count),
+                    <<" methods): ">>,
+                    format_selector_summary(Count, Selectors)
+                ])
+            end,
+            InhCMGrouped
+        ),
+
+        lists:map(
+            fun({FromClass, Selectors}) ->
+                Count = length(Selectors),
+                iolist_to_binary([
+                    <<"\nClass protocol from ">>,
+                    atom_to_binary(FromClass, utf8),
+                    <<" (">>,
+                    integer_to_binary(Count),
+                    <<" methods): ">>,
+                    format_selector_summary(Count, Selectors)
+                ])
+            end,
+            ProtoGrouped
+        ),
+
+        iolist_to_binary([
+            <<"\nUse :help ">>, ClassNameBin, <<" class selector for method details.">>
+        ])
+    ],
+    iolist_to_binary(
+        lists:filter(
+            fun
+                (<<>>) -> false;
+                (_) -> true
+            end,
+            lists:flatten(Parts)
+        )
+    ).
+
+%% @doc Walk the class hierarchy collecting class-side methods.
+%% Returns #{Selector => DefiningClass} — local methods shadow inherited ones.
+-spec collect_flattened_class_methods(atom(), pid()) -> #{atom() => atom()}.
+collect_flattened_class_methods(ClassName, ClassPid) ->
+    collect_flattened_class_methods(ClassName, ClassPid, 0).
+
+-spec collect_flattened_class_methods(atom(), pid(), non_neg_integer()) -> #{atom() => atom()}.
+collect_flattened_class_methods(_ClassName, _ClassPid, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
+    #{};
+collect_flattened_class_methods(ClassName, ClassPid, Depth) ->
+    LocalMethods = gen_server:call(ClassPid, get_local_class_methods, 5000),
+    LocalFlat = maps:map(fun(_Sel, _Info) -> ClassName end, LocalMethods),
+    Superclass = beamtalk_runtime_api:superclass(ClassPid),
+    SuperFlat = collect_class_method_superchain(Superclass, Depth + 1),
+    maps:merge(SuperFlat, LocalFlat).
+
+-spec collect_class_method_superchain(atom() | none, non_neg_integer()) -> #{atom() => atom()}.
+collect_class_method_superchain(none, _Depth) ->
+    #{};
+collect_class_method_superchain(SuperName, Depth) ->
+    case beamtalk_runtime_api:whereis_class(SuperName) of
+        undefined -> #{};
+        SuperPid -> collect_flattened_class_methods(SuperName, SuperPid, Depth)
+    end.

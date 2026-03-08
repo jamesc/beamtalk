@@ -50,6 +50,55 @@ Object subclass: Actor
   class sealed new: _initArgs =>
     InstantiationError new signal: "Actors must use spawnWith:, not new:"
 
+  // === Supervision defaults ===
+
+  /// Default OTP restart policy for this actor class.
+  ///
+  /// Returns `#temporary` by default — the actor is not automatically restarted
+  /// on crash. Override in subclasses to declare a different default:
+  ///
+  /// - `#permanent` — always restart (e.g., a database pool)
+  /// - `#transient` — restart only on abnormal exit (e.g., a request handler)
+  /// - `#temporary` — never restart (the default)
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Actor supervisionPolicy           // => #temporary
+  /// DatabasePool supervisionPolicy    // => #permanent (if overridden)
+  /// ```
+  class supervisionPolicy -> Symbol => #temporary
+
+  /// Whether this class is a supervisor.
+  ///
+  /// Returns `false` for Actor subclasses. Supervisor and DynamicSupervisor
+  /// subclasses override this to return `true`. Used by `SupervisionSpec childSpec`
+  /// to determine OTP `type` (`#worker` vs `#supervisor`) and `shutdown` timeout.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter isSupervisor   // => false
+  /// WebApp isSupervisor    // => true (if WebApp subclasses Supervisor)
+  /// ```
+  class isSupervisor -> Boolean => false
+
+  /// Return a SupervisionSpec for this actor class with default settings.
+  ///
+  /// Creates a SupervisionSpec with `actorClass` set to the receiver and
+  /// `restart` set from `supervisionPolicy`. Use the fluent `with*:` API to
+  /// override per-child settings:
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DatabasePool supervisionSpec
+  ///     // => SupervisionSpec with actorClass: DatabasePool, restart: #temporary
+  ///
+  /// DatabasePool supervisionSpec withId: #primary withArgs: #{#role => #primary}
+  /// ```
+  class supervisionSpec -> SupervisionSpec =>
+    policy := self supervisionPolicy
+    spec := SupervisionSpec new withActorClass: self
+    spec withRestart: policy
+
   /// Gracefully stop this actor (gen_server:stop).
   ///
   /// Idempotent: stopping an already-stopped actor succeeds silently.

@@ -252,12 +252,17 @@ parse_request_op_complete_test() ->
 parse_request_op_docs_test() ->
     Request = <<"{\"op\": \"docs\", \"class\": \"Integer\"}">>,
     Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({get_docs, <<"Integer">>, undefined}, Result).
+    ?assertMatch({get_docs, <<"Integer">>, undefined, false}, Result).
 
 parse_request_op_docs_with_selector_test() ->
     Request = <<"{\"op\": \"docs\", \"class\": \"Integer\", \"selector\": \"+\"}">>,
     Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({get_docs, <<"Integer">>, <<"+">>}, Result).
+    ?assertMatch({get_docs, <<"Integer">>, <<"+">>, false}, Result).
+
+parse_request_op_docs_class_side_test() ->
+    Request = <<"{\"op\": \"docs\", \"class\": \"Integer\", \"class_side\": true}">>,
+    Result = beamtalk_repl_server:parse_request(Request),
+    ?assertMatch({get_docs, <<"Integer">>, undefined, true}, Result).
 
 %%% BT-520: Additional parse_request edge cases
 
@@ -2561,7 +2566,14 @@ handle_op_show_codegen_in_describe_test() ->
     Decoded = jsx:decode(Result, [return_maps]),
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"show-codegen">>, Ops)),
-    ?assertMatch(#{<<"params">> := [<<"code">>]}, maps:get(<<"show-codegen">>, Ops)).
+    ShowCodegenOp = maps:get(<<"show-codegen">>, Ops),
+    %% BT-1236: show-codegen exposes optional params code, class, and selector.
+    %% Requires either code (snippet) or class (loaded class); selector is only meaningful with class.
+    ?assertEqual([], maps:get(<<"params">>, ShowCodegenOp)),
+    Optional = maps:get(<<"optional">>, ShowCodegenOp),
+    ?assert(lists:member(<<"code">>, Optional)),
+    ?assert(lists:member(<<"class">>, Optional)),
+    ?assert(lists:member(<<"selector">>, Optional)).
 
 %% ===================================================================
 %% handle_protocol_request direct test (BT-627)
