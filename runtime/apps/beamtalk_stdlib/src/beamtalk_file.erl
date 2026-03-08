@@ -13,6 +13,7 @@
 %%%
 %%% | Selector                     | Description                            |
 %%% |------------------------------|----------------------------------------|
+%%% | `cwd`                        | Current working directory (String)     |
 %%% | `exists:`                    | Check if file exists (returns Bool)    |
 %%% | `readAll:`                   | Read entire file as String             |
 %%% | `writeAll:contents:`         | Write string to file                   |
@@ -52,6 +53,7 @@
     'deleteAll:'/1,
     'rename:to:'/2,
     'absolutePath:'/1,
+    'cwd'/0,
     'tempDirectory'/0
 ]).
 -export([handle_lines/1, handle_has_method/1]).
@@ -455,7 +457,7 @@ handle_has_method(_) -> false.
                 false ->
                     case file:list_dir(ValidPath) of
                         {ok, Entries} ->
-                            [list_to_binary(E) || E <- Entries];
+                            [unicode:characters_to_binary(E) || E <- Entries];
                         {error, enoent} ->
                             Error0 = beamtalk_error:new(directory_not_found, 'File'),
                             Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
@@ -667,7 +669,7 @@ handle_has_method(_) -> false.
     case validate_path(Path) of
         {ok, ValidPath} ->
             AbsPath = filename:absname(ValidPath),
-            list_to_binary(AbsPath);
+            unicode:characters_to_binary(AbsPath);
         {error, Reason} ->
             raise_invalid_path(Reason, Path, 'absolutePath:')
     end;
@@ -676,6 +678,24 @@ handle_has_method(_) -> false.
     Error1 = beamtalk_error:with_selector(Error0, 'absolutePath:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
     beamtalk_error:raise(Error2).
+
+%% @doc Return the current working directory.
+%%
+%% Returns the current working directory as a String (absolute path).
+-spec 'cwd'() -> binary().
+'cwd'() ->
+    case file:get_cwd() of
+        {ok, Dir} ->
+            unicode:characters_to_binary(Dir);
+        {error, Reason} ->
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, 'cwd'),
+            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
+            Error3 = beamtalk_error:with_hint(
+                Error2, <<"Could not determine current working directory">>
+            ),
+            beamtalk_error:raise(Error3)
+    end.
 
 %% @doc Return the OS temporary directory path.
 %%
@@ -703,7 +723,7 @@ handle_has_method(_) -> false.
             V ->
                 V
         end,
-    list_to_binary(Dir).
+    unicode:characters_to_binary(Dir).
 
 %%% ============================================================================
 %%% FFI Shims
@@ -728,6 +748,7 @@ handle_has_method(_) -> false.
 %%%   (Erlang beamtalk_file) rename: from to: to   → rename/2
 %%%   (Erlang beamtalk_file) absolutePath: path     → absolutePath/1
 %%%   (Erlang beamtalk_file) handleLines: handle   → handleLines/1
+%%%   (Erlang beamtalk_file) cwd                   → 'cwd'/0 (direct)
 %%%   (Erlang beamtalk_file) tempDirectory         → 'tempDirectory'/0 (direct)
 %%% ============================================================================
 

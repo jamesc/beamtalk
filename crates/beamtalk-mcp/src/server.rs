@@ -131,9 +131,16 @@ pub struct ShowCodegenParams {
 /// Parameters for the `test` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct TestParams {
-    /// Optional class name to run tests for. If omitted, runs all tests.
-    #[schemars(description = "Optional TestCase class name. If omitted, runs all BUnit tests.")]
+    /// Optional class name to run tests for. Mutually exclusive with `file`.
+    #[schemars(
+        description = "Optional TestCase class name. Mutually exclusive with 'file'. If omitted, runs all BUnit tests."
+    )]
     pub class: Option<String>,
+    /// Optional path to a `.bt` test file. Mutually exclusive with `class`.
+    #[schemars(
+        description = "Optional path to a .bt source file (e.g. 'test/foo_test.bt'). Discovers and runs all TestCase subclasses defined in that file. Mutually exclusive with 'class'."
+    )]
+    pub file: Option<String>,
 }
 
 /// Parameters for the `unload` MCP tool.
@@ -686,15 +693,21 @@ impl BeamtalkMcp {
 
     /// Run `BUnit` tests.
     #[tool(
-        description = "Run BUnit tests. Provide a class name to run tests for that class, or omit to run all tests. Returns structured results with pass/fail counts."
+        description = "Run BUnit tests. Provide a class name or a file path to scope the run, or omit both to run all tests. 'class' and 'file' are mutually exclusive. Returns structured results with pass/fail counts."
     )]
     async fn test(
         &self,
         Parameters(params): Parameters<TestParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let response = match params.class {
-            Some(ref class) => self.client.test_class(class).await,
-            None => self.client.test_all().await,
+        if params.class.is_some() && params.file.is_some() {
+            return Ok(error_result(
+                "ERROR: 'class' and 'file' parameters are mutually exclusive".to_string(),
+            ));
+        }
+        let response = match (&params.class, &params.file) {
+            (Some(class), _) => self.client.test_class(class).await,
+            (_, Some(file)) => self.client.test_file(file).await,
+            _ => self.client.test_all().await,
         }
         .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 

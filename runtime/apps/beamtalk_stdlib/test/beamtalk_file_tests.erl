@@ -1157,6 +1157,34 @@ absolutePath_type_error_test() ->
     ).
 
 %%% ============================================================================
+%%% cwd/0
+%%% ============================================================================
+
+cwd_returns_binary_test() ->
+    ?assert(is_binary(beamtalk_file:'cwd'())).
+
+cwd_non_empty_test() ->
+    ?assert(byte_size(beamtalk_file:'cwd'()) > 0).
+
+cwd_is_absolute_test() ->
+    Cwd = beamtalk_file:'cwd'(),
+    %% On Unix the cwd starts with /; on Windows it starts with a drive letter
+    IsAbsolute =
+        case Cwd of
+            <<$/, _/binary>> -> true;
+            <<Drive, $:, _/binary>> when Drive >= $A, Drive =< $Z -> true;
+            <<Drive, $:, _/binary>> when Drive >= $a, Drive =< $z -> true;
+            _ -> false
+        end,
+    ?assert(IsAbsolute).
+
+cwd_matches_erlang_get_cwd_test() ->
+    %% Verify beamtalk_file:'cwd'() returns the same value as file:get_cwd/0
+    {ok, CwdList} = file:get_cwd(),
+    CwdBin = unicode:characters_to_binary(CwdList),
+    ?assertEqual(CwdBin, beamtalk_file:'cwd'()).
+
+%%% ============================================================================
 %%% tempDirectory/0
 %%% ============================================================================
 

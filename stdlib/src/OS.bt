@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// OS — shell command execution.
+///
+/// Provides class methods for running shell commands. All methods are
+/// class-side — OS has no instances.
+///
+/// ## Examples
+/// ```beamtalk
+/// OS run: "echo hello"   // => "hello"
+/// ```
+sealed Object subclass: OS
+
+  /// Execute a shell command and return its trimmed stdout as a String.
+  ///
+  /// Wraps `os:cmd/1` and trims trailing whitespace from the result.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// OS run: "echo hello"   // => "hello"
+  /// ```
+  class sealed run: cmd :: String -> String => (Erlang beamtalk_os) run: cmd

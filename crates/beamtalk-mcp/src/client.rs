@@ -350,6 +350,16 @@ impl ReplClient {
         self.send(&request).await
     }
 
+    /// Send a test operation scoped to a specific source file path.
+    pub async fn test_file(&self, file: &str) -> Result<ReplResponse, String> {
+        let request = serde_json::json!({
+            "op": "test",
+            "id": next_msg_id(),
+            "file": file
+        });
+        self.send(&request).await
+    }
+
     /// Send a test-all operation to run all `BUnit` tests.
     pub async fn test_all(&self) -> Result<ReplResponse, String> {
         let request = serde_json::json!({

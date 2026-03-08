@@ -793,6 +793,10 @@ install PREFIX="/usr/local": build-release build-stdlib
         echo "❌ MCP server binary not found. Run 'just build-release' first."
         exit 1
     fi
+    if [ ! -f target/release/beamtalk-exec ]; then
+        echo "❌ beamtalk-exec binary not found. Run 'just build-release' first."
+        exit 1
+    fi
 
     # Binaries
     install -d "${PREFIX}/bin"
@@ -800,6 +804,7 @@ install PREFIX="/usr/local": build-release build-stdlib
     install -m 755 target/release/beamtalk-compiler-port "${PREFIX}/bin/beamtalk-compiler-port"
     install -m 755 target/release/beamtalk-lsp "${PREFIX}/bin/beamtalk-lsp"
     install -m 755 target/release/beamtalk-mcp "${PREFIX}/bin/beamtalk-mcp"
+    install -m 755 target/release/beamtalk-exec "${PREFIX}/bin/beamtalk-exec"
 
     # OTP application ebin directories
     for app in beamtalk_runtime beamtalk_workspace beamtalk_compiler jsx cowboy cowlib ranch; do
@@ -850,7 +855,7 @@ uninstall PREFIX="/usr/local":
     set -euo pipefail
     PREFIX="{{PREFIX}}"
     echo "🗑️  Uninstalling beamtalk from ${PREFIX}..."
-    rm -f "${PREFIX}/bin/beamtalk" "${PREFIX}/bin/beamtalk-compiler-port" "${PREFIX}/bin/beamtalk-lsp" "${PREFIX}/bin/beamtalk-mcp"
+    rm -f "${PREFIX}/bin/beamtalk" "${PREFIX}/bin/beamtalk-compiler-port" "${PREFIX}/bin/beamtalk-lsp" "${PREFIX}/bin/beamtalk-mcp" "${PREFIX}/bin/beamtalk-exec"
     rm -rf "${PREFIX}/lib/beamtalk"
     rm -rf "${PREFIX}/share/beamtalk"
     echo "✅ Uninstalled beamtalk from ${PREFIX}"
@@ -962,6 +967,7 @@ dist: build-release build-stdlib
     Copy-Item target/release/beamtalk-compiler-port.exe dist/bin/
     Copy-Item target/release/beamtalk-lsp.exe dist/bin/
     Copy-Item target/release/beamtalk-mcp.exe dist/bin/
+    Copy-Item target/release/beamtalk-exec.exe dist/bin/
     foreach ($app in @('beamtalk_runtime','beamtalk_workspace','beamtalk_compiler','jsx','cowboy','cowlib','ranch')) { $src = "runtime/_build/default/lib/$app/ebin"; if (!(Test-Path "$src/*.beam")) { Write-Error "No .beam files in $src"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$src/*.beam" "dist/lib/beamtalk/lib/$app/ebin/"; Copy-Item "$src/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction SilentlyContinue }
     $stdlib = "runtime/apps/beamtalk_stdlib/ebin"; if (!(Test-Path "$stdlib/*.beam")) { Write-Error "No stdlib .beam files"; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin" | Out-Null; Copy-Item "$stdlib/*.beam" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/"; Copy-Item "$stdlib/*.app" "dist/lib/beamtalk/lib/beamtalk_stdlib/ebin/" -ErrorAction SilentlyContinue
     if (Test-Path "stdlib/src/*.bt") { New-Item -ItemType Directory -Force -Path "dist/share/beamtalk/stdlib/src" | Out-Null; Copy-Item "stdlib/src/*.bt" "dist/share/beamtalk/stdlib/src/" }
