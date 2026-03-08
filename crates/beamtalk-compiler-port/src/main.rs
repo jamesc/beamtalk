@@ -1527,6 +1527,66 @@ mod tests {
         );
     }
 
+    /// BT-1238: `compile_expression_trace` produces Core Erlang with trace list return.
+    #[test]
+    fn compile_expression_trace_single_expression() {
+        use eetf::List;
+
+        let request = Map::from([
+            (atom("command"), atom("compile_expression_trace")),
+            (atom("source"), binary("1 + 1.")),
+            (atom("module"), binary("bt@trace_test")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+        ]);
+        let response = handle_compile_expression_trace(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "compile_expression_trace should succeed: {response:?}"
+        );
+        let core_erlang = map_get(m, "core_erlang")
+            .and_then(term_to_string)
+            .expect("core_erlang field must be present");
+        // Trace module must export eval/1 and return a steps list, not a plain {Result, State}.
+        assert!(
+            core_erlang.contains("'eval'/1"),
+            "Trace module must export eval/1: {core_erlang}"
+        );
+        // The return must be a cons list [...] wrapping step tuples, not a plain 2-tuple.
+        assert!(
+            core_erlang.contains("[{"),
+            "Trace return must be a list of step tuples: {core_erlang}"
+        );
+    }
+
+    /// BT-1238: `compile_expression_trace` rejects class definitions.
+    #[test]
+    fn compile_expression_trace_rejects_class_definition() {
+        use eetf::List;
+
+        let request = Map::from([
+            (atom("command"), atom("compile_expression_trace")),
+            (
+                atom("source"),
+                binary("Object subclass: Foo\n  bar => 42"),
+            ),
+            (atom("module"), binary("bt@trace_class_test")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+        ]);
+        let response = handle_compile_expression_trace(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("error")),
+            "compile_expression_trace should reject class definitions: {response:?}"
+        );
+    }
+
     #[test]
     fn resolve_completion_type_unknown_expression() {
         let request = Map::from([

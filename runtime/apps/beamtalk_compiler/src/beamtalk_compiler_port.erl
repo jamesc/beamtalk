@@ -150,8 +150,9 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars) ->
 -spec compile_expression_trace(port(), binary(), binary(), [binary()], map()) ->
     {ok, binary(), [binary()]} | {error, [map()]}.
 compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
-    ClassHierarchy = maps:get(class_hierarchy, Options, #{}),
+    SuperclassIndex = maps:get(class_superclass_index, Options, #{}),
     ModuleIndex = maps:get(class_module_index, Options, #{}),
+    ClassHierarchy = maps:get(class_hierarchy, Options, #{}),
     Request0 = #{
         command => compile_expression_trace,
         source => Source,
@@ -159,14 +160,19 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
         known_vars => KnownVars
     },
     Request1 =
-        case map_size(ModuleIndex) of
+        case map_size(SuperclassIndex) of
             0 -> Request0;
-            _ -> Request0#{class_module_index => ModuleIndex}
+            _ -> Request0#{class_superclass_index => SuperclassIndex}
+        end,
+    Request2 =
+        case map_size(ModuleIndex) of
+            0 -> Request1;
+            _ -> Request1#{class_module_index => ModuleIndex}
         end,
     Request =
         case map_size(ClassHierarchy) of
-            0 -> Request1;
-            _ -> Request1#{class_hierarchy => ClassHierarchy}
+            0 -> Request2;
+            _ -> Request2#{class_hierarchy => ClassHierarchy}
         end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
