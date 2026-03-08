@@ -7,6 +7,7 @@
 
 -module(beamtalk_repl_eval_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%====================================================================
 %% Helpers
@@ -87,12 +88,11 @@ do_eval_no_compiler_error_test() ->
     %% Without a running compiler server (port backend), should get compile_error
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval("1 + 1", State),
-    ?assertMatch({error, {compile_error, _}, _, _, _}, Result),
+    ?assertMatch({error, #beamtalk_error{kind = compile_error}, _, _, _}, Result),
 
     %% Error message should mention compiler
-    {error, {compile_error, Msg}, _, _, _} = Result,
-    LowerMsg = string:lowercase(Msg),
-    ?assert(binary:match(LowerMsg, <<"compiler">>) =/= nomatch).
+    {error, #beamtalk_error{message = Msg}, _, _, _} = Result,
+    ?assert(re:run(Msg, <<"compiler">>, [caseless, {capture, none}]) =:= match).
 
 %%% File loading tests
 
@@ -110,12 +110,34 @@ handle_load_directory_test() ->
 
 %%% Additional do_eval tests
 
-do_eval_load_binary_error_test() ->
-    %% Test case where compilation fails without compiler server
+do_eval_compile_error_no_server_test() ->
+    %% Compilation fails without compiler server - load_binary is never reached
     State = beamtalk_repl_state:new(undefined, 0),
-    {error, {compile_error, _}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
+    {error, #beamtalk_error{}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
     %% Counter should still increment even on error
     ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)).
+
+wrap_load_err_returns_structured_error_test() ->
+    %% wrap_load_err/3 normalises a raw load reason to a structured #beamtalk_error{}.
+    %% load_error maps to kind=io_error via ensure_structured_error.
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:wrap_load_err(bad_module, [], State),
+    ?assertMatch({error, #beamtalk_error{kind = io_error}, <<>>, [], _}, Result).
+
+wrap_load_err_message_contains_reason_test() ->
+    %% The error message should describe the load failure reason.
+    State = beamtalk_repl_state:new(undefined, 0),
+    {error, #beamtalk_error{message = Msg}, <<>>, [], _} =
+        beamtalk_repl_eval:wrap_load_err(bad_module, [], State),
+    ?assert(binary:match(Msg, <<"bad_module">>) =/= nomatch).
+
+wrap_load_err_preserves_warnings_test() ->
+    %% wrap_load_err/3 passes Warnings through to the result tuple.
+    State = beamtalk_repl_state:new(undefined, 0),
+    Warnings = [<<"unused variable x">>, <<"deprecated function">>],
+    {error, #beamtalk_error{}, <<>>, ReturnedWarnings, _} =
+        beamtalk_repl_eval:wrap_load_err(bad_module, Warnings, State),
+    ?assertEqual(Warnings, ReturnedWarnings).
 
 do_eval_preserves_bindings_on_error_test() ->
     %% Verify that existing bindings are preserved when eval fails
@@ -510,7 +532,7 @@ do_eval_empty_expression_test() ->
     %% Empty expression should still attempt compilation (and fail without compiler)
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval("", State),
-    ?assertMatch({error, {compile_error, _}, _, _, _}, Result).
+    ?assertMatch({error, #beamtalk_error{kind = compile_error}, _, _, _}, Result).
 
 do_eval_counter_increments_on_each_call_test() ->
     %% Verify counter increments independently on each call
@@ -651,7 +673,7 @@ handle_load_valid_file_no_compiler_test() ->
 do_eval_with_registry_no_compiler_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     State = beamtalk_repl_state:new(RegistryPid, 0),
-    {error, {compile_error, _}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 2", State),
+    {error, #beamtalk_error{}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 2", State),
     ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)),
     gen_server:stop(RegistryPid).
 
@@ -1252,10 +1274,10 @@ do_eval_trace_increments_counter_test() ->
     ?assertEqual(InitialCounter + 1, beamtalk_repl_state:get_eval_counter(NewState)).
 
 do_eval_trace_compile_error_without_server_test() ->
-    %% Without compiler server, compile_expression_trace returns a compile_error
+    %% Without compiler server, compile_expression_trace returns a structured compile_error
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval_trace("1 + 2", State),
-    ?assertMatch({error, {compile_error, _}, _, _, _}, Result).
+    ?assertMatch({error, #beamtalk_error{kind = compile_error}, _, _, _}, Result).
 
 do_eval_trace_compile_error_includes_empty_output_test() ->
     %% Output should be <<>> when compilation fails before IO capture starts
