@@ -2659,8 +2659,7 @@ mod tests {
     /// Valid `#permanent` override — no diagnostics.
     #[test]
     fn supervision_policy_permanent_is_valid() {
-        let src =
-            "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #permanent\n  go => nil";
+        let src = "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #permanent\n  go => nil";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -2675,8 +2674,7 @@ mod tests {
     /// Valid `#transient` override — no diagnostics.
     #[test]
     fn supervision_policy_transient_is_valid() {
-        let src =
-            "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #transient\n  go => nil";
+        let src = "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #transient\n  go => nil";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -2691,8 +2689,7 @@ mod tests {
     /// Valid `#temporary` override — no diagnostics.
     #[test]
     fn supervision_policy_temporary_is_valid() {
-        let src =
-            "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #temporary\n  go => nil";
+        let src = "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #temporary\n  go => nil";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -2730,8 +2727,7 @@ mod tests {
     /// Multi-expression body is skipped (no static check possible).
     #[test]
     fn supervision_policy_multi_expr_body_is_skipped() {
-        let src =
-            "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol =>\n    x := #invalid\n    x\n  go => nil";
+        let src = "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol =>\n    x := #invalid\n    x\n  go => nil";
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
