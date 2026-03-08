@@ -21,6 +21,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
         "Actor"
             | "Array"
             | "BEAMError"
+            | "Bag"
             | "BeamtalkInterface"
             | "Behaviour"
             | "Block"
@@ -46,6 +47,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "HTTPResponse"
             | "InstantiationError"
             | "Integer"
+            | "Interval"
             | "Json"
             | "List"
             | "Metaclass"
@@ -162,6 +164,34 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Bag".into(),
+        ClassInfo {
+            name: "Bag".into(),
+            superclass: Some("Collection".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec!["counts".into()],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Total number of element occurrences (sum of all counts).\n\n## Examples\n```beamtalk\n(Bag withAll: #(1, 1, 2)) size   // => 3\nBag new size                     // => 0\n```".into()) },
+                MethodInfo { selector: "occurrencesOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![None], doc: Some("Number of occurrences of `element` in the bag.\n\n## Examples\n```beamtalk\n(Bag withAll: #(1, 1, 2)) occurrencesOf: 1   // => 2\n(Bag withAll: #(1, 1, 2)) occurrencesOf: 3   // => 0\n```".into()) },
+                MethodInfo { selector: "includes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Test if the bag contains at least one occurrence of `element`.\n\n## Examples\n```beamtalk\n(Bag withAll: #(1, 2)) includes: 1   // => true\n(Bag withAll: #(1, 2)) includes: 3   // => false\n```".into()) },
+                MethodInfo { selector: "add:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, return_type: Some("Bag".into()), param_types: vec![None], doc: Some("Return a new bag with one more occurrence of `element`.\n\n## Examples\n```beamtalk\n(Bag new add: 1) occurrencesOf: 1   // => 1\n```".into()) },
+                MethodInfo { selector: "add:withCount:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, return_type: Some("Bag".into()), param_types: vec![None, Some("Integer".into())], doc: Some("Return a new bag with `n` more occurrences of `element`.\n\n## Examples\n```beamtalk\n((Bag new) add: 1 withCount: 3) occurrencesOf: 1   // => 3\n```".into()) },
+                MethodInfo { selector: "remove:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, return_type: Some("Bag".into()), param_types: vec![None], doc: Some("Return a new bag with one fewer occurrence of `element` (no-op if absent).\n\n## Examples\n```beamtalk\n((Bag withAll: #(1, 1)) remove: 1) occurrencesOf: 1   // => 1\n((Bag withAll: #(1)) remove: 1) includes: 1           // => false\n```".into()) },
+                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Iterate over each element once per occurrence.\n\n## Examples\n```beamtalk\n(Bag withAll: #(1, 1, 2)) do: [:x | Transcript show: x]\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\nBag new printString   // => \"a Bag\"\n```".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, return_type: Some("Bag".into()), param_types: vec![Some("List".into())], doc: Some("Create a Bag containing all elements from a list.\n\n## Examples\n```beamtalk\nBag withAll: #(1, 2, 1, 3)   // => a Bag\n```".into()) },
+            ],
             class_variables: vec![],
         },
     );
@@ -887,6 +917,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "timesRepeat:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Evaluate `block` the receiver number of times.\n\n## Examples\n```beamtalk\n3 timesRepeat: [Transcript show: \"hi\"]\n```".into()) },
                 MethodInfo { selector: "to:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Integer".into()), Some("Block".into())], doc: Some("Iterate from the receiver to `end`, evaluating `block` with each value.\n\n## Examples\n```beamtalk\n1 to: 3 do: [:i | Transcript show: i]\n```".into()) },
                 MethodInfo { selector: "to:by:do:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Integer".into()), Some("Integer".into()), Some("Block".into())], doc: Some("Iterate from the receiver to `end` by `step`, evaluating `block` with each value.\n\n## Examples\n```beamtalk\n1 to: 10 by: 3 do: [:i | Transcript show: i]\n```".into()) },
+                MethodInfo { selector: "to:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Interval".into()), param_types: vec![Some("Integer".into())], doc: Some("Return an Interval from the receiver to `stop` with step 1.\n\n## Examples\n```beamtalk\n1 to: 10   // => (1 to: 10)\n```".into()) },
+                MethodInfo { selector: "to:by:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Interval".into()), param_types: vec![Some("Integer".into()), Some("Integer".into())], doc: Some("Return an Interval from the receiver to `stop` with the given step.\n\n## Examples\n```beamtalk\n1 to: 10 by: 2   // => (1 to: 10 by: 2)\n```".into()) },
                 MethodInfo { selector: "asFloat".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![], doc: Some("Convert the receiver to a Float.\n\n## Examples\n```beamtalk\n42 asFloat    // => 42.0\n```".into()) },
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Convert the receiver to its String representation.\n\n## Examples\n```beamtalk\n42 asString   // => \"42\"\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\n42 printString  // => \"42\"\n```".into()) },
@@ -910,6 +942,29 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "log10".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![], doc: Some("Base-10 logarithm of the receiver (returns Float).\n\n## Examples\n```beamtalk\n100 log10         // => 2.0\n```".into()) },
                 MethodInfo { selector: "exp".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![], doc: Some("Euler's number (e) raised to the power of the receiver (returns Float).\n\n## Examples\n```beamtalk\n0 exp             // => 1.0\n1 exp             // => 2.718281828459045\n```".into()) },
                 MethodInfo { selector: "raisedTo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: false, return_type: Some("Float".into()), param_types: vec![Some("Number".into())], doc: Some("Raise the receiver to the power of `exponent` (returns Float).\n\n## Examples\n```beamtalk\n2 raisedTo: 10    // => 1024.0\n```".into()) },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Interval".into(),
+        ClassInfo {
+            name: "Interval".into(),
+            superclass: Some("Collection".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec!["from".into(), "to".into(), "step".into()],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Interval".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Number of elements in the interval.\n\n## Examples\n```beamtalk\n(1 to: 10) size      // => 10\n(1 to: 1) size       // => 1\n(1 to: 0) size       // => 0\n```".into()) },
+                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Interval".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Block".into())], doc: Some("Iterate over each element, evaluating `block` with each one.\n\n## Examples\n```beamtalk\n(1 to: 3) do: [:i | Transcript show: i]\n```".into()) },
+                MethodInfo { selector: "first".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Interval".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("First element of the interval.\n\n## Examples\n```beamtalk\n(1 to: 10) first     // => 1\n```".into()) },
+                MethodInfo { selector: "last".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Interval".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Last element of the interval.\n\n## Examples\n```beamtalk\n(1 to: 10) last      // => 10\n(1 to: 10 by: 3) last  // => 10\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Interval".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\n(1 to: 10) printString          // => \"(1 to: 10)\"\n(1 to: 10 by: 2) printString   // => \"(1 to: 10 by: 2)\"\n```".into()) },
             ],
             class_methods: vec![],
             class_variables: vec![],

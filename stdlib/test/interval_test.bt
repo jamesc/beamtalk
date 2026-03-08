@@ -1,0 +1,93 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for Interval — arithmetic sequence of integers (BT-1249)
+
+TestCase subclass: IntervalTest
+
+  testCreationClass =>
+    iv := 1 to: 10
+    self assert: iv class equals: Interval
+
+  testCreationByClass =>
+    iv := 1 to: 10 by: 2
+    self assert: iv class equals: Interval
+
+  testSizeSimple => self assert: (1 to: 10) size equals: 10
+
+  testSizeByStep => self assert: (1 to: 10 by: 2) size equals: 5
+
+  testSizeByStepThree => self assert: (1 to: 10 by: 3) size equals: 4
+
+  testSizeSingleElement => self assert: (5 to: 5) size equals: 1
+
+  testSizeEmpty => self assert: (1 to: 0) size equals: 0
+
+  testSizeNegativeStep => self assert: (10 to: 1 by: -1) size equals: 10
+
+  testSizeNegativeStepByThree => self assert: (10 to: 1 by: -3) size equals: 4
+
+  testIsEmpty =>
+    self assert: (1 to: 0) isEmpty
+    self deny: (1 to: 10) isEmpty
+
+  testFirst => self assert: (1 to: 10) first equals: 1
+
+  testFirstByStep => self assert: (5 to: 20 by: 3) first equals: 5
+
+  testLast => self assert: (1 to: 10) last equals: 10
+
+  testLastByStep => self assert: (1 to: 10 by: 3) last equals: 10
+
+  testLastByStepNotExact =>
+    // 1, 4, 7, 10 — last is 10
+    self assert: (1 to: 11 by: 3) last equals: 10
+
+  testDoCollectsElements =>
+    result := #()
+    (1 to: 3) do: [:i | result := result addFirst: i]
+    self assert: result equals: #(3, 2, 1)
+
+  testDoNegativeStep =>
+    result := #()
+    (3 to: 1 by: -1) do: [:i | result := result addFirst: i]
+    self assert: result equals: #(1, 2, 3)
+
+  testInjectInto =>
+    sum := (1 to: 5) inject: 0 into: [:acc :x | acc + x]
+    self assert: sum equals: 15
+
+  testInjectIntoByStep =>
+    sum := (1 to: 10 by: 2) inject: 0 into: [:acc :x | acc + x]
+    self assert: sum equals: 25
+
+  testCollect =>
+    result := (1 to: 3) collect: [:x | x * 2]
+    self assert: result equals: #(2, 4, 6)
+
+  testSelect =>
+    result := (1 to: 6) select: [:x | x isEven]
+    self assert: result equals: #(2, 4, 6)
+
+  testReject =>
+    result := (1 to: 6) reject: [:x | x isEven]
+    self assert: result equals: #(1, 3, 5)
+
+  testIncludes =>
+    self assert: ((1 to: 10) includes: 5)
+    self deny: ((1 to: 10) includes: 11)
+    self deny: ((1 to: 10) includes: 0)
+
+  testIncludesByStep =>
+    self assert: ((1 to: 10 by: 2) includes: 3)
+    self deny: ((1 to: 10 by: 2) includes: 2)
+
+  testPrintString => self assert: (1 to: 10) printString equals: "(1 to: 10)"
+
+  testPrintStringByStep =>
+    self assert: (1 to: 10 by: 2) printString equals: "(1 to: 10 by: 2)"
+
+  testEmptyDoIsNoop =>
+    count := 0
+    (1 to: 0) do: [:_x | count := count + 1]
+    self assert: count equals: 0
