@@ -64,10 +64,32 @@ send({beamtalk_future, _} = Future, Selector, Args) ->
 send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, isAlive, []) ->
     %% ADR 0059: Supervisor lifecycle — check process liveness without gen_server.
     is_process_alive(Pid) andalso ClassName =/= undefined;
-send({beamtalk_supervisor, _ClassName, _Module, Pid} = _Self, stop, []) ->
+send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, stop, []) ->
     %% ADR 0059: Supervisor stop — OTP supervisors are gen_servers; use gen_server:stop/1.
-    gen_server:stop(Pid),
-    nil;
+    %% Catch noproc so a stale handle raises a structured error rather than a raw OTP exit.
+    try
+        gen_server:stop(Pid),
+        nil
+    catch
+        exit:{noproc, _} ->
+            %% gen_server:call path (shouldn't happen for stop, but guard defensively)
+            Error = beamtalk_error:new(
+                runtime_error,
+                ClassName,
+                stop,
+                <<"supervisor is not running — the handle is stale">>
+            ),
+            error(beamtalk_exception_handler:ensure_wrapped(Error));
+        exit:noproc ->
+            %% gen_server:stop/1 exits with bare noproc when process is dead.
+            Error = beamtalk_error:new(
+                runtime_error,
+                ClassName,
+                stop,
+                <<"supervisor is not running — the handle is stale">>
+            ),
+            error(beamtalk_exception_handler:ensure_wrapped(Error))
+    end;
 send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
     %% ADR 0059: Route supervisor method calls via class hierarchy walk.
     %% Supervisor instances do not run in a gen_server — methods execute

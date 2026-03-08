@@ -104,12 +104,15 @@ current(Self) ->
 -spec whichChildren(tuple()) -> [atom()].
 whichChildren(Self) ->
     Pid = element(4, Self),
-    [
-        Id
-     || {Id, ChildPid, _, _} <- supervisor:which_children(Pid),
-        Id =/= undefined,
-        is_pid(ChildPid)
-    ].
+    ClassName = element(2, Self),
+    with_live_supervisor(ClassName, children, fun() ->
+        [
+            Id
+         || {Id, ChildPid, _, _} <- supervisor:which_children(Pid),
+            Id =/= undefined,
+            is_pid(ChildPid)
+        ]
+    end).
 
 %% @doc Return the running child object for the given class, or nil.
 %%
@@ -121,21 +124,26 @@ whichChildren(Self) ->
 -spec whichChild(tuple(), tuple()) -> tuple() | nil.
 whichChild(Self, ClassArg) ->
     SupPid = element(4, Self),
+    ClassName = element(2, Self),
     ChildModule = element(3, ClassArg),
     ChildClassPid = element(4, ClassArg),
     ChildClass = beamtalk_object_class:class_name(ChildClassPid),
-    Children = supervisor:which_children(SupPid),
-    case
-        lists:search(
-            fun({_Id, CPid, _, Mods}) -> is_pid(CPid) andalso lists:member(ChildModule, Mods) end,
-            Children
-        )
-    of
-        {value, {_Id, ChildPid, _, _}} ->
-            wrap_child(ChildClass, ChildModule, ChildPid);
-        false ->
-            nil
-    end.
+    with_live_supervisor(ClassName, 'which:', fun() ->
+        Children = supervisor:which_children(SupPid),
+        case
+            lists:search(
+                fun({_Id, CPid, _, Mods}) ->
+                    is_pid(CPid) andalso lists:member(ChildModule, Mods)
+                end,
+                Children
+            )
+        of
+            {value, {_Id, ChildPid, _, _}} ->
+                wrap_child(ChildClass, ChildModule, ChildPid);
+            false ->
+                nil
+        end
+    end).
 
 %% @doc Terminate a supervised child.
 %%
@@ -150,47 +158,49 @@ whichChild(Self, ClassArg) ->
 terminateChild(Self, Arg) ->
     SupPid = element(4, Self),
     SupClass = element(2, Self),
-    case beamtalk_class_registry:is_class_object(Arg) of
-        true ->
-            %% Supervisor case: terminate by class name (the default child id)
-            ChildClassPid = element(4, Arg),
-            ChildId = beamtalk_object_class:class_name(ChildClassPid),
-            case supervisor:terminate_child(SupPid, ChildId) of
-                ok ->
-                    nil;
-                {error, Reason} ->
-                    Error = beamtalk_error:new(
-                        runtime_error,
-                        SupClass,
-                        'terminateChild:',
-                        iolist_to_binary(io_lib:format("~p", [Reason]))
-                    ),
-                    error(beamtalk_exception_handler:ensure_wrapped(Error))
-            end;
-        false ->
-            %% DynamicSupervisor case: terminate by child process pid
-            ChildPid = element(4, Arg),
-            case supervisor:terminate_child(SupPid, ChildPid) of
-                ok ->
-                    nil;
-                {error, not_found} ->
-                    Error = beamtalk_error:new(
-                        runtime_error,
-                        SupClass,
-                        'terminateChild:',
-                        <<"Child not found — it may have already terminated">>
-                    ),
-                    error(beamtalk_exception_handler:ensure_wrapped(Error));
-                {error, Reason} ->
-                    Error = beamtalk_error:new(
-                        runtime_error,
-                        SupClass,
-                        'terminateChild:',
-                        iolist_to_binary(io_lib:format("~p", [Reason]))
-                    ),
-                    error(beamtalk_exception_handler:ensure_wrapped(Error))
-            end
-    end.
+    with_live_supervisor(SupClass, 'terminateChild:', fun() ->
+        case beamtalk_class_registry:is_class_object(Arg) of
+            true ->
+                %% Supervisor case: terminate by class name (the default child id)
+                ChildClassPid = element(4, Arg),
+                ChildId = beamtalk_object_class:class_name(ChildClassPid),
+                case supervisor:terminate_child(SupPid, ChildId) of
+                    ok ->
+                        nil;
+                    {error, Reason} ->
+                        Error = beamtalk_error:new(
+                            runtime_error,
+                            SupClass,
+                            'terminateChild:',
+                            iolist_to_binary(io_lib:format("~p", [Reason]))
+                        ),
+                        error(beamtalk_exception_handler:ensure_wrapped(Error))
+                end;
+            false ->
+                %% DynamicSupervisor case: terminate by child process pid
+                ChildPid = element(4, Arg),
+                case supervisor:terminate_child(SupPid, ChildPid) of
+                    ok ->
+                        nil;
+                    {error, not_found} ->
+                        Error = beamtalk_error:new(
+                            runtime_error,
+                            SupClass,
+                            'terminateChild:',
+                            <<"Child not found — it may have already terminated">>
+                        ),
+                        error(beamtalk_exception_handler:ensure_wrapped(Error));
+                    {error, Reason} ->
+                        Error = beamtalk_error:new(
+                            runtime_error,
+                            SupClass,
+                            'terminateChild:',
+                            iolist_to_binary(io_lib:format("~p", [Reason]))
+                        ),
+                        error(beamtalk_exception_handler:ensure_wrapped(Error))
+                end
+        end
+    end).
 
 %% @doc Start a new child with default args under a DynamicSupervisor.
 %%
@@ -203,22 +213,25 @@ terminateChild(Self, Arg) ->
 startChild(Self) ->
     SupPid = element(4, Self),
     SupMod = element(3, Self),
+    SupClass = element(2, Self),
     ChildClassObj = SupMod:'childClass'(),
     ChildClassPid = element(4, ChildClassObj),
     ChildClass = beamtalk_object_class:class_name(ChildClassPid),
     ChildModule = element(3, ChildClassObj),
-    case supervisor:start_child(SupPid, []) of
-        {ok, ChildPid} ->
-            wrap_child(ChildClass, ChildModule, ChildPid);
-        {error, Reason} ->
-            Error = beamtalk_error:new(
-                runtime_error,
-                element(2, Self),
-                startChild,
-                iolist_to_binary(io_lib:format("~p", [Reason]))
-            ),
-            error(beamtalk_exception_handler:ensure_wrapped(Error))
-    end.
+    with_live_supervisor(SupClass, startChild, fun() ->
+        case supervisor:start_child(SupPid, []) of
+            {ok, ChildPid} ->
+                wrap_child(ChildClass, ChildModule, ChildPid);
+            {error, Reason} ->
+                Error = beamtalk_error:new(
+                    runtime_error,
+                    SupClass,
+                    startChild,
+                    iolist_to_binary(io_lib:format("~p", [Reason]))
+                ),
+                error(beamtalk_exception_handler:ensure_wrapped(Error))
+        end
+    end).
 
 %% @doc Start a new child with args under a DynamicSupervisor.
 %%
@@ -231,22 +244,25 @@ startChild(Self) ->
 startChild(Self, Args) ->
     SupPid = element(4, Self),
     SupMod = element(3, Self),
+    SupClass = element(2, Self),
     ChildClassObj = SupMod:'childClass'(),
     ChildClassPid = element(4, ChildClassObj),
     ChildClass = beamtalk_object_class:class_name(ChildClassPid),
     ChildModule = element(3, ChildClassObj),
-    case supervisor:start_child(SupPid, [Args]) of
-        {ok, ChildPid} ->
-            wrap_child(ChildClass, ChildModule, ChildPid);
-        {error, Reason} ->
-            Error = beamtalk_error:new(
-                runtime_error,
-                element(2, Self),
-                'startChild:',
-                iolist_to_binary(io_lib:format("~p", [Reason]))
-            ),
-            error(beamtalk_exception_handler:ensure_wrapped(Error))
-    end.
+    with_live_supervisor(SupClass, 'startChild:', fun() ->
+        case supervisor:start_child(SupPid, [Args]) of
+            {ok, ChildPid} ->
+                wrap_child(ChildClass, ChildModule, ChildPid);
+            {error, Reason} ->
+                Error = beamtalk_error:new(
+                    runtime_error,
+                    SupClass,
+                    'startChild:',
+                    iolist_to_binary(io_lib:format("~p", [Reason]))
+                ),
+                error(beamtalk_exception_handler:ensure_wrapped(Error))
+        end
+    end).
 
 %% @doc Return the count of active children.
 %%
@@ -256,8 +272,11 @@ startChild(Self, Args) ->
 -spec countChildren(tuple()) -> non_neg_integer().
 countChildren(Self) ->
     Pid = element(4, Self),
-    Counts = supervisor:count_children(Pid),
-    proplists:get_value(active, Counts, 0).
+    ClassName = element(2, Self),
+    with_live_supervisor(ClassName, count, fun() ->
+        Counts = supervisor:count_children(Pid),
+        proplists:get_value(active, Counts, 0)
+    end).
 
 %% @doc Stop the supervisor and all its children.
 %%
@@ -267,8 +286,11 @@ countChildren(Self) ->
 -spec stop(tuple()) -> nil.
 stop(Self) ->
     Pid = element(4, Self),
-    gen_server:stop(Pid),
-    nil.
+    ClassName = element(2, Self),
+    with_live_supervisor(ClassName, stop, fun() ->
+        gen_server:stop(Pid),
+        nil
+    end).
 
 %% @doc Build OTP child specs from a list of class objects or SupervisionSpec values.
 %%
@@ -359,4 +381,38 @@ wrap_child(ChildClass, ChildModule, ChildPid) ->
     case is_supervisor(ChildClass) of
         true -> {beamtalk_supervisor, ChildClass, ChildModule, ChildPid};
         false -> {beamtalk_object, ChildClass, ChildModule, ChildPid}
+    end.
+
+%% @private
+%% Execute Fun(), catching raw OTP process exits that indicate a stale
+%% supervisor handle ({noproc, _} when the process is dead) and converting
+%% them to a structured runtime_error instead of letting the raw exit leak
+%% across the public API boundary.
+%%
+%% Both `supervisor:*` and `gen_server:stop` raise `exit:{noproc, MFA}` when
+%% the target process is not alive.
+-spec with_live_supervisor(atom(), atom(), fun(() -> term())) -> term().
+with_live_supervisor(ClassName, Selector, Fun) ->
+    try
+        Fun()
+    catch
+        exit:{noproc, _} ->
+            %% supervisor:* calls use gen_server:call internally, which exits
+            %% with {noproc, MFA} when the target process is dead.
+            Error = beamtalk_error:new(
+                runtime_error,
+                ClassName,
+                Selector,
+                <<"supervisor is not running — the handle is stale">>
+            ),
+            error(beamtalk_exception_handler:ensure_wrapped(Error));
+        exit:noproc ->
+            %% gen_server:stop/1 exits with the bare atom noproc (no MFA wrapper).
+            Error = beamtalk_error:new(
+                runtime_error,
+                ClassName,
+                Selector,
+                <<"supervisor is not running — the handle is stale">>
+            ),
+            error(beamtalk_exception_handler:ensure_wrapped(Error))
     end.

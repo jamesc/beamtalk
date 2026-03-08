@@ -124,3 +124,14 @@ supervisor_stop_returns_nil_test() ->
     ?assertEqual(nil, Result),
     timer:sleep(50),
     ?assertEqual(false, is_process_alive(SupPid)).
+
+supervisor_stop_stale_handle_test() ->
+    %% stop on a dead supervisor raises a structured runtime_error (not a raw OTP exit).
+    SupPid = anon_sup(),
+    gen_server:stop(SupPid),
+    timer:sleep(20),
+    Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        beamtalk_message_dispatch:send(Sup, stop, [])
+    ).

@@ -211,3 +211,40 @@ supervisor_tuple_tag_test() ->
     after
         gen_server:stop(SupPid)
     end.
+
+%%====================================================================
+%% Tests: stale-handle error translation (noproc → beamtalk_error)
+%%====================================================================
+
+stale_handle_whichChildren_test() ->
+    %% whichChildren/1 on a dead supervisor raises a structured runtime_error.
+    SupPid = start_anon_supervisor(),
+    gen_server:stop(SupPid),
+    timer:sleep(20),
+    Self = make_supervisor_tuple('StaleSup', stale_mod, SupPid),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        beamtalk_supervisor:whichChildren(Self)
+    ).
+
+stale_handle_countChildren_test() ->
+    %% countChildren/1 on a dead supervisor raises a structured runtime_error.
+    SupPid = start_anon_supervisor(),
+    gen_server:stop(SupPid),
+    timer:sleep(20),
+    Self = make_supervisor_tuple('StaleSup2', stale_mod2, SupPid),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        beamtalk_supervisor:countChildren(Self)
+    ).
+
+stale_handle_stop_test() ->
+    %% stop/1 on a dead supervisor raises a structured runtime_error.
+    SupPid = start_anon_supervisor(),
+    gen_server:stop(SupPid),
+    timer:sleep(20),
+    Self = make_supervisor_tuple('StaleSup3', stale_mod3, SupPid),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        beamtalk_supervisor:stop(Self)
+    ).
