@@ -588,26 +588,15 @@ impl TypeChecker {
     }
 
     /// Bind all named variables in a destructuring `pattern` into `env` as `Dynamic`.
-    /// Wildcards (`_`) and non-variable leaf patterns are skipped.
+    ///
+    /// Delegates to [`crate::semantic_analysis::extract_pattern_bindings`] to walk
+    /// all pattern variants (including `Binary` segments) consistently. Wildcards
+    /// and literals are skipped; duplicates are silently ignored (the name resolver
+    /// already reports them as errors earlier in the pipeline).
     fn bind_pattern_vars(pattern: &Pattern, env: &mut TypeEnv) {
-        match pattern {
-            Pattern::Variable(id) => {
-                env.set(&id.name, InferredType::Dynamic);
-            }
-            Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
-                for elem in elements {
-                    Self::bind_pattern_vars(elem, env);
-                }
-            }
-            Pattern::List { elements, tail, .. } => {
-                for elem in elements {
-                    Self::bind_pattern_vars(elem, env);
-                }
-                if let Some(t) = tail {
-                    Self::bind_pattern_vars(t, env);
-                }
-            }
-            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Binary { .. } => {}
+        let (bindings, _diagnostics) = crate::semantic_analysis::extract_pattern_bindings(pattern);
+        for id in bindings {
+            env.set(&id.name, InferredType::Dynamic);
         }
     }
 
@@ -4424,39 +4413,23 @@ Object subclass: Foo
     }
 
     #[test]
-    fn test_wildcard_not_bound_in_destructure() {
-        // {_, y} := someValue — `_` must NOT be inserted into TypeEnv
-        // This test verifies bind_pattern_vars skips Wildcard patterns.
-        // If `_` were bound, a subsequent `_ + 1` would silently resolve;
-        // if not bound it remains Dynamic (no DNU). Either way no crash.
-        let method = make_method(
-            "doWork",
-            vec![
-                destructure_assign(
-                    Pattern::Tuple {
-                        elements: vec![Pattern::Wildcard(span()), Pattern::Variable(ident("y"))],
-                        span: span(),
-                    },
-                    int_lit(0),
-                ),
-                // y is reachable as Dynamic
-                msg_send(var("y"), MessageSelector::Unary("inspect".into()), vec![]),
-            ],
-        );
-        let class = make_class_with_methods("Thing", vec![method]);
-        let module = make_module_with_classes(vec![], vec![class]);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        let mut checker = TypeChecker::new();
-        // Should not crash; y is Dynamic → no warnings
-        checker.check_module(&module, &hierarchy);
-        let dnu: Vec<_> = checker
-            .diagnostics()
-            .iter()
-            .filter(|d| d.message.contains("does not understand"))
-            .collect();
+    fn test_bind_pattern_vars_skips_wildcard() {
+        // Directly verify that bind_pattern_vars does NOT insert `_` into TypeEnv
+        // while still binding the named variable `y`.
+        let pattern = Pattern::Tuple {
+            elements: vec![Pattern::Wildcard(span()), Pattern::Variable(ident("y"))],
+            span: span(),
+        };
+        let mut env = TypeEnv::new();
+        TypeChecker::bind_pattern_vars(&pattern, &mut env);
         assert!(
-            dnu.is_empty(),
-            "wildcard skip + Dynamic y: no DNU expected: {dnu:?}"
+            env.get("_").is_none(),
+            "`_` must not be bound by bind_pattern_vars"
+        );
+        assert_eq!(
+            env.get("y"),
+            Some(InferredType::Dynamic),
+            "`y` must be bound as Dynamic"
         );
     }
 }
