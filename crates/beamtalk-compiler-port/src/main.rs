@@ -744,13 +744,21 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
     let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
-    let all_diagnostics =
+    let mut all_diagnostics =
         beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
             &module,
             parse_diagnostics,
             &known_var_refs,
             pre_class_hierarchy,
         );
+
+    // Run @primitive validation (parity with compile_expression).
+    let options = beamtalk_core::CompilerOptions::default();
+    let primitive_diags =
+        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
+            &module, &options,
+        );
+    all_diagnostics.extend(primitive_diags);
 
     let error_diags: Vec<&beamtalk_core::source_analysis::Diagnostic> = all_diagnostics
         .iter()
