@@ -1035,46 +1035,28 @@ mod tests {
     /// 60 s, no extra code paths), and wraps it in a `NodeGuard` for automatic
     /// cleanup. Returns all three for use in the test body.
     ///
-    /// Retries up to 3 times with linear backoff (1 s, 2 s) to handle transient WebSocket
-    /// health check timeouts on slow CI runners (BT-1175). Between retries, any
-    /// partially-started node is killed (best-effort) and epmd deregistration is awaited
-    /// (best-effort) so the next attempt gets a clean slate.
+    /// Retries up to 3 times. Each retry uses a **distinct workspace ID** (and
+    /// therefore a distinct epmd node name). This avoids the self-defeating cycle
+    /// where a failed attempt's node name lingers in epmd and blocks the next
+    /// attempt from registering — the root cause of the previous flakiness.
+    /// Failed-attempt workspaces are cleaned up automatically via `TestWorkspace::drop`.
     fn start_test_node(prefix: &str) -> (TestWorkspace, NodeInfo, NodeGuard) {
-        let tw = TestWorkspace::new(prefix);
-        let project_path = std::env::current_dir().unwrap();
-        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
         let paths = beam_dirs_for_tests();
-        // Derive the node name the same way start_detached_node does, for epmd cleanup.
-        let node_name = format!("beamtalk_workspace_{}@localhost", tw.id);
-
-        // Best-effort cleanup of a partially-started node (passed TCP check but timed out
-        // on WS health check, so the BEAM process is still running). Errors are logged and
-        // ignored — cleanup is advisory; the next start_detached_node call cleans up stale
-        // files via remove_stale_runtime_files.
-        let cleanup_partial_node = |attempt: usize| {
-            let pid_path = workspace_dir(&tw.id).unwrap().join("pid");
-            if let Ok(contents) = fs::read_to_string(&pid_path) {
-                if let Ok(pid) = contents.trim().parse::<u32>() {
-                    if let Err(e) = force_kill_process(pid) {
-                        eprintln!("start_test_node: best-effort kill of PID {pid} failed: {e}");
-                    }
-                }
-            }
-            if let Err(e) = wait_for_epmd_deregistration(&node_name, 5) {
-                eprintln!(
-                    "start_test_node: best-effort epmd deregistration wait for {node_name} \
-                     failed: {e}"
-                );
-            }
-            // Linear backoff: 1 s, 2 s.
-            std::thread::sleep(std::time::Duration::from_secs(attempt as u64));
-        };
+        let project_path = std::env::current_dir().unwrap();
 
         let mut last_err = None;
         for attempt in 0..3_usize {
-            if attempt > 0 {
-                cleanup_partial_node(attempt);
-            }
+            // Each attempt gets its own workspace ID so epmd node names never
+            // collide between retries. The failed attempt's TestWorkspace drops
+            // at the end of this block, triggering directory + lockfile cleanup.
+            let attempt_suffix = if attempt == 0 {
+                String::new()
+            } else {
+                format!("_r{attempt}")
+            };
+            let tw = TestWorkspace::new(&format!("{prefix}{attempt_suffix}"));
+            let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+
             match start_detached_node(&tw.id, 0, &paths, &[], false, Some(60), None, None, None) {
                 Ok(node_info) => {
                     let guard = NodeGuard::new(&node_info);
@@ -1082,22 +1064,37 @@ mod tests {
                 }
                 Err(e) => {
                     eprintln!("start_test_node attempt {}/{} failed: {e}", attempt + 1, 3);
+                    // Kill any partially-started node before tw drops (and removes
+                    // its workspace dir). No need to wait for epmd deregistration
+                    // since the next attempt will use a different node name.
+                    let pid_path = workspace_dir(&tw.id).unwrap_or_default().join("pid");
+                    if let Ok(contents) = fs::read_to_string(&pid_path) {
+                        if let Ok(pid) = contents.trim().parse::<u32>() {
+                            let _ = force_kill_process(pid);
+                        }
+                    }
                     last_err = Some(e);
+                    // tw drops here: cleans up workspace dir and lockfile.
                 }
             }
         }
-        // All attempts exhausted — clean up any node left running by the final attempt.
-        cleanup_partial_node(0);
         panic!("start_test_node failed after 3 attempts: {last_err:?}");
     }
 
+    /// Combined test: start a node once and exercise all read-only queries against it,
+    /// then verify `is_node_running` detects death after a raw kill.
+    ///
+    /// Replaces four separate tests that each started their own BEAM node:
+    /// `test_start_detached_node_integration`, `test_list_workspaces_running_node_integration`,
+    /// `test_workspace_status_running_integration`, and
+    /// `test_is_node_running_true_then_false_integration`.
     #[test]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
-    fn test_start_detached_node_integration() {
-        let (tw, node_info, _guard) = start_test_node("integ_start");
+    fn test_node_start_queries_and_kill_integration() {
+        let (tw, node_info, _guard) = start_test_node("integ_queries");
 
-        // Verify node.info was written with correct fields
+        // ── node.info fields ──────────────────────────────────────────────
         let saved = get_node_info(&tw.id)
             .expect("get_node_info should succeed")
             .expect("node.info should exist after start");
@@ -1112,13 +1109,13 @@ mod tests {
             "node_name should contain workspace ID"
         );
 
-        // Verify the node is actually running
+        // ── is_node_running: true while alive ────────────────────────────
         assert!(
             is_node_running(&node_info, Some(&tw.id)),
-            "is_node_running should return true for live node"
+            "is_node_running should be true for live node"
         );
 
-        // Verify PID corresponds to a running BEAM process
+        // ── PID: corresponds to a running BEAM process ───────────────────
         #[cfg(unix)]
         {
             let pid_i = i32::try_from(node_info.pid).expect("node PID should fit in i32");
@@ -1130,7 +1127,6 @@ mod tests {
                 node_info.pid
             );
         }
-        // On Linux, verify the process is actually a BEAM node via /proc cmdline
         #[cfg(target_os = "linux")]
         {
             let cmdline_path = format!("/proc/{}/cmdline", node_info.pid);
@@ -1143,26 +1139,45 @@ mod tests {
                 cmdline
             );
         }
-    }
 
-    #[test]
-    #[ignore = "integration test — requires Erlang/OTP runtime"]
-    #[serial(workspace_integration)]
-    fn test_is_node_running_true_then_false_integration() {
-        let (tw, node_info, _guard) = start_test_node("integ_running");
-
-        // True case: node is running
-        assert!(
-            is_node_running(&node_info, Some(&tw.id)),
-            "is_node_running should be true while node is alive"
+        // ── list_workspaces: includes this workspace as Running ───────────
+        let workspaces = list_workspaces().unwrap();
+        let found = workspaces
+            .iter()
+            .find(|w| w.workspace_id == tw.id)
+            .expect("list_workspaces should find the running workspace");
+        assert_eq!(
+            found.status,
+            WorkspaceStatus::Running,
+            "status should be Running"
         );
+        assert_eq!(found.pid, Some(node_info.pid), "PID should match");
+        assert!(found.port.is_some_and(|p| p > 0), "port should be non-zero");
 
-        // Kill the node without cleanup (simulates a crash)
+        // ── workspace_status: Running with correct fields ─────────────────
+        let detail = workspace_status(Some(&tw.id)).unwrap();
+        assert_eq!(detail.workspace_id, tw.id);
+        assert_eq!(detail.status, WorkspaceStatus::Running);
+        assert!(
+            detail
+                .node_name
+                .as_ref()
+                .is_some_and(|n| n.contains(&tw.id)),
+            "node_name should contain workspace ID"
+        );
+        assert_eq!(detail.port, Some(node_info.port));
+        assert_eq!(detail.pid, Some(node_info.pid));
+
+        // ── is_node_running: false after raw kill ─────────────────────────
         kill_node_raw(&node_info);
-
         assert_node_stopped(&node_info, "is_node_running should be false after kill");
     }
 
+    /// Full workspace lifecycle: start → reconnect → graceful stop → restart → force stop.
+    ///
+    /// Also covers `stop_workspace` with both `force=false` (step 3) and `force=true` (step 5),
+    /// replacing the former `test_stop_workspace_graceful_integration` and
+    /// `test_stop_workspace_force_integration`.
     #[test]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
@@ -1212,17 +1227,15 @@ mod tests {
         assert_eq!(id2, tw.id);
         assert_eq!(info2.pid, info1.pid, "should return same PID");
 
-        // Step 3: Stop the node gracefully via TCP shutdown
+        // Step 3: Graceful stop via TCP shutdown
         stop_workspace(Some(&tw.id), false).expect("graceful stop should succeed");
-        assert_node_stopped(&info1, "node should not be running after stop");
+        assert_node_stopped(&info1, "node should not be running after graceful stop");
 
-        // Wait for epmd to deregister the old node name before restarting.
-        // After force-kill, epmd may still hold the registration briefly,
-        // which prevents a new node with the same name from starting.
-        wait_for_epmd_deregistration(&info1.node_name, 5)
+        // Wait for epmd deregistration before restarting with the same name.
+        wait_for_epmd_deregistration(&info1.node_name, 15)
             .expect("epmd should deregister node name within timeout");
 
-        // Step 4: Third call starts a new node
+        // Step 4: Restart — third call starts a new node
         let (info3, started3, id3) = get_or_start_workspace(
             &project_path,
             Some(&tw.id),
@@ -1247,6 +1260,10 @@ mod tests {
             is_node_running(&info3, Some(&tw.id)),
             "restarted node should be running"
         );
+
+        // Step 5: Force stop (SIGKILL via stop_workspace API)
+        stop_workspace(Some(&tw.id), true).expect("force stop should succeed");
+        assert_node_stopped(&info3, "node should not be running after force stop");
     }
 
     /// Regression test for BT-970: concurrent `get_or_start_workspace` calls on the
@@ -1489,33 +1506,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
-    #[ignore = "integration test — requires Erlang/OTP runtime"]
-    #[serial(workspace_integration)]
-    fn test_list_workspaces_running_node_integration() {
-        let (tw, node_info, _guard) = start_test_node("integ_list_running");
-
-        let workspaces = list_workspaces().unwrap();
-        let found = workspaces
-            .iter()
-            .find(|w| w.workspace_id == tw.id)
-            .expect("Should find the workspace in list");
-
-        assert_eq!(
-            found.status,
-            WorkspaceStatus::Running,
-            "Workspace should be Running"
-        );
-        assert_eq!(
-            found.pid,
-            Some(node_info.pid),
-            "PID should match started node"
-        );
-        assert!(found.port.is_some(), "Port should be reported");
-        assert!(found.port.unwrap() > 0, "Port should be non-zero");
-    }
-
-    #[test]
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_list_workspaces_stale_cleanup_integration() {
@@ -1541,73 +1531,6 @@ mod tests {
         kill_node_raw(&node_info);
 
         assert_workspace_stopped(&tw.id);
-    }
-
-    #[test]
-    #[cfg(unix)]
-    #[ignore = "integration test — requires Erlang/OTP runtime"]
-    #[serial(workspace_integration)]
-    fn test_workspace_status_running_integration() {
-        let (tw, node_info, _guard) = start_test_node("integ_ws_status");
-
-        let detail = workspace_status(Some(&tw.id)).unwrap();
-        assert_eq!(detail.workspace_id, tw.id);
-        assert_eq!(detail.status, WorkspaceStatus::Running);
-        assert!(
-            detail.node_name.is_some(),
-            "node_name should be present for running workspace"
-        );
-        assert!(
-            detail.node_name.as_ref().unwrap().contains(&tw.id),
-            "node_name should contain workspace ID"
-        );
-        assert_eq!(detail.port, Some(node_info.port));
-        assert_eq!(detail.pid, Some(node_info.pid));
-    }
-
-    #[test]
-    #[cfg(unix)]
-    #[ignore = "integration test — requires Erlang/OTP runtime"]
-    #[serial(workspace_integration)]
-    fn test_stop_workspace_graceful_integration() {
-        let (tw, node_info, _guard) = start_test_node("integ_stop_graceful");
-
-        // Graceful stop (force=false) uses TCP shutdown + init:stop(),
-        // which should succeed for detached BEAM nodes
-        let result = stop_workspace(Some(&tw.id), false);
-        assert!(
-            result.is_ok(),
-            "Graceful TCP shutdown should succeed, got: {:?}",
-            result.err()
-        );
-
-        assert_node_stopped(&node_info, "Node should not be running after graceful stop");
-    }
-
-    #[test]
-    #[cfg(unix)]
-    #[ignore = "integration test — requires Erlang/OTP runtime"]
-    #[serial(workspace_integration)]
-    fn test_stop_workspace_force_integration() {
-        // Safety net: NodeGuard ensures cleanup if test fails before stop_workspace runs.
-        // NodeGuard is a no-op for already-dead PIDs, so it won't conflict with stop_workspace.
-        let (tw, node_info, _guard) = start_test_node("integ_stop_force");
-
-        // Verify node is running before we stop it
-        assert!(
-            is_node_running(&node_info, Some(&tw.id)),
-            "Node should be running before force stop"
-        );
-
-        // Force stop (SIGKILL) should succeed
-        let result = stop_workspace(Some(&tw.id), true);
-        assert!(
-            result.is_ok(),
-            "Force stop should succeed, got: {:?}",
-            result.err()
-        );
-
-        assert_node_stopped(&node_info, "Node should not be running after force stop");
     }
 
     #[test]
