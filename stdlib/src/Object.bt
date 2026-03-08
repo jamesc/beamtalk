@@ -237,6 +237,17 @@ ProtoObject subclass: Object
     TranscriptStream current ifNotNil: [:t | t show: aValue; cr]
     self
 
+  /// Test if the receiver is an instance of aClass or any of its subclasses.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 isKindOf: Integer    // => true
+  /// 42 isKindOf: Object     // => true
+  /// #foo isKindOf: Symbol   // => true
+  /// #foo isKindOf: String   // => false
+  /// ```
+  isKindOf: aClass -> Boolean => self class includesBehaviour: aClass
+
   /// Raise an error with the given message.
   ///
   /// ## Examples

@@ -231,14 +231,34 @@ impl CoreErlangGenerator {
                 }
                 // If not last, the let chain stays open for the next expression
             } else if Self::is_local_var_assignment(expr) {
-                // BT-1053: Local variable mutation inside conditional branch.
+                // BT-1053/BT-1225: Local variable mutation inside conditional branch.
                 // generate_local_var_assignment_in_loop emits open let chain:
-                // "let _Val = <value> in let StateAccN = maps:put('key', _Val, StateAccM) in "
+                // "let _Val = <value> in let StateAccN = maps:put('__local__key', _Val, StateAccM) in "
                 let doc = self.generate_local_var_assignment_in_loop(expr)?;
                 docs.push(doc);
                 if is_last {
                     // last_open_scope_result is set to _Val by generate_local_var_assignment_in_loop
                     last_result.clone_from(&self.last_open_scope_result);
+                } else {
+                    // BT-1225: Bind the variable name to the temp var so subsequent reads
+                    // within this block resolve directly to the temp var (e.g. `_Val1`)
+                    // rather than falling through to maps:get without the __local__ prefix,
+                    // which would cause a {badkey,VarName} crash at runtime.
+                    //
+                    // is_local_var_assignment(expr) guarantees expr is Assignment { target: Identifier }.
+                    // If either invariant breaks, fail loudly rather than silently skipping bind_var.
+                    let Expression::Assignment { target, .. } = expr else {
+                        unreachable!("is_local_var_assignment must ensure expr is an Assignment");
+                    };
+                    let Expression::Identifier(id) = target.as_ref() else {
+                        unreachable!(
+                            "is_local_var_assignment must ensure assignment target is an Identifier"
+                        );
+                    };
+                    let val_var = self.last_open_scope_result.clone().expect(
+                        "generate_local_var_assignment_in_loop must set last_open_scope_result",
+                    );
+                    self.bind_var(&id.name, &val_var);
                 }
             } else if is_last && self.control_flow_has_mutations(expr) {
                 // Last expression is nested control flow with mutations.
@@ -404,6 +424,41 @@ mod tests {
         assert!(
             put_count >= 2,
             "Both branches should call maps:put for 'n'. Found {put_count}. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_local_var_in_if_true_block_reads_back_correctly() {
+        // BT-1225: Local var assigned inside ifTrue: block must be readable in subsequent
+        // expressions of the same block without a {badkey,VarName} runtime crash.
+        // The write uses '__local__y' key; reads must resolve to the temp var, not 'y'.
+        let src = "Actor subclass: BrokenActor\n  state: x = 5\n\n  myMethod: cond =>\n    cond ifTrue: [\n      y := self.x + 1.\n      self.x := y\n    ].\n    self.x\n";
+        let code = codegen(src);
+        // The local var 'y' should be stored with __local__ prefix
+        assert!(
+            code.contains("__local__y"),
+            "Local var 'y' should use __local__ prefix in maps:put. Got:\n{code}"
+        );
+        // The field assignment self.x := y should NOT use maps:get('y', ...) — that would
+        // be the buggy read (key mismatch). Instead, it should reference the temp var directly.
+        assert!(
+            !code.contains("maps':'get'('y'"),
+            "Should NOT generate maps:get('y',...) — reads of 'y' should use temp var. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_local_var_in_if_false_block_reads_back_correctly() {
+        // BT-1225: Same fix applies to ifFalse: blocks.
+        let src = "Actor subclass: TestActor\n  state: x = 10\n\n  myMethod: cond =>\n    cond ifFalse: [\n      y := self.x - 1.\n      self.x := y\n    ].\n    self.x\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("__local__y"),
+            "Local var 'y' should use __local__ prefix in maps:put. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("maps':'get'('y'"),
+            "Should NOT generate maps:get('y',...) — reads of 'y' should use temp var. Got:\n{code}"
         );
     }
 }

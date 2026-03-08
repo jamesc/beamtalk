@@ -97,3 +97,18 @@ TestCase subclass: ActorConditionalMutationsTest
     result2 := c conditionalLast: false
     self assert: result2 equals: nil
     self assert: c getCount equals: 0
+
+  testLocalVarInIfTrueBlock =>
+    // BT-1225: Local var assigned inside ifTrue: block must be readable in subsequent
+    // expressions of the same block (no {badkey,y} crash at runtime)
+    c := ConditionalMutationCounter spawn
+    self assert: (c incrementViaLocalVar: true) equals: 1
+    self assert: (c incrementViaLocalVar: true) equals: 2
+    self assert: (c incrementViaLocalVar: false) equals: 2
+
+  testLocalVarInIfFalseBlock =>
+    // BT-1225: Same fix applies to ifFalse: blocks
+    c := ConditionalMutationCounter spawn
+    self assert: (c decrementViaLocalVar: false) equals: -1
+    self assert: (c decrementViaLocalVar: false) equals: -2
+    self assert: (c decrementViaLocalVar: true) equals: -2
