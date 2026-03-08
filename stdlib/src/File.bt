@@ -28,44 +28,50 @@ Object subclass: File
 
   /// Read the entire contents of a file as a string (class method).
   ///
+  /// Returns `Result ok: contents` on success, or `Result error: err` on failure.
+  ///
   /// ## Examples
   /// ```beamtalk
-  /// File readAll: "test.txt"  // => "file contents..."
+  /// File readAll: "test.txt"  // => Result ok: "file contents..."
   /// ```
-  class sealed readAll: path :: String -> String =>
+  class sealed readAll: path :: String -> Result =>
     (Erlang beamtalk_file) readAll: path
 
   /// Write text to a file, creating or overwriting it (class method).
+  ///
+  /// Returns `Result ok: nil` on success, or `Result error: err` on failure.
   ///
   /// ## Examples
   /// ```beamtalk
   /// File writeAll: "output.txt" contents: "hello"
   /// ```
-  class sealed writeAll: path :: String contents: text :: String -> Nil =>
+  class sealed writeAll: path :: String contents: text :: String -> Result =>
     (Erlang beamtalk_file) writeAll: path contents: text
 
   /// Return a lazy Stream of lines from a file (class method).
   ///
-  /// Opens the file and returns a Stream whose generator reads one line
-  /// at a time. The handle closes automatically when the stream is
-  /// exhausted. Constant memory — safe for large files.
+  /// Opens the file and returns `Result ok: stream` on success, or
+  /// `Result error: err` on failure. The Stream reads one line at a time
+  /// and closes the handle automatically when exhausted. Constant memory —
+  /// safe for large files.
   ///
   /// Cross-process constraint: file-backed Streams must be consumed
   /// by the same process that created them.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (File lines: "data.csv") take: 5
-  /// (File lines: "log.txt") select: [:l | l includesSubstring: "ERROR"]
+  /// (File lines: "data.csv") unwrap take: 5
+  /// (File lines: "log.txt") unwrap select: [:l | l includesSubstring: "ERROR"]
   /// ```
-  class sealed lines: path :: String -> Stream =>
+  class sealed lines: path :: String -> Result =>
     (Erlang beamtalk_file) lines: path
 
   /// Block-scoped file handle with automatic cleanup (class method).
   ///
   /// Opens the file, passes a FileHandle to the block, and ensures
   /// the handle is closed when the block exits (normally or via exception).
-  /// Returns the result of the block.
+  /// Returns `Result ok: blockResult` on success, or `Result error: err`
+  /// on failure.
   ///
   /// The handle responds to `lines` which returns a Stream of lines.
   /// Both the handle and any Streams derived from it must be consumed
@@ -74,11 +80,11 @@ Object subclass: File
   ///
   /// ## Examples
   /// ```beamtalk
-  /// File open: "data.csv" do: [:handle |
+  /// (File open: "data.csv" do: [:handle |
   ///   handle lines take: 10
-  /// ]
+  /// ]) unwrap
   /// ```
-  class sealed open: path :: String do: block :: Block -> Object =>
+  class sealed open: path :: String do: block :: Block -> Result =>
     (Erlang beamtalk_file) open: path do: block
 
   /// Test if a path refers to a directory (class method).
@@ -101,65 +107,79 @@ Object subclass: File
 
   /// Create a directory (class method). Error if the parent does not exist.
   ///
+  /// Returns `Result ok: nil` on success, or `Result error: err` on failure.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// File mkdir: "target/mydir"
   /// ```
-  class sealed mkdir: path :: String -> Nil =>
+  class sealed mkdir: path :: String -> Result =>
     (Erlang beamtalk_file) mkdir: path
 
   /// Create a directory and all missing parent directories (class method).
+  ///
+  /// Returns `Result ok: nil` on success, or `Result error: err` on failure.
   ///
   /// ## Examples
   /// ```beamtalk
   /// File mkdirAll: "target/a/b/c"
   /// ```
-  class sealed mkdirAll: path :: String -> Nil =>
+  class sealed mkdirAll: path :: String -> Result =>
     (Erlang beamtalk_file) mkdirAll: path
 
   /// List entries in a directory as a List of Strings (class method).
+  ///
+  /// Returns `Result ok: list` on success, or `Result error: err` on failure.
   ///
   /// ## Examples
   /// ```beamtalk
   /// File listDirectory: "target"
   /// ```
-  class sealed listDirectory: path :: String -> List =>
+  class sealed listDirectory: path :: String -> Result =>
     (Erlang beamtalk_file) listDirectory: path
 
   /// Delete a file or empty directory (class method).
+  ///
+  /// Returns `Result ok: nil` on success, or `Result error: err` on failure.
   ///
   /// ## Examples
   /// ```beamtalk
   /// File delete: "target/old.txt"
   /// ```
-  class sealed delete: path :: String -> Nil =>
+  class sealed delete: path :: String -> Result =>
     (Erlang beamtalk_file) delete: path
 
   /// Recursively delete a directory tree (class method).
+  ///
+  /// Returns `Result ok: nil` on success, or `Result error: err` on failure.
   ///
   /// ## Examples
   /// ```beamtalk
   /// File deleteAll: "target/old-workspace"
   /// ```
-  class sealed deleteAll: path :: String -> Nil =>
+  class sealed deleteAll: path :: String -> Result =>
     (Erlang beamtalk_file) deleteAll: path
 
   /// Rename or move a file or directory (class method).
+  ///
+  /// Returns `Result ok: nil` on success, or `Result error: err` on failure.
   ///
   /// ## Examples
   /// ```beamtalk
   /// File rename: "old.txt" to: "new.txt"
   /// ```
-  class sealed rename: from :: String to: to :: String -> Nil =>
+  class sealed rename: from :: String to: to :: String -> Result =>
     (Erlang beamtalk_file) rename: from to: to
 
   /// Resolve a relative path to its absolute path (class method).
+  ///
+  /// Returns `Result ok: absPath` on success, or `Result error: err` on failure.
   ///
   /// ## Examples
   /// ```beamtalk
   /// File absolutePath: "target/test.txt"
   /// ```
-  class sealed absolutePath: path :: String -> String =>
+  class sealed absolutePath: path :: String -> Result =>
     (Erlang beamtalk_file) absolutePath: path
 
   /// Return the current working directory (class method).

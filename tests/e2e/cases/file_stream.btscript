@@ -12,7 +12,7 @@
 // ===========================================================================
 
 // Stream result assigned in one REPL turn is accessible in the next
-lines := (File lines: "stdlib/test/fixtures/stream_test.txt") asList
+lines := (File lines: "stdlib/test/fixtures/stream_test.txt") unwrap asList
 // => ["line one","line two","line three"]
 
 // Workspace variable persists across turns

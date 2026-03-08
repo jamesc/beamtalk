@@ -37,7 +37,7 @@
 // ===========================================================================
 
 // Read Unicode content from file
-File readAll: "stdlib/test/fixtures/unicode_test.txt"
+(File readAll: "stdlib/test/fixtures/unicode_test.txt") unwrap
 // => Hello 世界 🌍
 
 // ===========================================================================
