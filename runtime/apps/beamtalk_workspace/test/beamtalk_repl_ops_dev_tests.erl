@@ -327,9 +327,10 @@ handle_show_codegen_empty_class_falls_back_to_code_test() ->
         self()
     ),
     Decoded = jsx:decode(Result, [return_maps]),
-    %% Code path taken (empty class ignored), empty code yields the standard "empty expression" error.
-    %% If class="" had been selected instead, we'd get a class-not-found error (different error type).
-    ?assert(maps:is_key(<<"error">>, Decoded)).
+    %% Code path taken: error must say "Empty expression", not "class not found".
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrorMsg = maps:get(<<"error">>, Decoded),
+    ?assert(binary:match(ErrorMsg, <<"Empty expression">>) =/= nomatch).
 
 handle_show_codegen_selector_without_class_test() ->
     %% Providing selector without class returns a specific "selector requires class" error,
@@ -368,9 +369,14 @@ compile_file_for_codegen_success_test() ->
             ?assert(is_binary(CoreErlang)),
             ?assert(byte_size(CoreErlang) > 0),
             ?assert(is_list(Warnings));
-        {error, _Reason} ->
-            %% Compiler port may not be available in this test environment; that's acceptable.
-            ok
+        {error, {compile_error, Reason}} when is_binary(Reason) ->
+            %% Tolerate only "compiler not available" — any other compile error is a real failure.
+            case binary:match(Reason, <<"Compiler not available">>) of
+                nomatch -> error({unexpected_compile_error, Reason});
+                _ -> ok
+            end;
+        {error, OtherReason} ->
+            error({unexpected_compile_error, OtherReason})
     end.
 
 %%====================================================================
