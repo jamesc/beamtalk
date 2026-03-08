@@ -662,6 +662,15 @@ fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
 
     let mut current = start_dir.to_owned();
     loop {
+        // Guard against empty paths — this happens when walking up from a
+        // single-component relative path (e.g. parent of "test" is "").
+        // Without this guard, `"".join("beamtalk.toml")` resolves to
+        // `"beamtalk.toml"` relative to the CWD and returns `Some("")`,
+        // which later causes `build("", ...)` to fail with
+        // "Path '' does not exist". (BT-1228)
+        if current.as_str().is_empty() {
+            return None;
+        }
         if current.join("beamtalk.toml").exists() {
             return Some(current);
         }
@@ -1577,6 +1586,55 @@ mod tests {
 
         let result = find_package_root(&dir.join("sub/test.bt"));
         assert!(result.is_none());
+    }
+
+    /// BT-1228: Walking up from a relative single-component path (e.g. "test")
+    /// yields "" as the parent directory. The guard in `find_package_root` must
+    /// return `None` before treating "" as a valid package root, since
+    /// `"".join("beamtalk.toml")` resolves to `"beamtalk.toml"` relative to
+    /// CWD and would return `Some("")`, causing `build("", ...)` to fail.
+    ///
+    /// This test is hermetic: it sets up a temp dir with a `beamtalk.toml` at
+    /// its root, changes the process CWD to that dir, and asserts that passing
+    /// a single-component relative path like `"test"` returns `None` (not
+    /// `Some("") `) even though `beamtalk.toml` is now discoverable from the
+    /// empty parent path. Uses `#[serial(cwd)]` to avoid CWD races.
+    #[test]
+    #[serial_test::serial(cwd)]
+    fn test_find_package_root_relative_path_does_not_return_empty() {
+        // RAII guard so CWD is restored even if an assertion panics.
+        struct CwdGuard(std::path::PathBuf);
+        impl Drop for CwdGuard {
+            fn drop(&mut self) {
+                std::env::set_current_dir(&self.0).unwrap();
+            }
+        }
+
+        let temp = tempfile::TempDir::new().unwrap();
+
+        // Write a beamtalk.toml at the temp dir root so that "".join("beamtalk.toml")
+        // would find it if the guard were absent.
+        fs::write(
+            temp.path().join("beamtalk.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let _cwd_guard = CwdGuard(std::env::current_dir().unwrap());
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        // Single-component relative paths: parent is "" which would resolve
+        // "beamtalk.toml" in the CWD without the guard. With the guard they
+        // must return None — the CWD root is handled by the canonical_path(".")
+        // check in run_tests, not by walking relative path ancestors.
+        for rel in &["test", "src", "lib"] {
+            let result = find_package_root(Utf8Path::new(rel));
+            assert!(
+                result.is_none(),
+                "find_package_root(\"{rel}\") should return None for single-component \
+                 relative paths, got {result:?}"
+            );
+        }
     }
 
     #[test]
