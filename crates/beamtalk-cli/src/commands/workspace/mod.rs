@@ -1514,25 +1514,12 @@ mod tests {
     #[ignore = "integration test — requires Erlang/OTP runtime"]
     #[serial(workspace_integration)]
     fn test_list_workspaces_stale_cleanup_integration() {
-        let tw = TestWorkspace::new("integ_list_stale");
-        let project_path = std::env::current_dir().unwrap();
-        let _ = create_workspace(&project_path, Some(&tw.id)).unwrap();
+        // Use start_test_node for retry logic — WebSocket health check is
+        // the most common transient failure cause.
+        let (tw, node_info, _guard) = start_test_node("integ_list_stale");
 
-        let paths = beam_dirs_for_tests();
-        let node_info = start_detached_node(
-            &tw.id,
-            0,
-            &paths,
-            &[],
-            false,
-            Some(60),
-            None,
-            None, // ssl_dist_optfile
-            None, // web_port
-        )
-        .expect("start_detached_node should succeed");
-
-        // Kill the node without cleanup (simulating crash)
+        // Kill the node without cleanup (simulating crash).
+        // _guard will also try to kill on drop; force_kill_process(ESRCH) is a no-op.
         kill_node_raw(&node_info);
 
         assert_workspace_stopped(&tw.id);
