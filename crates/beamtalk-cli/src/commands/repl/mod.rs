@@ -867,7 +867,9 @@ pub(crate) fn repl_loop(
                             continue;
                         }
                         _ if line.starts_with(":unload ") => {
-                            let class_name = extract_command_arg(line, ":unload ", None).trim().to_string();
+                            let class_name = extract_command_arg(line, ":unload ", None)
+                                .trim()
+                                .to_string();
                             if class_name.is_empty() {
                                 eprintln!("Usage: :unload <ClassName>");
                             } else {
