@@ -419,7 +419,7 @@ sealed readAll: path :: String -> Result(String, IOError) => ...
 
 The runtime representation (tagged map with `isOk`, `okValue`, `errReason` fields) is compatible with future type parameterization — the type parameters constrain what values the fields may hold, they don't change the representation. No runtime changes will be needed; this is purely a type-system concern.
 
-### 10. Guidelines: When to Use Which
+### 11. Guidelines: When to Use Which
 
 | Situation | Use | Why |
 |---|---|---|
@@ -546,7 +546,7 @@ Newspeak uses promises for asynchronous operations: if processing produces a res
 - `{ok, V} | {error, R}` maps 1:1 to `Result ok: v` / `Result error: r` — the most natural BEAM interop possible
 - `beamtalk_result:from_tagged_tuple/1` eliminates 50+ lines of error translation boilerplate per FFI module
 - OTP supervision is unchanged — actor crashes are still exceptions, handled by supervisors
-- They can pattern match on Result tagged maps from Erlang: `#{'$beamtalk_class' := 'Result', 'isOk' := true, 'value' := V}`
+- They can pattern match on Result tagged maps from Erlang: `#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := V}`
 - `tryDo:` lets them wrap legacy exception-based code without refactoring it
 
 ### Production Operator
@@ -680,7 +680,7 @@ This provides composability with **zero breaking changes** — all existing APIs
 
 **Not adopted as the final state because:** Every `tryDo:` pays the cost of constructing a `#beamtalk_error{}`, raising it, catching it, and wrapping it — when the FFI could return a Result directly from `{ok, V} | {error, R}` without the exception round-trip. For methods called in tight loops (e.g., parsing each line of a file), this overhead matters.
 
-**However:** This IS the right Phase 1. Ship `Result.bt` + `tryDo:` first, validate the design in real use, then migrate FFI modules in later phases only where the performance or ergonomic benefit justifies the breaking change. The ADR's phased rollout already captures this — Phase 1 introduces Result with no API changes; Phases 2-3 migrate FFI methods where justified.
+**However:** This was considered as a cautious Phase 1 approach. Ultimately, existing callers (Symphony) are already in poor shape with ad-hoc error conventions, and deferring the FFI migration only entrenches `tryDo:` as a substitute convention. The ADR ships Result and migrates FFI modules together.
 
 ### Alternative F: Optional/Maybe Type (Separate from Result)
 
