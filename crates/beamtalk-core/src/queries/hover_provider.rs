@@ -672,7 +672,7 @@ fn find_hover_in_expr(
             .body
             .iter()
             .find_map(|s| find_hover_in_expr(&s.expression, offset, context, hierarchy, type_map)),
-        Expression::Return { value, .. } => {
+        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
             find_hover_in_expr(value, offset, context, hierarchy, type_map)
         }
         Expression::Parenthesized { expression, .. } => {

@@ -1102,11 +1102,58 @@ Core classes implemented and tested:
 | **List** | Linked list with fast prepend (`#()` syntax) |
 | **Dictionary** | Key-value map |
 | **Set** | Unordered unique elements |
+| **Interval** | Arithmetic sequence of integers (`1 to: 10`, `1 to: 10 by: 2`) |
+| **Bag** | Multiset — allows duplicate elements, counts occurrences |
 | **Stream** | Lazy, closure-based sequences ([ADR 0021](ADR/0021-streams-and-io-design.md)) |
 | **Nil** | Null object pattern |
 | **Result** | Typed success/error value for expected failures ([ADR 0060](ADR/0060-result-type-hybrid-error-handling.md)) |
 
 For detailed API documentation, see [API Reference](https://jamesc.github.io/beamtalk/apidocs/).
+
+### Interval — Arithmetic Sequences
+
+An `Interval` represents an arithmetic sequence of integers without materialising a list. Create one with `to:` or `to:by:` on any `Integer`:
+
+```beamtalk
+1 to: 10                    // => (1 to: 10) — 10 elements: 1, 2, ..., 10
+1 to: 10 by: 2             // => (1 to: 10 by: 2) — 5 elements: 1, 3, 5, 7, 9
+10 to: 1 by: -1            // => (10 to: 1 by: -1) — 10 elements: 10, 9, ..., 1
+
+(1 to: 10) size            // => 10
+(1 to: 10) first           // => 1
+(1 to: 10) last            // => 10
+(1 to: 10) includes: 5     // => true
+
+// Interval supports the full Collection protocol:
+(1 to: 5) inject: 0 into: [:sum :x | sum + x]   // => 15
+(1 to: 10) select: [:x | x isEven]              // => #(2, 4, 6, 8, 10)
+(1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)
+```
+
+### Bag — Multisets
+
+A `Bag` is an unordered collection that allows duplicate elements. It is backed by a `Dictionary` mapping elements to occurrence counts. Like other collections, Bag is immutable — mutating operations return a new Bag.
+
+```beamtalk
+Bag new class                           // => Bag
+(Bag new add: 1) occurrencesOf: 1      // => 1
+
+b := Bag withAll: #(1, 2, 1, 3, 1)
+b size                                  // => 5 (total occurrences)
+b occurrencesOf: 1                      // => 3
+b includes: 2                           // => true
+b includes: 9                           // => false
+
+// Bag mutating operations return new Bags:
+b2 := b add: 2                         // one more occurrence of 2
+b2 occurrencesOf: 2                    // => 2
+b3 := b add: 4 withCount: 5           // add 5 occurrences of 4
+b4 := b remove: 1                      // remove one occurrence of 1
+b4 occurrencesOf: 1                    // => 2
+
+// do: iterates each element once per occurrence:
+(Bag withAll: #(1, 1, 2)) inject: 0 into: [:sum :x | sum + x]  // => 4
+```
 
 ### Stream — Lazy Pipelines
 

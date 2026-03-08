@@ -16,6 +16,7 @@
 -export([
     open/0, open/1,
     compile_expression/4, compile_expression/5,
+    compile_expression_trace/4, compile_expression_trace/5,
     resolve_completion_type/3,
     close/1
 ]).
@@ -131,6 +132,71 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
     catch
         error:badarg ->
             ?LOG_ERROR("Compiler port not available", #{port => Port}),
+            {error, [#{message => <<"Compiler port is not available">>}]}
+    end.
+
+%% @doc Compile a REPL expression in trace mode (BT-1238).
+%%
+%% Same request format as `compile_expression/4' but sends the
+%% `compile_expression_trace' command.  The returned Core Erlang module's
+%% `eval/1' returns `{[{<<"src0">>, Val0}, ...], FinalState}' instead of
+%% `{Result, FinalState}'.
+-spec compile_expression_trace(port(), binary(), binary(), [binary()]) ->
+    {ok, binary(), [binary()]} | {error, [map()]}.
+compile_expression_trace(Port, Source, ModuleName, KnownVars) ->
+    compile_expression_trace(Port, Source, ModuleName, KnownVars, #{}).
+
+%% @doc Compile in trace mode with optional compilation options.
+-spec compile_expression_trace(port(), binary(), binary(), [binary()], map()) ->
+    {ok, binary(), [binary()]} | {error, [map()]}.
+compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
+    SuperclassIndex = maps:get(class_superclass_index, Options, #{}),
+    ModuleIndex = maps:get(class_module_index, Options, #{}),
+    ClassHierarchy = maps:get(class_hierarchy, Options, #{}),
+    Request0 = #{
+        command => compile_expression_trace,
+        source => Source,
+        module => ModuleName,
+        known_vars => KnownVars
+    },
+    Request1 =
+        case map_size(SuperclassIndex) of
+            0 -> Request0;
+            _ -> Request0#{class_superclass_index => SuperclassIndex}
+        end,
+    Request2 =
+        case map_size(ModuleIndex) of
+            0 -> Request1;
+            _ -> Request1#{class_module_index => ModuleIndex}
+        end,
+    Request =
+        case map_size(ClassHierarchy) of
+            0 -> Request2;
+            _ -> Request2#{class_hierarchy => ClassHierarchy}
+        end,
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (trace)", #{port => Port}),
+                            {error, [#{message => <<"Compiler port response is malformed">>}]}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during trace compile", #{status => Status}),
+                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (trace)", #{port => Port}),
+                catch port_close(Port),
+                {error, [#{message => <<"Compiler port timed out">>}]}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (trace)", #{port => Port}),
             {error, [#{message => <<"Compiler port is not available">>}]}
     end.
 

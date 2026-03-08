@@ -1,0 +1,116 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for Bag — immutable multiset collection (BT-1249)
+
+TestCase subclass: BagTest
+
+  testCreationClass => self assert: Bag new class equals: Bag
+
+  testNewIsEmpty =>
+    self assert: Bag new isEmpty
+    self assert: Bag new size equals: 0
+
+  testWithAll =>
+    b := Bag withAll: #(1, 2, 1, 3)
+    self assert: b class equals: Bag
+    self assert: b size equals: 4
+
+  testOccurrencesOf =>
+    b := Bag withAll: #(1, 1, 2)
+    self assert: (b occurrencesOf: 1) equals: 2
+    self assert: (b occurrencesOf: 2) equals: 1
+    self assert: (b occurrencesOf: 3) equals: 0
+
+  testIncludes =>
+    b := Bag withAll: #(1, 2)
+    self assert: (b includes: 1)
+    self assert: (b includes: 2)
+    self deny: (b includes: 3)
+
+  testAdd =>
+    b := Bag new add: 1
+    self assert: (b occurrencesOf: 1) equals: 1
+    b2 := b add: 1
+    self assert: (b2 occurrencesOf: 1) equals: 2
+    // Original unchanged
+    self assert: (b occurrencesOf: 1) equals: 1
+
+  testAddWithCount =>
+    b := (Bag new) add: 1 withCount: 3
+    self assert: (b occurrencesOf: 1) equals: 3
+    self assert: b size equals: 3
+
+  testRemoveOneOccurrence =>
+    b := Bag withAll: #(1, 1, 2)
+    b2 := b remove: 1
+    self assert: (b2 occurrencesOf: 1) equals: 1
+    self assert: b2 size equals: 2
+
+  testRemoveLastOccurrence =>
+    b := Bag withAll: #(1, 2)
+    b2 := b remove: 1
+    self deny: (b2 includes: 1)
+    self assert: b2 size equals: 1
+
+  testRemoveAbsentIsNoop =>
+    b := Bag withAll: #(1, 2)
+    b2 := b remove: 3
+    self assert: b2 size equals: 2
+
+  testSizeIsTotal =>
+    b := Bag withAll: #(1, 1, 1, 2, 2)
+    self assert: b size equals: 5
+
+  testDoIteratesEachOccurrence =>
+    b := Bag withAll: #(1, 1, 2)
+    result := Bag new
+    b do: [:x | result := result add: x]
+    self assert: result size equals: 3
+    self assert: (result occurrencesOf: 1) equals: 2
+    self assert: (result occurrencesOf: 2) equals: 1
+
+  testInjectInto =>
+    b := Bag withAll: #(1, 2, 3)
+    sum := b inject: 0 into: [:acc :x | acc + x]
+    self assert: sum equals: 6
+
+  testInjectIntoWithDuplicates =>
+    b := Bag withAll: #(1, 1, 2)
+    sum := b inject: 0 into: [:acc :x | acc + x]
+    self assert: sum equals: 4
+
+  testCollect =>
+    b := Bag withAll: #(1, 2)
+    b2 := b collect: [:x | x * 2]
+    self assert: b2 class equals: Bag
+    self assert: b2 size equals: 2
+    self assert: (b2 occurrencesOf: 2) equals: 1
+    self assert: (b2 occurrencesOf: 4) equals: 1
+
+  testSelect =>
+    b := Bag withAll: #(1, 2, 3, 4)
+    b2 := b select: [:x | x > 2]
+    self assert: b2 class equals: Bag
+    self assert: b2 size equals: 2
+    self assert: (b2 occurrencesOf: 3) equals: 1
+    self assert: (b2 occurrencesOf: 4) equals: 1
+
+  testReject =>
+    b := Bag withAll: #(1, 2, 3, 4)
+    b2 := b reject: [:x | x > 2]
+    self assert: b2 class equals: Bag
+    self assert: b2 size equals: 2
+    self assert: (b2 occurrencesOf: 1) equals: 1
+    self assert: (b2 occurrencesOf: 2) equals: 1
+
+  testPrintString =>
+    self assert: Bag new printString notNil
+    self assert: (Bag withAll: #(1, 2)) printString notNil
+
+  testAddWithCountZeroIsNoop =>
+    b := (Bag new) add: 1 withCount: 0
+    self assert: b isEmpty
+
+  testAddWithCountNegativeRaisesError =>
+    self should: [(Bag new) add: 1 withCount: -1] raise: #user_error
