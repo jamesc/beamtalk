@@ -1,0 +1,34 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Time — current time accessors.
+///
+/// Provides class methods for reading the system clock as an integer
+/// timestamp. All methods are class-side — Time has no instances.
+///
+/// ## Examples
+/// ```beamtalk
+/// Time nowMs   // => _
+/// Time nowUs   // => _
+/// ```
+sealed Object subclass: Time
+
+  /// Current time in milliseconds since the Unix epoch.
+  ///
+  /// Wraps `erlang:system_time(millisecond)`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Time nowMs   // => _
+  /// ```
+  class sealed nowMs -> Integer => (Erlang beamtalk_time) nowMs
+
+  /// Current time in microseconds since the Unix epoch.
+  ///
+  /// Wraps `erlang:system_time(microsecond)`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Time nowUs   // => _
+  /// ```
+  class sealed nowUs -> Integer => (Erlang beamtalk_time) nowUs

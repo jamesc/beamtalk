@@ -50,6 +50,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "List"
             | "Metaclass"
             | "Number"
+            | "OS"
             | "Object"
             | "Pid"
             | "Port"
@@ -72,6 +73,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "TestResult"
             | "TestRunner"
             | "ThrowError"
+            | "Time"
             | "Timer"
             | "TranscriptStream"
             | "True"
@@ -1065,6 +1067,25 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "OS".into(),
+        ClassInfo {
+            name: "OS".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "OS".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("String".into())], doc: Some("Execute a shell command and return its trimmed stdout as a String.\n\nWraps `os:cmd/1` and trims trailing whitespace from the result.\n\n## Examples\n```beamtalk\nOS run: \"echo hello\"   // => \"hello\"\n```".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
         "Object".into(),
         ClassInfo {
             name: "Object".into(),
@@ -1462,6 +1483,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("List".into())], doc: Some("Create a String by joining a list of grapheme cluster strings.\n\nUseful for constructing a String from the result of `asList` or\n`select:` operations. Each element should be a grapheme string.\n\n## Examples\n```beamtalk\nString class withAll: #(\"h\", \"e\", \"l\", \"l\", \"o\")  // => \"hello\"\n```".into()) },
                 MethodInfo { selector: "fromCodePoint:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("Integer".into())], doc: Some("Create a single-character String from a Unicode code point integer.\n\n## Examples\n```beamtalk\nString fromCodePoint: 65    // => \"A\"\nString fromCodePoint: 8364  // => \"€\"\n```".into()) },
                 MethodInfo { selector: "fromCodePoints:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("List".into())], doc: Some("Create a String from a list of Unicode code point integers.\n\n## Examples\n```beamtalk\nString fromCodePoints: #(72, 105)   // => \"Hi\"\nString fromCodePoints: #(123, 125)  // => \"\\{\\}\"\n```".into()) },
+                MethodInfo { selector: "fromIolist:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![None], doc: Some("Convert an Erlang iolist or charlist to a String binary.\n\nUseful for coercing the result of Erlang FFI calls that return\niolists (nested lists of binaries and integers) into a plain String.\n\n## Examples\n```beamtalk\nString fromIolist: #(104, 105)   // => \"hi\"\n```".into()) },
             ],
             class_variables: vec![],
         },
@@ -1702,6 +1724,26 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Time".into(),
+        ClassInfo {
+            name: "Time".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "nowMs".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in milliseconds since the Unix epoch.\n\nWraps `erlang:system_time(millisecond)`.\n\n## Examples\n```beamtalk\nTime nowMs   // => _\n```".into()) },
+                MethodInfo { selector: "nowUs".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in microseconds since the Unix epoch.\n\nWraps `erlang:system_time(microsecond)`.\n\n## Examples\n```beamtalk\nTime nowUs   // => _\n```".into()) },
+            ],
             class_variables: vec![],
         },
     );

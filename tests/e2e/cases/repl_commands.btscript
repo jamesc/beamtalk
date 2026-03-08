@@ -147,3 +147,23 @@ c2 := Counter spawn
 
 c2 increment
 // => 1
+
+// ===========================================================================
+// :unload — UNLOAD A LOADED CLASS (BT-1243)
+// ===========================================================================
+
+// Load a fresh class to unload (reusing the point fixture)
+:load tests/e2e/fixtures/point.bt
+// => Loaded: Point
+
+// Unload it — should succeed
+:unload Point
+// => ok
+
+// Unloading a stdlib class should return an error
+:unload Integer
+// => ERROR: Cannot remove stdlib class
+
+// Unloading a non-existent class should return an error
+:unload NonExistentClass99
+// => ERROR: Class not found

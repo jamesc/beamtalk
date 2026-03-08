@@ -47,6 +47,7 @@ const REPL_COMMANDS: &[&str] = &[
     ":l",
     ":reload",
     ":r",
+    ":unload",
     ":modules",
     ":m",
     ":actors",
@@ -171,6 +172,7 @@ const CLASS_EXPR_COMMANDS: &[&str] = &[
     ":t ",
     ":show-codegen ",
     ":sc ",
+    ":unload ",
 ];
 
 /// If `line` starts with a REPL class/expression command, return the byte offset
