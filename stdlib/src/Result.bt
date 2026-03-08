@@ -1,0 +1,237 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Result — Value type for expected success/failure outcomes (ADR 0060).
+///
+/// `Result` is a sealed value class representing either a successful outcome
+/// (`ok:`) or a failure (`error:`). Use `Result` for operations where failure
+/// is a normal, expected case — file I/O, parsing, network requests. Use
+/// exceptions (`on:do:`) for programming errors like wrong argument types.
+///
+/// ## Constructors
+/// ```beamtalk
+/// Result ok: 42               // => a successful Result holding 42
+/// Result error: #file_not_found   // => a failed Result
+/// Result tryDo: [expr]         // => wraps exception-raising code
+/// ```
+///
+/// ## Combinators
+/// ```beamtalk
+/// (Result ok: 42) map: [:v | v + 1]              // => Result ok: 43
+/// (Result ok: 42) andThen: [:v | Result ok: v * 2]  // => Result ok: 84
+/// (Result error: #nope) map: [:v | v + 1]        // => Result error: #nope
+/// (Result ok: 42) valueOr: 0                     // => 42
+/// (Result error: #nope) valueOr: 0               // => 0
+/// (Result ok: 42) ifOk: [:v | v] ifError: [:e | 0]  // => 42
+/// ```
+///
+/// ## When to Use Result vs Exceptions
+///
+/// | Failure mode                      | Use          |
+/// |-----------------------------------|--------------|
+/// | File not found, parse error       | Result       |
+/// | does_not_understand, arity error  | Exception    |
+/// | User input validation             | Result       |
+/// | Actor lifecycle errors            | Exception    |
+///
+/// @see Exception, Error for exception-based error handling
+sealed Value subclass: Result
+  state: okValue :: Object = nil
+  state: errReason :: Object = nil
+  state: isOk :: Boolean = true
+
+  // ===== Class Methods — Construction =====
+
+  /// Create a successful Result wrapping a value (class method).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Result ok: 42          // => Result ok: 42
+  /// Result ok: "hello"     // => Result ok: "hello"
+  /// Result ok: nil         // => Result ok: nil
+  /// ```
+  class ok: value -> Result => (Erlang beamtalk_result) ok: value
+
+  /// Create a failed Result wrapping an error reason (class method).
+  ///
+  /// The `reason` should be a structured error (Exception subclass instance or
+  /// `#beamtalk_error{}`). Bare symbols are accepted for convenience but FFI
+  /// wrappers must provide structured errors at public boundaries.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Result error: #not_found   // => Result error: #not_found
+  /// Result error: Error new    // => Result error: <Error>
+  /// ```
+  /// To capture a raised exception as a Result, use `Result tryDo: [Error new signal: "oops"]`.
+  class error: reason -> Result => (Erlang beamtalk_result) makeError: reason
+
+  /// Evaluate a block and return a Result (class method).
+  ///
+  /// If the block succeeds, returns `Result ok: value`.
+  /// If the block raises an exception, returns `Result error: theException`.
+  /// Bridges between exception-raising legacy code and Result combinators.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Result tryDo: [42]                          // => Result ok: 42
+  /// Result tryDo: [Exception new signal: "oops"]   // => Result error: <Exception>
+  /// Result tryDo: [File readAll: "missing.txt"] // => Result error: <IOError>
+  /// ```
+  class sealed tryDo: block :: Block -> Result =>
+    (Erlang beamtalk_result) tryDo: block
+
+  // ===== Instance Methods — Querying =====
+
+  /// True if this Result holds a success value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) ok      // => true
+  /// (Result error: #x) ok   // => false
+  /// ```
+  sealed ok -> Boolean => self.isOk
+
+  /// True if this Result holds an error.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) isError      // => false
+  /// (Result error: #x) isError   // => true
+  /// ```
+  sealed isError -> Boolean => self.isOk not
+
+  // ===== Instance Methods — Guarded Accessors =====
+
+  /// The success value. Raises if this is an error Result.
+  ///
+  /// Prefer `valueOr:`, `valueOrDo:`, or `ifOk:ifError:` for safe access.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) value     // => 42
+  /// (Result error: #x) value  // => Exception: Cannot access 'value'...
+  /// ```
+  sealed value -> Object =>
+    self.isOk ifTrue: [
+      self.okValue
+    ] ifFalse: [
+      Exception new signal: "Cannot access 'value' on Result error — use valueOr:, ifOk:ifError:, or unwrap"
+    ]
+
+  /// The error reason. Raises if this is an ok Result.
+  ///
+  /// Prefer `ifOk:ifError:` or `mapError:` for safe access.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result error: #x) error  // => #x
+  /// (Result ok: 42) error     // => Exception: Cannot access 'error'...
+  /// ```
+  sealed error -> Object =>
+    self.isOk ifTrue: [
+      Exception new signal: "Cannot access 'error' on Result ok — use ifOk:ifError: or mapError:"
+    ] ifFalse: [self.errReason]
+
+  // ===== Instance Methods — Safe Extractors =====
+
+  /// Unwrap the success value, or return the default if error.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) valueOr: 0    // => 42
+  /// (Result error: #x) valueOr: 0 // => 0
+  /// ```
+  sealed valueOr: default -> Object =>
+    self.isOk ifTrue: [self.okValue] ifFalse: [default]
+
+  /// Unwrap the success value, or evaluate a block with the error reason.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) valueOrDo: [:e | 0]       // => 42
+  /// (Result error: #x) valueOrDo: [:e | -1]   // => -1
+  /// ```
+  sealed valueOrDo: block -> Object =>
+    self.isOk ifTrue: [self.okValue] ifFalse: [block value: self.errReason]
+
+  /// Unwrap the success value, or raise an exception.
+  ///
+  /// Re-raises the `errReason` directly if it is an Exception (preserving
+  /// class, message, and hints). For raw values, signals a generic Error.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) unwrap         // => 42
+  /// (Result error: #x) unwrap      // => Exception: unwrap called on Result error: #x
+  /// ```
+  sealed unwrap -> Object =>
+    self.isOk ifTrue: [
+      self.okValue
+    ] ifFalse: [(Erlang beamtalk_result) unwrapError: self.errReason]
+
+  // ===== Instance Methods — Transformers =====
+
+  /// Apply a block to the success value, wrapping result in a new ok Result.
+  /// If this is an error, returns self unchanged.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) map: [:v | v + 1]        // => Result ok: 43
+  /// (Result error: #x) map: [:v | v + 1]     // => Result error: #x
+  /// ```
+  sealed map: block -> Result =>
+    self.isOk ifTrue: [Result ok: (block value: self.okValue)] ifFalse: [self]
+
+  /// Apply a block that returns a Result. Flattens the nesting.
+  /// If this is an error, returns self unchanged.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) andThen: [:v | Result ok: v * 2]   // => Result ok: 84
+  /// (Result error: #x) andThen: [:v | Result ok: v]    // => Result error: #x
+  /// ```
+  sealed andThen: block -> Result =>
+    self.isOk ifTrue: [block value: self.okValue] ifFalse: [self]
+
+  /// Apply a block to the error reason, wrapping result in a new error Result.
+  /// If this is ok, returns self unchanged.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result error: #x) mapError: [:e | "wrapped: " ++ e printString]
+  ///   // => Result error: "wrapped: #x"
+  /// (Result ok: 42) mapError: [:e | "oops"]   // => Result ok: 42
+  /// ```
+  sealed mapError: block -> Result =>
+    self.isOk ifTrue: [
+      self
+    ] ifFalse: [Result error: (block value: self.errReason)]
+
+  // ===== Instance Methods — Pattern Matching =====
+
+  /// Handle both ok and error cases with blocks.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) ifOk: [:v | v + 1] ifError: [:e | -1]    // => 43
+  /// (Result error: #x) ifOk: [:v | v] ifError: [:e | 0]      // => 0
+  /// ```
+  sealed ifOk: okBlock ifError: errorBlock -> Object =>
+    self.isOk ifTrue: [
+      okBlock value: self.okValue
+    ] ifFalse: [errorBlock value: self.errReason]
+
+  // ===== Instance Methods — Display =====
+
+  /// Human-readable representation: "Result ok: value" or "Result error: reason".
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Result ok: 42) printString       // => "Result ok: 42"
+  /// (Result error: #x) printString    // => "Result error: #x"
+  /// ```
+  sealed printString -> String =>
+    self.isOk ifTrue: [
+      "Result ok: " ++ self.okValue printString
+    ] ifFalse: ["Result error: " ++ self.errReason printString]

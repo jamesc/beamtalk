@@ -52,6 +52,7 @@
             {'bt@stdlib@reactive_subprocess', 'ReactiveSubprocess', 'Actor'},
             {'bt@stdlib@reference', 'Reference', 'Object'},
             {'bt@stdlib@regex', 'Regex', 'Value'},
+            {'bt@stdlib@result', 'Result', 'Value'},
             {'bt@stdlib@runtime_error', 'RuntimeError', 'Error'},
             {'bt@stdlib@set', 'Set', 'Collection'},
             {'bt@stdlib@stack_frame', 'StackFrame', 'Value'},
