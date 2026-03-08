@@ -1,7 +1,7 @@
 # ADR 0060: Result Type — Hybrid Error Handling for Expected Failures
 
 ## Status
-Proposed (2026-03-08)
+Accepted (2026-03-08)
 
 ## Context
 
@@ -810,7 +810,7 @@ content := File readAll: path  // => Result ok: "..." or Result error: #file_not
 ### Negative
 
 - **Two error systems** — Developers must learn both `on:do:` (exceptions) and `Result` (expected failures). The guideline is clear but edge cases exist
-- **Breaking change for File I/O callers** — `File readAll:` changing from direct value / exception to Result requires callers to handle Result. Must be phased carefully
+- **Breaking change for File I/O callers** — `File readAll:` changing from direct value / exception to Result requires callers to update call sites. `unwrap` provides a mechanical escape hatch to preserve crash-on-failure semantics during migration
 - **New dependency in stdlib** — Result must load before any Result-returning class (File, Yaml, etc.)
 - **Unwrap-induced crashes** — `unwrap` on a Result error crashes with an exception. Developers who overuse `unwrap` get the worst of both worlds
 - **API documentation effort** — Every method migrated to Result needs updated docs and examples
@@ -893,7 +893,10 @@ beamtalk_result:from_tagged_tuple(some_erlang_call(Args)).
 case some_erlang_call(Args) of
     {ok, Value} -> beamtalk_result:from_tagged_tuple({ok, Value});
     {error, Reason} ->
-        beamtalk_result:from_tagged_tuple({error, #{reason => Reason, path => Path}})
+        %% Build a structured #beamtalk_error{} before passing to from_tagged_tuple/1
+        Error = beamtalk_error:new(some_kind, 'MyClass'),
+        Error1 = beamtalk_error:with_details(Error, #{reason => Reason}),
+        beamtalk_result:from_tagged_tuple({error, Error1})
 end.
 ```
 
