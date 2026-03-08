@@ -41,30 +41,29 @@
 %% `output_too_large` if stdout exceeds 10 MB.
 -spec 'run:'(binary()) -> binary().
 'run:'(Cmd) when is_binary(Cmd) ->
-    run_cmd(Cmd, ?DEFAULT_TIMEOUT_MS);
+    run_cmd(Cmd, ?DEFAULT_TIMEOUT_MS, 'run:');
 'run:'(_) ->
-    raise_type_error('run:').
+    raise_type_error('run:', <<"Argument must be a String">>).
 
 %% @doc Execute a shell command with an explicit timeout in milliseconds.
 %%
 %% Behaves like `run:` but the caller controls the wall-clock deadline.
 %% Raises `#beamtalk_error{kind = timeout}` if the command has not exited
 %% within `TimeoutMs` milliseconds.
--spec 'run:timeout:'(binary(), non_neg_integer()) -> binary().
+-spec 'run:timeout:'(binary(), pos_integer()) -> binary().
 'run:timeout:'(Cmd, TimeoutMs) when is_binary(Cmd), is_integer(TimeoutMs), TimeoutMs > 0 ->
-    run_cmd(Cmd, TimeoutMs);
-'run:timeout:'(Cmd, TimeoutMs) when not is_binary(Cmd) ->
-    _ = TimeoutMs,
-    raise_type_error('run:timeout:');
+    run_cmd(Cmd, TimeoutMs, 'run:timeout:');
+'run:timeout:'(Cmd, _TimeoutMs) when not is_binary(Cmd) ->
+    raise_type_error('run:timeout:', <<"Argument must be a String">>);
 'run:timeout:'(_, _) ->
-    raise_type_error('run:timeout:').
+    raise_type_error('run:timeout:', <<"Timeout must be a positive Integer">>).
 
 %% @doc FFI shim for (Erlang beamtalk_os) run: cmd dispatch.
 -spec run(binary()) -> binary().
 run(Cmd) -> 'run:'(Cmd).
 
 %% @doc FFI shim for (Erlang beamtalk_os) run: cmd timeout: ms dispatch.
--spec run(binary(), non_neg_integer()) -> binary().
+-spec run(binary(), pos_integer()) -> binary().
 run(Cmd, TimeoutMs) -> 'run:timeout:'(Cmd, TimeoutMs).
 
 %%% ============================================================================
@@ -72,15 +71,15 @@ run(Cmd, TimeoutMs) -> 'run:timeout:'(Cmd, TimeoutMs).
 %%% ============================================================================
 
 %% @private Open a shell port and collect all stdout until exit or timeout.
--spec run_cmd(binary(), non_neg_integer()) -> binary().
-run_cmd(Cmd, TimeoutMs) ->
+-spec run_cmd(binary(), pos_integer(), atom()) -> binary().
+run_cmd(Cmd, TimeoutMs, Selector) ->
     Port = open_port({spawn, binary_to_list(Cmd)}, [exit_status, binary]),
     Timer = erlang:start_timer(TimeoutMs, self(), os_run_timeout),
-    collect(Port, <<>>, Timer).
+    collect(Port, <<>>, Timer, Selector).
 
 %% @private Accumulate port output, then trim trailing whitespace on exit.
--spec collect(port(), binary(), reference()) -> binary().
-collect(Port, Acc, Timer) ->
+-spec collect(port(), binary(), reference(), atom()) -> binary().
+collect(Port, Acc, Timer, Selector) ->
     receive
         {Port, {data, Data}} ->
             NewAcc = <<Acc/binary, Data/binary>>,
@@ -88,38 +87,49 @@ collect(Port, Acc, Timer) ->
                 true ->
                     erlang:cancel_timer(Timer),
                     port_close(Port),
-                    raise_output_too_large();
+                    flush_port(Port),
+                    raise_output_too_large(Selector);
                 false ->
-                    collect(Port, NewAcc, Timer)
+                    collect(Port, NewAcc, Timer, Selector)
             end;
         {Port, {exit_status, _}} ->
             erlang:cancel_timer(Timer),
             string:trim(Acc, trailing);
         {timeout, Timer, os_run_timeout} ->
             port_close(Port),
-            raise_timeout()
+            flush_port(Port),
+            raise_timeout(Selector)
+    end.
+
+%% @private Drain any residual port messages left in the mailbox after
+%% port_close/1 so they do not accumulate in long-lived callers.
+-spec flush_port(port()) -> ok.
+flush_port(Port) ->
+    receive
+        {Port, _} -> flush_port(Port)
+    after 0 -> ok
     end.
 
 %% @private
--spec raise_type_error(atom()) -> no_return().
-raise_type_error(Selector) ->
+-spec raise_type_error(atom(), binary()) -> no_return().
+raise_type_error(Selector, Hint) ->
     Error0 = beamtalk_error:new(type_error, 'OS'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a String">>),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
 
 %% @private
--spec raise_timeout() -> no_return().
-raise_timeout() ->
+-spec raise_timeout(atom()) -> no_return().
+raise_timeout(Selector) ->
     Error0 = beamtalk_error:new(timeout, 'OS'),
-    Error1 = beamtalk_error:with_selector(Error0, 'run:'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1, <<"Command exceeded time limit">>),
     beamtalk_error:raise(Error2).
 
 %% @private
--spec raise_output_too_large() -> no_return().
-raise_output_too_large() ->
+-spec raise_output_too_large(atom()) -> no_return().
+raise_output_too_large(Selector) ->
     Error0 = beamtalk_error:new(output_too_large, 'OS'),
-    Error1 = beamtalk_error:with_selector(Error0, 'run:'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1, <<"Command output exceeded 10 MB limit">>),
     beamtalk_error:raise(Error2).

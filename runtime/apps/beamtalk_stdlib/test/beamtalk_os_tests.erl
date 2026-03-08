@@ -122,8 +122,7 @@ run_timeout_raises_on_expiry_test() ->
 run_output_too_large_test() ->
     case os:type() of
         {unix, _} ->
-            %% Generate ~11 MB of output (exceeds 10 MB limit).
-            %% yes outputs an infinite stream; we only need it to exceed the cap.
+            %% Generate ~11 MB of output via dd (exceeds 10 MB limit).
             ?assertError(
                 #{error := #beamtalk_error{kind = output_too_large, class = 'OS'}},
                 beamtalk_os:'run:'(<<"dd if=/dev/zero bs=1048576 count=11 2>/dev/null | cat">>)
