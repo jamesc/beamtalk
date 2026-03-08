@@ -1,0 +1,76 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// DynamicSupervisor — Abstract base class for dynamic OTP supervision trees.
+///
+/// Subclass `DynamicSupervisor` to define a dynamic supervision tree: one
+/// where children are added at runtime rather than declared at startup.
+/// Override `class childClass` to declare which actor class this pool manages.
+///
+/// See ADR 0059 for the full design.
+///
+/// ## Examples
+/// ```beamtalk
+/// DynamicSupervisor subclass: WorkerPool
+///   class childClass => Worker
+///
+/// pool := WorkerPool supervise
+/// w := pool startChild
+/// pool count   // => 1
+/// ```
+abstract Object subclass: DynamicSupervisor
+
+  // === Class-side configuration (override in concrete subclasses) ===
+
+  /// Maximum number of restarts within `restartWindow` seconds.
+  ///
+  /// If this rate is exceeded, the supervisor itself shuts down.
+  class maxRestarts -> Integer => 10
+
+  /// Time window in seconds for the `maxRestarts` rate limit.
+  class restartWindow -> Integer => 60
+
+  /// Whether this class is a supervisor (always true for DynamicSupervisor subclasses).
+  ///
+  /// Used by `SupervisionSpec childSpec` to determine `type` and `shutdown`.
+  class isSupervisor -> Boolean => true
+
+  /// Return the actor class that this dynamic supervisor manages.
+  ///
+  /// Must be overridden by concrete subclasses. Raises SubclassResponsibility otherwise.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DynamicSupervisor subclass: WorkerPool
+  ///   class childClass => Worker
+  /// ```
+  class childClass -> Class => self subclassResponsibility
+
+  // === Class-side lifecycle ===
+
+  /// Start this dynamic supervisor (or return the already-running instance).
+  class supervise -> DynamicSupervisor =>
+    (Erlang beamtalk_supervisor) startLink: self
+
+  /// Return the running supervisor instance, or nil if not started.
+  class current -> DynamicSupervisor =>
+    (Erlang beamtalk_supervisor) current: self
+
+  // === Instance-side child management ===
+
+  /// Start a new child with default args.
+  startChild -> Object => (Erlang beamtalk_supervisor) startChild: self
+
+  /// Start a new child with the given initialization args.
+  startChild: args :: Dictionary -> Object =>
+    (Erlang beamtalk_supervisor) startChild: self with: args
+
+  /// Terminate the given child process.
+  terminateChild: child :: Object -> Nil =>
+    (Erlang beamtalk_supervisor) terminateChild: self child: child
+
+  /// Return the count of currently-running children.
+  count -> Integer => (Erlang beamtalk_supervisor) countChildren: self
+
+  /// Stop this supervisor and all its children.
+  stop -> Nil => (Erlang beamtalk_supervisor) stop: self

@@ -32,6 +32,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "CompiledMethod"
             | "DateTime"
             | "Dictionary"
+            | "DynamicSupervisor"
             | "Erlang"
             | "ErlangModule"
             | "Error"
@@ -63,6 +64,8 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Stream"
             | "String"
             | "Subprocess"
+            | "SupervisionSpec"
+            | "Supervisor"
             | "Symbol"
             | "System"
             | "TestCase"
@@ -110,6 +113,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "spawnWith:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![None], doc: Some("Spawn a new actor process with initialization arguments.\n\n## Examples\n```beamtalk\nc := Counter spawnWith: #{#count => 10}\n```".into()) },
                 MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![], doc: Some("Raises an InstantiationError — actors must use `spawn`, not `new`.\n\n## Examples\n```beamtalk\nCounter new   // => ERROR: instantiation_error\n```".into()) },
                 MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: true, return_type: None, param_types: vec![None], doc: Some("Raises an InstantiationError — actors must use `spawnWith:`, not `new:`.\n\n## Examples\n```beamtalk\nCounter new: #{}   // => ERROR: instantiation_error\n```".into()) },
+                MethodInfo { selector: "supervisionPolicy".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, return_type: Some("Symbol".into()), param_types: vec![], doc: Some("Default OTP restart policy for this actor class.\n\nReturns `#temporary` by default — the actor is not automatically restarted\non crash. Override in subclasses to declare a different default:\n\n- `#permanent` — always restart (e.g., a database pool)\n- `#transient` — restart only on abnormal exit (e.g., a request handler)\n- `#temporary` — never restart (the default)\n\n## Examples\n```beamtalk\nActor supervisionPolicy           // => #temporary\nDatabasePool supervisionPolicy    // => #permanent (if overridden)\n```".into()) },
+                MethodInfo { selector: "isSupervisor".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this class is a supervisor.\n\nReturns `false` for Actor subclasses. Supervisor and DynamicSupervisor\nsubclasses override this to return `true`. Used by `SupervisionSpec childSpec`\nto determine OTP `type` (`#worker` vs `#supervisor`) and `shutdown` timeout.\n\n## Examples\n```beamtalk\nCounter isSupervisor   // => false\nWebApp isSupervisor    // => true (if WebApp subclasses Supervisor)\n```".into()) },
+                MethodInfo { selector: "supervisionSpec".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, return_type: Some("SupervisionSpec".into()), param_types: vec![], doc: Some("Return a SupervisionSpec for this actor class with default settings.\n\nCreates a SupervisionSpec with `actorClass` set to the receiver and\n`restart` set from `supervisionPolicy`. Use the fluent `with*:` API to\noverride per-child settings:\n\n## Examples\n```beamtalk\nDatabasePool supervisionSpec\n    // => SupervisionSpec with actorClass: DatabasePool, restart: #temporary\n\nDatabasePool supervisionSpec withId: #primary withArgs: #{#role => #primary}\n```".into()) },
             ],
             class_variables: vec![],
         },
@@ -505,6 +511,36 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Dictionary".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a string representation using Beamtalk syntax.\n\n## Examples\n```beamtalk\n#{#a => 1} printString                     // => \"#{#a => 1}\"\n```".into()) },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "DynamicSupervisor".into(),
+        ClassInfo {
+            name: "DynamicSupervisor".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: true,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "startChild".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Start a new child with default args.".into()) },
+                MethodInfo { selector: "startChild:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![Some("Dictionary".into())], doc: Some("Start a new child with the given initialization args.".into()) },
+                MethodInfo { selector: "terminateChild:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![Some("Object".into())], doc: Some("Terminate the given child process.".into()) },
+                MethodInfo { selector: "count".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the count of currently-running children.".into()) },
+                MethodInfo { selector: "stop".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Stop this supervisor and all its children.".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "maxRestarts".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Maximum number of restarts within `restartWindow` seconds.\n\nIf this rate is exceeded, the supervisor itself shuts down.".into()) },
+                MethodInfo { selector: "restartWindow".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Time window in seconds for the `maxRestarts` rate limit.".into()) },
+                MethodInfo { selector: "isSupervisor".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this class is a supervisor (always true for DynamicSupervisor subclasses).\n\nUsed by `SupervisionSpec childSpec` to determine `type` and `shutdown`.".into()) },
+                MethodInfo { selector: "childClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, return_type: Some("Class".into()), param_types: vec![], doc: Some("Return the actor class that this dynamic supervisor manages.\n\nMust be overridden by concrete subclasses. Raises SubclassResponsibility otherwise.\n\n## Examples\n```beamtalk\nDynamicSupervisor subclass: WorkerPool\n  class childClass => Worker\n```".into()) },
+                MethodInfo { selector: "supervise".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, return_type: Some("DynamicSupervisor".into()), param_types: vec![], doc: Some("Start this dynamic supervisor (or return the already-running instance).".into()) },
+                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "DynamicSupervisor".into(), is_sealed: false, return_type: Some("DynamicSupervisor".into()), param_types: vec![], doc: Some("Return the running supervisor instance, or nil if not started.".into()) },
+            ],
             class_variables: vec![],
         },
     );
@@ -1456,6 +1492,69 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_methods: vec![
                 MethodInfo { selector: "open:args:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: None, param_types: vec![None, None], doc: Some("Convenience factory — open a subprocess with command and args.\n\nBacked by `beamtalk_subprocess` which starts a gen_server and returns the actor reference.\n\n## Examples\n```beamtalk\nagent := Subprocess open: \"ls\" args: #(\"-la\")\n```".into()) },
                 MethodInfo { selector: "open:args:env:dir:".into(), arity: 4, kind: MethodKind::Primary, defined_in: "Subprocess".into(), is_sealed: false, return_type: None, param_types: vec![None, None, None, None], doc: Some("Convenience factory — open a subprocess with command, args, environment, and working directory.\n\n## Examples\n```beamtalk\nagent := Subprocess open: \"make\" args: #(\"test\") env: #{#\"CI\" => #\"true\"} dir: #\"/tmp\"\n```".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "SupervisionSpec".into(),
+        ClassInfo {
+            name: "SupervisionSpec".into(),
+            superclass: Some("Value".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: true,
+            state: vec!["id".into(), "actorClass".into(), "restart".into(), "args".into()],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "withId:withRestart:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol".into()), Some("Symbol".into())], doc: Some("Return a new spec with id and restart overridden.".into()) },
+                MethodInfo { selector: "withId:withArgs:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol".into()), Some("Dictionary".into())], doc: Some("Return a new spec with id and args overridden.".into()) },
+                MethodInfo { selector: "withId:withRestart:withArgs:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol".into()), Some("Symbol".into()), Some("Dictionary".into())], doc: Some("Return a new spec with id, restart, and args all overridden.".into()) },
+                MethodInfo { selector: "childSpec".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: Some("Dictionary".into()), param_types: vec![], doc: Some("Build the OTP child spec dictionary for this supervised actor.\n\nUses `actorClass isSupervisor` to determine `shutdown` and `type` without\nany Erlang ancestry check. Returns a Beamtalk dict that the runtime passes\ndirectly to OTP's `supervisor:start_link/2`.\n\n- `shutdown`: `#infinity` for nested supervisors, `5000` (ms) for workers\n- `type`: `#supervisor` or `#worker`\n- `start`: `#(actorClass, #spawn, #())` or `#(actorClass, #'spawnWith:', #(args))`".into()) },
+                MethodInfo { selector: "id".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Returns the `id` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withId:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: Some("SupervisionSpec".into()), param_types: vec![None], doc: Some("Returns a new `SupervisionSpec` with `id` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "actorClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Returns the `actorClass` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withActorClass:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: Some("SupervisionSpec".into()), param_types: vec![None], doc: Some("Returns a new `SupervisionSpec` with `actorClass` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "restart".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Returns the `restart` field value. Default: `#temporary`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withRestart:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: Some("SupervisionSpec".into()), param_types: vec![None], doc: Some("Returns a new `SupervisionSpec` with `restart` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "args".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: None, param_types: vec![], doc: Some("Returns the `args` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withArgs:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: Some("SupervisionSpec".into()), param_types: vec![None], doc: Some("Returns a new `SupervisionSpec` with `args` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "id:actorClass:restart:args:".into(), arity: 4, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, return_type: Some("SupervisionSpec".into()), param_types: vec![None, None, None, None], doc: Some("Creates a new `SupervisionSpec`. Args: id (default: nil), actorClass (default: nil), restart (default: #temporary), args (default: nil).\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Supervisor".into(),
+        ClassInfo {
+            name: "Supervisor".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: true,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "children".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Array".into()), param_types: vec![], doc: Some("Return the OTP child ids of currently-running children.".into()) },
+                MethodInfo { selector: "which:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Object".into()), param_types: vec![None], doc: Some("Return the running child process for the given class, or nil.".into()) },
+                MethodInfo { selector: "terminate:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![None], doc: Some("Terminate the running child process for the given class.".into()) },
+                MethodInfo { selector: "count".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the count of currently-running children.".into()) },
+                MethodInfo { selector: "stop".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Stop this supervisor and all its children.".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "strategy".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Symbol".into()), param_types: vec![], doc: Some("OTP supervisor restart strategy.\n\nValid values: `#oneForOne`, `#oneForAll`, `#restForOne`.\nDefault: `#oneForOne`.".into()) },
+                MethodInfo { selector: "maxRestarts".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Maximum number of restarts within `restartWindow` seconds.\n\nIf this rate is exceeded, the supervisor itself shuts down.".into()) },
+                MethodInfo { selector: "restartWindow".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Time window in seconds for the `maxRestarts` rate limit.".into()) },
+                MethodInfo { selector: "isSupervisor".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this class is a supervisor (always true for Supervisor subclasses).\n\nUsed by `SupervisionSpec childSpec` to determine `type` and `shutdown`.".into()) },
+                MethodInfo { selector: "children".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Array".into()), param_types: vec![], doc: Some("Return the list of child classes (or SupervisionSpec values) for this supervisor.\n\nMust be overridden by concrete subclasses. Raises SubclassResponsibility otherwise.\n\n## Examples\n```beamtalk\nSupervisor subclass: WebApp\n  class children => #(DatabasePool HTTPRouter)\n```".into()) },
+                MethodInfo { selector: "supervise".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Supervisor".into()), param_types: vec![], doc: Some("Start this supervisor (or return the already-running instance).\n\nRegisters the supervisor under its class name. Subsequent calls to\n`supervise` or `current` return the running instance.".into()) },
+                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Supervisor".into(), is_sealed: false, return_type: Some("Supervisor".into()), param_types: vec![], doc: Some("Return the running supervisor instance, or nil if not started.".into()) },
             ],
             class_variables: vec![],
         },

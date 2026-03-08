@@ -1,0 +1,84 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Supervisor — Abstract base class for static OTP supervision trees.
+///
+/// Subclass `Supervisor` to define a static supervision tree: one whose
+/// children are known at startup. Override `class children` to return
+/// the list of child classes (or `SupervisionSpec` values for per-child
+/// configuration). All other configuration methods have sensible defaults
+/// that can be selectively overridden.
+///
+/// See ADR 0059 for the full design.
+///
+/// ## Examples
+/// ```beamtalk
+/// Supervisor subclass: WebApp
+///   class children => #(DatabasePool HTTPRouter MetricsCollector)
+///
+/// app := WebApp supervise
+/// app count   // => 3
+/// ```
+abstract Object subclass: Supervisor
+
+  // === Class-side configuration (override in concrete subclasses) ===
+
+  /// OTP supervisor restart strategy.
+  ///
+  /// Valid values: `#oneForOne`, `#oneForAll`, `#restForOne`.
+  /// Default: `#oneForOne`.
+  class strategy -> Symbol => #oneForOne
+
+  /// Maximum number of restarts within `restartWindow` seconds.
+  ///
+  /// If this rate is exceeded, the supervisor itself shuts down.
+  class maxRestarts -> Integer => 10
+
+  /// Time window in seconds for the `maxRestarts` rate limit.
+  class restartWindow -> Integer => 60
+
+  /// Whether this class is a supervisor (always true for Supervisor subclasses).
+  ///
+  /// Used by `SupervisionSpec childSpec` to determine `type` and `shutdown`.
+  class isSupervisor -> Boolean => true
+
+  /// Return the list of child classes (or SupervisionSpec values) for this supervisor.
+  ///
+  /// Must be overridden by concrete subclasses. Raises SubclassResponsibility otherwise.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Supervisor subclass: WebApp
+  ///   class children => #(DatabasePool HTTPRouter)
+  /// ```
+  class children -> Array => self subclassResponsibility
+
+  // === Class-side lifecycle ===
+
+  /// Start this supervisor (or return the already-running instance).
+  ///
+  /// Registers the supervisor under its class name. Subsequent calls to
+  /// `supervise` or `current` return the running instance.
+  class supervise -> Supervisor => (Erlang beamtalk_supervisor) startLink: self
+
+  /// Return the running supervisor instance, or nil if not started.
+  class current -> Supervisor => (Erlang beamtalk_supervisor) current: self
+
+  // === Instance-side inspection ===
+
+  /// Return the OTP child ids of currently-running children.
+  children -> Array => (Erlang beamtalk_supervisor) whichChildren: self
+
+  /// Return the running child process for the given class, or nil.
+  which: aClass -> Object =>
+    (Erlang beamtalk_supervisor) whichChild: self class: aClass
+
+  /// Terminate the running child process for the given class.
+  terminate: aClass -> Nil =>
+    (Erlang beamtalk_supervisor) terminateChild: self class: aClass
+
+  /// Return the count of currently-running children.
+  count -> Integer => (Erlang beamtalk_supervisor) countChildren: self
+
+  /// Stop this supervisor and all its children.
+  stop -> Nil => (Erlang beamtalk_supervisor) stop: self
