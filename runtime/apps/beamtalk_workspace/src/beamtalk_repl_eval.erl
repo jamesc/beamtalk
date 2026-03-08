@@ -144,10 +144,15 @@ do_eval_trace(Expression, State) ->
                                 )
                             of
                                 {value, {_Src, {future_rejected, FutureReason}}} ->
-                                    ErrState = beamtalk_repl_state:set_bindings(
-                                        CleanBindings, NewState
+                                    %% Mirror process_eval_result/4: wrap and store in '_error'.
+                                    FutExObj = beamtalk_exception_handler:ensure_wrapped(
+                                        FutureReason
                                     ),
-                                    {error, {future_rejected, FutureReason}, ErrState};
+                                    FutBindings = maps:put('_error', FutExObj, CleanBindings),
+                                    ErrState = beamtalk_repl_state:set_bindings(
+                                        FutBindings, NewState
+                                    ),
+                                    {error, FutExObj, ErrState};
                                 false ->
                                     FinalState = beamtalk_repl_state:set_bindings(
                                         CleanBindings, NewState
