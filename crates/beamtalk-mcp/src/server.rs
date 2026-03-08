@@ -127,6 +127,21 @@ pub struct UnloadParams {
     pub module: String,
 }
 
+/// Parameters for the `load_project` MCP tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct LoadProjectParams {
+    /// Path to a directory containing `beamtalk.toml`.
+    #[schemars(
+        description = "Path to the project directory containing beamtalk.toml. Use \".\" for the current directory."
+    )]
+    pub path: String,
+    /// If true, also load files from the `test/` directory.
+    #[schemars(
+        description = "Whether to also load test files from the test/ directory. Defaults to false."
+    )]
+    pub include_tests: Option<bool>,
+}
+
 // --- MCP Tool implementations ---
 
 #[tool_router]
@@ -209,6 +224,75 @@ impl BeamtalkMcp {
         };
 
         Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Load all `.bt` source files from a project in dependency order.
+    #[tool(
+        description = "Load all .bt source files from a beamtalk project (identified by beamtalk.toml) in dependency order. Reads the src/ directory and loads files so superclasses are loaded before subclasses. Returns the list of loaded classes and any per-file errors."
+    )]
+    async fn load_project(
+        &self,
+        Parameters(params): Parameters<LoadProjectParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let include_tests = params.include_tests.unwrap_or(false);
+        let response = self
+            .client
+            .load_project(&params.path, include_tests)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        if response.is_error() {
+            let msg = response.error_message().unwrap_or("Failed to load project");
+            return Ok(error_result(format!("ERROR: {msg}")));
+        }
+
+        let classes = response.classes.unwrap_or_default();
+        let errors = response.errors.unwrap_or_default();
+
+        let mut parts = Vec::new();
+
+        if classes.is_empty() {
+            parts.push(Content::text("No classes loaded"));
+        } else {
+            parts.push(Content::text(format!(
+                "Loaded classes: {}",
+                classes.join(", ")
+            )));
+        }
+
+        for e in &errors {
+            // Each error is a structured map with path, kind, message (and optional hint).
+            let msg = match e {
+                serde_json::Value::Object(map) => {
+                    let path = map.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    let message = map
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown error");
+                    if path.is_empty() {
+                        message.to_string()
+                    } else {
+                        format!("{path}: {message}")
+                    }
+                }
+                serde_json::Value::String(s) => s.clone(),
+                _ => e.to_string(),
+            };
+            parts.push(Content::text(format!("Error: {msg}")));
+        }
+
+        // Partial loads (some files succeeded, some failed) are still reported as
+        // errors so MCP clients that inspect is_error see the failure.
+        if !errors.is_empty() {
+            return Ok(CallToolResult {
+                content: parts,
+                is_error: Some(true),
+                meta: None,
+                structured_content: None,
+            });
+        }
+
+        Ok(CallToolResult::success(parts))
     }
 
     /// Load a `.bt` source file into the workspace.
@@ -625,7 +709,8 @@ impl ServerHandler for BeamtalkMcp {
         ServerInfo {
             instructions: Some(
                 "Beamtalk MCP server — interact with live beamtalk objects through the REPL. \
-                 Use 'evaluate' to run beamtalk expressions, 'load_file' to load source code, \
+                 Use 'evaluate' to run beamtalk expressions, 'load_project' to load all files \
+                 from a project in dependency order, 'load_file' to load a single source file, \
                  'list_actors' to see running actors, 'inspect' to examine actor state, \
                  'reload_module' for hot code reloading, 'test' to run BUnit tests, \
                  'show_codegen' to inspect generated Core Erlang, 'info' for symbol details, \

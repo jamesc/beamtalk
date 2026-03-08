@@ -351,6 +351,68 @@ impl ReplClient {
         self.send(&request).await
     }
 
+    /// Send a load-project operation.
+    ///
+    /// Uses [`send_once`] (no retry) because `load-project` loads multiple files
+    /// sequentially on the server side. A retry after a partial success would
+    /// re-execute already-completed file loads, causing class redefinitions and
+    /// duplicate errors in the response.
+    pub async fn load_project(
+        &self,
+        path: &str,
+        include_tests: bool,
+    ) -> Result<ReplResponse, String> {
+        let request = serde_json::json!({
+            "op": "load-project",
+            "id": next_msg_id(),
+            "path": path,
+            "include_tests": include_tests
+        });
+        self.send_once(&request).await
+    }
+
+    /// Send a JSON request and receive a JSON response **without retrying**.
+    ///
+    /// Suitable for non-idempotent operations where a retry after partial
+    /// success could cause duplicate side effects. For ordinary ops use
+    /// [`send`] which retries once after transient I/O failures.
+    async fn send_once(&self, request: &serde_json::Value) -> Result<ReplResponse, String> {
+        let request_str =
+            serde_json::to_string(request).map_err(|e| format!("Failed to serialize: {e}"))?;
+
+        let mut inner = self.inner.lock().await;
+
+        let io_future = async {
+            inner
+                .ws
+                .send(Message::Text(request_str.into()))
+                .await
+                .map_err(|e| format!("Failed to send: {e}"))?;
+
+            loop {
+                let response_text = read_text_message(&mut inner.ws).await?;
+
+                let parsed: serde_json::Value = serde_json::from_str(&response_text)
+                    .map_err(|e| format!("Failed to parse response: {e}\nRaw: {response_text}"))?;
+
+                if parsed.get("status").is_some() {
+                    return serde_json::from_value(parsed).map_err(|e| {
+                        format!("Failed to deserialize response: {e}\nRaw: {response_text}")
+                    });
+                }
+            }
+        };
+
+        tokio::time::timeout(REPL_IO_TIMEOUT, io_future)
+            .await
+            .map_err(|_| {
+                format!(
+                    "REPL I/O timed out after {}s — the REPL may be unresponsive",
+                    REPL_IO_TIMEOUT.as_secs()
+                )
+            })?
+    }
+
     /// Send a docs operation.
     pub async fn docs(&self, class: &str, selector: Option<&str>) -> Result<ReplResponse, String> {
         let mut request = serde_json::json!({
@@ -404,6 +466,9 @@ pub struct ReplResponse {
     pub migration_failures: Option<u32>,
     /// Generated Core Erlang source (show-codegen op).
     pub core_erlang: Option<String>,
+    /// Per-file load errors (load-project op). Each entry is a structured map
+    /// with at least `path`, `kind`, and `message` fields.
+    pub errors: Option<Vec<serde_json::Value>>,
     /// Test results (test / test-all ops).
     pub results: Option<serde_json::Value>,
     /// Supported operations and protocol info (describe op).
