@@ -374,9 +374,7 @@ compile_class_source(ClassBin, ClassAtom, ClassPid, Msg) ->
             undefined ->
                 file:read_file(SourcePath);
             SrcStr when is_list(SrcStr) ->
-                {ok, list_to_binary(SrcStr)};
-            SrcBin ->
-                {ok, SrcBin}
+                {ok, list_to_binary(SrcStr)}
         end,
     case SourceResult of
         {error, no_source} ->
