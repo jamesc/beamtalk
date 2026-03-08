@@ -354,17 +354,12 @@ structured_file_error(Path, Reason) ->
     ErrMap = #{
         <<"path">> => list_to_binary(Path),
         <<"kind">> => atom_to_binary(Kind, utf8),
-        <<"message">> => coerce_binary(Msg)
+        <<"message">> => Msg
     },
     case Hint of
         undefined -> ErrMap;
-        _ -> ErrMap#{<<"hint">> => coerce_binary(Hint)}
+        _ -> ErrMap#{<<"hint">> => Hint}
     end.
-
-%% @private
--spec coerce_binary(binary() | undefined) -> binary().
-coerce_binary(undefined) -> <<>>;
-coerce_binary(B) -> B.
 
 %% @private
 %% @doc Collect collision warnings for the loaded classes after a file load.
