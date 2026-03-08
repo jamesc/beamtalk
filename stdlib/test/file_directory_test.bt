@@ -223,6 +223,19 @@ TestCase subclass: FileDirectoryTest
     @expect type
     self should: [File absolutePath: 42] raise: #type_error
 
+  testCwd =>
+    cwd := File cwd
+    self assert: (cwd size > 0)
+
+  testCwdIsString =>
+    cwd := File cwd
+    self assert: (cwd class name) equals: #String
+
+  testCwdIsAbsolute =>
+    cwd := File cwd
+    // Absolute paths are longer than a single component
+    self assert: cwd size > 1
+
   testTempDirectory =>
     tmp := File tempDirectory
     self assert: (tmp size > 0)

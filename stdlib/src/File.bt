@@ -162,6 +162,14 @@ Object subclass: File
   class sealed absolutePath: path :: String -> String =>
     (Erlang beamtalk_file) absolutePath: path
 
+  /// Return the current working directory (class method).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// File cwd   // => "/home/user/projects/myapp"
+  /// ```
+  class sealed cwd -> String => (Erlang beamtalk_file) cwd
+
   /// Return the OS temporary directory path (class method).
   ///
   /// ## Examples
