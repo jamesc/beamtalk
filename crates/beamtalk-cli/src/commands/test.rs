@@ -662,6 +662,15 @@ fn find_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
 
     let mut current = start_dir.to_owned();
     loop {
+        // Guard against empty paths — this happens when walking up from a
+        // single-component relative path (e.g. parent of "test" is "").
+        // Without this guard, `"".join("beamtalk.toml")` resolves to
+        // `"beamtalk.toml"` relative to the CWD and returns `Some("")`,
+        // which later causes `build("", ...)` to fail with
+        // "Path '' does not exist". (BT-1228)
+        if current.as_str().is_empty() {
+            return None;
+        }
         if current.join("beamtalk.toml").exists() {
             return Some(current);
         }
@@ -1577,6 +1586,27 @@ mod tests {
 
         let result = find_package_root(&dir.join("sub/test.bt"));
         assert!(result.is_none());
+    }
+
+    /// BT-1228: Walking up from a relative single-component path (e.g. "test")
+    /// yields "" as the parent directory. The guard in `find_package_root` must
+    /// return `None` before treating "" as a valid package root, since
+    /// `"".join("beamtalk.toml")` resolves to `"beamtalk.toml"` relative to
+    /// CWD and would return `Some("")`, causing `build("", ...)` to fail.
+    #[test]
+    fn test_find_package_root_never_returns_empty_path() {
+        // Single-component relative paths whose parent is "": the function
+        // must not return Some("") regardless of whether the CWD has a manifest.
+        for rel in &["test", "src", "lib"] {
+            let result = find_package_root(Utf8Path::new(rel));
+            if let Some(root) = result {
+                assert!(
+                    !root.as_str().is_empty(),
+                    "find_package_root(\"{rel}\") returned Some(\"\"), \
+                     which would cause build to fail with \"Path '' does not exist\""
+                );
+            }
+        }
     }
 
     #[test]
