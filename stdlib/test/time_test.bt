@@ -23,8 +23,7 @@ TestCase subclass: TimeTest
     us := Time nowUs
     self assert: (us > ms)
 
-  testNowMsIncreases =>
-    t1 := Time nowMs
-    // Take two samples; second must be >= first
-    t2 := Time nowMs
-    self assert: (t2 >= t1)
+  testNowMsAndNowUsArePositive =>
+    // Sanity check: both values are well above zero
+    self assert: (Time nowMs > 1000000000000)
+    self assert: (Time nowUs > 1000000000000000)

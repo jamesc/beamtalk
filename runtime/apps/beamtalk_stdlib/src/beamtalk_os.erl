@@ -21,14 +21,23 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+%% Maximum output bytes collected from a shell command.
+%% Guards against memory exhaustion from commands with unbounded output.
+%% TODO BT-1247: replace os:cmd/2 with port-based impl that also enforces a timeout.
+-define(MAX_OUTPUT_BYTES, 10485760).
+
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
 
 %% @doc Execute a shell command and return its trimmed stdout as a binary.
+%%
+%% Uses `os:cmd/2` with a 10 MB output cap to prevent memory exhaustion.
+%% The call blocks synchronously until the command exits — avoid long-running
+%% commands. For timeout support or larger output see BT-1247.
 -spec 'run:'(binary()) -> binary().
 'run:'(Cmd) when is_binary(Cmd) ->
-    Result = os:cmd(binary_to_list(Cmd)),
+    Result = os:cmd(binary_to_list(Cmd), #{max_size => ?MAX_OUTPUT_BYTES}),
     Bin = list_to_binary(Result),
     string:trim(Bin, trailing);
 'run:'(_) ->

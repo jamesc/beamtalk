@@ -13,5 +13,15 @@ TestCase subclass: StringFromIolistTest
     // Charlist (list of code points) is coerced to String
     self assert: (String fromIolist: #(104, 105)) equals: "hi"
 
+  testFromIolistWithNonAsciiUtf8Bytes =>
+    // UTF-8 byte iolist [195, 169] must produce "é" (U+00E9), not corrupt bytes
+    expected := String fromCodePoint: 233
+    self assert: (String fromIolist: #(195, 169)) equals: expected
+
+  testFromIolistWithNonAsciiCodepointCharlist =>
+    // Codepoint charlist [233] must also produce "é" (U+00E9)
+    expected := String fromCodePoint: 233
+    self assert: (String fromIolist: #(233)) equals: expected
+
   testFromIolistWithNonIolistRaisesTypeError =>
     self should: [String fromIolist: 42] raise: #type_error
