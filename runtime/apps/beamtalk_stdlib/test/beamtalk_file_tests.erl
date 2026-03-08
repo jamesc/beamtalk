@@ -83,7 +83,7 @@ ffi_shim_lines_not_found_test() ->
     ).
 
 ffi_shim_open_not_found_test() ->
-    R = beamtalk_file:open(<<"_bt_shim_no_such.txt">>, fun(_) -> ok end),
+    R = beamtalk_file:open(<<"_bt_shim_no_such.txt">>, fun(_) -> error(callback_should_not_run) end),
     ?assertMatch(
         #{
             '$beamtalk_class' := 'Result',
@@ -633,7 +633,7 @@ open_do_success_test() ->
 open_do_file_not_found_test() ->
     R = beamtalk_file:'open:do:'(
         <<"_bt_test_no_such_file.txt">>,
-        fun(_) -> ok end
+        fun(_) -> error(callback_should_not_run) end
     ),
     ?assertMatch(
         #{
@@ -672,7 +672,7 @@ open_do_type_error_non_block_test() ->
     ).
 
 open_do_invalid_path_absolute_test() ->
-    R = beamtalk_file:'open:do:'(<<"/etc/passwd">>, fun(_) -> ok end),
+    R = beamtalk_file:'open:do:'(<<"/etc/passwd">>, fun(_) -> error(callback_should_not_run) end),
     ?assertMatch(
         #{
             '$beamtalk_class' := 'Result',
@@ -686,7 +686,7 @@ open_do_invalid_path_absolute_test() ->
     ).
 
 open_do_invalid_path_traversal_test() ->
-    R = beamtalk_file:'open:do:'(<<"../secret.txt">>, fun(_) -> ok end),
+    R = beamtalk_file:'open:do:'(<<"../secret.txt">>, fun(_) -> error(callback_should_not_run) end),
     ?assertMatch(
         #{
             '$beamtalk_class' := 'Result',
