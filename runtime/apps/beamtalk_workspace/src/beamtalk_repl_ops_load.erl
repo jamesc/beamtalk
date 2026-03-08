@@ -172,7 +172,9 @@ handle(<<"modules">>, _Params, Msg, SessionPid) ->
     %% BT-1239: Filter out stale tracker entries for modules purged via removeFromSystem.
     %% code:is_loaded/1 returns false for modules that have been code:delete'd.
     AllTrackedModules = beamtalk_repl_modules:list_modules(Tracker),
-    TrackedModules = lists:filter(fun({N, _}) -> code:is_loaded(N) =/= false end, AllTrackedModules),
+    TrackedModules = lists:filter(
+        fun({N, _}) -> code:is_loaded(N) =/= false end, AllTrackedModules
+    ),
     RegistryPid = whereis(beamtalk_actor_registry),
     %% Build a module-atom → Beamtalk-class-name map so the UI shows class names,
     %% not BEAM module atoms. Without this, names like 'beamtalk_counter_v1_abc' appear
