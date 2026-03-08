@@ -1193,8 +1193,32 @@ impl Parser {
                 }
                 self.advance(); // consume '=>'
 
-                // Parse value: variable or wildcard
-                let value = self.parse_pattern();
+                // Parse value: must be a variable identifier or `_` wildcard.
+                // Reject literals, tuples, nested patterns — they are not supported
+                // in map destructuring and would fail codegen with a confusing error.
+                let value_span = self.current_token().span();
+                let value = match self.current_kind() {
+                    TokenKind::Identifier(name) if name.as_str() == "_" => {
+                        let span = self.advance().span();
+                        Pattern::Wildcard(span)
+                    }
+                    TokenKind::Identifier(_) => {
+                        let token = self.advance();
+                        let span = token.span();
+                        let TokenKind::Identifier(name) = token.into_kind() else {
+                            unreachable!()
+                        };
+                        Pattern::Variable(Identifier::new(name, span))
+                    }
+                    _ => {
+                        let bad = self.advance();
+                        self.diagnostics.push(Diagnostic::error(
+                            "Map destructuring value must be a variable or '_' (e.g. #{#key => var})",
+                            bad.span(),
+                        ));
+                        Pattern::Wildcard(value_span)
+                    }
+                };
                 let pair_span = pair_start.merge(value.span());
                 pairs.push(MapPatternPair {
                     key,

@@ -18,6 +18,7 @@
 //! Note: Message sending is handled by [`super::dispatch_codegen`].
 
 use super::document::Document;
+use super::selector_mangler::escape_atom_chars;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, CascadeMessage,
@@ -1551,11 +1552,12 @@ impl CoreErlangGenerator {
                         Pattern::Variable(id) => {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
+                            let key_atom = Document::String(escape_atom_chars(pair.key.as_str()));
                             docs.push(docvec![
                                 "let ",
                                 Document::String(core_var),
                                 " = call 'erlang':'map_get'('",
-                                Document::String(pair.key.to_string()),
+                                key_atom,
                                 "', ",
                                 Document::String(map_var.clone()),
                                 ") in "
