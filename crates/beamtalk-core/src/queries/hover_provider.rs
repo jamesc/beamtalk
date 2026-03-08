@@ -27,7 +27,7 @@
 //! - LSP specification: Language Server Protocol hover requests
 
 use crate::ast::{
-    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module,
+    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module, Pattern,
     StateDeclaration,
 };
 use crate::language_service::{HoverInfo, Position};
@@ -533,6 +533,47 @@ fn selector_hover_info(selector: &MessageSelector, span: Span) -> HoverInfo {
     HoverInfo::new(format!("{kind}: `{name}` (arity: {arity})"), span)
 }
 
+/// Recursively searches for hover information in a destructuring pattern.
+///
+/// Walks pattern variable bindings and returns hover info when the offset
+/// falls within a variable's span. Mirrors `collect_pattern_variables` from
+/// codegen but produces `HoverInfo` instead of binding names.
+fn find_hover_in_pattern(pattern: &Pattern, offset: u32, type_map: &TypeMap) -> Option<HoverInfo> {
+    let span = pattern.span();
+    if offset < span.start() || offset >= span.end() {
+        return None;
+    }
+    match pattern {
+        Pattern::Variable(ident) => {
+            if offset >= ident.span.start() && offset < ident.span.end() {
+                let type_info = type_map.get(ident.span).and_then(InferredType::as_known);
+                let contents = if let Some(ty) = type_info {
+                    format!("Pattern variable: `{}` — Type: {ty}", ident.name)
+                } else {
+                    format!("Pattern variable: `{}`", ident.name)
+                };
+                Some(HoverInfo::new(contents, ident.span))
+            } else {
+                None
+            }
+        }
+        Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => elements
+            .iter()
+            .find_map(|p| find_hover_in_pattern(p, offset, type_map)),
+        Pattern::List { elements, tail, .. } => elements
+            .iter()
+            .find_map(|p| find_hover_in_pattern(p, offset, type_map))
+            .or_else(|| {
+                tail.as_deref()
+                    .and_then(|t| find_hover_in_pattern(t, offset, type_map))
+            }),
+        Pattern::Binary { segments, .. } => segments
+            .iter()
+            .find_map(|seg| find_hover_in_pattern(&seg.value, offset, type_map)),
+        Pattern::Wildcard(_) | Pattern::Literal(_, _) => None,
+    }
+}
+
 /// Recursively searches for hover information in an expression.
 #[expect(clippy::too_many_lines, reason = "match on Expression variants")]
 fn find_hover_in_expr(
@@ -672,8 +713,12 @@ fn find_hover_in_expr(
             .body
             .iter()
             .find_map(|s| find_hover_in_expr(&s.expression, offset, context, hierarchy, type_map)),
-        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
+        Expression::Return { value, .. } => {
             find_hover_in_expr(value, offset, context, hierarchy, type_map)
+        }
+        Expression::DestructureAssignment { pattern, value, .. } => {
+            find_hover_in_pattern(pattern, offset, type_map)
+                .or_else(|| find_hover_in_expr(value, offset, context, hierarchy, type_map))
         }
         Expression::Parenthesized { expression, .. } => {
             find_hover_in_expr(expression, offset, context, hierarchy, type_map)
@@ -1783,6 +1828,72 @@ mod tests {
             hover.contents.contains("-> Integer"),
             "Hover should show inferred return type. Got: {}",
             hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_tuple_destructure_pattern_variable() {
+        // `{a, b} := someTuple` — hover over `a` (offset 1) and `b` (offset 4)
+        let source = "{a, b} := 42";
+        let hover_a = hover_at(source, Position::new(0, 1));
+        assert!(
+            hover_a.is_some(),
+            "Should get hover info for pattern variable `a`"
+        );
+        assert!(
+            hover_a.unwrap().contents.contains("`a`"),
+            "Hover for `a` should mention the exact variable name"
+        );
+
+        let hover_b = hover_at(source, Position::new(0, 4));
+        assert!(
+            hover_b.is_some(),
+            "Should get hover info for pattern variable `b`"
+        );
+        assert!(
+            hover_b.unwrap().contents.contains("`b`"),
+            "Hover for `b` should mention the exact variable name"
+        );
+    }
+
+    #[test]
+    fn hover_on_array_destructure_pattern_variable() {
+        // `#[a, b] := someArray` — hover over `a` (offset 2) and `b` (offset 5)
+        let source = "#[a, b] := 42";
+        let hover_a = hover_at(source, Position::new(0, 2));
+        assert!(
+            hover_a.is_some(),
+            "Should get hover info for pattern variable `a`"
+        );
+        assert!(
+            hover_a.unwrap().contents.contains("`a`"),
+            "Hover for `a` should mention the exact variable name"
+        );
+
+        let hover_b = hover_at(source, Position::new(0, 5));
+        assert!(
+            hover_b.is_some(),
+            "Should get hover info for pattern variable `b`"
+        );
+        assert!(
+            hover_b.unwrap().contents.contains("`b`"),
+            "Hover for `b` should mention the exact variable name"
+        );
+    }
+
+    #[test]
+    fn hover_on_destructure_rhs_still_works() {
+        // Hovering the RHS of a destructure should still show hover info
+        let source = "{a, b} := 42";
+        // offset 10 is at "42"
+        let hover = hover_at(source, Position::new(0, 10));
+        assert!(
+            hover.is_some(),
+            "Should get hover info for RHS literal in destructure"
+        );
+        assert!(
+            hover.unwrap().contents.contains("42"),
+            "Hover for RHS should mention the literal value"
         );
     }
 }
