@@ -28,12 +28,12 @@ TestCase subclass: DestructuringTest
     self assert: value equals: 42
 
   testTupleDestructuringLiteralMismatchRaisesError =>
-    // When the literal slot does not match, a RuntimeError is raised.
+    // When the literal slot does not match, a RuntimeError with badmatch details is raised.
     result := [
-      {#ok, val} := Erlang erlang list_to_tuple: #(#error, 42)
+      {#ok, _val} := Erlang erlang list_to_tuple: #(#error, 42)
       #did_not_raise
-    ] on: RuntimeError do: [:_e | #raised]
-    self assert: result equals: #raised
+    ] on: RuntimeError do: [:e | e message includesSubstring: "badmatch"]
+    self assert: result equals: true
 
   testTupleDestructuringWithWildcard =>
     {_, b} := Erlang erlang list_to_tuple: #(#ignore, 99)
