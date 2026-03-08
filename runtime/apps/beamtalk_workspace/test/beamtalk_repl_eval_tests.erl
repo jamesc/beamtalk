@@ -118,18 +118,26 @@ do_eval_compile_error_no_server_test() ->
     ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)).
 
 wrap_load_err_returns_structured_error_test() ->
-    %% wrap_load_err/2 normalises a raw load reason to a structured #beamtalk_error{}.
+    %% wrap_load_err/3 normalises a raw load reason to a structured #beamtalk_error{}.
     %% load_error maps to kind=io_error via ensure_structured_error.
     State = beamtalk_repl_state:new(undefined, 0),
-    Result = beamtalk_repl_eval:wrap_load_err(bad_module, State),
+    Result = beamtalk_repl_eval:wrap_load_err(bad_module, [], State),
     ?assertMatch({error, #beamtalk_error{kind = io_error}, <<>>, [], _}, Result).
 
 wrap_load_err_message_contains_reason_test() ->
     %% The error message should describe the load failure reason.
     State = beamtalk_repl_state:new(undefined, 0),
     {error, #beamtalk_error{message = Msg}, <<>>, [], _} =
-        beamtalk_repl_eval:wrap_load_err(bad_module, State),
+        beamtalk_repl_eval:wrap_load_err(bad_module, [], State),
     ?assert(binary:match(Msg, <<"bad_module">>) =/= nomatch).
+
+wrap_load_err_preserves_warnings_test() ->
+    %% wrap_load_err/3 passes Warnings through to the result tuple.
+    State = beamtalk_repl_state:new(undefined, 0),
+    Warnings = [<<"unused variable x">>, <<"deprecated function">>],
+    {error, #beamtalk_error{}, <<>>, ReturnedWarnings, _} =
+        beamtalk_repl_eval:wrap_load_err(bad_module, Warnings, State),
+    ?assertEqual(Warnings, ReturnedWarnings).
 
 do_eval_preserves_bindings_on_error_test() ->
     %% Verify that existing bindings are preserved when eval fails

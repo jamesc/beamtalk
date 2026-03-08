@@ -30,7 +30,7 @@
     inject_output/3,
     handle_class_definition/7,
     handle_method_definition/4,
-    wrap_load_err/2
+    wrap_load_err/3
 ]).
 -endif.
 
@@ -86,7 +86,7 @@ do_eval(Expression, State, Subscriber) ->
                         NewState
                     );
                 {error, Reason} ->
-                    wrap_load_err(Reason, NewState)
+                    wrap_load_err(Reason, Warnings, NewState)
             end;
         {error, Reason} ->
             wrap_compile_err(Reason, NewState)
@@ -184,7 +184,7 @@ do_eval_trace(Expression, State) ->
                             {error, WrappedReason, Output, Warnings, ErrorState}
                     end;
                 {error, Reason} ->
-                    wrap_load_err(Reason, NewState)
+                    wrap_load_err(Reason, Warnings, NewState)
             end;
         {error, Reason} ->
             wrap_compile_err(Reason, NewState)
@@ -270,7 +270,7 @@ handle_class_definition(
                         NewState2
                     );
                 {error, LoadReason} ->
-                    wrap_load_err(LoadReason, NewState2)
+                    wrap_load_err(LoadReason, Warnings, NewState2)
             end;
         {error, Reason, NewState2} ->
             {error, Reason, <<>>, Warnings, NewState2}
@@ -438,8 +438,8 @@ wrap_compile_err(Reason, State) ->
     {error, Err, <<>>, [], State}.
 
 %% @private Wrap a load error as a structured #beamtalk_error{} result tuple.
--spec wrap_load_err(term(), beamtalk_repl_state:state()) ->
+-spec wrap_load_err(term(), [binary()], beamtalk_repl_state:state()) ->
     {error, #beamtalk_error{}, binary(), [binary()], beamtalk_repl_state:state()}.
-wrap_load_err(Reason, State) ->
+wrap_load_err(Reason, Warnings, State) ->
     Err = beamtalk_repl_errors:ensure_structured_error({load_error, Reason}),
-    {error, Err, <<>>, [], State}.
+    {error, Err, <<>>, Warnings, State}.
