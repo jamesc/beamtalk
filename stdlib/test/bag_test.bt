@@ -97,3 +97,10 @@ TestCase subclass: BagTest
   testPrintString =>
     self assert: Bag new printString notNil
     self assert: (Bag withAll: #(1, 2)) printString notNil
+
+  testAddWithCountZeroIsNoop =>
+    b := (Bag new) add: 1 withCount: 0
+    self assert: b isEmpty
+
+  testAddWithCountNegativeRaisesError =>
+    self should: [(Bag new) add: 1 withCount: -1] raise: #user_error

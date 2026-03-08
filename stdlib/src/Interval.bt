@@ -19,15 +19,22 @@ Collection subclass: Interval
 
   /// Number of elements in the interval.
   ///
+  /// Returns 0 when the step direction does not move from toward to.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// (1 to: 10) size      // => 10
   /// (1 to: 1) size       // => 1
   /// (1 to: 0) size       // => 0
+  /// (1 to: 0 by: 2) size  // => 0
   /// ```
   size -> Integer =>
-    s := (self.to - self.from) div: self.step
-    (s + 1) max: 0
+    wrongDirection := (self.step > 0 and: [
+      self.from > self.to
+    ]) or: [self.step < 0 and: [self.from < self.to]]
+    (self.step =:= 0 or: [
+      wrongDirection
+    ]) ifTrue: [0] ifFalse: [((self.to - self.from) abs div: self.step abs) + 1]
 
   /// Iterate over each element, evaluating `block` with each one.
   ///

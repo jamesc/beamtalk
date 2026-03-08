@@ -91,3 +91,13 @@ TestCase subclass: IntervalTest
     count := 0
     (1 to: 0) do: [:_x | count := count + 1]
     self assert: count equals: 0
+
+  testSizeWrongDirectionPositiveStep =>
+    // step > 0 but from > to — must be empty (do: iterates nothing)
+    self assert: (1 to: 0 by: 2) size equals: 0
+
+  testSizeWrongDirectionNegativeStep =>
+    // step < 0 but from < to — must be empty (do: iterates nothing)
+    self assert: (1 to: 10 by: -1) size equals: 0
+
+  testZeroStepRaisesError => self should: [1 to: 10 by: 0] raise: #user_error

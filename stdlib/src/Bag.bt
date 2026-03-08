@@ -69,8 +69,13 @@ Collection subclass: Bag
   /// ((Bag new) add: 1 withCount: 3) occurrencesOf: 1   // => 3
   /// ```
   add: element withCount: n :: Integer -> Bag =>
-    current := self occurrencesOf: element
-    Bag new: #{#counts => (self.counts at: element put: current + n)}
+    n < 0 ifTrue: [self error: "Bag count must be positive"]
+    n =:= 0
+      ifTrue: [self]
+      ifFalse: [
+        current := self occurrencesOf: element
+        Bag new: #{#counts => (self.counts at: element put: current + n)}
+      ]
 
   /// Return a new bag with one fewer occurrence of `element` (no-op if absent).
   ///
