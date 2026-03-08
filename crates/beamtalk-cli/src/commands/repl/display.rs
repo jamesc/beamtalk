@@ -68,9 +68,11 @@ pub(crate) fn format_error(msg: &str) -> String {
 pub(crate) fn print_help() {
     println!("Beamtalk REPL Commands:");
     println!();
-    println!("  :help, :h       Show this help message");
-    println!("  :help <Class>   Show class documentation and methods");
-    println!("  :help <C> <sel> Show method documentation");
+    println!("  :help, :h               Show this help message");
+    println!("  :help <Class>           Show instance-side class docs and methods");
+    println!("  :help <Class> <sel>     Show instance-side method documentation");
+    println!("  :help <Class> class     Show class-side docs (name, allMethods, reload, ...)");
+    println!("  :help <Class> class <sel>  Show class-side method documentation");
     println!("  :exit, :q       Exit the REPL");
     println!("  :clear          Clear all variable bindings");
     println!("  :bindings       Show current variable bindings");
