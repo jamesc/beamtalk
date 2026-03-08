@@ -1,0 +1,94 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for Ets class (BT-1189)
+
+TestCase subclass: EtsTest
+  state: table = nil
+
+  setUp => self.table := Ets new: #etsTest type: #set
+
+  tearDown =>
+    // Guard: testDelete sets self.table to nil after destroying it
+    self.table isNil ifFalse: [[self.table delete] on: Error do: [:e | nil]]
+    self.table := nil
+
+  testInsertAndLookup =>
+    self.table at: "key" put: "value"
+    self assert: (self.table at: "key") equals: "value"
+
+  testLookupMissingKeyReturnsNil =>
+    self assert: (self.table at: "missing") equals: nil
+
+  testLookupIfAbsentWhenPresent =>
+    self.table at: "key" put: 42
+    self assert: (self.table at: "key" ifAbsent: [0]) equals: 42
+
+  testLookupIfAbsentWhenMissing =>
+    self assert: (self.table at: "missing" ifAbsent: [99]) equals: 99
+
+  testIncludesKeyWhenPresent =>
+    self.table at: "key" put: "val"
+    self assert: (self.table includesKey: "key")
+
+  testIncludesKeyWhenAbsent =>
+    self deny: (self.table includesKey: "no_such_key")
+
+  testRemoveKey =>
+    self.table at: "key" put: "val"
+    self.table removeKey: "key"
+    self assert: (self.table at: "key") equals: nil
+    self deny: (self.table includesKey: "key")
+
+  testRemoveKeyMissingIsIdempotent =>
+    // Removing a key that does not exist does not raise
+    self.table removeKey: "no_such_key"
+    self assert: (self.table at: "no_such_key") equals: nil
+
+  testKeysEmpty => self assert: self.table keys size equals: 0
+
+  testKeysMultiple =>
+    self.table at: "a" put: 1
+    self.table at: "b" put: 2
+    self.table at: "c" put: 3
+    self assert: self.table keys size equals: 3
+
+  testSizeEmpty => self assert: self.table size equals: 0
+
+  testSizeAfterInsert =>
+    self.table at: "x" put: 1
+    self assert: self.table size equals: 1
+    self.table at: "y" put: 2
+    self assert: self.table size equals: 2
+
+  testUpdateDoesNotIncreaseSize =>
+    self.table at: "key" put: "original"
+    self.table at: "key" put: "updated"
+    self assert: self.table size equals: 1
+    self assert: (self.table at: "key") equals: "updated"
+
+  testNamedTableLookup =>
+    // Another reference to the same table via name
+    shared := Ets named: #etsTest
+    self.table at: "shared" put: "hello"
+    self assert: (shared at: "shared") equals: "hello"
+
+  testDelete =>
+    self.table delete
+    self.table := nil
+    // Table is gone — creating a fresh one with the same name succeeds
+    fresh := Ets new: #etsTest type: #set
+    self assert: fresh size equals: 0
+    fresh delete
+
+  testOrderedSetType =>
+    ordered := Ets new: #etsTestOrdered type: #orderedSet
+    ordered at: "b" put: 2
+    ordered at: "a" put: 1
+    ordered at: "c" put: 3
+    // All keys are present
+    self assert: ordered size equals: 3
+    ordered delete
+
+  testNewAlreadyExistsRaisesError =>
+    self should: [Ets new: #etsTest type: #set] raise: #already_exists

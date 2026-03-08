@@ -1348,4 +1348,64 @@ The full list of structural intrinsics: `actorSpawn`, `actorSpawnWith`, `blockVa
 
 ---
 
+### Ets — Shared In-Memory Tables
+
+`Ets` wraps OTP ets tables for sharing mutable state between actors without message-passing overhead. Tables are named and public by default, so any process can read and write them.
+
+#### Creating a Table
+
+```beamtalk
+// Create a named public table
+cache := Ets new: #myCache type: #set
+
+// Table types
+Ets new: #t1 type: #set          // one entry per key (unordered)
+Ets new: #t2 type: #orderedSet   // one entry per key (sorted keys)
+Ets new: #t3 type: #bag          // multiple entries per key, values differ
+Ets new: #t4 type: #duplicateBag // multiple identical entries per key
+
+// Look up an existing named table from another actor
+cache := Ets named: #myCache
+```
+
+#### Reading and Writing
+
+```beamtalk
+cache at: "key" put: 42         // insert or update
+cache at: "key"                 // => 42
+cache at: "missing"             // => nil (not an error)
+cache at: "missing" ifAbsent: [0]  // => 0 (evaluate block when absent)
+cache includesKey: "key"        // => true
+cache includesKey: "other"      // => false
+```
+
+#### Other Operations
+
+```beamtalk
+cache size                      // => number of entries
+cache keys                      // => List of all keys (order unspecified for #set)
+cache removeKey: "key"          // delete entry; no-op if key is absent
+cache delete                    // destroy the table; frees all memory
+```
+
+#### Cross-Actor Sharing
+
+ETS tables are process-owned but publicly readable and writable. Create a named table in one actor, then retrieve it from another:
+
+```beamtalk
+// Actor A — create the table
+cache := Ets new: #requestCache type: #set
+cache at: "token" put: "abc123"
+
+// Actor B — retrieve by name
+cache := Ets named: #requestCache
+cache at: "token"               // => "abc123"
+```
+
+#### Table Lifecycle
+
+The owning process (the one that called `Ets new:type:`) holds the table. When that process terminates, the table is automatically deleted by the OTP runtime. Call `delete` explicitly to release memory before the process exits.
+
+---
+
 See [Tooling](beamtalk-tooling.md) for CLI tools, REPL, VS Code extension, and testing framework.

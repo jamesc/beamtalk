@@ -35,6 +35,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Erlang"
             | "ErlangModule"
             | "Error"
+            | "Ets"
             | "Exception"
             | "ExitError"
             | "False"
@@ -560,6 +561,35 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Ets".into(),
+        ClassInfo {
+            name: "Ets".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: None, param_types: vec![None], doc: Some("Look up a key. Returns the value, or `nil` if the key is absent.\n\n## Examples\n```beamtalk\ncache at: \"key\"        // => value or nil\n```".into()) },
+                MethodInfo { selector: "at:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![None, None], doc: Some("Insert or replace a key-value pair. Returns `nil`.\n\n## Examples\n```beamtalk\ncache at: \"counter\" put: 1\n```".into()) },
+                MethodInfo { selector: "at:ifAbsent:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: None, param_types: vec![None, Some("Block".into())], doc: Some("Look up a key; if absent, evaluate the block and return its result.\n\n## Examples\n```beamtalk\ncache at: \"missing\" ifAbsent: [0]    // => 0\ncache at: \"key\"     ifAbsent: [0]    // => stored value\n```".into()) },
+                MethodInfo { selector: "includesKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Return `true` if the table contains an entry for `key`.\n\n## Examples\n```beamtalk\ncache includesKey: \"key\"    // => true or false\n```".into()) },
+                MethodInfo { selector: "removeKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![None], doc: Some("Remove the entry for `key`. Returns `nil`. Idempotent if key is absent.\n\n## Examples\n```beamtalk\ncache removeKey: \"oldKey\"\n```".into()) },
+                MethodInfo { selector: "keys".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return all keys in the table as a `List`.\n\nOrder is unspecified for `#set` and `#bag` tables.\nKeys are sorted for `#orderedSet` tables.\n\n## Examples\n```beamtalk\ncache keys    // => [\"key1\", \"key2\"]\n```".into()) },
+                MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the number of entries in the table.\n\n## Examples\n```beamtalk\ncache size    // => 3\n```".into()) },
+                MethodInfo { selector: "delete".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Destroy the table, freeing all memory. Returns `nil`.\n\nAfter calling `delete`, this `Ets` instance is no longer valid.\nAny further operations on the deleted table will raise an error.\n\n## Examples\n```beamtalk\ncache delete\n```".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "new:type:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: true, return_type: Some("Ets".into()), param_types: vec![Some("Symbol".into()), Some("Symbol".into())], doc: Some("Create a new named public ETS table (class method).\n\n`tableType` must be one of: `#set`, `#orderedSet`, `#bag`, `#duplicateBag`.\nThe table is created as `named_table` with `public` access so that any\nprocess can read and write it. Raises `already_exists` if a table with\nthe same name already exists.\n\n## Examples\n```beamtalk\ncache := Ets new: #myCache type: #set\ncounters := Ets new: #counters type: #set\n```".into()) },
+                MethodInfo { selector: "named:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: true, return_type: Some("Ets".into()), param_types: vec![Some("Symbol".into())], doc: Some("Look up an existing named ETS table (class method).\n\nReturns an `Ets` instance if a table with the given name exists.\nRaises `not_found` if no table with that name has been created.\n\n## Examples\n```beamtalk\ncache := Ets named: #myCache\n```".into()) },
+            ],
             class_variables: vec![],
         },
     );
