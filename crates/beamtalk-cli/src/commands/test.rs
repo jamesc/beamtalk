@@ -1620,7 +1620,7 @@ mod tests {
         for rel in &["test", "src", "lib"] {
             let result = find_package_root(Utf8Path::new(rel));
             assert!(
-                result.as_ref().map_or(true, |r| !r.as_str().is_empty()),
+                result.as_ref().is_none_or(|r| !r.as_str().is_empty()),
                 "find_package_root(\"{rel}\") returned Some(\"\"), \
                  which would cause build to fail with \"Path '' does not exist\""
             );
