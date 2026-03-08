@@ -295,7 +295,7 @@ impl CoreErlangGenerator {
     /// Generates `childClass/0` for dynamic supervisors.
     ///
     /// Called directly by `beamtalk_supervisor:startChild/1,2` as `SupMod:'childClass'()`
-    /// to resolve the child class object at runtime (see beamtalk_supervisor.erl:217).
+    /// to resolve the child class object at runtime (see `beamtalk_supervisor.erl:217`).
     ///
     /// ```erlang
     /// childClass() ->
