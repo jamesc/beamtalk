@@ -100,6 +100,10 @@ Object subclass: AtomicCounter
 
   /// Reset the counter to 0. Returns nil.
   ///
+  /// Note: reset is not atomic with respect to concurrent increment/decrement
+  /// operations. Under concurrent access, increments may be lost if they race
+  /// with a reset.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// c reset

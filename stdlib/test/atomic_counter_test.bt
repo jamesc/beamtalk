@@ -7,6 +7,8 @@ TestCase subclass: AtomicCounterTest
   state: counter = nil
 
   setUp =>
+    // Defensively clean up any leftover table from a crashed previous run
+    [(AtomicCounter named: #atomicCounterBUnitTest) delete] on: Error do: [:e | nil]
     self.counter := AtomicCounter new: #atomicCounterBUnitTest
     self
 

@@ -9,6 +9,8 @@
 ///
 /// Use Queue when you need a FIFO data structure with guaranteed O(1)
 /// amortised head/tail access, distinct from List's O(n) append.
+/// Note: `size` is O(n) — it traverses the internal structure. Track size
+/// separately if you need it in a hot path.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -70,6 +72,9 @@ Object subclass: Queue
   isEmpty -> Boolean => (Erlang beamtalk_queue) isEmpty: self
 
   /// Return the number of elements in the queue.
+  ///
+  /// O(n) — traverses the internal list. Prefer tracking size separately if
+  /// called frequently on large queues.
   ///
   /// ## Examples
   /// ```beamtalk
