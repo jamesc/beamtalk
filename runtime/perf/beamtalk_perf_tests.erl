@@ -257,21 +257,20 @@ bench_throughput() ->
 
 bench_overhead_comparison() ->
     %% Raw process counter (inline — no module needed)
-    Parent = self(),
     RawPid = spawn_link(fun() ->
-        raw_counter_loop(0, Parent)
+        raw_counter_loop(0)
     end),
     %% Warmup raw
     lists:foreach(fun(_) ->
         RawPid ! {increment, self()},
-        receive ok -> ok after 1000 -> error(timeout) end
+        receive ok -> ok after 1000 -> error({perf_timeout, overhead_raw_process, increment}) end
     end, lists:seq(1, ?WARMUP)),
     RawTimings = lists:map(fun(_) ->
         {T, _} = timer:tc(fun() ->
             RawPid ! {increment, self()},
-            receive ok -> ok after 1000 -> error(timeout) end,
+            receive ok -> ok after 1000 -> error({perf_timeout, overhead_raw_process, increment}) end,
             RawPid ! {get_value, self()},
-            receive {value, _} -> ok after 1000 -> error(timeout) end
+            receive {value, _} -> ok after 1000 -> error({perf_timeout, overhead_raw_process, get_value}) end
         end),
         T
     end, lists:seq(1, ?ITERATIONS)),
@@ -330,19 +329,19 @@ bench_overhead_comparison() ->
         "PERF: overhead/beamtalk_vs_raw ~.2fx~n",
         [BtMedian / max(RawMedian, 1)]).
 
-raw_counter_loop(N, _Parent) ->
+raw_counter_loop(N) ->
     receive
         stop ->
             ok;
         {increment, From} ->
             From ! ok,
-            raw_counter_loop(N + 1, _Parent);
+            raw_counter_loop(N + 1);
         {get_value, From} ->
             From ! {value, N},
-            raw_counter_loop(N, _Parent)
+            raw_counter_loop(N)
     end.
 
-%% --- 8b. High-resolution gen_server overhead comparison ---
+%% --- 9. High-resolution gen_server overhead comparison ---
 %%
 %% timer:tc resolution is 1us, which floors all results when calls take <2us.
 %% This variant batches ?HIRES_BATCH calls per sample to get sub-microsecond
@@ -357,8 +356,7 @@ raw_counter_loop(N, _Parent) ->
 
 bench_overhead_comparison_hires() ->
     %% Raw process
-    Parent = self(),
-    RawPid = spawn_link(fun() -> raw_counter_loop(0, Parent) end),
+    RawPid = spawn_link(fun() -> raw_counter_loop(0) end),
     lists:foreach(fun(_) ->
         RawPid ! {increment, self()},
         receive ok -> ok after 1000 -> error(timeout) end
@@ -455,6 +453,9 @@ report_ns(Name, #{median := Median, mean := Mean, min := Min,
         [Name, Median, float(Mean), Min, Max, P95, P99, N]).
 
 %% --- 7. Concurrent callers test ---
+%%
+%% 10 callers each making 1000 calls to a single actor — measures queue depth
+%% and lock contention under concurrent load.
 
 bench_concurrent_callers() ->
     {ok, Counter} = test_counter:start_link(0),

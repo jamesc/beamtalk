@@ -102,9 +102,15 @@ sum_stateacc_maybe_await_loop(I, StateAcc) ->
 %% No new map is created per iteration — mutations are destructive updates.
 -spec sum_procdict(non_neg_integer()) -> integer().
 sum_procdict(N) ->
+    OldSum = get('__local__sum'),
     put('__local__sum', 0),
     sum_procdict_loop(N),
-    get('__local__sum').
+    Result = get('__local__sum'),
+    case OldSum of
+        undefined -> erase('__local__sum');
+        _         -> put('__local__sum', OldSum)
+    end,
+    Result.
 
 sum_procdict_loop(0) -> ok;
 sum_procdict_loop(I) ->
@@ -147,12 +153,17 @@ fold_native(List) ->
     lists:foldl(fun(X, Acc) -> X + Acc end, 0, List).
 
 %% @doc Simulates Beamtalk's stateful block for inject:into:.
-%% The block fun takes (Acc, X, StateAcc) -> {NewAcc, StateAcc}.
+%%
+%% Beamtalk's inject:into: block takes (acc, x) in user code. The generated
+%% lists:foldl fun wraps this as fun(X, {AccIn, StateAcc}) -> {NewAcc, NewStateAcc}.
+%% The user-visible block is (AccIn, X) — accumulator first, element second.
 -spec fold_stateacc_block(list()) -> integer().
 fold_stateacc_block(List) ->
     InitState = #{},
+    %% User block: [:acc :x | acc + x] — accumulator (AccIn) first, element (X) second.
+    %% Wrapped for lists:foldl which passes element first, accumulator second.
     BlockFun = fun(X, {AccIn, StateAcc}) ->
-        NewAcc = beamtalk_future:maybe_await(X) + beamtalk_future:maybe_await(AccIn),
+        NewAcc = beamtalk_future:maybe_await(AccIn) + beamtalk_future:maybe_await(X),
         {NewAcc, StateAcc}
     end,
     {Result, _} = lists:foldl(BlockFun, {0, InitState}, List),
