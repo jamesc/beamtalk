@@ -196,7 +196,29 @@ handle(<<"methods">>, Params, Msg, _SessionPid) ->
     });
 handle(<<"test">>, Params, Msg, _SessionPid) ->
     ClassName = maps:get(<<"class">>, Params, undefined),
-    run_test_op(ClassName, Msg);
+    FilePath = maps:get(<<"file">>, Params, undefined),
+    case {ClassName, FilePath} of
+        {CN, FP} when CN =/= undefined, FP =/= undefined ->
+            Err0 = beamtalk_error:new(invalid_argument, 'TestRunner'),
+            Err1 = beamtalk_error:with_message(
+                Err0, <<"'class' and 'file' are mutually exclusive">>
+            ),
+            beamtalk_repl_protocol:encode_error(
+                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+            );
+        {undefined, FP} when FP =/= undefined, not is_binary(FP) ->
+            Err0 = beamtalk_error:new(invalid_argument, 'TestRunner'),
+            Err1 = beamtalk_error:with_message(
+                Err0, <<"'file' must be a binary path">>
+            ),
+            beamtalk_repl_protocol:encode_error(
+                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+            );
+        {undefined, FP} when FP =/= undefined ->
+            run_test_op_file(FP, Msg);
+        _ ->
+            run_test_op(ClassName, Msg)
+    end;
 handle(<<"test-all">>, _Params, Msg, _SessionPid) ->
     run_test_op(undefined, Msg);
 handle(<<"describe">>, _Params, Msg, _SessionPid) ->
@@ -270,6 +292,35 @@ run_test_op(ClassName, Msg) when is_binary(ClassName) ->
                         Err1, Msg, fun beamtalk_repl_json:format_error_message/1
                     )
             end
+    end.
+
+%% @private
+%% @doc Execute a file-scoped test run and encode the result.
+%%
+%% Discovers all TestCase subclasses whose beamtalk_source attribute matches
+%% FilePath (by path suffix) and runs them. Returns an aggregated TestResult.
+-spec run_test_op_file(binary(), beamtalk_repl_protocol:protocol_msg()) -> binary().
+run_test_op_file(FilePath, Msg) ->
+    try
+        TestResult = beamtalk_test_runner:run_file(FilePath),
+        beamtalk_repl_protocol:encode_test_results(TestResult, Msg)
+    catch
+        error:#{error := #beamtalk_error{} = Err} ->
+            beamtalk_repl_protocol:encode_error(
+                Err, Msg, fun beamtalk_repl_json:format_error_message/1
+            );
+        _Class:Reason ->
+            ?LOG_ERROR("test file op failed for ~s: ~p", [FilePath, Reason]),
+            Err0 = beamtalk_error:new(runtime_error, 'TestRunner'),
+            Err1 = beamtalk_error:with_message(
+                Err0,
+                iolist_to_binary(
+                    io_lib:format("Test run failed for file ~s: ~p", [FilePath, Reason])
+                )
+            ),
+            beamtalk_repl_protocol:encode_error(
+                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+            )
     end.
 
 %%% Internal helpers
@@ -1008,7 +1059,7 @@ describe_ops() ->
         <<"eval">> => #{<<"params">> => [<<"code">>]},
         <<"stdin">> => #{<<"params">> => [<<"value">>]},
         <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
-        <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>]},
+        <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>, <<"file">>]},
         <<"test-all">> => #{<<"params">> => []},
         <<"docs">> => #{
             <<"params">> => [<<"class">>],

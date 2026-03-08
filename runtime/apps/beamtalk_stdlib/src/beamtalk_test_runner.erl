@@ -22,6 +22,7 @@
 -export([
     %% TestRunner class-side primitives
     run_all/0,
+    run_file/1,
     run_class/1,
     run_class_by_name/1,
     run_method/2,
@@ -39,6 +40,8 @@
 
 %% FFI shims for (Erlang beamtalk_test_runner) dispatch
 -export([runAll/0, run/1, run/2]).
+%% Exported for testing
+-export([path_suffix_match/2]).
 %% TestResult instance-side
 -export([
     passed/1,
@@ -73,6 +76,31 @@ run_all() ->
                 end,
                 Classes
             ),
+            aggregate_results(ClassResults)
+    end.
+
+%% @doc Run all TestCase subclasses whose source file matches FilePath.
+%%
+%% FilePath is a binary, matched as a path suffix against the absolute path
+%% stored in each compiled module's beamtalk_source attribute. This allows
+%% passing relative paths like <<"test/foo_test.bt">> to match the full path.
+%%
+%% Returns an aggregated TestResult. If no matching classes are found,
+%% returns an empty TestResult.
+-spec run_file(binary()) -> map().
+run_file(FilePath) when is_binary(FilePath) ->
+    AllTestClasses = beamtalk_test_case:find_test_classes(),
+    MatchingClasses = lists:filter(
+        fun(ClassName) ->
+            class_source_matches(ClassName, FilePath)
+        end,
+        AllTestClasses
+    ),
+    case MatchingClasses of
+        [] ->
+            make_test_result(0, 0, 0, 0, 0.0, []);
+        _ ->
+            ClassResults = lists:map(fun run_class_by_name/1, MatchingClasses),
             aggregate_results(ClassResults)
     end.
 
@@ -261,6 +289,61 @@ discover_methods_via_registry(ClassName) ->
 %%====================================================================
 %% Internal helpers
 %%====================================================================
+
+%% @doc Check whether a class's source file matches the given path.
+%%
+%% Looks up the class in the registry, reads its module's beamtalk_source
+%% attribute, and checks if the stored path ends with FilePath.
+%% Returns false if the class is not registered or has no source attribute.
+-spec class_source_matches(atom(), binary()) -> boolean().
+class_source_matches(ClassName, FilePath) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            false;
+        ClassPid ->
+            try
+                ModuleName = beamtalk_object_class:module_name(ClassPid),
+                case beamtalk_reflection:source_file_from_module(ModuleName) of
+                    nil -> false;
+                    StoredPath -> path_suffix_match(StoredPath, FilePath)
+                end
+            catch
+                exit:{noproc, _} -> false;
+                exit:{timeout, _} -> false
+            end
+    end.
+
+%% @doc Check whether Stored (absolute) ends with Suffix (relative or absolute).
+%%
+%% Both inputs are normalised to forward slashes before comparison, so that
+%% Windows-style stored paths (backslash separators from canonicalize) and
+%% Unix-style suffix arguments both work correctly. Exact match, or the stored
+%% path ends with "/Suffix" (path-boundary safe).
+-spec path_suffix_match(binary(), binary()) -> boolean().
+path_suffix_match(Stored, Suffix) when is_binary(Stored), is_binary(Suffix) ->
+    StoredStr = normalize_separators(binary_to_list(Stored)),
+    SuffixStr = normalize_separators(binary_to_list(Suffix)),
+    SL = length(StoredStr),
+    SuffL = length(SuffixStr),
+    StoredStr =:= SuffixStr orelse
+        (SL > SuffL andalso
+            lists:suffix(SuffixStr, StoredStr) andalso
+            lists:nth(SL - SuffL, StoredStr) =:= $/).
+
+%% @doc Normalise path separators to forward slash.
+%%
+%% Converts backslashes to forward slashes so that Windows paths stored in
+%% the beamtalk_source module attribute compare correctly against Unix-style
+%% relative paths passed by callers.
+-spec normalize_separators(string()) -> string().
+normalize_separators(S) ->
+    [
+        case C of
+            $\\ -> $/;
+            _ -> C
+        end
+     || C <- S
+    ].
 
 %% @doc Convert a structured result map to a TestResult tagged map.
 -spec structured_to_test_result(map()) -> map().
