@@ -1267,7 +1267,7 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
         }
     }
 
-    // Phase 1b: Batch compile all test file cores in a single BEAM process startup.
+    // Phase 1c: Batch compile all test file cores in a single BEAM process startup.
     // This replaces the previous per-file compile_batch calls (one BEAM startup per file).
     if !pending_test_cores.is_empty() {
         let compiler = BeamCompiler::new(build_dir.clone());
