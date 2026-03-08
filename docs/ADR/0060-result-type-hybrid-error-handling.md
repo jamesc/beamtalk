@@ -683,6 +683,41 @@ This provides composability with **zero breaking changes** — all existing APIs
 
 **However:** This was considered as a cautious Phase 1 approach. Ultimately, existing callers (Symphony) are already in poor shape with ad-hoc error conventions, and deferring the FFI migration only entrenches `tryDo:` as a substitute convention. The ADR ships Result and migrates FFI modules together.
 
+### Alternative G: Naked Union Return Types (TypeScript Approach)
+
+Return the value or an error object directly, without a wrapper. Callers discriminate with `isKindOf:` or a type annotation:
+
+```beamtalk
+// No wrapper — return String or FileError directly
+File readAll: path  // => "content..." or FileError(#file_not_found)
+
+// Caller discriminates at runtime
+content := File readAll: path
+(content isKindOf: FileError)
+  ifTrue: [useDefaults]
+  ifFalse: [process: content]
+```
+
+With gradual typing, the return annotation could express the union:
+
+```beamtalk
+class File
+  readAll: path :: String -> String | IOError =>
+    ...
+```
+
+**Why TypeScript uses this:** TypeScript's structural type system + exhaustiveness checking enforces that callers handle both branches at compile time. Type narrowing (`if (result instanceof Error)`) is syntactically lightweight. The runtime value is just the value — no wrapper object, no allocation.
+
+**Why this degrades in Beamtalk's dynamic mode:**
+
+In dynamic mode (the common case), `-> String | IOError` is an unenforced annotation — documentation, not a contract. Callers can ignore the error branch silently. There is no compile-time exhaustiveness check. This is strictly *worse* than exceptions, which at minimum surface as runtime crashes. It's also exactly what Symphony was already doing with Symbol sentinels (`(result class) =:= Symbol`) — the worst of the three ad-hoc conventions the ADR was written to replace.
+
+The discrimination syntax (`isKindOf:`) is also heavier than TypeScript's `instanceof` narrowing, and the result is not composable — there is no `andThen:` or `map:` without reinventing the Result container.
+
+**The dynamic/typed gap:** This alternative is genuinely interesting once ADR 0025 (gradual typing) matures to support union types with exhaustiveness enforcement. At that point, `String | IOError` with a typed context becomes a real alternative to the Result wrapper — lighter weight and more composable with the type system. It is not viable today in dynamic mode.
+
+**Not adopted because:** In dynamic mode, caller enforcement is absent — the error branch is silently ignorable. Composability (`andThen:`) requires reinventing the Result container anyway. The Result wrapper provides runtime shape guarantees (`$beamtalk_class`, `isOk`, guarded accessors) that union types cannot without the type checker. Revisit when gradual typing covers union types with exhaustiveness.
+
 ### Alternative F: Optional/Maybe Type (Separate from Result)
 
 Add `Optional` for "might be nil" and `Result` for "might fail with a reason":
