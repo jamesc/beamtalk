@@ -134,8 +134,9 @@ sealed Value subclass: Result
     self isOk ifTrue: [self okValue] ifFalse: [block value: self errReason]
 
   /// Unwrap the success value, or raise an exception.
-  /// If errReason is itself an Exception, re-raises it directly (preserving class, details, hints).
-  /// Otherwise signals a generic Exception with the error reason printed.
+  /// Re-raises errReason directly if it is an Exception (preserving class, details, hints).
+  /// FFI-sourced and tryDo: Results always carry Exception errReasons (from_tagged_tuple/1
+  /// calls ensure_wrapped/1). Generic signal only fires for explicit Result error: rawSymbol.
   sealed unwrap -> Object =>
     self isOk ifTrue: [self okValue] ifFalse: [
       (self errReason isKindOf: Exception)
@@ -244,7 +245,11 @@ Erlang modules that return `{ok, V} | {error, R}` can surface these as Results v
 from_tagged_tuple({ok, Value}) ->
     #{'$beamtalk_class' => 'Result', 'isOk' => true, 'okValue' => Value, 'errReason' => nil};
 from_tagged_tuple({error, Reason}) ->
-    #{'$beamtalk_class' => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => Reason}.
+    %% Promote #beamtalk_error{} records to Beamtalk Exception objects so that
+    %% errReason is always either a Beamtalk Exception (re-raiseable by unwrap)
+    %% or a raw value. ensure_wrapped/1 is a no-op if Reason is already a tagged map.
+    ExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
+    #{'$beamtalk_class' => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => ExObj}.
 ```
 
 Usage in FFI modules:
@@ -716,7 +721,7 @@ This follows Elixir's `File.read/1` vs `File.read!/1` convention. The caller cho
 
 **Not adopted as the primary pattern because:** API surface doubles — every fallible method needs two variants. The naming convention (`readAllOrRaise:` or `readAll!:`) is un-Smalltalk-like. And `unwrap` already provides the "I want an exception" escape hatch: `(File readAll: path) unwrap`.
 
-**However:** The adversarial review correctly notes that `unwrap` produces a generic error message ("unwrap called on Result error: ...") that loses the original error context (file path, hint text). Implementation should consider whether `unwrap` can preserve the original error context — e.g., if the error reason is an Exception object (from `tryDo:`), re-raise it directly rather than wrapping in a new signal.
+**However:** `unwrap` re-raises the original Exception when `errReason` is an Exception object — which it always is for FFI-sourced Results (via `from_tagged_tuple/1` calling `ensure_wrapped/1`) and `tryDo:` Results. Full error context (class, details, hints) is preserved in these cases. The generic signal fallback only applies to explicit `Result error: rawSymbol` from Beamtalk code.
 
 ### Alternative E: `tryDo:` Only (Minimal Approach)
 
@@ -809,7 +814,7 @@ content := File readAll: path  // => Result ok: "..." or Result error: #file_not
 - **New dependency in stdlib** — Result must load before any Result-returning class (File, Yaml, etc.)
 - **Unwrap-induced crashes** — `unwrap` on a Result error crashes with an exception. Developers who overuse `unwrap` get the worst of both worlds
 - **API documentation effort** — Every method migrated to Result needs updated docs and examples
-- **`unwrap` loses error context** — `Exception: unwrap called on Result error: #file_not_found` is less informative than `IOError: File not found at /path/to/file` with details and hint. The original structured error is compressed into a generic signal. Implementation should mitigate this by re-raising the original Exception when the error reason is an Exception object
+- **`unwrap` context loss is narrow** — `from_tagged_tuple/1` calls `ensure_wrapped/1` on the error reason before storing it, so FFI-sourced Results always carry a Beamtalk Exception as `errReason`. `tryDo:` does the same. `unwrap` re-raises these directly, preserving the original class, details, and hints. The only case that produces a generic signal is explicit `Result error: rawSymbol` from Beamtalk code — which is a caller choice to not use a structured error
 - **REPL confusion for Result errors** — `_error` is not set when a Result error is returned (it's a successful evaluation). Users expecting `_error` will find `nil`. Documentation must address this
 - **Gradual typing gap** — `-> Result` doesn't express what types the ok value and error carry. Future parameterized types (`-> Result(String, IOError)`) will be needed for full type safety; the current design must be forward-compatible with this
 
