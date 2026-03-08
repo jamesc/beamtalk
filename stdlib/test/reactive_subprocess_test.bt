@@ -67,9 +67,9 @@ TestCase subclass: ReactiveSubprocessTest
     delegate := StubDelegate spawn
     proc := ReactiveSubprocess open: "/bin/cat" args: #() notify: delegate
     proc writeLine: "hello"
-    // Poll up to 5 s (50 × 100 ms) for cat to echo back
+    // Poll up to 500 ms (50 × 10 ms) for cat to echo back
     50 timesRepeat: [
-      (delegate stdoutLines includes: "hello") ifFalse: [Timer sleep: 100]
+      (delegate stdoutLines includes: "hello") ifFalse: [Timer sleep: 10]
     ]
     self assert: (delegate stdoutLines includes: "hello")
     proc close
@@ -107,10 +107,10 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: delegate stop equals: #ok
     self assert: proc stop equals: #ok
 
-  // Helper: poll up to 50 times (100ms each) for delegate exitReceived.
+  // Helper: poll up to 50 times (10ms each) for delegate exitReceived.
   // Uses timesRepeat: to avoid mutable local variables across block boundaries.
   waitForExit: delegate from: _proc =>
-    50 timesRepeat: [delegate exitReceived ifFalse: [Timer sleep: 100]]
+    50 timesRepeat: [delegate exitReceived ifFalse: [Timer sleep: 10]]
     delegate exitReceived ifFalse: [
       self fail: "Timed out waiting for subprocess exit notification"
     ]

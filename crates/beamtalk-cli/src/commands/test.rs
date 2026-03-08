@@ -248,6 +248,7 @@ fn compile_fixtures_directory(
     );
 
     let mut module_names = Vec::new();
+    let mut core_files = Vec::new();
     let mut fixtures_by_module: HashMap<String, Utf8PathBuf> = HashMap::new();
     for fixture_path in &fixture_files {
         let module_name = fixture_module_name(fixture_path)?;
@@ -262,14 +263,25 @@ fn compile_fixtures_directory(
         }
         fixtures_by_module.insert(module_name.clone(), fixture_path.clone());
 
-        let module_name = compile_fixture(
+        let core_file = generate_core_file(
             fixture_path,
+            &module_name,
             output_dir,
             class_module_index,
             class_superclass_index,
             warnings_as_errors,
-        )?;
+        )
+        .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
+        core_files.push(core_file);
         module_names.push(module_name);
+    }
+
+    // Batch compile all fixture cores in a single BEAM process startup
+    if !core_files.is_empty() {
+        let compiler = BeamCompiler::new(output_dir.to_owned());
+        compiler
+            .compile_batch(&core_files)
+            .wrap_err("Failed to compile fixture BEAM files")?;
     }
 
     Ok(module_names)
@@ -285,24 +297,13 @@ fn compile_fixture(
 ) -> Result<String> {
     let module_name = fixture_module_name(fixture_path)?;
 
-    let core_file = output_dir.join(format!("{module_name}.core"));
-
-    let options = beamtalk_core::CompilerOptions {
-        stdlib_mode: false,
-        allow_primitives: false,
-        workspace_mode: false,
-        warnings_as_errors,
-        ..Default::default()
-    };
-
-    compile_source_with_bindings(
+    let core_file = generate_core_file(
         fixture_path,
         &module_name,
-        &core_file,
-        &options,
-        &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+        output_dir,
         class_module_index,
         class_superclass_index,
+        warnings_as_errors,
     )
     .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
 
@@ -359,15 +360,19 @@ fn build_fixture_class_module_index(
 // Test file compilation
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Compile a `.bt` test file through the normal pipeline.
-fn compile_test_file(
+/// Compile a `.bt` source file to Core Erlang only (no BEAM compilation).
+///
+/// Returns the path to the generated `.core` file. Callers should collect
+/// multiple core files and batch-compile them with a single `BeamCompiler`
+/// call to avoid repeated Erlang VM startup overhead.
+fn generate_core_file(
     source_path: &Utf8Path,
     module_name: &str,
     output_dir: &Utf8Path,
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
     warnings_as_errors: bool,
-) -> Result<()> {
+) -> Result<Utf8PathBuf> {
     let core_file = output_dir.join(format!("{module_name}.core"));
 
     let options = beamtalk_core::CompilerOptions {
@@ -387,14 +392,9 @@ fn compile_test_file(
         class_module_index,
         class_superclass_index,
     )
-    .wrap_err_with(|| format!("Failed to compile test file '{source_path}'"))?;
+    .wrap_err_with(|| format!("Failed to compile '{source_path}'"))?;
 
-    let compiler = BeamCompiler::new(output_dir.to_owned());
-    compiler
-        .compile_batch(&[core_file])
-        .wrap_err_with(|| format!("Failed to compile BEAM for '{source_path}'"))?;
-
-    Ok(())
+    Ok(core_file)
 }
 
 /// Compile `EUnit` wrapper `.erl` files with erlc.
@@ -1120,6 +1120,9 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
 
     // Phase 1: Discover test classes and compile
     let mut fixture_modules_by_name: HashMap<String, Utf8PathBuf> = HashMap::new();
+    // Accumulate all test-file core paths; batch-compile after the loop to avoid
+    // one BEAM process startup per file.
+    let mut pending_test_cores: Vec<Utf8PathBuf> = Vec::new();
 
     for test_file in &test_files {
         // Build per-file effective class index: own package's classes + fixtures.
@@ -1216,15 +1219,17 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
 
         // Compile TestCase subclasses
         for test_class in test_classes {
-            // Compile the test .bt file through normal pipeline
-            compile_test_file(
+            // Generate Core Erlang for the test file (BEAM compilation is batched below)
+            let core_file = generate_core_file(
                 test_file,
                 &test_class.module_name,
                 &build_dir,
                 &file_class_index,
                 &file_super_index,
                 warnings_as_errors,
-            )?;
+            )
+            .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
+            pending_test_cores.push(core_file);
 
             // Generate EUnit wrapper
             let eunit_module = format!("{}_tests", test_class.module_name);
@@ -1260,6 +1265,15 @@ pub fn run_tests(path: &str, warnings_as_errors: bool) -> Result<()> {
                 assertion_count: dr.assertion_count,
             });
         }
+    }
+
+    // Phase 1b: Batch compile all test file cores in a single BEAM process startup.
+    // This replaces the previous per-file compile_batch calls (one BEAM startup per file).
+    if !pending_test_cores.is_empty() {
+        let compiler = BeamCompiler::new(build_dir.clone());
+        compiler
+            .compile_batch(&pending_test_cores)
+            .wrap_err("Failed to compile test file BEAM files")?;
     }
 
     if compiled_tests.is_empty() && compiled_doc_tests.is_empty() {
