@@ -1058,6 +1058,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_register_class(
         &mut self,
         module: &Module,
+        synthesize_supervision_spec: bool,
     ) -> Result<Document<'static>> {
         // Skip if no class definitions
         if module.classes.is_empty() {
@@ -1246,7 +1247,7 @@ impl CoreErlangGenerator {
                         "'meta' => ",
                         // include_standalone: true — standalone methods included in BuilderState.meta
                         // so that init/1 can register their return types during on_load.
-                        Self::build_meta_map_doc(class, module, true),
+                        Self::build_meta_map_doc(class, module, true, synthesize_supervision_spec),
                         if is_non_constructible {
                             docvec![",", line(), "'isConstructible' => 'false'"]
                         } else {
@@ -1862,6 +1863,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_meta_function(
         &self,
         module: &Module,
+        synthesize_supervision_spec: bool,
     ) -> Result<Document<'static>> {
         let Some(class) = module.classes.first() else {
             return Ok(Document::Nil);
@@ -1871,7 +1873,7 @@ impl CoreErlangGenerator {
             "'__beamtalk_meta'/0 = fun () ->\n",
             "    ",
             // include_standalone: false — standalone methods are runtime-patched, not static
-            Self::build_meta_map_doc(class, module, false),
+            Self::build_meta_map_doc(class, module, false, synthesize_supervision_spec),
             "\n\n",
         ])
     }
@@ -1894,6 +1896,7 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
         module: &Module,
         include_standalone: bool,
+        synthesize_supervision_spec: bool,
     ) -> Document<'static> {
         let class_name = class.name.name.to_string();
         let superclass_name = class
@@ -1933,6 +1936,7 @@ impl CoreErlangGenerator {
             module,
             auto.as_ref(),
             include_standalone,
+            synthesize_supervision_spec,
         ));
 
         docvec![
@@ -2067,6 +2071,7 @@ impl CoreErlangGenerator {
         module: &Module,
         auto: Option<&crate::codegen::core_erlang::value_type_codegen::AutoSlotMethods>,
         include_standalone: bool,
+        synthesize_supervision_spec: bool,
     ) -> Vec<MethodInfoEntry> {
         let sealed = class.is_sealed;
         let mut entries: Vec<MethodInfoEntry> = class
@@ -2091,6 +2096,17 @@ impl CoreErlangGenerator {
                 let arity = class.state.len();
                 entries.push((kw_sel.clone(), arity, None, vec![None; arity], sealed));
             }
+        }
+        // BT-1218: Register the synthesized supervisionSpec so class dispatch finds it locally
+        // rather than walking the chain to Actor's version (which always returns #temporary).
+        if synthesize_supervision_spec {
+            entries.push((
+                "supervisionSpec".to_string(),
+                0,
+                Some("SupervisionSpec".to_string()),
+                vec![],
+                sealed,
+            ));
         }
         entries
     }
@@ -2218,7 +2234,7 @@ mod tests {
             file_leading_comments: vec![],
             file_trailing_comments: Vec::new(),
         };
-        let doc = generator.generate_register_class(&module).unwrap();
+        let doc = generator.generate_register_class(&module, false).unwrap();
         assert_eq!(
             doc.to_pretty_string(),
             "",
@@ -2237,7 +2253,7 @@ mod tests {
             file_leading_comments: vec![],
             file_trailing_comments: Vec::new(),
         };
-        let doc = generator.generate_register_class(&module).unwrap();
+        let doc = generator.generate_register_class(&module, false).unwrap();
         let output = doc.to_pretty_string();
         assert!(
             output.contains("'Counter'"),

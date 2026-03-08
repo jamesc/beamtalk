@@ -256,6 +256,21 @@ impl ExpressionStatement {
     }
 }
 
+/// The kind of supervisor based on ancestry (BT-1218, ADR 0059 Phase 1).
+///
+/// Set by semantic analysis when a class is found to inherit from
+/// `Supervisor` or `DynamicSupervisor` (which are themselves `Object`
+/// subclasses, not `Actor` subclasses). `None` for all other classes —
+/// including non-supervisor `Actor` subclasses and non-supervisor classes
+/// that do not descend from `Supervisor` or `DynamicSupervisor`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SupervisorKind {
+    /// Inherits from `Supervisor` (static child list).
+    Static,
+    /// Inherits from `DynamicSupervisor` (children added at runtime).
+    Dynamic,
+}
+
 /// The kind of class based on its declaration form (ADR 0042).
 ///
 /// Determined at parse time from the superclass used in the `subclass:` declaration.
@@ -328,6 +343,12 @@ pub struct ClassDefinition {
     pub is_sealed: bool,
     /// Whether this is a typed class (requires type annotations on methods).
     pub is_typed: bool,
+    /// Supervisor kind, set by semantic analysis (BT-1218, ADR 0059 Phase 1).
+    ///
+    /// `Some(Static)` if this class inherits from `Supervisor`,
+    /// `Some(Dynamic)` if it inherits from `DynamicSupervisor`,
+    /// `None` otherwise.
+    pub supervisor_kind: Option<SupervisorKind>,
     /// Instance variable declarations.
     pub state: Vec<StateDeclaration>,
     /// Method definitions.
@@ -362,6 +383,7 @@ impl ClassDefinition {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state,
             methods,
             class_methods: Vec::new(),
@@ -393,6 +415,7 @@ impl ClassDefinition {
             is_abstract,
             is_sealed,
             is_typed: false,
+            supervisor_kind: None,
             state,
             methods,
             class_methods: Vec::new(),

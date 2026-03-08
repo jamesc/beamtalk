@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1218: Actor with explicit #permanent supervisionPolicy — fixture for supervision_spec_test.bt
+
+Actor subclass: SpecTestActorPermanent
+  state: value = 0
+
+  class supervisionPolicy -> Symbol => #permanent
+
+  getValue => self.value

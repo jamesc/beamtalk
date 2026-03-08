@@ -27,6 +27,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
         is_abstract: false,
         is_sealed: false,
         is_typed: false,
+        supervisor_kind: None,
         state: vec![
             StateDeclaration {
                 name: Identifier::new("x", Span::new(0, 0)),

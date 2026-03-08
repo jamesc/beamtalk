@@ -290,6 +290,28 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Actor")
     }
 
+    /// Returns true if the named class is Supervisor or a subclass of Supervisor (BT-1218).
+    #[must_use]
+    pub fn is_supervisor_subclass(&self, class_name: &str) -> bool {
+        if class_name == "Supervisor" {
+            return true;
+        }
+        self.superclass_chain(class_name)
+            .iter()
+            .any(|s| s.as_str() == "Supervisor")
+    }
+
+    /// Returns true if the named class is `DynamicSupervisor` or a subclass (BT-1218).
+    #[must_use]
+    pub fn is_dynamic_supervisor_subclass(&self, class_name: &str) -> bool {
+        if class_name == "DynamicSupervisor" {
+            return true;
+        }
+        self.superclass_chain(class_name)
+            .iter()
+            .any(|s| s.as_str() == "DynamicSupervisor")
+    }
+
     /// Returns true if the named class is Value or a subclass of Value (ADR 0042).
     ///
     /// Value subclasses use immutable value semantics — `self.slot :=` is a
@@ -1519,6 +1541,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![StateDeclaration {
                 name: Identifier::new("count", test_span()),
                 type_annotation: None,
@@ -1803,6 +1826,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary(method_name.into()),
@@ -1836,6 +1860,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![],
             class_methods: vec![MethodDefinition {
@@ -2060,6 +2085,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary("baseMethod".into()),
@@ -2085,6 +2111,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary("derivedMethod".into()),
@@ -2164,6 +2191,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -2223,6 +2251,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![],
             class_methods: vec![
@@ -2279,6 +2308,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![
                 MethodDefinition {
@@ -2469,6 +2499,7 @@ mod tests {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            supervisor_kind: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
@@ -2518,6 +2549,7 @@ mod tests {
             is_sealed: false,
             is_abstract: false,
             is_typed: false,
+            supervisor_kind: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
             span: test_span(),
@@ -2549,6 +2581,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: true,
+            supervisor_kind: None,
             state: vec![
                 StateDeclaration::with_type(
                     Identifier::new("count", test_span()),
@@ -2629,6 +2662,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![StateDeclaration::with_type(
                 Identifier::new("extra", test_span()),
                 TypeAnnotation::simple("String", test_span()),
@@ -2688,6 +2722,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![StateDeclaration::new(
                 Identifier::new("count", test_span()),
                 test_span(),
@@ -2861,6 +2896,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![],
             class_methods: vec![],
@@ -2889,6 +2925,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![
                 StateDeclaration::new(Identifier::new("x", test_span()), test_span()),
                 StateDeclaration::new(Identifier::new("y", test_span()), test_span()),
@@ -2959,6 +2996,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state,
             methods: vec![],
             class_methods: vec![],
@@ -3037,6 +3075,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![StateDeclaration::new(
                 Identifier::new("x", test_span()),
                 test_span(),
@@ -3111,6 +3150,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary("foo".into()),
@@ -3139,6 +3179,7 @@ mod tests {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
                 selector: crate::ast::MessageSelector::Unary("foo".into()),

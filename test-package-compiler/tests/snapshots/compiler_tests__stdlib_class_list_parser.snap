@@ -26,6 +26,7 @@ Module {
             is_abstract: false,
             is_sealed: true,
             is_typed: false,
+            supervisor_kind: None,
             state: [],
             methods: [
                 MethodDefinition {

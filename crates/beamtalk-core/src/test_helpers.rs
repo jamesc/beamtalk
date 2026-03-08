@@ -90,6 +90,7 @@ pub mod test_support {
             is_abstract: false,
             is_sealed: false,
             is_typed: false,
+            supervisor_kind: None,
             state: Vec::new(),
             methods: Vec::new(),
             class_methods: Vec::new(),
