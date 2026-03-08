@@ -791,6 +791,18 @@ term_to_json_beamtalk_object_tuple_test() ->
     ?assert(binary:match(Result, <<"Counter">>) =/= nomatch),
     exit(Pid, kill).
 
+term_to_json_supervisor_tuple_test() ->
+    %% ADR 0059: Supervisor instances display as #Supervisor<Class,pid>.
+    Pid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
+    Result = beamtalk_repl_json:term_to_json({beamtalk_supervisor, 'WebApp', bt_webapp, Pid}),
+    ?assert(binary:match(Result, <<"#Supervisor<">>) =/= nomatch),
+    ?assert(binary:match(Result, <<"WebApp">>) =/= nomatch),
+    exit(Pid, kill).
+
 term_to_json_future_timeout_test() ->
     Pid = spawn(fun() ->
         receive

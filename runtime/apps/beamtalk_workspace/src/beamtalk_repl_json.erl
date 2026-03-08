@@ -306,6 +306,18 @@ term_to_json(#beamtalk_error{} = Error) ->
     iolist_to_binary(beamtalk_error:format(Error));
 term_to_json(Value) when is_tuple(Value) ->
     case Value of
+        {beamtalk_supervisor, Class, _Module, Pid} ->
+            %% ADR 0059: Supervisor instances display as #Supervisor<Class, Pid>
+            %% or #DynamicSupervisor<Class, Pid> depending on ancestry.
+            ClassBin = atom_to_binary(Class, utf8),
+            PidStr = pid_to_list(Pid),
+            Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
+            Prefix =
+                case (catch beamtalk_runtime_api:inherits_from(Class, 'DynamicSupervisor')) of
+                    true -> <<"#DynamicSupervisor<">>;
+                    _ -> <<"#Supervisor<">>
+                end,
+            iolist_to_binary([Prefix, ClassBin, <<",">>, Inner, <<">">>]);
         {beamtalk_object, 'Metaclass', _Module, Pid} ->
             %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
             ClassName = beamtalk_runtime_api:class_name(Pid),
