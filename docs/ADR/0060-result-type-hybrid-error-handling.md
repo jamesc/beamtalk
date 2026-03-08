@@ -904,6 +904,18 @@ end.
 
 **Phase 1** ships Result and migrates all FFI modules simultaneously. Existing callers (Symphony and stdlib tests) need updating, but `unwrap` provides a mechanical escape hatch for any call site that wants to preserve exception-raising behavior. New FFI modules must return Result by default from day one.
 
+## Implementation Tracking
+
+**Epic:** [BT-1253](https://linear.app/beamtalk/issue/BT-1253) — Result Type — Hybrid Error Handling (ADR 0060)
+
+| Issue | Title | Depends on |
+|-------|-------|------------|
+| [BT-1254](https://linear.app/beamtalk/issue/BT-1254) | Result class, FFI helper, tests, and docs | — |
+| [BT-1255](https://linear.app/beamtalk/issue/BT-1255) | Migrate beamtalk_file.erl to Result | BT-1254 |
+| [BT-1256](https://linear.app/beamtalk/issue/BT-1256) | Migrate remaining FFI modules (regex, yaml, json, http, subprocess) | BT-1254 |
+
+**Status:** Planned
+
 ## References
 
 - Related issues: [BT-449](https://linear.app/beamtalk/issue/BT-449) — Research: Errors as Results
