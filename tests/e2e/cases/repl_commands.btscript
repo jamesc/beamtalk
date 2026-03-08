@@ -158,12 +158,12 @@ c2 increment
 
 // Unload it — should succeed
 :unload Point
-// => Class 'Point' removed from system
+// => ok
 
 // Unloading a stdlib class should return an error
 :unload Integer
-// => _
+// => ERROR: Cannot remove stdlib class
 
 // Unloading a non-existent class should return an error
 :unload NonExistentClass99
-// => _
+// => ERROR: Class not found
