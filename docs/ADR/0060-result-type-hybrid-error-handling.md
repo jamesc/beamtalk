@@ -67,14 +67,16 @@ Introduce a `Result` value class for operations where failure is a normal, expec
 
 | Failure mode | Mechanism | Example |
 |---|---|---|
-| File doesn't exist | **Result** | `File read: path` → `Result error: #file_not_found` |
-| Parse input is malformed | **Result** | `Yaml parse: text` → `Result error: #parse_error` |
-| Network is unreachable | **Result** | `HTTPClient get: url` → `Result error: #connection_failed` |
+| File doesn't exist | **Result** | `File read: path` → `Result error: (IOError file_not_found)` |
+| Parse input is malformed | **Result** | `Yaml parse: text` → `Result error: (ParseError malformed_input)` |
+| Network is unreachable | **Result** | `HTTPClient get: url` → `Result error: (NetworkError connection_failed)` |
 | Object doesn't understand message | **Exception** | `42 foo` → RuntimeError |
 | Wrong number of arguments | **Exception** | `Array new: 1 with: 2 extra: 3` → RuntimeError |
 | Actor is dead | **Exception** | Supervision restarts it |
 
 **Guideline:** If the caller should reasonably expect and handle the failure as part of normal program flow, return a Result. If the failure indicates a programming mistake, raise an exception.
+
+**Error payload convention:** The `errReason` inside a `Result error:` follows the same structured-error rule as exceptions: public API methods must wrap the reason in a `#beamtalk_error{}` object (or equivalent structured Exception subclass instance), not a bare symbol. Bare symbols (`#file_not_found`) are only acceptable in internal helpers that are immediately translated at the public boundary. `from_tagged_tuple/1` is an internal helper — FFI module wrappers that call it must populate `errReason` with a structured error before surfacing the Result to Beamtalk callers.
 
 ### 1. The Result Class
 
@@ -132,9 +134,13 @@ sealed Value subclass: Result
     self isOk ifTrue: [self okValue] ifFalse: [block value: self errReason]
 
   /// Unwrap the success value, or raise an exception.
+  /// If errReason is itself an Exception, re-raises it directly (preserving class, details, hints).
+  /// Otherwise signals a generic Exception with the error reason printed.
   sealed unwrap -> Object =>
     self isOk ifTrue: [self okValue] ifFalse: [
-      Exception signal: "unwrap called on Result error: " ++ self errReason printString
+      (self errReason isKindOf: Exception)
+        ifTrue:  [self errReason signal]
+        ifFalse: [Exception signal: "unwrap called on Result error: " ++ self errReason printString]
     ]
 
   // --- Transforming ---
@@ -293,14 +299,11 @@ Implementation in Erlang:
 ```erlang
 %% beamtalk_result.erl
 'class_tryDo:'(_ClassSelf, _ClassVars, Block) ->
-    try beamtalk_dispatch:send(Block, 'value', []) of
+    try beamtalk_message_dispatch:send(Block, 'value', []) of
         Value -> from_tagged_tuple({ok, Value})
     catch
-        error:Reason:_Stack ->
-            ExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
-            from_tagged_tuple({error, ExObj});
-        throw:Reason:_Stack ->
-            ExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
+        Class:Reason:Stack ->
+            ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stack),
             from_tagged_tuple({error, ExObj})
     end.
 ```
@@ -343,8 +346,9 @@ fetchCandidateIssues =>
 An actor method can return a Result. This is a normal return value — it flows through `gen_server:call` as `{ok, ResultMap}` and is unwrapped by `sync_send/3` to just `ResultMap`. Crucially:
 
 - **A `Result error:` from an actor method does NOT trigger a supervisor restart.** The actor handled the message successfully — it just returned a value indicating the operation failed.
-- **An exception from an actor method DOES trigger a restart** (via the normal `{error, Error}` reply path).
-- This is the correct semantics: expected failures (file not found, parse error) should not crash the actor. Bugs (wrong message, type error) should.
+- **In the current runtime, an exception from an actor method also does NOT crash the actor or trigger a supervisor restart.** `handle_call/3` uses `safe_dispatch/3` to isolate errors and replies `{error, Error}` to the caller; the actor process stays alive. The exception is surfaced to the caller as a signal, not a process crash.
+- **If we later decide that exceptions from actor methods should crash actors** (to trigger supervisor restarts for bugs), the dispatch path would need to change — removing or altering `safe_dispatch/3` in `handle_call/3` so exceptions propagate as process crashes rather than reply tuples. This would require a separate ADR.
+- This is the correct semantics for Result: expected failures (file not found, parse error) should not crash the actor. The exception isolation story is a separate design question.
 
 ```beamtalk
 // Actor method returns Result — actor stays alive
@@ -632,7 +636,7 @@ Beamtalk adopts part 2 entirely. Part 1 is available in typed contexts (gradual 
 
 **Tension:** Block-based fallbacks cannot compose across function boundaries. Symphony's `fetchCandidateIssues → graphql → extractIssues → filterCandidates` pipeline requires manual propagation with blocks; `andThen:` solves this structurally. The API explosion (every fallible method needs 2+ variants) is also a real cost.
 
-### Option D: Status Quo (exceptions only)
+### Option C: Status Quo (exceptions only)
 
 | Cohort | Strongest argument |
 |--------|-------------------|
@@ -643,7 +647,7 @@ Beamtalk adopts part 2 entirely. Part 1 is available in typed contexts (gradual 
 
 **Tension:** The status quo is defensible for small programs but breaks down at application scale (Symphony). The real-world evidence of three incompatible conventions emerging organically demonstrates that the language needs to provide a standard mechanism before users invent ad-hoc ones. The Smalltalk purist's pipeline suggestion is worth exploring but would need its own design — and it still doesn't solve the FFI impedance mismatch with `{ok, V} | {error, R}`.
 
-### Option E: `tryDo:` Only (Minimal Phase 1 as Final State)
+### Option D: `tryDo:` Only (Minimal Phase 1 as Final State)
 
 | Cohort | Strongest argument |
 |--------|-------------------|
@@ -657,7 +661,7 @@ Beamtalk adopts part 2 entirely. Part 1 is available in typed contexts (gradual 
 
 - **Smalltalk purists vs BEAM veterans:** Purists want block-based handlers (Pharo tradition); BEAM veterans want Result types (Erlang/Gleam tradition). The hybrid satisfies both by making Result respond to block-argument messages (`ifOk:ifError:`)
 - **Simplicity vs composition:** One error system (Option D) is simpler, but the chaining problem is real and worsens with FFI surface area growth
-- **API migration scope:** Converting File I/O from exceptions to Results is a breaking change for existing `on:do:` callers. Migration must be phased: add Result-returning variants first, deprecate exception-raising versions later
+- **API migration scope:** Converting File I/O from exceptions to Results is a breaking change for existing `on:do:` callers. The ADR ships Result and migrates FFI modules together — existing callers in Symphony are already in poor shape with ad-hoc conventions, so deferring only entrenches them further
 - **Two systems overhead:** Developers must choose between Result and exceptions. The guideline ("expected failures → Result, bugs → exceptions") is clear in principle but boundary cases exist (e.g., is "parse error" expected or a bug? Depends on whether input is trusted)
 
 ## Alternatives Considered
@@ -855,7 +859,7 @@ content := File readAll: path
 content := [File readAll: path] on: IOError do: [:e | "default"]
 
 // AFTER: Result-based
-content := (File readAll: path) unwrap          // crashes on error (same as before)
+content := (File readAll: path) unwrap          // crashes on error (re-raises original Exception if errReason is one; generic signal otherwise — see Consequences §unwrap)
 // or
 content := (File readAll: path) valueOr: "default"  // safe fallback
 // or
