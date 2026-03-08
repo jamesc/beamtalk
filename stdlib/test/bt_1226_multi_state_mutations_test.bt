@@ -47,6 +47,10 @@ TestCase subclass: BT1226MultiStateMutationsTest
     d := BT1226MultiStateActor spawn
     result := d processAll: #(#a, #b)
     self assert: (result at: #claimed) equals: #(#a, #b)
+    // All three mutations must survive: first write (#a=>true) and second write (#b=>true)
+    // must not be clobbered by the third mutation (at: #count put: size)
+    self assert: ((result at: #running) at: #a) equals: true
+    self assert: ((result at: #running) at: #b) equals: true
     self assert: ((result at: #running) at: #count) equals: 2
 
   // Exact issue pattern: local var before do: with two field mutations
