@@ -496,9 +496,15 @@ classRemoveFromSystemByName(ClassName) ->
                             %% Stop the class gen_server
                             %% (terminate/2 in beamtalk_object_class removes ETS entry and pg group)
                             gen_server:stop(ClassPid),
-                            %% Purge the BEAM module
+                            %% Fully unload the BEAM module.
+                            %% soft_purge removes any old-slot code from a prior reload.
+                            %% delete moves current code to the old slot.
+                            %% A second purge removes that old slot, freeing memory.
+                            %% Actors have already been stopped above, so no process
+                            %% should be running old code — soft_purge is safe both times.
                             _ = code:soft_purge(Module),
                             _ = code:delete(Module),
+                            _ = code:soft_purge(Module),
                             nil;
                         Subclasses ->
                             NameBins = [atom_to_binary(S, utf8) || S <- Subclasses],
