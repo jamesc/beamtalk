@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -134,6 +135,31 @@ pub struct UnloadParams {
     pub module: String,
 }
 
+/// Parameters for the `load_project` MCP tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct LoadProjectParams {
+    /// Path to a directory containing `beamtalk.toml`.
+    #[schemars(
+        description = "Path to the project directory containing beamtalk.toml. Use \".\" for the current directory."
+    )]
+    pub path: String,
+    /// If true, also load files from the `test/` directory.
+    #[schemars(
+        description = "Whether to also load test files from the test/ directory. Defaults to false."
+    )]
+    pub include_tests: Option<bool>,
+}
+
+/// Parameters for the `lint` MCP tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct LintParams {
+    /// Path to a `.bt` source file or directory to lint. Defaults to `.`.
+    #[schemars(
+        description = "Path to a .bt source file or directory to lint. Defaults to the current directory."
+    )]
+    pub path: Option<String>,
+}
+
 // --- MCP Tool implementations ---
 
 #[tool_router]
@@ -216,6 +242,75 @@ impl BeamtalkMcp {
         };
 
         Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Load all `.bt` source files from a project in dependency order.
+    #[tool(
+        description = "Load all .bt source files from a beamtalk project (identified by beamtalk.toml) in dependency order. Reads the src/ directory and loads files so superclasses are loaded before subclasses. Returns the list of loaded classes and any per-file errors."
+    )]
+    async fn load_project(
+        &self,
+        Parameters(params): Parameters<LoadProjectParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let include_tests = params.include_tests.unwrap_or(false);
+        let response = self
+            .client
+            .load_project(&params.path, include_tests)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        if response.is_error() {
+            let msg = response.error_message().unwrap_or("Failed to load project");
+            return Ok(error_result(format!("ERROR: {msg}")));
+        }
+
+        let classes = response.classes.unwrap_or_default();
+        let errors = response.errors.unwrap_or_default();
+
+        let mut parts = Vec::new();
+
+        if classes.is_empty() {
+            parts.push(Content::text("No classes loaded"));
+        } else {
+            parts.push(Content::text(format!(
+                "Loaded classes: {}",
+                classes.join(", ")
+            )));
+        }
+
+        for e in &errors {
+            // Each error is a structured map with path, kind, message (and optional hint).
+            let msg = match e {
+                serde_json::Value::Object(map) => {
+                    let path = map.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    let message = map
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown error");
+                    if path.is_empty() {
+                        message.to_string()
+                    } else {
+                        format!("{path}: {message}")
+                    }
+                }
+                serde_json::Value::String(s) => s.clone(),
+                _ => e.to_string(),
+            };
+            parts.push(Content::text(format!("Error: {msg}")));
+        }
+
+        // Partial loads (some files succeeded, some failed) are still reported as
+        // errors so MCP clients that inspect is_error see the failure.
+        if !errors.is_empty() {
+            return Ok(CallToolResult {
+                content: parts,
+                is_error: Some(true),
+                meta: None,
+                structured_content: None,
+            });
+        }
+
+        Ok(CallToolResult::success(parts))
     }
 
     /// Load a `.bt` source file into the workspace.
@@ -592,6 +687,34 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
+    /// Run lint checks on a `.bt` source file or directory.
+    #[tool(
+        description = "Run style and redundancy lint checks on a .bt source file or directory. Returns structured diagnostics with file, line, message, and severity. Use path=. for the current directory."
+    )]
+    async fn lint(
+        &self,
+        Parameters(params): Parameters<LintParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let path = params.path.unwrap_or_else(|| ".".to_string());
+        // Run blocking I/O and CPU-bound parsing off the Tokio worker thread.
+        let result = tokio::task::spawn_blocking(move || run_lint_structured(&path))
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+        let has_errors = !result.errors.is_empty();
+        let text = serde_json::to_string_pretty(&result).unwrap_or_else(|_| format!("{result:?}"));
+        let structured = serde_json::to_value(&result).ok();
+        let mut call_result = CallToolResult {
+            content: vec![Content::text(text)],
+            structured_content: structured,
+            is_error: None,
+            meta: None,
+        };
+        if has_errors {
+            call_result.is_error = Some(true);
+        }
+        Ok(call_result)
+    }
+
     /// Discover supported REPL operations and protocol version.
     #[tool(
         description = "Discover supported REPL operations and protocol version. Returns the list of available ops with their parameters, and version information."
@@ -631,6 +754,174 @@ impl BeamtalkMcp {
     }
 }
 
+// --- Lint helpers ---
+
+/// A single lint diagnostic in structured form.
+///
+/// `line` is `None` for file-level errors (e.g. unreadable path, non-`.bt` file)
+/// where there is no specific source location.  For diagnostics derived from
+/// source text it is a 1-indexed line number.
+#[derive(Debug, serde::Serialize)]
+struct LintDiagnostic {
+    file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<u32>,
+    message: String,
+    severity: &'static str,
+}
+
+/// Structured result returned by the `lint` MCP tool.
+#[derive(Debug, serde::Serialize)]
+struct LintResult {
+    warnings: Vec<LintDiagnostic>,
+    errors: Vec<LintDiagnostic>,
+    total: usize,
+}
+
+/// Convert a byte offset into a 1-indexed line number.
+fn offset_to_line(source: &str, offset: usize) -> u32 {
+    let clamped = offset.min(source.len());
+    #[allow(clippy::cast_possible_truncation)]
+    let line = source[..clamped].bytes().filter(|&b| b == b'\n').count() as u32 + 1;
+    line
+}
+
+/// Recursively collect all `.bt` files under `dir`.
+///
+/// Returns an error if the directory cannot be read (e.g. permission denied),
+/// preventing silent false-clean results.
+fn collect_bt_files(dir: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
+    let mut out = Vec::new();
+    let entries = std::fs::read_dir(dir)?;
+    let mut entries: Vec<_> = entries.collect::<std::io::Result<Vec<_>>>()?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for entry in entries {
+        let path = entry.path();
+        if path.is_symlink() {
+            continue;
+        }
+        if path.is_dir() {
+            out.extend(collect_bt_files(&path)?);
+        } else if path.extension().is_some_and(|e| e == "bt") {
+            out.push(path);
+        }
+    }
+    Ok(out)
+}
+
+/// Resolve `path` to a list of `.bt` source files, or return a `LintResult`
+/// containing a single error diagnostic explaining why no files could be found.
+///
+/// Returns `Vec<PathBuf>` (not `Utf8PathBuf`) so that files with non-UTF-8
+/// names are preserved rather than silently dropped.
+fn resolve_source_files(path: &str) -> Result<Vec<std::path::PathBuf>, LintResult> {
+    let source_path = std::path::Path::new(path);
+    if source_path.is_file() {
+        if source_path.extension().is_some_and(|e| e == "bt") {
+            return Ok(vec![source_path.to_path_buf()]);
+        }
+        return Err(lint_error(
+            path,
+            format!("'{path}' is not a .bt source file"),
+        ));
+    }
+    if source_path.is_dir() {
+        let files = collect_bt_files(source_path)
+            .map_err(|e| lint_error(path, format!("Failed to read directory '{path}': {e}")))?;
+        if files.is_empty() {
+            return Err(lint_error(
+                path,
+                format!("No .bt source files found in '{path}'"),
+            ));
+        }
+        return Ok(files);
+    }
+    Err(lint_error(path, format!("Path '{path}' does not exist")))
+}
+
+/// Build a `LintResult` containing a single file-level error diagnostic.
+fn lint_error(file: &str, message: String) -> LintResult {
+    let diag = LintDiagnostic {
+        file: file.to_string(),
+        line: None,
+        message,
+        severity: "error",
+    };
+    LintResult {
+        warnings: vec![],
+        errors: vec![diag],
+        total: 1,
+    }
+}
+
+/// Run lint passes on `path` (file or directory) and return structured results.
+fn run_lint_structured(path: &str) -> LintResult {
+    let source_files = match resolve_source_files(path) {
+        Ok(files) => files,
+        Err(result) => return result,
+    };
+
+    let mut warnings = Vec::new();
+    let mut errors = Vec::new();
+
+    for file in &source_files {
+        let Ok(source) = std::fs::read_to_string(file) else {
+            errors.push(LintDiagnostic {
+                file: file.to_string_lossy().into_owned(),
+                line: None,
+                message: format!("Failed to read '{}'", file.display()),
+                severity: "error",
+            });
+            continue;
+        };
+
+        let tokens = lex_with_eof(&source);
+        let (module, parse_diags) = parse(tokens);
+
+        // Include parse errors (syntax problems) and warnings so files with
+        // broken syntax or parser-emitted warnings don't silently appear clean.
+        // Hint-severity diagnostics (DNU hints) are excluded as they are
+        // informational and belong to the check/compile workflow.
+        let mut lint_diags: Vec<_> = parse_diags
+            .into_iter()
+            .filter(|d| {
+                matches!(
+                    d.severity,
+                    Severity::Error | Severity::Warning | Severity::Lint
+                )
+            })
+            .collect();
+        lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
+
+        let file_name = file.to_string_lossy().into_owned();
+        for diag in &lint_diags {
+            let line = offset_to_line(&source, diag.span.start() as usize);
+            let severity = match diag.severity {
+                Severity::Error => "error",
+                Severity::Warning | Severity::Lint | Severity::Hint => "warning",
+            };
+            let entry = LintDiagnostic {
+                file: file_name.clone(),
+                line: Some(line),
+                message: diag.message.to_string(),
+                severity,
+            };
+            if diag.severity == Severity::Error {
+                errors.push(entry);
+            } else {
+                warnings.push(entry);
+            }
+        }
+    }
+
+    let total = warnings.len() + errors.len();
+    LintResult {
+        warnings,
+        errors,
+        total,
+    }
+}
+
 #[tool_handler]
 impl ServerHandler for BeamtalkMcp {
     /// Return server metadata and capabilities advertised to MCP clients.
@@ -638,9 +929,11 @@ impl ServerHandler for BeamtalkMcp {
         ServerInfo {
             instructions: Some(
                 "Beamtalk MCP server — interact with live beamtalk objects through the REPL. \
-                 Use 'evaluate' to run beamtalk expressions, 'load_file' to load source code, \
+                 Use 'evaluate' to run beamtalk expressions, 'load_project' to load all files \
+                 from a project in dependency order, 'load_file' to load a single source file, \
                  'list_actors' to see running actors, 'inspect' to examine actor state, \
                  'reload_module' for hot code reloading, 'test' to run BUnit tests, \
+                 'lint' to run style/redundancy checks on .bt source files, \
                  'show_codegen' to inspect generated Core Erlang, 'info' for symbol details, \
                  'describe' for capability discovery, 'clear' to reset bindings, \
                  'unload' to remove a module, and 'interrupt' to cancel evaluations."
@@ -649,5 +942,71 @@ impl ServerHandler for BeamtalkMcp {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use camino::Utf8PathBuf;
+
+    // --- offset_to_line ---
+
+    #[test]
+    fn offset_to_line_empty_string() {
+        assert_eq!(offset_to_line("", 0), 1);
+    }
+
+    #[test]
+    fn offset_to_line_single_line() {
+        let src = "hello world";
+        assert_eq!(offset_to_line(src, 0), 1);
+        assert_eq!(offset_to_line(src, 5), 1);
+        assert_eq!(offset_to_line(src, src.len()), 1);
+    }
+
+    #[test]
+    fn offset_to_line_multi_line() {
+        let src = "line1\nline2\nline3";
+        assert_eq!(offset_to_line(src, 0), 1); // start of line1
+        assert_eq!(offset_to_line(src, 5), 1); // end of line1 (before \n)
+        assert_eq!(offset_to_line(src, 6), 2); // start of line2
+        assert_eq!(offset_to_line(src, 11), 2); // end of line2 (before \n)
+        assert_eq!(offset_to_line(src, 12), 3); // start of line3
+    }
+
+    #[test]
+    fn offset_to_line_clamps_past_end() {
+        let src = "abc";
+        // Offset beyond source length should clamp and not panic.
+        assert_eq!(offset_to_line(src, 999), 1);
+    }
+
+    // --- run_lint_structured ---
+
+    #[test]
+    fn run_lint_structured_nonexistent_path() {
+        let result = run_lint_structured("/nonexistent/path/that/does/not/exist");
+        assert_eq!(result.total, 1);
+        assert!(result.errors.len() == 1);
+        assert!(result.warnings.is_empty());
+        assert!(result.errors[0].message.contains("does not exist"));
+    }
+
+    #[test]
+    fn run_lint_structured_non_bt_file() {
+        // Use a temp file so the test is portable across platforms.
+        let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir should be UTF-8")
+            .join(format!(
+                "beamtalk-mcp-lint-non-bt-{}.txt",
+                std::process::id()
+            ));
+        std::fs::write(path.as_std_path(), "not beamtalk").unwrap();
+        let result = run_lint_structured(path.as_str());
+        let _ = std::fs::remove_file(path.as_std_path());
+        assert_eq!(result.total, 1);
+        assert!(result.errors.len() == 1);
+        assert!(result.errors[0].message.contains(".bt source file"));
     }
 }

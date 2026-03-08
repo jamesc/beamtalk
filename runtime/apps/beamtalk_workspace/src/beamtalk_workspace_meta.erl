@@ -22,7 +22,7 @@
 %% Public API
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([register_actor/1, unregister_actor/1, supervised_actors/0]).
--export([register_module/1, register_module/2, loaded_modules/0]).
+-export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
 -export([set_class_source/2, get_class_source/1]).
 -export([get_package_name/0]).
 % Alias for get_metadata/0
@@ -170,6 +170,16 @@ register_module(Module, SourcePath) when is_atom(Module) ->
     NormalizedPath = normalize_source_path(SourcePath),
     try
         gen_server:cast(?MODULE, {register_module, Module, NormalizedPath})
+    catch
+        exit:{noproc, _} ->
+            ok
+    end.
+
+%% @doc Unregister a loaded module (BT-1239: called when a class is removed from the system).
+-spec unregister_module(atom()) -> ok.
+unregister_module(Module) when is_atom(Module) ->
+    try
+        gen_server:cast(?MODULE, {unregister_module, Module})
     catch
         exit:{noproc, _} ->
             ok
@@ -341,6 +351,12 @@ handle_cast({register_module, Module, NewSource}, State) ->
             _ -> NewSource
         end,
     State2 = State#state{loaded_modules = maps:put(Module, EffectiveSource, Modules)},
+    store_state_in_ets(State2),
+    {noreply, schedule_persist(State2)};
+handle_cast({unregister_module, Module}, State) ->
+    %% BT-1239: Remove a module when removeFromSystem is called.
+    Modules = State#state.loaded_modules,
+    State2 = State#state{loaded_modules = maps:remove(Module, Modules)},
     store_state_in_ets(State2),
     {noreply, schedule_persist(State2)};
 handle_cast(_Msg, State) ->

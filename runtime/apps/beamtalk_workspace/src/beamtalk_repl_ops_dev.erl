@@ -1065,6 +1065,10 @@ describe_ops() ->
             <<"migrate_to">> => <<"eval: Workspace load: \"path\"">>
         },
         <<"load-source">> => #{<<"params">> => [<<"source">>]},
+        <<"load-project">> => #{
+            <<"params">> => [<<"path">>],
+            <<"optional">> => [<<"include_tests">>]
+        },
         <<"reload">> => #{
             <<"params">> => [],
             <<"optional">> => [<<"module">>, <<"path">>],
