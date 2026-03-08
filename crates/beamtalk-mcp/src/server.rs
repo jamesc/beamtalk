@@ -12,7 +12,6 @@
 use std::sync::Arc;
 
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
-use camino::Utf8PathBuf;
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -715,11 +714,14 @@ fn collect_bt_files(dir: &std::path::Path) -> std::io::Result<Vec<std::path::Pat
 
 /// Resolve `path` to a list of `.bt` source files, or return a `LintResult`
 /// containing a single error diagnostic explaining why no files could be found.
-fn resolve_source_files(path: &str) -> Result<Vec<Utf8PathBuf>, LintResult> {
-    let source_path = Utf8PathBuf::from(path);
+///
+/// Returns `Vec<PathBuf>` (not `Utf8PathBuf`) so that files with non-UTF-8
+/// names are preserved rather than silently dropped.
+fn resolve_source_files(path: &str) -> Result<Vec<std::path::PathBuf>, LintResult> {
+    let source_path = std::path::Path::new(path);
     if source_path.is_file() {
-        if source_path.extension() == Some("bt") {
-            return Ok(vec![source_path]);
+        if source_path.extension().is_some_and(|e| e == "bt") {
+            return Ok(vec![source_path.to_path_buf()]);
         }
         return Err(lint_error(
             path,
@@ -727,7 +729,7 @@ fn resolve_source_files(path: &str) -> Result<Vec<Utf8PathBuf>, LintResult> {
         ));
     }
     if source_path.is_dir() {
-        let files = collect_bt_files(source_path.as_std_path())
+        let files = collect_bt_files(source_path)
             .map_err(|e| lint_error(path, format!("Failed to read directory '{path}': {e}")))?;
         if files.is_empty() {
             return Err(lint_error(
@@ -735,10 +737,7 @@ fn resolve_source_files(path: &str) -> Result<Vec<Utf8PathBuf>, LintResult> {
                 format!("No .bt source files found in '{path}'"),
             ));
         }
-        return Ok(files
-            .into_iter()
-            .filter_map(|p| Utf8PathBuf::try_from(p).ok())
-            .collect());
+        return Ok(files);
     }
     Err(lint_error(path, format!("Path '{path}' does not exist")))
 }
@@ -769,11 +768,11 @@ fn run_lint_structured(path: &str) -> LintResult {
     let mut errors = Vec::new();
 
     for file in &source_files {
-        let Ok(source) = std::fs::read_to_string(file.as_std_path()) else {
+        let Ok(source) = std::fs::read_to_string(file) else {
             errors.push(LintDiagnostic {
-                file: file.to_string(),
+                file: file.to_string_lossy().into_owned(),
                 line: None,
-                message: format!("Failed to read '{file}'"),
+                message: format!("Failed to read '{}'", file.display()),
                 severity: "error",
             });
             continue;
@@ -797,6 +796,7 @@ fn run_lint_structured(path: &str) -> LintResult {
             .collect();
         lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
 
+        let file_name = file.to_string_lossy().into_owned();
         for diag in &lint_diags {
             let line = offset_to_line(&source, diag.span.start() as usize);
             let severity = match diag.severity {
@@ -804,7 +804,7 @@ fn run_lint_structured(path: &str) -> LintResult {
                 Severity::Warning | Severity::Lint | Severity::Hint => "warning",
             };
             let entry = LintDiagnostic {
-                file: file.to_string(),
+                file: file_name.clone(),
                 line: Some(line),
                 message: diag.message.to_string(),
                 severity,
@@ -850,6 +850,7 @@ impl ServerHandler for BeamtalkMcp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use camino::Utf8PathBuf;
 
     // --- offset_to_line ---
 
