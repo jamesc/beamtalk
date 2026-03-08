@@ -362,10 +362,9 @@ structured_file_error(Path, Reason) ->
     end.
 
 %% @private
--spec coerce_binary(binary() | list() | undefined) -> binary().
+-spec coerce_binary(binary() | undefined) -> binary().
 coerce_binary(undefined) -> <<>>;
-coerce_binary(B) when is_binary(B) -> B;
-coerce_binary(L) when is_list(L) -> list_to_binary(L).
+coerce_binary(B) -> B.
 
 %% @private
 %% @doc Collect collision warnings for the loaded classes after a file load.
