@@ -39,7 +39,7 @@ Value subclass: SupervisionSpec
   ///
   /// Defaults to `#temporary`. Set to the actor's `supervisionPolicy` when
   /// created via `ActorClass supervisionSpec`.
-  state: restart = #temporary
+  state: restart :: Symbol = #temporary
   /// Optional initialization arguments passed via `spawnWith:`.
   ///
   /// nil means no args (use `spawn`); a Dictionary means use `spawnWith:`.
