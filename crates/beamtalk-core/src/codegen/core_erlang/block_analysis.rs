@@ -289,9 +289,54 @@ fn analyze_expression(
             }
         }
 
-        Expression::DestructureAssignment { value, .. } => {
-            // Destructure assignment: walk into value; does not mutate fields
+        Expression::DestructureAssignment { pattern, value, .. } => {
+            // Destructure assignment: walk into value, then bind all pattern variables
             analyze_expression(value, analysis, ctx);
+            collect_pattern_bindings(pattern, analysis, ctx);
+        }
+    }
+}
+
+/// Adds all variable names bound by `pattern` to `ctx.local_bindings` and
+/// `analysis.local_writes`. Wildcards and literals are skipped; nested patterns
+/// are walked recursively.
+fn collect_pattern_bindings(
+    pattern: &crate::ast::Pattern,
+    analysis: &mut BlockMutationAnalysis,
+    ctx: &mut AnalysisContext,
+) {
+    use crate::ast::Pattern;
+    match pattern {
+        Pattern::Variable(id) => {
+            let name = id.name.to_string();
+            if ctx.local_bindings.contains(name.as_str()) {
+                // Shadowing an outer local — record the write
+                analysis.local_writes.insert(name.clone());
+            } else {
+                ctx.local_bindings.insert(name.clone());
+                analysis.local_writes.insert(name);
+            }
+        }
+        Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
+            for elem in elements {
+                collect_pattern_bindings(elem, analysis, ctx);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for elem in elements {
+                collect_pattern_bindings(elem, analysis, ctx);
+            }
+            if let Some(t) = tail {
+                collect_pattern_bindings(t, analysis, ctx);
+            }
+        }
+        Pattern::Binary { segments, .. } => {
+            for seg in segments {
+                collect_pattern_bindings(&seg.value, analysis, ctx);
+            }
+        }
+        Pattern::Wildcard(..) | Pattern::Literal(..) => {
+            // No bindings introduced
         }
     }
 }
@@ -638,6 +683,93 @@ mod tests {
         );
         assert!(analysis.local_writes.contains("temp"));
         assert!(analysis.local_reads.contains("temp"));
+    }
+
+    #[test]
+    fn test_destructure_assignment_binds_variables() {
+        // BT-1263: [{a, b} := expr. a + b] — a and b must be local bindings after destructure
+        use crate::ast::Pattern;
+
+        let tuple_pattern = Pattern::Tuple {
+            elements: vec![
+                Pattern::Variable(make_id("a")),
+                Pattern::Variable(make_id("b")),
+            ],
+            span: Span::new(1, 7),
+        };
+
+        let block = Block::new(
+            vec![],
+            vec![
+                bare(Expression::DestructureAssignment {
+                    pattern: tuple_pattern,
+                    value: Box::new(make_expr_id("someTuple")),
+                    span: Span::new(0, 20),
+                }),
+                bare(Expression::MessageSend {
+                    receiver: Box::new(make_expr_id("a")),
+                    selector: MessageSelector::Binary("+".into()),
+                    arguments: vec![make_expr_id("b")],
+                    is_cast: false,
+                    span: Span::new(22, 30),
+                }),
+            ],
+            Span::new(0, 32),
+        );
+        let analysis = analyze_block(&block);
+
+        // a and b are locally defined by the destructure — not captured from outer scope
+        assert!(
+            analysis.local_writes.contains("a"),
+            "a should be in local_writes after destructure"
+        );
+        assert!(
+            analysis.local_writes.contains("b"),
+            "b should be in local_writes after destructure"
+        );
+        assert!(
+            !analysis.captured_reads.contains("a"),
+            "a should NOT be a captured read"
+        );
+        assert!(
+            !analysis.captured_reads.contains("b"),
+            "b should NOT be a captured read"
+        );
+        assert!(analysis.local_reads.contains("a"));
+        assert!(analysis.local_reads.contains("b"));
+    }
+
+    #[test]
+    fn test_array_destructure_binds_variables() {
+        // BT-1263: [#[first, second] := arr. first] — first and second are local after destructure
+        use crate::ast::Pattern;
+
+        let array_pattern = Pattern::Array {
+            elements: vec![
+                Pattern::Variable(make_id("first")),
+                Pattern::Variable(make_id("second")),
+            ],
+            span: Span::new(1, 15),
+        };
+
+        let block = Block::new(
+            vec![],
+            vec![
+                bare(Expression::DestructureAssignment {
+                    pattern: array_pattern,
+                    value: Box::new(make_expr_id("arr")),
+                    span: Span::new(0, 20),
+                }),
+                bare(make_expr_id("first")),
+            ],
+            Span::new(0, 28),
+        );
+        let analysis = analyze_block(&block);
+
+        assert!(analysis.local_writes.contains("first"));
+        assert!(analysis.local_writes.contains("second"));
+        assert!(!analysis.captured_reads.contains("first"));
+        assert!(!analysis.captured_reads.contains("second"));
     }
 
     #[test]
