@@ -140,7 +140,7 @@
 %% @doc Look up a key. Returns the value, or nil if the key is absent.
 %%
 %% For bag/duplicate_bag tables with multiple values for a key, returns
-%% the first stored value. Use `keys` and iterate for full multi-value access.
+%% the first stored value. The wrapper exposes only one value per key.
 -spec lookup(map(), term()) -> term().
 lookup(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
     try

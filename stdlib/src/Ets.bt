@@ -70,8 +70,8 @@ Object subclass: Ets
   /// Look up a key. Returns the value, or `nil` if the key is absent.
   ///
   /// For `#bag` and `#duplicateBag` tables with multiple entries per key,
-  /// returns the first stored value. Use `keys` and iterate for full
-  /// multi-value access.
+  /// returns the first stored value. The current wrapper exposes only one
+  /// value per key; bag tables are best suited for single-value-per-key use.
   ///
   /// ## Examples
   /// ```beamtalk

@@ -173,7 +173,11 @@ insert_type_error_test() ->
 lookupIfAbsent_present_test() ->
     with_table(bt_ets_test_lookup_default, fun(Table) ->
         beamtalk_ets:insert(Table, <<"key">>, 42),
-        Result = beamtalk_ets:lookupIfAbsent(Table, <<"key">>, fun() -> 0 end),
+        Result = beamtalk_ets:lookupIfAbsent(
+            Table,
+            <<"key">>,
+            fun() -> erlang:error(fallback_should_not_run) end
+        ),
         ?assertEqual(42, Result)
     end).
 
