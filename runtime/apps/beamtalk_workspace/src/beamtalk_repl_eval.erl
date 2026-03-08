@@ -14,7 +14,9 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([do_eval/2, do_eval/3, do_eval_trace/2, do_show_codegen/2, handle_load/2, handle_load_source/3]).
+-export([
+    do_eval/2, do_eval/3, do_eval_trace/2, do_show_codegen/2, handle_load/2, handle_load_source/3
+]).
 %% BT-845: ADR 0040 Phase 2 — stateless class reload (called via erlang:apply from beamtalk_runtime)
 -export([reload_class_file/1, reload_class_file/2]).
 
@@ -150,7 +152,9 @@ do_eval_trace(Expression, State) ->
                         {ok, Steps2, FinalState2} ->
                             {ok, Steps2, Output, Warnings, FinalState2};
                         {error, ErrorReason, ErrorState} ->
-                            WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
+                            WrappedReason = beamtalk_repl_errors:ensure_structured_error(
+                                ErrorReason
+                            ),
                             {error, WrappedReason, Output, Warnings, ErrorState}
                     end;
                 {error, Reason} ->

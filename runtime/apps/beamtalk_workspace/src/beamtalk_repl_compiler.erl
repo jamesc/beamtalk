@@ -56,7 +56,7 @@ compile_expression(Expression, ModuleName, Bindings) ->
 %% Like `compile_expression/3' but the generated module's `eval/1' returns
 %% `{[{<<"src0">>, Val0}, ...], FinalState}' — one step per top-level statement.
 -spec compile_expression_trace(string(), atom(), map()) ->
-    {ok, binary(), [binary()]} | {error, term()}.
+    {ok, binary(), term(), [binary()]} | {error, term()}.
 compile_expression_trace(Expression, ModuleName, Bindings) ->
     SourceBin = list_to_binary(Expression),
     ModNameBin = atom_to_binary(ModuleName, utf8),
@@ -70,7 +70,9 @@ compile_expression_trace(Expression, ModuleName, Bindings) ->
     wrap_compiler_errors(
         fun() ->
             case
-                beamtalk_compiler:compile_expression_trace(SourceBin, ModNameBin, KnownVars, CompileOpts)
+                beamtalk_compiler:compile_expression_trace(
+                    SourceBin, ModNameBin, KnownVars, CompileOpts
+                )
             of
                 {ok, CoreErlang, Warnings} ->
                     compile_standard_expression(CoreErlang, Warnings);

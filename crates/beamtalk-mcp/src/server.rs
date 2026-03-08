@@ -221,7 +221,10 @@ impl BeamtalkMcp {
             } else {
                 for step in &steps {
                     let src = step.get("src").and_then(|v| v.as_str()).unwrap_or("?");
-                    let val = step.get("value").cloned().unwrap_or(serde_json::Value::Null);
+                    let val = step
+                        .get("value")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
                     let val_str = match &val {
                         serde_json::Value::String(s) => s.clone(),
                         v => v.to_string(),

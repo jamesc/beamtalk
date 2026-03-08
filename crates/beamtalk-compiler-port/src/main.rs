@@ -774,11 +774,11 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
     }
 
     if !module.classes.is_empty() || !module.method_definitions.is_empty() {
-        return error_response(&[
-            "trace mode does not support class or method definitions; \
+        return error_response(
+            &["trace mode does not support class or method definitions; \
              use eval without trace to define classes"
-                .to_string(),
-        ]);
+                .to_string()],
+        );
     }
 
     if module.expressions.is_empty() {
