@@ -1,0 +1,93 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SupervisionSpec — Value type describing how to start an actor as a supervised child.
+///
+/// SupervisionSpec carries per-child configuration for OTP supervision trees.
+/// It is created via `ActorClass supervisionSpec` and refined with fluent
+/// override methods. Use it in `Supervisor subclass:` `children` methods when
+/// you need per-child overrides for id, restart policy, or startup args.
+///
+/// The auto-generated API (from `state:` declarations) includes:
+/// - Getters: `id`, `actorClass`, `restart`, `args`
+/// - Single-field fluent: `withId:`, `withActorClass:`, `withRestart:`, `withArgs:`
+/// - Keyword constructor: `id:actorClass:restart:args:`
+///
+/// See ADR 0059 for the full design.
+///
+/// ## Examples
+/// ```beamtalk
+/// DatabasePool supervisionSpec
+///     // => SupervisionSpec(id: nil, actorClass: DatabasePool, restart: #temporary, args: nil)
+///
+/// DatabasePool supervisionSpec withId: #primary
+///     // => SupervisionSpec(id: #primary, actorClass: DatabasePool, ...)
+///
+/// DatabasePool supervisionSpec withId: #primary withRestart: #permanent withArgs: #{#role => #primary}
+///     // => full per-child override
+///
+/// DatabasePool supervisionSpec childSpec
+///     // => #{ #id => #DatabasePool, #start => #[DatabasePool, #spawn, #()],
+///     //        #restart => #temporary, #shutdown => 5000, #type => #worker }
+/// ```
+Value subclass: SupervisionSpec
+  /// Child id override — nil uses the actor class name as the OTP child id.
+  state: id = nil
+  /// The actor class being supervised.
+  state: actorClass = nil
+  /// OTP restart policy — `#permanent`, `#transient`, or `#temporary`.
+  ///
+  /// Defaults to `#temporary`. Set to the actor's `supervisionPolicy` when
+  /// created via `ActorClass supervisionSpec`.
+  state: restart :: Symbol = #temporary
+  /// Optional initialization arguments passed via `spawnWith:`.
+  ///
+  /// nil means no args (use `spawn`); any non-nil value is passed to `spawnWith:`.
+  state: args = nil
+
+  // === Multi-keyword fluent overrides ===
+  // (Single-field variants withId:, withRestart:, withArgs: are auto-generated.)
+
+  /// Return a new spec with id and restart overridden.
+  withId: anId :: Symbol withRestart: policy :: Symbol -> SupervisionSpec =>
+    (self withId: anId) withRestart: policy
+
+  /// Return a new spec with id and args overridden.
+  withId: anId :: Symbol withArgs: someArgs -> SupervisionSpec =>
+    (self withId: anId) withArgs: someArgs
+
+  /// Return a new spec with id, restart, and args all overridden.
+  withId: anId :: Symbol withRestart: policy :: Symbol withArgs: someArgs -> SupervisionSpec =>
+    ((self withId: anId) withRestart: policy) withArgs: someArgs
+
+  // === OTP child spec construction ===
+
+  /// Build the OTP child spec dictionary for this supervised actor.
+  ///
+  /// Uses `actorClass isSupervisor` to determine `shutdown` and `type` without
+  /// any Erlang ancestry check. Returns a Beamtalk dict that the runtime helper
+  /// (`beamtalk_supervisor`, Phase 2) translates into an OTP-compatible child spec
+  /// before passing to `supervisor:start_link/2`.
+  ///
+  /// - `shutdown`: `#infinity` for nested supervisors, `5000` (ms) for workers
+  /// - `type`: `#supervisor` or `#worker`
+  /// - `start`: `#[actorClass, startFn, startArgs]` — an intermediate Array
+  ///   that the runtime translates into the MFA tuple OTP expects
+  childSpec -> Dictionary =>
+    self actorClass isNil ifTrue: [
+      self error: "SupervisionSpec>>childSpec: actorClass must not be nil"
+    ]
+    childId := self id isNil ifTrue: [self actorClass name] ifFalse: [self id]
+    startFn := self args isNil ifTrue: [#spawn] ifFalse: [#spawnWith:]
+    startArgs := self args isNil ifTrue: [#()] ifFalse: [#(self args)]
+    shutdown := self actorClass isSupervisor ifTrue: [#infinity] ifFalse: [5000]
+    childType := self actorClass isSupervisor ifTrue: [
+      #supervisor
+    ] ifFalse: [#worker]
+    #{
+      #id => childId,
+      #start => #[self actorClass, startFn, startArgs],
+      #restart => self restart,
+      #shutdown => shutdown,
+      #type => childType
+    }
