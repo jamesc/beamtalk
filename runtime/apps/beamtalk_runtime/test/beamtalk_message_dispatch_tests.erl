@@ -9,6 +9,7 @@
 -module(beamtalk_message_dispatch_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-export([init/1]).
 
 %% ============================================================================
 %% Actor dispatch tests (need bootstrap)
@@ -85,3 +86,52 @@ primitive_list_dispatch() ->
     %% List size via primitive dispatch path
     Result = beamtalk_message_dispatch:send([1, 2, 3], size, []),
     ?assertEqual(3, Result).
+
+%% ============================================================================
+%% Supervisor dispatch tests (ADR 0059)
+%% ============================================================================
+
+%% @private Minimal OTP supervisor callback for dispatch tests.
+init({SupFlags, ChildSpecs}) ->
+    {ok, {SupFlags, ChildSpecs}}.
+
+%% @private Start an anonymous OTP supervisor with no children.
+anon_sup() ->
+    SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
+    {ok, Pid} = supervisor:start_link(?MODULE, {SupFlags, []}),
+    Pid.
+
+supervisor_is_alive_true_test() ->
+    %% isAlive returns true for a running supervisor.
+    SupPid = anon_sup(),
+    Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
+    ?assertEqual(true, beamtalk_message_dispatch:send(Sup, isAlive, [])),
+    gen_server:stop(SupPid).
+
+supervisor_is_alive_false_test() ->
+    %% isAlive returns false after the supervisor is stopped.
+    SupPid = anon_sup(),
+    gen_server:stop(SupPid),
+    timer:sleep(20),
+    Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
+    ?assertEqual(false, beamtalk_message_dispatch:send(Sup, isAlive, [])).
+
+supervisor_stop_returns_nil_test() ->
+    %% stop returns nil and terminates the supervisor process.
+    SupPid = anon_sup(),
+    Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
+    Result = beamtalk_message_dispatch:send(Sup, stop, []),
+    ?assertEqual(nil, Result),
+    timer:sleep(50),
+    ?assertEqual(false, is_process_alive(SupPid)).
+
+supervisor_stop_stale_handle_test() ->
+    %% stop on a dead supervisor raises a structured runtime_error (not a raw OTP exit).
+    SupPid = anon_sup(),
+    gen_server:stop(SupPid),
+    timer:sleep(20),
+    Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+        beamtalk_message_dispatch:send(Sup, stop, [])
+    ).
