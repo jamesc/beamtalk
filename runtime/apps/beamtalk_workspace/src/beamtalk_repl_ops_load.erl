@@ -55,7 +55,14 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
             AllFiles = SrcFiles ++ TestFiles,
             SortedFiles = sort_bt_files_by_deps(AllFiles),
             {AllClasses, Errors} = load_files_sequential(SortedFiles, SessionPid),
-            ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- AllClasses],
+            ClassNames =
+                [
+                    case maps:get(name, C, "") of
+                        N when is_binary(N) -> N;
+                        N -> list_to_binary(N)
+                    end
+                 || C <- AllClasses
+                ],
             Base = beamtalk_repl_protocol:base_response(Msg),
             Response = Base#{
                 <<"status">> => [<<"done">>],
@@ -315,9 +322,11 @@ topo_sort_loop([#{path := Path, class := Class} | Ready], Pending, Acc) ->
     topo_sort_loop(Ready ++ NowReady, StillPending, [Path | Acc]).
 
 %% @private
-%% @doc Load files one by one, accumulating class maps and per-file error messages.
+%% @doc Load files one by one, accumulating class maps and per-file error maps.
 %% Accumulates in reverse to avoid quadratic ++ and reverses at the end.
--spec load_files_sequential([string()], pid()) -> {[map()], [binary()]}.
+%% Per-file errors are returned as structured maps with path, kind, and message
+%% so callers can handle partial failures programmatically.
+-spec load_files_sequential([string()], pid()) -> {[map()], [map()]}.
 load_files_sequential(Files, SessionPid) ->
     {RevClasses, RevErrors} =
         lists:foldl(
@@ -326,16 +335,37 @@ load_files_sequential(Files, SessionPid) ->
                     {ok, Classes} ->
                         {lists:reverse(Classes, ClassesAcc), ErrorsAcc};
                     {error, Reason} ->
-                        Wrapped = beamtalk_repl_errors:ensure_structured_error(Reason),
-                        ErrBin = beamtalk_repl_json:format_error_message(Wrapped),
-                        ErrMsg = iolist_to_binary([list_to_binary(Path), ": ", ErrBin]),
-                        {ClassesAcc, [ErrMsg | ErrorsAcc]}
+                        ErrMap = structured_file_error(Path, Reason),
+                        {ClassesAcc, [ErrMap | ErrorsAcc]}
                 end
             end,
             {[], []},
             Files
         ),
     {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
+
+%% @private
+%% @doc Build a structured error map for a per-file load failure.
+%% Preserves kind, message, and hint from the underlying beamtalk_error.
+-spec structured_file_error(string(), term()) -> map().
+structured_file_error(Path, Reason) ->
+    #beamtalk_error{kind = Kind, message = Msg, hint = Hint} =
+        beamtalk_repl_errors:ensure_structured_error(Reason),
+    ErrMap = #{
+        <<"path">> => list_to_binary(Path),
+        <<"kind">> => atom_to_binary(Kind, utf8),
+        <<"message">> => coerce_binary(Msg)
+    },
+    case Hint of
+        undefined -> ErrMap;
+        _ -> ErrMap#{<<"hint">> => coerce_binary(Hint)}
+    end.
+
+%% @private
+-spec coerce_binary(binary() | list() | undefined) -> binary().
+coerce_binary(undefined) -> <<>>;
+coerce_binary(B) when is_binary(B) -> B;
+coerce_binary(L) when is_list(L) -> list_to_binary(L).
 
 %% @private
 %% @doc Collect collision warnings for the loaded classes after a file load.

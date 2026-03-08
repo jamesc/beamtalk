@@ -261,7 +261,35 @@ impl BeamtalkMcp {
         }
 
         for e in &errors {
-            parts.push(Content::text(format!("Error: {e}")));
+            // Each error is a structured map with path, kind, message (and optional hint).
+            let msg = match e {
+                serde_json::Value::Object(map) => {
+                    let path = map.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    let message = map
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown error");
+                    if path.is_empty() {
+                        message.to_string()
+                    } else {
+                        format!("{path}: {message}")
+                    }
+                }
+                serde_json::Value::String(s) => s.clone(),
+                _ => e.to_string(),
+            };
+            parts.push(Content::text(format!("Error: {msg}")));
+        }
+
+        // Partial loads (some files succeeded, some failed) are still reported as
+        // errors so MCP clients that inspect is_error see the failure.
+        if !errors.is_empty() {
+            return Ok(CallToolResult {
+                content: parts,
+                is_error: Some(true),
+                meta: None,
+                structured_content: None,
+            });
         }
 
         Ok(CallToolResult::success(parts))

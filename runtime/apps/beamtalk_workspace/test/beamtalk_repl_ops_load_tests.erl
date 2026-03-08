@@ -23,22 +23,10 @@ write_temp_file(Dir, Name, Content) ->
     ok = file:write_file(Path, Content),
     Path.
 
-%% Create a fresh temp directory for a test.
-%% Checks TMPDIR → TEMP → "/tmp" for cross-platform compatibility.
+%% Create a fresh temp directory for a test using a relative path.
+%% Relative directories work cross-platform and avoid POSIX /tmp assumptions.
 make_temp_dir() ->
-    TmpBase =
-        case os:getenv("TMPDIR") of
-            false ->
-                case os:getenv("TEMP") of
-                    false -> "/tmp";
-                    T -> T
-                end;
-            T ->
-                T
-        end,
-    Base = filename:join(
-        [TmpBase, "bt_ops_load_test_" ++ integer_to_list(erlang:unique_integer([positive]))]
-    ),
+    Base = "bt_ops_load_test_" ++ integer_to_list(erlang:unique_integer([positive])),
     ok = file:make_dir(Base),
     Base.
 
@@ -62,7 +50,8 @@ find_bt_files_empty_dir_test() ->
     end.
 
 find_bt_files_nonexistent_dir_test() ->
-    ?assertEqual([], beamtalk_repl_ops_load:find_bt_files("/nonexistent/path/xyz123")).
+    Missing = "missing_bt_ops_load_test_dir_" ++ integer_to_list(erlang:unique_integer([positive])),
+    ?assertEqual([], beamtalk_repl_ops_load:find_bt_files(Missing)).
 
 find_bt_files_finds_bt_files_test() ->
     Dir = make_temp_dir(),
