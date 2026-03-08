@@ -502,9 +502,24 @@ classRemoveFromSystemByName(ClassName) ->
                             %% A second purge removes that old slot, freeing memory.
                             %% Actors have already been stopped above, so no process
                             %% should be running old code — soft_purge is safe both times.
-                            _ = code:soft_purge(Module),
-                            _ = code:delete(Module),
-                            _ = code:soft_purge(Module),
+                            ok = ensure_code_step(
+                                ClassName,
+                                Module,
+                                soft_purge_before_delete,
+                                code:soft_purge(Module)
+                            ),
+                            ok = ensure_code_step(
+                                ClassName,
+                                Module,
+                                delete,
+                                code:delete(Module)
+                            ),
+                            ok = ensure_code_step(
+                                ClassName,
+                                Module,
+                                soft_purge_after_delete,
+                                code:soft_purge(Module)
+                            ),
                             nil;
                         Subclasses ->
                             NameBins = [atom_to_binary(S, utf8) || S <- Subclasses],
@@ -805,6 +820,24 @@ atom_to_class_object(ClassName) ->
             Tag = beamtalk_class_registry:class_object_tag(ClassName),
             #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid}
     end.
+
+%% @private
+%% @doc Assert that a code-server step succeeded; raise a structured error if not.
+%%
+%% Both code:soft_purge/1 and code:delete/1 return false on failure (e.g.,
+%% processes still linger in old code, or there is already old code that must
+%% be purged first). Silently ignoring false would leave the BEAM module
+%% resident while the class registry entry is already removed. This helper
+%% converts a false result into a beamtalk_error so the caller is notified.
+-spec ensure_code_step(atom(), atom(), atom(), boolean()) -> ok.
+ensure_code_step(_ClassName, _Module, _Step, true) ->
+    ok;
+ensure_code_step(ClassName, Module, Step, false) ->
+    Error0 = beamtalk_error:new(runtime_error, ClassName),
+    Msg = iolist_to_binary(
+        io_lib:format("Failed to ~p module ~p during unload", [Step, Module])
+    ),
+    beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg)).
 
 %% @private
 %% @doc Check if a module name belongs to the Beamtalk stdlib.
