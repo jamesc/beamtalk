@@ -714,9 +714,9 @@ In dynamic mode (the common case), `-> String | IOError` is an unenforced annota
 
 The discrimination syntax (`isKindOf:`) is also heavier than TypeScript's `instanceof` narrowing, and the result is not composable — there is no `andThen:` or `map:` without reinventing the Result container.
 
-**The dynamic/typed gap:** This alternative is genuinely interesting once ADR 0025 (gradual typing) matures to support union types with exhaustiveness enforcement. At that point, `String | IOError` with a typed context becomes a real alternative to the Result wrapper — lighter weight and more composable with the type system. It is not viable today in dynamic mode.
+**The structural problem — not a maturity problem:** This alternative is sometimes framed as "viable once gradual typing matures." That framing is wrong. Because typing is always optional in Beamtalk, there will permanently be dynamic-mode callers with no exhaustiveness enforcement — not as a temporary gap, but as a design invariant. Union types can never be the primary error-handling convention when the enforcement mechanism is opt-in. At best, `-> String | IOError` annotations could serve as a typed-mode overlay on top of whatever convention dynamic code uses — which must be Result anyway.
 
-**Not adopted because:** In dynamic mode, caller enforcement is absent — the error branch is silently ignorable. Composability (`andThen:`) requires reinventing the Result container anyway. The Result wrapper provides runtime shape guarantees (`$beamtalk_class`, `isOk`, guarded accessors) that union types cannot without the type checker. Revisit when gradual typing covers union types with exhaustiveness.
+**Not adopted because:** The optional type system means caller enforcement is permanently absent for dynamic-mode code. The error branch is silently ignorable with no compile-time penalty — strictly worse than exceptions. The Result wrapper provides runtime shape guarantees (`$beamtalk_class`, `isOk`, guarded accessors) that hold regardless of typing mode. Composability (`andThen:`, `map:`) works at runtime without a type checker. Union types could complement Result as typed annotations (e.g., narrowing `result :: Result(String, IOError)`) but cannot replace it.
 
 ### Alternative F: Optional/Maybe Type (Separate from Result)
 
