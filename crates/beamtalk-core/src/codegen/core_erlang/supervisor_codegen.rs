@@ -23,7 +23,7 @@
 
 use super::document::Document;
 use super::util::ClassIdentity;
-use super::{CodeGenContext, CoreErlangGenerator, Result};
+use super::{spec_codegen, CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{MethodKind, Module, SupervisorKind};
 use crate::docvec;
 
@@ -81,6 +81,9 @@ impl CoreErlangGenerator {
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
         let file_attr = self.file_attr();
         let source_path_attr = self.source_path_attr();
+        let spec_attrs = spec_codegen::generate_class_specs(class, true);
+        let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
+            .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
@@ -95,6 +98,7 @@ impl CoreErlangGenerator {
             beamtalk_class_attr,
             file_attr,
             source_path_attr,
+            spec_suffix,
             "]\n",
             "\n",
         ]);
@@ -130,7 +134,13 @@ impl CoreErlangGenerator {
         let module_name = self.module_name.clone();
 
         // Build export list
-        let mut exports: Vec<String> = vec!["'start_link'/0".to_string(), "'init'/1".to_string()];
+        let mut exports: Vec<String> = vec![
+            "'start_link'/0".to_string(),
+            "'init'/1".to_string(),
+            // BT-1220: childClass/0 is called directly by beamtalk_supervisor:startChild/1,2
+            // (SupMod:'childClass'() at runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl:217)
+            "'childClass'/0".to_string(),
+        ];
         // User-defined class-side methods
         for m in class
             .class_methods
@@ -148,6 +158,9 @@ impl CoreErlangGenerator {
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
         let file_attr = self.file_attr();
         let source_path_attr = self.source_path_attr();
+        let spec_attrs = spec_codegen::generate_class_specs(class, true);
+        let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
+            .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
@@ -162,6 +175,7 @@ impl CoreErlangGenerator {
             beamtalk_class_attr,
             file_attr,
             source_path_attr,
+            spec_suffix,
             "]\n",
             "\n",
         ]);
@@ -172,6 +186,10 @@ impl CoreErlangGenerator {
 
         // init/1 for dynamic supervisor
         docs.push(Self::generate_dynamic_sup_init(&class_name));
+        docs.push(Document::Str("\n\n"));
+
+        // childClass/0 — called by beamtalk_supervisor:startChild to resolve the child module
+        docs.push(Self::generate_dynamic_child_class(&class_name));
         docs.push(Document::Str("\n"));
 
         // User-defined class-side method functions
@@ -271,6 +289,26 @@ impl CoreErlangGenerator {
             "\n    let SupFlags = ~{'strategy' => 'simple_one_for_one', 'intensity' => SupMaxR, 'period' => SupMaxT}~ in",
             "\n    let SupSpecs = call 'beamtalk_supervisor':'build_child_specs'([SupChildClass]) in",
             "\n    {'ok', {SupFlags, SupSpecs}}",
+        ]
+    }
+
+    /// Generates `childClass/0` for dynamic supervisors.
+    ///
+    /// Called directly by `beamtalk_supervisor:startChild/1,2` as `SupMod:'childClass'()`
+    /// to resolve the child class object at runtime (see beamtalk_supervisor.erl:217).
+    ///
+    /// ```erlang
+    /// childClass() ->
+    ///     SupCp = beamtalk_class_registry:whereis_class('WorkerPool'),
+    ///     beamtalk_object_class:class_send(SupCp, childClass, []).
+    /// ```
+    fn generate_dynamic_child_class(class_name: &str) -> Document<'static> {
+        docvec![
+            "'childClass'/0 = fun () ->",
+            "\n    let SupCp = call 'beamtalk_class_registry':'whereis_class'('",
+            Document::String(class_name.to_string()),
+            "') in",
+            "\n    call 'beamtalk_object_class':'class_send'(SupCp, 'childClass', [])",
         ]
     }
 }

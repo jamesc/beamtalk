@@ -277,6 +277,19 @@ fn test_dynamic_supervisor_init_does_not_fetch_children() {
 }
 
 #[test]
+fn test_dynamic_supervisor_exports_and_defines_child_class() {
+    // beamtalk_supervisor:startChild/1,2 calls SupMod:'childClass'() directly at runtime.
+    // Without this export, startChild will fail with 'undef'.
+    let module = make_dynamic_supervisor_module();
+    let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
+        .expect("codegen should succeed");
+    assert!(
+        code.contains("'childClass'/0"),
+        "Dynamic supervisor must export/define 'childClass'/0 (called by beamtalk_supervisor:startChild). Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_is_actor_class_returns_true_for_supervisor_subclass() {
     // Verify that supervisor subclasses route through generate_actor_module
     // (which then delegates to supervisor_codegen).
