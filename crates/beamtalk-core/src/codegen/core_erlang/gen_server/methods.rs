@@ -338,6 +338,18 @@ impl CoreErlangGenerator {
                         Document::String(final_state),
                         "}",
                     ]);
+                } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                    // Destructuring as last expression: emit bindings then reply with nil
+                    let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                    for d in binding_docs {
+                        docs.push(d);
+                    }
+                    let post_state = self.current_state_var();
+                    docs.push(docvec![
+                        "{'reply', 'nil', ",
+                        Document::String(post_state),
+                        "}",
+                    ]);
                 } else {
                     // Regular last expression: bind to Result and reply
                     // BT-851: Get state AFTER expression generation, since Tier 2
@@ -672,6 +684,18 @@ impl CoreErlangGenerator {
                         Document::String(dispatch_var),
                         "), ",
                         Document::String(final_state),
+                        "}",
+                    ]);
+                } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                    // Destructuring as last expression: emit bindings then reply with nil
+                    let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                    for d in binding_docs {
+                        docs.push(d);
+                    }
+                    let post_state = self.current_state_var();
+                    docs.push(docvec![
+                        "{'reply', 'nil', ",
+                        Document::String(post_state),
                         "}",
                     ]);
                 } else {

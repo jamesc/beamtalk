@@ -1660,12 +1660,14 @@ impl CoreErlangGenerator {
             Expression::StringInterpolation { segments, .. } => {
                 self.generate_string_interpolation(segments)
             }
-            Expression::DestructureAssignment { .. } => {
-                // DestructureAssignment is only valid as a statement inside a block body.
-                // generate_block_body_slice() handles it; hitting here means it appeared
-                // in an expression position (e.g. as the sole expression in a method body
-                // with no surrounding block).  Return nil so compilation can continue.
-                Ok(Document::Str("'nil'"))
+            Expression::DestructureAssignment { span, .. } => {
+                // DestructureAssignment is only valid as a statement in a body context.
+                // All statement-body generators handle it explicitly. Reaching here means
+                // it appeared in a pure expression position, which is not supported.
+                Err(CodeGenError::UnsupportedFeature {
+                    feature: "destructuring assignment in expression position".to_string(),
+                    location: format!("{span:?}"),
+                })
             }
             Expression::Error { message, span, .. } => Err(CodeGenError::UnsupportedFeature {
                 feature: format!("expression error: {message}"),

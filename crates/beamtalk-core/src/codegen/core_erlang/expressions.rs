@@ -1230,43 +1230,9 @@ impl CoreErlangGenerator {
             let is_field_assignment = Self::is_field_assignment(expr);
             let is_local_assignment = Self::is_local_var_assignment(expr);
 
-            if is_last {
-                // Last expression: generate directly (its value is the block's result)
-                docs.push(self.generate_expression(expr)?);
-            } else if is_field_assignment {
-                // Field assignment not at end: generate WITHOUT closing the value
-                // This leaves the let bindings open for subsequent expressions
-                docs.push(self.generate_field_assignment_open(expr)?);
-            } else if is_local_assignment {
-                // Local variable assignment: generate with proper binding
-                if let Expression::Assignment { target, value, .. } = expr {
-                    // BT-852: Stored blocks with mutations are now supported via Tier 2.
-                    // generate_block() handles stateful emission; no validation needed here.
-
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        let var_name = &id.name;
-                        // Determine the Core Erlang variable name:
-                        // - If the variable is already bound (e.g. block parameter), reuse that Core var.
-                        // - Otherwise, create a new Core Erlang variable name.
-                        let core_var = self
-                            .lookup_var(var_name)
-                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                        // Capture the value expression (preserves side effects)
-                        // Important: capture BEFORE updating the mapping,
-                        // so that any uses of the variable in the RHS see the previous binding.
-                        let val_doc = self.expression_doc(value)?;
-                        // Now update the mapping so subsequent expressions see this binding.
-                        self.bind_var(var_name, &core_var);
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(core_var.clone()),
-                            " = ",
-                            val_doc,
-                            " in "
-                        ]);
-                    }
-                }
-            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+            if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                // Destructuring: handle for both last and non-last positions.
+                // The match below checks is_last internally for Array; Tuple wraps remaining body.
                 match pattern {
                     Pattern::Array { elements, .. } => {
                         // Array destructuring: generate sequential `let` bindings using `at:`.
@@ -1315,7 +1281,7 @@ impl CoreErlangGenerator {
                     }
                     Pattern::Tuple { .. } => {
                         // Tuple destructuring: wrap the remaining body in a `case` arm.
-                        // Example: `{a, b} := expr` at non-last position →
+                        // Example: `{a, b} := expr` →
                         //   let _Tup1 = <expr> in
                         //   case _Tup1 of <{A, B}> when 'true' -> <rest of body> end
                         let tup_var = self.fresh_temp_var("Tup");
@@ -1335,7 +1301,7 @@ impl CoreErlangGenerator {
                             self.bind_var(name, core_var);
                         });
 
-                        // Generate remaining body inside the case arm
+                        // Generate remaining body inside the case arm (empty slice → 'nil')
                         let rest_doc = self.generate_block_body_slice(&body[i + 1..])?;
                         self.pop_scope();
 
@@ -1372,6 +1338,42 @@ impl CoreErlangGenerator {
                             feature: "Unsupported destructuring pattern kind".to_string(),
                             location: "generate_block_body_slice".to_string(),
                         });
+                    }
+                }
+            } else if is_last {
+                // Last expression: generate directly (its value is the block's result)
+                docs.push(self.generate_expression(expr)?);
+            } else if is_field_assignment {
+                // Field assignment not at end: generate WITHOUT closing the value
+                // This leaves the let bindings open for subsequent expressions
+                docs.push(self.generate_field_assignment_open(expr)?);
+            } else if is_local_assignment {
+                // Local variable assignment: generate with proper binding
+                if let Expression::Assignment { target, value, .. } = expr {
+                    // BT-852: Stored blocks with mutations are now supported via Tier 2.
+                    // generate_block() handles stateful emission; no validation needed here.
+
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        let var_name = &id.name;
+                        // Determine the Core Erlang variable name:
+                        // - If the variable is already bound (e.g. block parameter), reuse that Core var.
+                        // - Otherwise, create a new Core Erlang variable name.
+                        let core_var = self
+                            .lookup_var(var_name)
+                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                        // Capture the value expression (preserves side effects)
+                        // Important: capture BEFORE updating the mapping,
+                        // so that any uses of the variable in the RHS see the previous binding.
+                        let val_doc = self.expression_doc(value)?;
+                        // Now update the mapping so subsequent expressions see this binding.
+                        self.bind_var(var_name, &core_var);
+                        docs.push(docvec![
+                            "let ",
+                            Document::String(core_var.clone()),
+                            " = ",
+                            val_doc,
+                            " in "
+                        ]);
                     }
                 }
             } else if let Some(threaded_vars) = Self::get_control_flow_threaded_vars(expr) {
@@ -1492,10 +1494,16 @@ impl CoreErlangGenerator {
                                 ") in "
                             ]);
                         }
-                        Pattern::Literal(lit, _) => {
-                            // Literal in pattern (e.g. `{#ok, val}`) — skip, no binding.
-                            // A full pattern match would validate; flat codegen trusts the shape.
-                            let _ = lit;
+                        Pattern::Literal(_, span) => {
+                            // Literal patterns (e.g. `{#ok, val}`) are not supported in the flat
+                            // codegen path. Use block-body tuple destructuring (which compiles to
+                            // a `case`) if matching on literals is needed.
+                            return Err(CodeGenError::UnsupportedFeature {
+                                feature:
+                                    "Literal patterns in tuple destructuring outside a block body"
+                                        .to_string(),
+                                location: format!("{span:?}"),
+                            });
                         }
                         Pattern::Wildcard(_) => {}
                         _ => {

@@ -124,6 +124,28 @@ fn check_expr_seq(
     }
 }
 
+/// Define pattern-bound variable names in the lint scope.
+fn define_pattern_vars_in_scope(pattern: &crate::ast::Pattern, scope: &mut LintScope) {
+    use crate::ast::Pattern;
+    match pattern {
+        Pattern::Variable(id) => scope.define(id.name.as_str()),
+        Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
+            for elem in elements {
+                define_pattern_vars_in_scope(elem, scope);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for elem in elements {
+                define_pattern_vars_in_scope(elem, scope);
+            }
+            if let Some(t) = tail {
+                define_pattern_vars_in_scope(t, scope);
+            }
+        }
+        Pattern::Binary { .. } | Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+    }
+}
+
 /// Recursively check a single expression.
 fn check_expr(expr: &Expression, scope: &mut LintScope, diagnostics: &mut Vec<Diagnostic>) {
     #[allow(clippy::enum_glob_use)]
@@ -170,8 +192,15 @@ fn check_expr(expr: &Expression, scope: &mut LintScope, diagnostics: &mut Vec<Di
             check_expr(receiver, scope, diagnostics);
         }
 
-        Return { value, .. } | DestructureAssignment { value, .. } => {
+        Return { value, .. } => {
             check_expr(value, scope, diagnostics);
+        }
+
+        DestructureAssignment { pattern, value, .. } => {
+            // Check the RHS first, then define pattern variables so blocks that follow
+            // can be warned when their parameters shadow these newly bound names.
+            check_expr(value, scope, diagnostics);
+            define_pattern_vars_in_scope(pattern, scope);
         }
 
         Parenthesized { expression, .. } => {

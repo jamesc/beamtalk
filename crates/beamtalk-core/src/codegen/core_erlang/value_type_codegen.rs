@@ -888,6 +888,22 @@ impl CoreErlangGenerator {
                         Document::String(final_self),
                         "}\n",
                     ]);
+                } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                    // Destructuring as last expression: emit bindings then return Self
+                    let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                    for d in binding_docs {
+                        body_parts.push(docvec!["    ", d]);
+                    }
+                    let final_self = self.current_self_var();
+                    if nlr_token_var.is_some() {
+                        body_parts.push(docvec![
+                            "    {'nil', ",
+                            Document::String(final_self),
+                            "}\n",
+                        ]);
+                    } else {
+                        body_parts.push(docvec!["    ", Document::String(final_self), "\n"]);
+                    }
                 } else {
                     let expr_code = self.capture_expression(expr)?;
                     if i > 0 {

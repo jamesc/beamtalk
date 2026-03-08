@@ -52,3 +52,25 @@ TestCase subclass: DestructuringTest
     #[first, second] := #["hello", "world"]
     self assert: first equals: "hello"
     self assert: second equals: "world"
+
+  // === Last-expression destructuring (RHS must be evaluated) ===
+  testTupleDestructuringOnlyStatement =>
+    // Destructuring as the only (and therefore last) statement in a method.
+    // Verifies the method compiles and runs without error.
+    {_, _} := Erlang erlang list_to_tuple: #(#ok, 42)
+
+  testArrayDestructuringOnlyStatement =>
+    // Same for array destructuring as the only statement.
+    #[_, _] := #[1, 2]
+
+  testTupleDestructuringVariablesUsedAfter =>
+    // Variables bound by destructuring are accessible in subsequent expressions.
+    {a, b} := Erlang erlang list_to_tuple: #(5, 10)
+    self assert: a equals: 5
+    self assert: b equals: 10
+
+  testArrayDestructuringVariablesUsedAfter =>
+    // Same for array destructuring.
+    #[x, y] := #[3, 7]
+    self assert: x equals: 3
+    self assert: y equals: 7
