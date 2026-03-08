@@ -63,17 +63,19 @@ with_details_adds_details_test() ->
 format_without_hint_test() ->
     Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
     Error = beamtalk_error:with_selector(Error0, 'foo'),
-    Formatted = iolist_to_binary(beamtalk_error:format(Error)),
+    Formatted = beamtalk_error:format(Error),
+    ?assert(is_binary(Formatted)),
     ?assertEqual(<<"Integer does not understand 'foo'">>, Formatted).
 
-%%% Test: format/1 includes hint when present
+%%% Test: format/1 includes hint when present and always returns binary (not iolist)
 format_with_hint_test() ->
     Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
     Error1 = beamtalk_error:with_selector(Error0, 'foo'),
     Error = beamtalk_error:with_hint(
         Error1, <<"Check spelling or use 'respondsTo:' to verify method exists">>
     ),
-    Formatted = iolist_to_binary(beamtalk_error:format(Error)),
+    Formatted = beamtalk_error:format(Error),
+    ?assert(is_binary(Formatted)),
     Expected =
         <<"Integer does not understand 'foo'\nHint: Check spelling or use 'respondsTo:' to verify method exists">>,
     ?assertEqual(Expected, Formatted).

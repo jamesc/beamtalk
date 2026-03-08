@@ -191,8 +191,42 @@ pub(crate) fn compile_expression_to_core(
 /// All expected values are represented as binaries (`<<"">>`) since
 /// `format_result/1` always returns a binary. This matches E2E semantics
 /// where the REPL compares string representations.
+///
+/// Escape sequences in the input are interpreted: `\n` → newline, `\t` → tab,
+/// `\\` → backslash. This allows btscript `// =>` assertions to test
+/// multi-line strings returned from functions like `printString`.
 pub(crate) fn expected_to_binary_literal(expected: &str) -> String {
-    let escaped = expected.replace('\\', "\\\\").replace('"', "\\\"");
+    // Process escape sequences, then re-escape for Erlang string literal.
+    // Uses char-based iteration to correctly handle multibyte Unicode.
+    let mut escaped = String::with_capacity(expected.len());
+    let mut chars = expected.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.peek() {
+                Some(&'n') => {
+                    chars.next();
+                    escaped.push_str("\\n"); // Erlang \n escape = real newline
+                }
+                Some(&'t') => {
+                    chars.next();
+                    escaped.push_str("\\t"); // Erlang \t escape = real tab
+                }
+                Some(&'\\') => {
+                    chars.next();
+                    escaped.push_str("\\\\"); // Erlang \\ = literal backslash
+                }
+                Some(&'"') => {
+                    chars.next();
+                    escaped.push_str("\\\""); // Erlang \" = literal quote
+                }
+                _ => {
+                    escaped.push_str("\\\\"); // unknown sequence: escape the backslash
+                }
+            },
+            '"' => escaped.push_str("\\\""),
+            other => escaped.push(other),
+        }
+    }
     // Use /utf8 type to correctly encode multi-byte Unicode characters (BT-388).
     // Without /utf8, Erlang truncates codepoints > 255 to a single byte.
     format!("<<\"{escaped}\"/utf8>>")

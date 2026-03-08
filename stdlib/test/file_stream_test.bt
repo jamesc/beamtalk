@@ -71,8 +71,10 @@ TestCase subclass: FileStreamTest
     self assert: (File lines: "test/fixtures/stream_large.txt") isOk
 
   testErrorPaths =>
-    // File not found
-    self assert: (File lines: "test/fixtures/nonexistent.txt") isError
+    // File not found returns file_not_found error
+    notFound := File lines: "test/fixtures/nonexistent.txt"
+    self assert: notFound isError
+    self assert: (notFound error printString includesSubstring: "file not found")
     // Type error: non-string path
     @expect type
     self should: [File lines: 42] raise: #type_error

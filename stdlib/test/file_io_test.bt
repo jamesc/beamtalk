@@ -38,7 +38,7 @@ TestCase subclass: FileIoTest
     // readAll: nonexistent file returns file_not_found error
     result := File readAll: "target/bt-test-tmp/no_such_file_xyz.txt"
     self assert: result isError
-    self assert: result error notNil
+    self assert: (result error printString includesSubstring: "file not found")
     // readAll: non-string path
     @expect type
     self should: [File readAll: 42] raise: #type_error
