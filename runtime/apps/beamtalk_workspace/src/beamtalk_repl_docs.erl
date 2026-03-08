@@ -256,11 +256,16 @@ resolve_class_side_method_obj(ClassPid, Selector) ->
         ClassMethodObj when is_map(ClassMethodObj) ->
             {ok, ClassMethodObj, find_defining_class_method(ClassPid, Selector)};
         nil ->
-            case beamtalk_method_resolver:resolve('Class', Selector) of
-                ClassProtoObj when is_map(ClassProtoObj) ->
-                    {ok, ClassProtoObj, find_class_protocol_defining_class(Selector)};
-                nil ->
-                    not_found
+            case beamtalk_runtime_api:whereis_class('Class') of
+                undefined ->
+                    not_found;
+                _ ->
+                    case beamtalk_method_resolver:resolve('Class', Selector) of
+                        ClassProtoObj when is_map(ClassProtoObj) ->
+                            {ok, ClassProtoObj, find_class_protocol_defining_class(Selector)};
+                        nil ->
+                            not_found
+                    end
             end
     end.
 

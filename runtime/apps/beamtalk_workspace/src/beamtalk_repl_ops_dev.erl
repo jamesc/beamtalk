@@ -130,7 +130,12 @@ handle(<<"docs">>, Params, Msg, _SessionPid) ->
                 {error, {method_not_found, _, _}} ->
                     NameBin = to_binary(ClassName),
                     SelectorBin2 = maps:get(<<"selector">>, Params, <<"?">>),
-                    SelectorAtom = binary_to_atom(SelectorBin2, utf8),
+                    MaybeSelectorAtom =
+                        try
+                            binary_to_existing_atom(SelectorBin2, utf8)
+                        catch
+                            error:badarg -> undefined
+                        end,
                     HintClass =
                         case ClassSide of
                             true ->
@@ -139,7 +144,11 @@ handle(<<"docs">>, Params, Msg, _SessionPid) ->
                                 NameBin
                         end,
                     Err0 = beamtalk_error:new(does_not_understand, ClassName),
-                    Err1 = beamtalk_error:with_selector(Err0, SelectorAtom),
+                    Err1 =
+                        case MaybeSelectorAtom of
+                            undefined -> Err0;
+                            SelectorAtom -> beamtalk_error:with_selector(Err0, SelectorAtom)
+                        end,
                     Err2 = beamtalk_error:with_message(
                         Err1,
                         iolist_to_binary([HintClass, <<" does not understand ">>, SelectorBin2])

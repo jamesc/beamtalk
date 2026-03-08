@@ -786,12 +786,12 @@ pub(crate) fn repl_loop(
 
                             // Parse "ClassName", "ClassName selector",
                             // "ClassName class", or "ClassName class selector"
-                            let parts: Vec<&str> = args.splitn(3, ' ').collect();
-                            let (class_name, class_side, selector) = match parts.as_slice() {
+                            let tokens: Vec<&str> = args.split_whitespace().collect();
+                            let (class_name, class_side, selector) = match tokens.as_slice() {
                                 [cls] => (*cls, false, None),
                                 [cls, sel] if *sel == "class" => (*cls, true, None),
-                                [cls, mid, sel] if *mid == "class" => (*cls, true, Some(*sel)),
-                                [cls, sel] => (*cls, false, Some(*sel)),
+                                [cls, mid, sel, ..] if *mid == "class" => (*cls, true, Some(*sel)),
+                                [cls, sel, ..] => (*cls, false, Some(*sel)),
                                 _ => (args, false, None),
                             };
 
