@@ -1,0 +1,50 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1226: Regression tests for multi-statement do: block bodies with state mutations.
+//
+// Previously, do: block bodies with multiple field mutations (where at least one RHS
+// involves a nested collection operation like reject:) generated invalid Core Erlang
+// with a "syntax error before: in" compile error.
+
+TestCase subclass: BT1226MultiStateMutationsTest
+
+  // Exact issue pattern: removeKey: then reject: with =:= identity check
+  testDoBlockWithRemoveKeyAndReject =>
+    a := BT1226MultiStateActor spawn
+    a addEntry: "x"
+    a addEntry: "y"
+    a addEntry: "z"
+    result := a removeAll: #("x", "z")
+    self assert: (result at: #claimed) equals: #("y")
+
+  // removeAll: with single-element list (single iteration)
+  testDoBlockSingleIterationTwoMutations =>
+    b := BT1226MultiStateActor spawn
+    b addEntry: "a"
+    b addEntry: "b"
+    result := b removeAll: #("a")
+    self assert: (result at: #claimed) equals: #("b")
+
+  // Two field mutations per iteration with simple integer values
+  testDoBlockTwoSimpleMutationsPerIteration =>
+    c := BT1226MultiStateActor spawn
+    result := c accumulatePairs: #(#p, #q, #r)
+    self assert: (result at: #claimed) equals: #(#p, #q, #r)
+    self assert: ((result at: #running) at: #p) equals: 1
+    self assert: ((result at: #running) at: #q) equals: 2
+    self assert: ((result at: #running) at: #r) equals: 3
+
+  // Three field mutations per iteration
+  testDoBlockThreeMutationsPerIteration =>
+    d := BT1226MultiStateActor spawn
+    result := d processAll: #(#a, #b)
+    self assert: (result at: #claimed) equals: #(#a, #b)
+    self assert: ((result at: #running) at: #count) equals: 2
+
+  // Exact issue pattern: local var before do: with two field mutations
+  testLocalVarBeforeDoWithTwoMutations =>
+    e := BT1226MultiStateActor spawn
+    result := e tickLocalVar
+    self assert: (result at: #claimed) equals: #()
+    self assert: (result at: #running) equals: #{}
