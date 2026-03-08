@@ -218,6 +218,12 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
             p0.to_string(),
             ")"
         ]),
+        // Class-side factory: coerce an Erlang iolist/charlist to a String binary
+        "fromIolist:" => Some(docvec![
+            "call 'beamtalk_string':'from_iolist'(",
+            p0.to_string(),
+            ")"
+        ]),
         _ => None,
     }
 }

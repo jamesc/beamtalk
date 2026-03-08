@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Time class (BT-1244)
+
+TestCase subclass: TimeTest
+
+  testNowMsReturnsInteger =>
+    ms := Time nowMs
+    self assert: ms class equals: Integer
+
+  testNowUsReturnsInteger =>
+    us := Time nowUs
+    self assert: us class equals: Integer
+
+  testNowMsIsPositive => self assert: (Time nowMs > 0)
+
+  testNowUsIsPositive => self assert: (Time nowUs > 0)
+
+  testNowUsGreaterThanNowMs =>
+    // Microseconds > milliseconds for any time after epoch
+    ms := Time nowMs
+    us := Time nowUs
+    self assert: (us > ms)
+
+  testNowMsIncreases =>
+    t1 := Time nowMs
+    // Take two samples; second must be >= first
+    t2 := Time nowMs
+    self assert: (t2 >= t1)

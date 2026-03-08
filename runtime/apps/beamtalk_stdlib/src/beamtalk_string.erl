@@ -35,7 +35,8 @@
     is_digit/1,
     is_alpha/1,
     from_code_point/1,
-    from_code_points/1
+    from_code_points/1,
+    from_iolist/1
 ]).
 
 %% @doc 1-based grapheme access. Returns the grapheme at the given index.
@@ -276,6 +277,33 @@ from_code_points(_) ->
     Error0 = beamtalk_error:new(type_error, 'String'),
     Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoints:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Expected a List of Integer code points">>),
+    beamtalk_error:raise(Error2).
+
+%% @doc Coerce an Erlang iolist or charlist to a UTF-8 binary String.
+-spec from_iolist(iolist() | binary()) -> binary().
+from_iolist(X) when is_binary(X) ->
+    X;
+from_iolist(X) when is_list(X) ->
+    case unicode:characters_to_binary(X) of
+        Bin when is_binary(Bin) ->
+            Bin;
+        _ ->
+            case catch iolist_to_binary(X) of
+                Bin when is_binary(Bin) ->
+                    Bin;
+                _ ->
+                    Error0 = beamtalk_error:new(type_error, 'String'),
+                    Error1 = beamtalk_error:with_selector(Error0, 'fromIolist:'),
+                    Error2 = beamtalk_error:with_hint(
+                        Error1, <<"Could not convert iolist to String">>
+                    ),
+                    beamtalk_error:raise(Error2)
+            end
+    end;
+from_iolist(_) ->
+    Error0 = beamtalk_error:new(type_error, 'String'),
+    Error1 = beamtalk_error:with_selector(Error0, 'fromIolist:'),
+    Error2 = beamtalk_error:with_hint(Error1, <<"Expected an iolist (List) or String">>),
     beamtalk_error:raise(Error2).
 
 %%% ============================================================================

@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for String fromIolist: (BT-1244)
+
+TestCase subclass: StringFromIolistTest
+
+  testFromIolistWithBinaryPassthrough =>
+    // A binary is already a String — returned as-is
+    self assert: (String fromIolist: "hello") equals: "hello"
+
+  testFromIolistWithCharlist =>
+    // Charlist (list of code points) is coerced to String
+    self assert: (String fromIolist: #(104, 105)) equals: "hi"
+
+  testFromIolistWithNonIolistRaisesTypeError =>
+    self should: [String fromIolist: 42] raise: #type_error
