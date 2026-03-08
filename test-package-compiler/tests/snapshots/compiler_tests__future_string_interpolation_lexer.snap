@@ -35,7 +35,7 @@ Token { kind: Identifier("lastName"), span: Span { start: 413, end: 421 }, leadi
 Token { kind: StringEnd(""), span: Span { start: 422, end: 423 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("escaped"), span: Span { start: 469, end: 476 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Escape sequences in interpolated strings"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Assign, span: Span { start: 477, end: 479 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: StringStart("Literal braces: \\{ and \\}, variable: "), span: Span { start: 480, end: 518 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: StringStart("Literal braces: { and }, variable: "), span: Span { start: 480, end: 518 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("name"), span: Span { start: 519, end: 523 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: StringEnd(""), span: Span { start: 524, end: 525 }, leading_trivia: [], trailing_trivia: [] }
 Token { kind: Identifier("emojiVar"), span: Span { start: 562, end: 570 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Unicode in interpolated strings"), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
