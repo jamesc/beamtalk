@@ -1470,12 +1470,12 @@ q := Queue new        // empty queue
 ```beamtalk
 q2 := q enqueue: 1
 q3 := q2 enqueue: 2
-result := q3 dequeue         // => #(1, <Queue with [2]>)
+result := q3 dequeue         // => {1, <Queue with [2]>}
 value := result at: 1       // => 1
 rest := result at: 2        // => Queue containing [2]
 ```
 
-`dequeue` returns a `Tuple` of `#(value, newQueue)`. Raises `empty_queue` if the queue is empty.
+`dequeue` returns a `Tuple` of `{value, newQueue}`. Raises `empty_queue` if the queue is empty.
 
 #### Other Operations
 
