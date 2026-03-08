@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Object >> isKindOf: (BT-1229)
+
+TestCase subclass: IsKindOfTest
+
+  testIntegerIsKindOfInteger => self assert: (42 isKindOf: Integer)
+
+  testIntegerIsKindOfObject => self assert: (42 isKindOf: Object)
+
+  testSymbolIsKindOfSymbol => self assert: (#foo isKindOf: Symbol)
+
+  testSymbolIsNotKindOfString => self deny: (#foo isKindOf: String)
+
+  testListIsKindOfList => self assert: (#() isKindOf: List)
+
+  testListIsKindOfObject => self assert: (#() isKindOf: Object)
+
+  testStringIsKindOfString => self assert: ("hello" isKindOf: String)
+
+  testStringIsKindOfObject => self assert: ("hello" isKindOf: Object)
+
+  testIntegerIsNotKindOfString => self deny: (42 isKindOf: String)
+
+  testFloatIsKindOfFloat => self assert: (3.14 isKindOf: Float)
+
+  testFloatIsKindOfObject => self assert: (3.14 isKindOf: Object)
+
+  testTrueIsKindOfBoolean => self assert: (true isKindOf: Boolean)
+
+  testFalseIsKindOfBoolean => self assert: (false isKindOf: Boolean)
