@@ -750,9 +750,11 @@ fn run_lint_structured(path: &str) -> LintResult {
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
 
+        // Include parse errors (syntax problems) so files with broken syntax
+        // don't silently appear clean, plus Lint-severity style diagnostics.
         let mut lint_diags: Vec<_> = parse_diags
             .into_iter()
-            .filter(|d| d.severity == Severity::Lint)
+            .filter(|d| matches!(d.severity, Severity::Error | Severity::Lint))
             .collect();
         lint_diags.extend(beamtalk_core::lint::run_lint_passes(&module));
 
@@ -760,7 +762,7 @@ fn run_lint_structured(path: &str) -> LintResult {
             let line = offset_to_line(&source, diag.span.start() as usize);
             let severity = match diag.severity {
                 Severity::Error => "error",
-                _ => "warning",
+                Severity::Warning | Severity::Lint | Severity::Hint => "warning",
             };
             let entry = LintDiagnostic {
                 file: file.to_string(),
@@ -803,5 +805,61 @@ impl ServerHandler for BeamtalkMcp {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..Default::default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- offset_to_line ---
+
+    #[test]
+    fn offset_to_line_empty_string() {
+        assert_eq!(offset_to_line("", 0), 1);
+    }
+
+    #[test]
+    fn offset_to_line_single_line() {
+        let src = "hello world";
+        assert_eq!(offset_to_line(src, 0), 1);
+        assert_eq!(offset_to_line(src, 5), 1);
+        assert_eq!(offset_to_line(src, src.len()), 1);
+    }
+
+    #[test]
+    fn offset_to_line_multi_line() {
+        let src = "line1\nline2\nline3";
+        assert_eq!(offset_to_line(src, 0), 1); // start of line1
+        assert_eq!(offset_to_line(src, 5), 1); // end of line1 (before \n)
+        assert_eq!(offset_to_line(src, 6), 2); // start of line2
+        assert_eq!(offset_to_line(src, 11), 2); // end of line2 (before \n)
+        assert_eq!(offset_to_line(src, 12), 3); // start of line3
+    }
+
+    #[test]
+    fn offset_to_line_clamps_past_end() {
+        let src = "abc";
+        // Offset beyond source length should clamp and not panic.
+        assert_eq!(offset_to_line(src, 999), 1);
+    }
+
+    // --- run_lint_structured ---
+
+    #[test]
+    fn run_lint_structured_nonexistent_path() {
+        let result = run_lint_structured("/nonexistent/path/that/does/not/exist");
+        assert_eq!(result.total, 1);
+        assert!(result.errors.len() == 1);
+        assert!(result.warnings.is_empty());
+        assert!(result.errors[0].message.contains("does not exist"));
+    }
+
+    #[test]
+    fn run_lint_structured_non_bt_file() {
+        let result = run_lint_structured("/etc/hostname");
+        assert_eq!(result.total, 1);
+        assert!(result.errors.len() == 1);
+        assert!(result.errors[0].message.contains(".bt source file"));
     }
 }
