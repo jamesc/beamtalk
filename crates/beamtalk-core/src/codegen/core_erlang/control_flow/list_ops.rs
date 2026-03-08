@@ -228,6 +228,7 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         let mut has_mutations = false;
+        let mut has_plain_lets = false;
 
         // BT-598: At the start of each foldl iteration, read threaded locals from StateAcc.
         // This ensures that local variables resolve to their loop-accumulated values,
@@ -278,6 +279,7 @@ impl CoreErlangGenerator {
                 if let Some(doc) =
                     self.try_generate_block_local_plain_let(expr, is_last, &threaded)?
                 {
+                    has_plain_lets = true;
                     docs.push(doc);
                 } else {
                     has_mutations = true;
@@ -324,8 +326,11 @@ impl CoreErlangGenerator {
                 let doc = self.generate_expression(expr)?;
                 docs.push(doc);
 
-                if is_last && has_mutations {
-                    // Return final state after non-assignment last expression
+                if is_last && (has_mutations || has_plain_lets) {
+                    // BT-1224: Return StateAcc when there are any prior bindings (threaded
+                    // mutations or block-local plain-lets). The foldl accumulator must always
+                    // be StateAcc — a non-assignment last expression in a stateful block still
+                    // needs to return the current state, not the expression's value.
                     docs.push(Document::String(format!(
                         " in {}",
                         self.current_state_var()

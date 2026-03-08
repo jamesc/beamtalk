@@ -182,15 +182,22 @@ impl CoreErlangGenerator {
                 // code tried to reference unbound Core Erlang variables (e.g. `Y`) that only
                 // exist inside the lambda, not in the outer dispatch/4 function.
                 let mut all_captured_reads = analysis.captured_reads.clone();
+                let mut all_writes = analysis.local_writes.clone();
                 if let Some(Expression::Block(cond_block)) = condition {
                     let cond_analysis = block_analysis::analyze_block(cond_block);
                     all_captured_reads = all_captured_reads
                         .union(&cond_analysis.captured_reads)
                         .cloned()
                         .collect();
+                    // BT-1224: Also include writes from the condition block so that
+                    // variables first written in a condition are included in threading.
+                    all_writes = all_writes
+                        .union(&cond_analysis.local_writes)
+                        .cloned()
+                        .collect();
                 }
                 all_captured_reads
-                    .intersection(&analysis.local_writes)
+                    .intersection(&all_writes)
                     .filter(|v| !block_params.contains(*v))
                     .cloned()
                     .collect::<std::collections::BTreeSet<_>>()
@@ -245,6 +252,12 @@ impl CoreErlangGenerator {
             return Ok(None);
         };
         if threaded.contains(&id.name.to_string()) {
+            return Ok(None);
+        }
+        // BT-912: Tier-2 block calls return {Result, NewStateAcc}. Fall back to
+        // generate_local_var_assignment_in_loop which already handles Tier-2 unpacking
+        // and StateAcc propagation correctly.
+        if self.is_tier2_value_call(value) {
             return Ok(None);
         }
         let core_var = self

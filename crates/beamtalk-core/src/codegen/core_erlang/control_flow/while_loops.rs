@@ -162,7 +162,8 @@ impl CoreErlangGenerator {
             "<'true'> when 'true' -> ",
         ]);
 
-        let (body_doc, final_state_version) = self.generate_while_body_with_threading(body, &[])?;
+        let (body_doc, final_state_version) =
+            self.generate_while_body_with_threading(body, &threaded_locals)?;
         docs.push(body_doc);
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
@@ -190,7 +191,7 @@ impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_while_body_with_threading(
         &mut self,
         body: &Block,
-        _mutated_vars: &[String],
+        threaded_locals: &[String],
     ) -> Result<(Document<'static>, usize)> {
         // Generate the body with state threading
         let saved_state_version = self.state_version();
@@ -226,35 +227,12 @@ impl CoreErlangGenerator {
                 let doc = self.generate_self_dispatch_open(expr)?;
                 docs.push(doc);
             } else if Self::is_local_var_assignment(expr) {
-                // BT-1224: Threaded locals are pre-bound in scope at the start of each
-                // iteration. Block-local variables (not pre-bound) use plain let bindings
-                // so subsequent reads in the same iteration resolve correctly.
-                // REPL mode excluded: in REPL all local vars thread through StateAcc.
-                let is_block_local = if let Expression::Assignment { target, .. } = expr {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        self.lookup_var(&id.name).is_none()
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-
-                if is_block_local && !self.is_repl_mode {
-                    if let Expression::Assignment { target, value, .. } = expr {
-                        if let Expression::Identifier(id) = target.as_ref() {
-                            let core_var = Self::to_core_erlang_var(&id.name);
-                            let val_doc = self.expression_doc(value)?;
-                            self.bind_var(&id.name, &core_var);
-                            docs.push(docvec![
-                                "let ",
-                                Document::String(core_var),
-                                " = ",
-                                val_doc,
-                                " in",
-                            ]);
-                        }
-                    }
+                // BT-1224: Block-local vars (not in threaded_locals) use plain let.
+                // Threaded captured vars use StateAcc threading.
+                if let Some(doc) =
+                    self.try_generate_block_local_plain_let(expr, is_last, threaded_locals)?
+                {
+                    docs.push(doc);
                 } else {
                     // BT-153: Threaded variable — thread through StateAcc
                     let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
@@ -425,7 +403,8 @@ impl CoreErlangGenerator {
         ]);
 
         // FALSE case: execute body and recurse
-        let (body_doc, final_state_version) = self.generate_while_body_with_threading(body, &[])?;
+        let (body_doc, final_state_version) =
+            self.generate_while_body_with_threading(body, &threaded_locals)?;
         docs.push(body_doc);
         let final_state_var = if final_state_version == 0 {
             "StateAcc".to_string()
