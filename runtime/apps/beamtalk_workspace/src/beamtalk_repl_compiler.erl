@@ -17,6 +17,7 @@
     compile_expression/3,
     compile_file/4,
     compile_for_codegen/3,
+    compile_file_for_codegen/2,
     compile_for_method_reload/2,
     format_formatted_diagnostics/1,
     is_internal_key/1,
@@ -72,6 +73,27 @@ compile_for_codegen(SourceBin, ModNameBin, KnownVars) ->
                         {compile_error,
                             <<"show-codegen does not support standalone method definitions">>}};
                 {ok, CoreErlang, Warnings} ->
+                    {ok, CoreErlang, Warnings};
+                {error, Diagnostics} ->
+                    {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
+            end
+        end,
+        wrapped
+    ).
+
+%% @doc Compile a Beamtalk source file and return Core Erlang source (for show-codegen).
+%% Does NOT compile to bytecode. Used when inspecting codegen for a loaded class.
+-spec compile_file_for_codegen(binary(), string() | undefined) ->
+    {ok, binary(), [binary()]} | {error, term()}.
+compile_file_for_codegen(SourceBin, Path) ->
+    Options0 = #{},
+    Options1 = apply_source_path(Options0, Path),
+    Options = add_class_indexes(Options1),
+    wrap_compiler_errors(
+        fun() ->
+            case beamtalk_compiler:compile(SourceBin, Options) of
+                {ok, #{core_erlang := CoreErlang} = CR} ->
+                    Warnings = maps:get(warnings, CR, []),
                     {ok, CoreErlang, Warnings};
                 {error, Diagnostics} ->
                     {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}

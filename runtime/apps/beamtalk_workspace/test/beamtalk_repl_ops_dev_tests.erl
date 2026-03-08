@@ -276,6 +276,110 @@ handle_show_codegen_missing_code_error_test() ->
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
 %%====================================================================
+%% handle/4 -- show-codegen class+selector (BT-1236)
+%%====================================================================
+
+handle_show_codegen_class_not_found_error_test() ->
+    %% Non-existent class name -> class not found error
+    Msg = make_msg(<<"show-codegen">>, <<"sc-3">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>,
+        #{<<"class">> => <<"NonExistentClass99999">>},
+        Msg,
+        self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+handle_show_codegen_class_with_selector_no_class_found_test() ->
+    %% class+selector where class doesn't exist -> error
+    Msg = make_msg(<<"show-codegen">>, <<"sc-4">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>,
+        #{<<"class">> => <<"NonExistentClass99999">>, <<"selector">> => <<"someMethod">>},
+        Msg,
+        self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+handle_show_codegen_class_takes_priority_over_code_test() ->
+    %% When both class and code are given, class takes priority and errors (non-existent class)
+    Msg = make_msg(<<"show-codegen">>, <<"sc-5">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>,
+        #{<<"class">> => <<"NonExistentClass99999">>, <<"code">> => <<"1 + 2">>},
+        Msg,
+        self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    %% class path taken, returns error for non-existent class
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+handle_show_codegen_empty_class_falls_back_to_code_test() ->
+    %% Empty class binary is treated as absent; falls back to code path.
+    %% Use empty code so we get the "empty expression" error without calling a real session.
+    Msg = make_msg(<<"show-codegen">>, <<"sc-6">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>,
+        #{<<"class">> => <<>>, <<"code">> => <<>>},
+        Msg,
+        self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    %% Code path taken: error must say "Empty expression", not "class not found".
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrorMsg = maps:get(<<"error">>, Decoded),
+    ?assert(binary:match(ErrorMsg, <<"Empty expression">>) =/= nomatch).
+
+handle_show_codegen_selector_without_class_test() ->
+    %% Providing selector without class returns a specific "selector requires class" error,
+    %% not the generic missing-parameter error — consistent with the Rust MCP boundary.
+    Msg = make_msg(<<"show-codegen">>, <<"sc-7">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>,
+        #{<<"selector">> => <<"greet">>},
+        Msg,
+        self()
+    ),
+    Decoded = jsx:decode(Result, [return_maps]),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    %% The error message must mention "selector" (not a generic missing-parameter message).
+    ErrorMsg = maps:get(<<"error">>, Decoded),
+    ?assert(binary:match(ErrorMsg, <<"selector">>) =/= nomatch).
+
+validate_selector_undefined_returns_ok_test() ->
+    %% When SelectorBin is undefined, no validation is needed.
+    Msg = make_msg(<<"show-codegen">>, <<"sc-8">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:validate_selector_if_present(
+        <<"SomeClass">>, 'SomeClass', self(), undefined, Msg
+    ),
+    ?assertEqual(ok, Result).
+
+%% @doc Unit test for compile_file_for_codegen/2 success path (BT-1236).
+%%
+%% Tests that the compiler can take a Beamtalk class source binary and
+%% return Core Erlang text without loading a module into the runtime.
+%% This exercises the compilation side of show_codegen_class_method/3.
+compile_file_for_codegen_success_test() ->
+    Source = <<"Object subclass: TestCodegenClass\n  greet => 42\n">>,
+    Result = beamtalk_repl_compiler:compile_file_for_codegen(Source, undefined),
+    case Result of
+        {ok, CoreErlang, Warnings} ->
+            ?assert(is_binary(CoreErlang)),
+            ?assert(byte_size(CoreErlang) > 0),
+            ?assert(is_list(Warnings));
+        {error, {compile_error, Reason}} when is_binary(Reason) ->
+            %% Tolerate only "compiler not available" — any other compile error is a real failure.
+            case binary:match(Reason, <<"Compiler not available">>) of
+                nomatch -> error({unexpected_compile_error, Reason});
+                _ -> ok
+            end;
+        {error, OtherReason} ->
+            error({unexpected_compile_error, OtherReason})
+    end.
+
+%%====================================================================
 %% handle/4 -- complete with old protocol (no cursor field)
 %%====================================================================
 
@@ -566,6 +670,30 @@ handle_describe_deprecated_ops_have_migrate_to_test() ->
     DocsOp = maps:get(<<"docs">>, Ops),
     ?assertEqual(true, maps:get(<<"deprecated">>, DocsOp)),
     ?assert(maps:is_key(<<"migrate_to">>, DocsOp)).
+
+handle_describe_contains_actors_op_test() ->
+    Msg = make_msg(<<"describe">>, <<"d-actors">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    Ops = maps:get(<<"ops">>, Decoded),
+    ?assert(maps:is_key(<<"actors">>, Ops)),
+    ?assertEqual([], maps:get(<<"params">>, maps:get(<<"actors">>, Ops))).
+
+handle_describe_contains_inspect_op_test() ->
+    Msg = make_msg(<<"describe">>, <<"d-inspect">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    Ops = maps:get(<<"ops">>, Decoded),
+    ?assert(maps:is_key(<<"inspect">>, Ops)),
+    ?assertEqual([<<"actor">>], maps:get(<<"params">>, maps:get(<<"inspect">>, Ops))).
+
+handle_describe_contains_kill_op_test() ->
+    Msg = make_msg(<<"describe">>, <<"d-kill">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    Ops = maps:get(<<"ops">>, Decoded),
+    ?assert(maps:is_key(<<"kill">>, Ops)),
+    ?assertEqual([<<"actor">>], maps:get(<<"params">>, maps:get(<<"kill">>, Ops))).
 
 %%====================================================================
 %% handle/4 -- complete new format with no cursor

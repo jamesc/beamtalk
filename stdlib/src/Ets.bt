@@ -1,0 +1,157 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Ets — shared in-memory table for actor state sharing.
+///
+/// Wraps OTP ets tables with a Beamtalk-friendly API. Tables are named and
+/// public by default, enabling cross-actor reads and writes without
+/// message-passing overhead.
+///
+/// ETS tables are owned by the creating process. When the owner terminates,
+/// the table is deleted automatically unless an heir is configured.
+///
+/// ## Table Types
+///
+/// | Symbol        | Description                                    |
+/// |---------------|------------------------------------------------|
+/// | `#set`        | One entry per key (default, unordered)         |
+/// | `#orderedSet` | One entry per key, keys sorted                 |
+/// | `#bag`        | Multiple entries per key, values must differ   |
+/// | `#duplicateBag` | Multiple identical entries per key allowed   |
+///
+/// ## Examples
+/// ```beamtalk
+/// cache := Ets new: #myCache type: #set
+/// cache at: "key" put: 42
+/// cache at: "key"                        // => 42
+/// cache at: "missing"                    // => nil
+/// cache at: "missing" ifAbsent: [0]      // => 0
+/// cache includesKey: "key"               // => true
+/// cache size                             // => 1
+/// cache removeKey: "key"
+/// cache delete
+/// ```
+///
+/// ## Cross-Actor Sharing
+/// ```beamtalk
+/// cache := Ets new: #sharedCache type: #set
+/// // In another actor — retrieve by name:
+/// shared := Ets named: #sharedCache
+/// shared at: "counter" put: 1
+/// ```
+Object subclass: Ets
+
+  /// Create a new named public ETS table (class method).
+  ///
+  /// `tableType` must be one of: `#set`, `#orderedSet`, `#bag`, `#duplicateBag`.
+  /// The table is created as `named_table` with `public` access so that any
+  /// process can read and write it. Raises `already_exists` if a table with
+  /// the same name already exists.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache := Ets new: #myCache type: #set
+  /// counters := Ets new: #counters type: #set
+  /// ```
+  class sealed new: name :: Symbol type: tableType :: Symbol -> Ets =>
+    (Erlang beamtalk_ets) new: name type: tableType
+
+  /// Look up an existing named ETS table (class method).
+  ///
+  /// Returns an `Ets` instance if a table with the given name exists.
+  /// Raises `not_found` if no table with that name has been created.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache := Ets named: #myCache
+  /// ```
+  class sealed named: name :: Symbol -> Ets => (Erlang beamtalk_ets) named: name
+
+  /// Look up a key. Returns the value, or `nil` if the key is absent.
+  ///
+  /// For `#bag` and `#duplicateBag` tables with multiple entries per key,
+  /// returns the first stored value. The current wrapper exposes only one
+  /// value per key; bag tables are best suited for single-value-per-key use.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache at: "key"        // => value or nil
+  /// ```
+  at: key => (Erlang beamtalk_ets) lookup: self key: key
+
+  /// Insert or replace a key-value pair. Returns `nil`.
+  ///
+  /// For `#bag` and `#duplicateBag` tables, all existing entries for `key`
+  /// are removed before the new entry is inserted, giving best-effort
+  /// upsert semantics. Concurrent writes from multiple actors to the same
+  /// key on a bag table are not serialized — interleaved operations may
+  /// result in multiple entries for that key.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache at: "counter" put: 1
+  /// ```
+  at: key put: value -> Nil =>
+    (Erlang beamtalk_ets) insert: self key: key value: value
+
+  /// Look up a key; if absent, evaluate the block and return its result.
+  ///
+  /// For `#bag` and `#duplicateBag` tables with multiple entries per key,
+  /// returns the first stored value (same as `at:`); the block is not called.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache at: "missing" ifAbsent: [0]    // => 0
+  /// cache at: "key"     ifAbsent: [0]    // => stored value
+  /// ```
+  at: key ifAbsent: block :: Block =>
+    (Erlang beamtalk_ets) lookupIfAbsent: self key: key block: block
+
+  /// Return `true` if the table contains an entry for `key`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache includesKey: "key"    // => true or false
+  /// ```
+  includesKey: key -> Boolean =>
+    (Erlang beamtalk_ets) includesKey: self key: key
+
+  /// Remove the entry for `key`. Returns `nil`. Idempotent if key is absent.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache removeKey: "oldKey"
+  /// ```
+  removeKey: key -> Nil => (Erlang beamtalk_ets) removeKey: self key: key
+
+  /// Return all keys in the table as a `List`.
+  ///
+  /// Order is unspecified for `#set` and `#bag` tables.
+  /// Keys are sorted for `#orderedSet` tables.
+  /// For `#bag` and `#duplicateBag` tables, each key appears only once.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache keys    // => #("key1", "key2")
+  /// ```
+  keys -> List => (Erlang beamtalk_ets) keys: self
+
+  /// Return the number of entries in the table.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache size    // => 3
+  /// ```
+  size -> Integer => (Erlang beamtalk_ets) tableSize: self
+
+  /// Destroy the table, freeing all memory. Returns `nil`.
+  ///
+  /// Only the process that created the table (the owner) may call `delete`.
+  /// After calling `delete`, this `Ets` instance is no longer valid.
+  /// Any further operations on the deleted table will raise an error.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache delete
+  /// ```
+  delete -> Nil => (Erlang beamtalk_ets) deleteTable: self
