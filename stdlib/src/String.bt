@@ -47,6 +47,17 @@ sealed typed Collection subclass: String
   /// ```
   class fromCodePoints: list :: List -> String => @primitive "fromCodePoints:"
 
+  /// Convert an Erlang iolist or charlist to a String binary.
+  ///
+  /// Useful for coercing the result of Erlang FFI calls that return
+  /// iolists (nested lists of binaries and integers) into a plain String.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// String fromIolist: #(104, 105)   // => "hi"
+  /// ```
+  class fromIolist: iolist -> String => @primitive "fromIolist:"
+
   /// Test strict equality with another string.
   ///
   /// ## Examples

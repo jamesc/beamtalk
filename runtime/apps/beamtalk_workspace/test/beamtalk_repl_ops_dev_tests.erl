@@ -567,6 +567,30 @@ handle_describe_deprecated_ops_have_migrate_to_test() ->
     ?assertEqual(true, maps:get(<<"deprecated">>, DocsOp)),
     ?assert(maps:is_key(<<"migrate_to">>, DocsOp)).
 
+handle_describe_contains_actors_op_test() ->
+    Msg = make_msg(<<"describe">>, <<"d-actors">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    Ops = maps:get(<<"ops">>, Decoded),
+    ?assert(maps:is_key(<<"actors">>, Ops)),
+    ?assertEqual([], maps:get(<<"params">>, maps:get(<<"actors">>, Ops))).
+
+handle_describe_contains_inspect_op_test() ->
+    Msg = make_msg(<<"describe">>, <<"d-inspect">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    Ops = maps:get(<<"ops">>, Decoded),
+    ?assert(maps:is_key(<<"inspect">>, Ops)),
+    ?assertEqual([<<"actor">>], maps:get(<<"params">>, maps:get(<<"inspect">>, Ops))).
+
+handle_describe_contains_kill_op_test() ->
+    Msg = make_msg(<<"describe">>, <<"d-kill">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
+    Decoded = jsx:decode(Result, [return_maps]),
+    Ops = maps:get(<<"ops">>, Decoded),
+    ?assert(maps:is_key(<<"kill">>, Ops)),
+    ?assertEqual([<<"actor">>], maps:get(<<"params">>, maps:get(<<"kill">>, Ops))).
+
 %%====================================================================
 %% handle/4 -- complete new format with no cursor
 %%====================================================================

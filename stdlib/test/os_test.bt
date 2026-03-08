@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for OS class (BT-1244)
+
+TestCase subclass: OSTest
+  state: isUnix = false
+
+  setUp => self.isUnix := System osFamily == "unix"
+
+  testRunReturnsString =>
+    self.isUnix
+      ifTrue: [
+        result := OS run: "echo hello"
+        self assert: result class equals: String
+      ]
+
+  testRunTrimsTrailingWhitespace =>
+    self.isUnix
+      ifTrue: [
+        result := OS run: "echo hello"
+        self assert: result equals: "hello"
+      ]
+
+  testRunWithNonStringRaisesTypeError =>
+    @expect type
+    self should: [OS run: 42] raise: #type_error

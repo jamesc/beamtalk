@@ -35,6 +35,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Erlang"
             | "ErlangModule"
             | "Error"
+            | "Ets"
             | "Exception"
             | "ExitError"
             | "False"
@@ -49,6 +50,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "List"
             | "Metaclass"
             | "Number"
+            | "OS"
             | "Object"
             | "Pid"
             | "Port"
@@ -69,6 +71,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "TestResult"
             | "TestRunner"
             | "ThrowError"
+            | "Time"
             | "Timer"
             | "TranscriptStream"
             | "True"
@@ -565,6 +568,35 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "Ets".into(),
+        ClassInfo {
+            name: "Ets".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: None, param_types: vec![None], doc: Some("Look up a key. Returns the value, or `nil` if the key is absent.\n\nFor `#bag` and `#duplicateBag` tables with multiple entries per key,\nreturns the first stored value. The current wrapper exposes only one\nvalue per key; bag tables are best suited for single-value-per-key use.\n\n## Examples\n```beamtalk\ncache at: \"key\"        // => value or nil\n```".into()) },
+                MethodInfo { selector: "at:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![None, None], doc: Some("Insert or replace a key-value pair. Returns `nil`.\n\nFor `#bag` and `#duplicateBag` tables, all existing entries for `key`\nare removed before the new entry is inserted, giving best-effort\nupsert semantics. Concurrent writes from multiple actors to the same\nkey on a bag table are not serialized — interleaved operations may\nresult in multiple entries for that key.\n\n## Examples\n```beamtalk\ncache at: \"counter\" put: 1\n```".into()) },
+                MethodInfo { selector: "at:ifAbsent:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: None, param_types: vec![None, Some("Block".into())], doc: Some("Look up a key; if absent, evaluate the block and return its result.\n\nFor `#bag` and `#duplicateBag` tables with multiple entries per key,\nreturns the first stored value (same as `at:`); the block is not called.\n\n## Examples\n```beamtalk\ncache at: \"missing\" ifAbsent: [0]    // => 0\ncache at: \"key\"     ifAbsent: [0]    // => stored value\n```".into()) },
+                MethodInfo { selector: "includesKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Return `true` if the table contains an entry for `key`.\n\n## Examples\n```beamtalk\ncache includesKey: \"key\"    // => true or false\n```".into()) },
+                MethodInfo { selector: "removeKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![None], doc: Some("Remove the entry for `key`. Returns `nil`. Idempotent if key is absent.\n\n## Examples\n```beamtalk\ncache removeKey: \"oldKey\"\n```".into()) },
+                MethodInfo { selector: "keys".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return all keys in the table as a `List`.\n\nOrder is unspecified for `#set` and `#bag` tables.\nKeys are sorted for `#orderedSet` tables.\nFor `#bag` and `#duplicateBag` tables, each key appears only once.\n\n## Examples\n```beamtalk\ncache keys    // => #(\"key1\", \"key2\")\n```".into()) },
+                MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the number of entries in the table.\n\n## Examples\n```beamtalk\ncache size    // => 3\n```".into()) },
+                MethodInfo { selector: "delete".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Destroy the table, freeing all memory. Returns `nil`.\n\nOnly the process that created the table (the owner) may call `delete`.\nAfter calling `delete`, this `Ets` instance is no longer valid.\nAny further operations on the deleted table will raise an error.\n\n## Examples\n```beamtalk\ncache delete\n```".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "new:type:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: true, return_type: Some("Ets".into()), param_types: vec![Some("Symbol".into()), Some("Symbol".into())], doc: Some("Create a new named public ETS table (class method).\n\n`tableType` must be one of: `#set`, `#orderedSet`, `#bag`, `#duplicateBag`.\nThe table is created as `named_table` with `public` access so that any\nprocess can read and write it. Raises `already_exists` if a table with\nthe same name already exists.\n\n## Examples\n```beamtalk\ncache := Ets new: #myCache type: #set\ncounters := Ets new: #counters type: #set\n```".into()) },
+                MethodInfo { selector: "named:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Ets".into(), is_sealed: true, return_type: Some("Ets".into()), param_types: vec![Some("Symbol".into())], doc: Some("Look up an existing named ETS table (class method).\n\nReturns an `Ets` instance if a table with the given name exists.\nRaises `not_found` if no table with that name has been created.\n\n## Examples\n```beamtalk\ncache := Ets named: #myCache\n```".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
         "Exception".into(),
         ClassInfo {
             name: "Exception".into(),
@@ -1029,6 +1061,25 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "OS".into(),
+        ClassInfo {
+            name: "OS".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "run:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "OS".into(), is_sealed: true, return_type: Some("String".into()), param_types: vec![Some("String".into())], doc: Some("Execute a shell command and return its trimmed stdout as a String.\n\nWraps `os:cmd/1` and trims trailing whitespace from the result.\n\n## Examples\n```beamtalk\nOS run: \"echo hello\"   // => \"hello\"\n```".into()) },
+            ],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
         "Object".into(),
         ClassInfo {
             name: "Object".into(),
@@ -1426,6 +1477,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("List".into())], doc: Some("Create a String by joining a list of grapheme cluster strings.\n\nUseful for constructing a String from the result of `asList` or\n`select:` operations. Each element should be a grapheme string.\n\n## Examples\n```beamtalk\nString class withAll: #(\"h\", \"e\", \"l\", \"l\", \"o\")  // => \"hello\"\n```".into()) },
                 MethodInfo { selector: "fromCodePoint:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("Integer".into())], doc: Some("Create a single-character String from a Unicode code point integer.\n\n## Examples\n```beamtalk\nString fromCodePoint: 65    // => \"A\"\nString fromCodePoint: 8364  // => \"€\"\n```".into()) },
                 MethodInfo { selector: "fromCodePoints:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![Some("List".into())], doc: Some("Create a String from a list of Unicode code point integers.\n\n## Examples\n```beamtalk\nString fromCodePoints: #(72, 105)   // => \"Hi\"\nString fromCodePoints: #(123, 125)  // => \"\\{\\}\"\n```".into()) },
+                MethodInfo { selector: "fromIolist:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, return_type: Some("String".into()), param_types: vec![None], doc: Some("Convert an Erlang iolist or charlist to a String binary.\n\nUseful for coercing the result of Erlang FFI calls that return\niolists (nested lists of binaries and integers) into a plain String.\n\n## Examples\n```beamtalk\nString fromIolist: #(104, 105)   // => \"hi\"\n```".into()) },
             ],
             class_variables: vec![],
         },
@@ -1603,6 +1655,26 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_types: HashMap::new(),
             methods: vec![],
             class_methods: vec![],
+            class_variables: vec![],
+        },
+    );
+
+    classes.insert(
+        "Time".into(),
+        ClassInfo {
+            name: "Time".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_value: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "nowMs".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in milliseconds since the Unix epoch.\n\nWraps `erlang:system_time(millisecond)`.\n\n## Examples\n```beamtalk\nTime nowMs   // => _\n```".into()) },
+                MethodInfo { selector: "nowUs".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Time".into(), is_sealed: true, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Current time in microseconds since the Unix epoch.\n\nWraps `erlang:system_time(microsecond)`.\n\n## Examples\n```beamtalk\nTime nowUs   // => _\n```".into()) },
+            ],
             class_variables: vec![],
         },
     );
