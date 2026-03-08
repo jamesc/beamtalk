@@ -105,11 +105,27 @@ pub struct DocsParams {
 }
 
 /// Parameters for the `show_codegen` MCP tool.
+///
+/// Provide either `code` (expression snippet) or `class` (loaded class name).
+/// When both are provided, `class` takes priority.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ShowCodegenParams {
-    /// Beamtalk code to compile and show the generated Core Erlang for.
-    #[schemars(description = "Beamtalk code to compile and show the generated Core Erlang for")]
-    pub code: String,
+    /// Beamtalk code snippet to compile and show the generated Core Erlang for.
+    /// Used when `class` is not provided.
+    #[schemars(
+        description = "Beamtalk code snippet to compile and show generated Core Erlang for. Used when 'class' is not provided."
+    )]
+    pub code: Option<String>,
+    /// Name of a loaded Beamtalk class to inspect. Takes priority over `code` when both provided.
+    #[schemars(
+        description = "Name of a loaded Beamtalk class to show generated Core Erlang for. Takes priority over 'code' when both are provided."
+    )]
+    pub class: Option<String>,
+    /// Optional method selector when using `class`. If omitted, shows the full module.
+    #[schemars(
+        description = "Optional method selector when inspecting a class. Narrows context but full module Core Erlang is returned."
+    )]
+    pub selector: Option<String>,
 }
 
 /// Parameters for the `test` MCP tool.
@@ -616,19 +632,40 @@ impl BeamtalkMcp {
         )]))
     }
 
-    /// Inspect the generated Core Erlang code for a beamtalk expression.
+    /// Inspect the generated Core Erlang code for a beamtalk expression or loaded class.
     #[tool(
-        description = "Show the generated Core Erlang code for a beamtalk expression or class definition. Useful for debugging codegen and understanding compilation."
+        description = "Show the generated Core Erlang code for a beamtalk expression or loaded class. Use 'code' to compile an expression snippet, or 'class' (+ optional 'selector') to inspect a class already loaded in the session. Useful for debugging codegen and understanding compilation."
     )]
     async fn show_codegen(
         &self,
         Parameters(params): Parameters<ShowCodegenParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let response = self
-            .client
-            .show_codegen(&params.code)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        // Normalize empty strings to absent — Some("") is not a valid class or code.
+        let class = params.class.filter(|s| !s.is_empty());
+        let code = params.code.filter(|s| !s.is_empty());
+        let selector = params.selector.filter(|s| !s.is_empty());
+
+        // Reject orphaned selector (selector without class).
+        if selector.is_some() && class.is_none() {
+            return Ok(error_result(
+                "ERROR: 'selector' requires 'class' to be specified.",
+            ));
+        }
+
+        let response = match (&class, &code) {
+            (Some(class_str), _) => {
+                self.client
+                    .show_codegen_class(class_str, selector.as_deref())
+                    .await
+            }
+            (None, Some(code_str)) => self.client.show_codegen(code_str).await,
+            (None, None) => {
+                return Ok(error_result(
+                    "ERROR: Provide 'code' to compile an expression or 'class' to inspect a loaded class.",
+                ));
+            }
+        }
+        .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
         if response.is_error() {
             let msg = response
@@ -942,7 +979,7 @@ impl ServerHandler for BeamtalkMcp {
                  'list_actors' to see running actors, 'inspect' to examine actor state, \
                  'reload_module' for hot code reloading, 'test' to run BUnit tests, \
                  'lint' to run style/redundancy checks on .bt source files, \
-                 'show_codegen' to inspect generated Core Erlang, 'info' for symbol details, \
+                 'show_codegen' to inspect generated Core Erlang (use class+selector for loaded classes), 'info' for symbol details, \
                  'describe' for capability discovery, 'clear' to reset bindings, \
                  'unload' to remove a module, and 'interrupt' to cancel evaluations."
                     .to_string(),

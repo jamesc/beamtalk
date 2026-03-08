@@ -34,7 +34,8 @@
 %% BT-1045: Export internals for white-box testing of the binding-lookup pipeline.
 -ifdef(TEST).
 -export([
-    get_session_bindings/1
+    get_session_bindings/1,
+    validate_selector_if_present/5
 ]).
 -endif.
 
@@ -151,37 +152,68 @@ handle(<<"docs">>, Params, Msg, _SessionPid) ->
     end;
 handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
     %% BT-700: Compile expression and return Core Erlang source without evaluating.
-    Code = binary_to_list(maps:get(<<"code">>, Params, <<>>)),
-    case Code of
-        [] ->
-            Err = beamtalk_error:new(empty_expression, 'REPL'),
-            Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
-            Err2 = beamtalk_error:with_hint(Err1, <<"Enter an expression to compile.">>),
+    %% BT-1236: Also accepts class+selector to inspect a loaded class method.
+    %% `class` takes priority when both are present; empty string is treated as absent.
+    ClassBin = nonempty_or_undefined(maps:get(<<"class">>, Params, undefined)),
+    CodeBin = maps:get(<<"code">>, Params, undefined),
+    SelectorBin = nonempty_or_undefined(maps:get(<<"selector">>, Params, undefined)),
+    %% Reject orphaned selector at the Erlang boundary, mirroring the Rust MCP guard,
+    %% so behaviour is consistent regardless of which entry point is used.
+    case {SelectorBin, ClassBin} of
+        {SB, undefined} when SB =/= undefined ->
+            Err = beamtalk_error:new(invalid_argument, 'REPL'),
+            Err1 = beamtalk_error:with_message(
+                Err, <<"'selector' requires 'class' to be specified">>
+            ),
+            Err2 = beamtalk_error:with_hint(
+                Err1,
+                <<"Provide 'class' along with 'selector' to inspect a specific method.">>
+            ),
             beamtalk_repl_protocol:encode_error(
                 Err2, Msg, fun beamtalk_repl_json:format_error_message/1
             );
         _ ->
-            case beamtalk_repl_shell:show_codegen(SessionPid, Code) of
-                {ok, CoreErlang, Warnings} ->
-                    Base = beamtalk_repl_protocol:base_response(Msg),
-                    Result = Base#{
-                        <<"core_erlang">> => CoreErlang,
-                        <<"status">> => [<<"done">>]
-                    },
-                    Result1 =
-                        case Warnings of
-                            [] -> Result;
-                            _ -> Result#{<<"warnings">> => Warnings}
-                        end,
-                    jsx:encode(Result1);
-                {error, ErrorReason, Warnings} ->
-                    WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
+            case {ClassBin, CodeBin} of
+                {CB, _} when CB =/= undefined ->
+                    show_codegen_class_method(CB, SelectorBin, Msg);
+                {undefined, CB} when CB =/= undefined ->
+                    Code = binary_to_list(CB),
+                    case Code of
+                        [] ->
+                            Err = beamtalk_error:new(empty_expression, 'REPL'),
+                            Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
+                            Err2 = beamtalk_error:with_hint(
+                                Err1, <<"Enter an expression to compile.">>
+                            ),
+                            beamtalk_repl_protocol:encode_error(
+                                Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+                            );
+                        _ ->
+                            case beamtalk_repl_shell:show_codegen(SessionPid, Code) of
+                                {ok, CoreErlang, Warnings} ->
+                                    encode_codegen_response(CoreErlang, Warnings, Msg);
+                                {error, ErrorReason, Warnings} ->
+                                    WrappedReason = beamtalk_repl_errors:ensure_structured_error(
+                                        ErrorReason
+                                    ),
+                                    beamtalk_repl_protocol:encode_error(
+                                        WrappedReason,
+                                        Msg,
+                                        fun beamtalk_repl_json:format_error_message/1,
+                                        <<>>,
+                                        Warnings
+                                    )
+                            end
+                    end;
+                {undefined, undefined} ->
+                    Err = beamtalk_error:new(empty_expression, 'REPL'),
+                    Err1 = beamtalk_error:with_message(Err, <<"Missing required parameter">>),
+                    Err2 = beamtalk_error:with_hint(
+                        Err1,
+                        <<"Provide 'code' to compile an expression, or 'class' to inspect a loaded class.">>
+                    ),
                     beamtalk_repl_protocol:encode_error(
-                        WrappedReason,
-                        Msg,
-                        fun beamtalk_repl_json:format_error_message/1,
-                        <<>>,
-                        Warnings
+                        Err2, Msg, fun beamtalk_repl_json:format_error_message/1
                     )
             end
     end;
@@ -234,6 +266,201 @@ handle(<<"describe">>, _Params, Msg, _SessionPid) ->
         <<"beamtalk">> => BeamtalkVsnBin
     },
     beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg).
+
+%%% show-codegen helpers
+
+%% @private
+%% @doc Encode a successful Core Erlang codegen response.
+-spec encode_codegen_response(binary(), [binary()], beamtalk_repl_protocol:protocol_msg()) ->
+    binary().
+encode_codegen_response(CoreErlang, Warnings, Msg) ->
+    Base = beamtalk_repl_protocol:base_response(Msg),
+    Result = Base#{<<"core_erlang">> => CoreErlang, <<"status">> => [<<"done">>]},
+    Result1 =
+        case Warnings of
+            [] -> Result;
+            _ -> Result#{<<"warnings">> => Warnings}
+        end,
+    jsx:encode(Result1).
+
+%% @private
+%% @doc Handle show-codegen for a loaded class method (BT-1236).
+%%
+%% Looks up the class in the runtime, validates the selector (if given),
+%% retrieves the authoritative live source from workspace metadata (falling back
+%% to the on-disk file), re-compiles for codegen, and returns Core Erlang.
+%%
+%% All gen_server calls on ClassPid are guarded against TOCTOU races: if the
+%% class is unloaded between the whereis_class/1 lookup and subsequent calls,
+%% the noproc exit is translated to a structured class_not_found error.
+-spec show_codegen_class_method(
+    binary(), binary() | undefined, beamtalk_repl_protocol:protocol_msg()
+) -> binary().
+show_codegen_class_method(ClassBin, SelectorBin, Msg) ->
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassBin) of
+        {error, badarg} ->
+            beamtalk_repl_protocol:encode_error(
+                make_class_not_found_error(ClassBin),
+                Msg,
+                fun beamtalk_repl_json:format_error_message/1
+            );
+        {ok, ClassAtom} ->
+            case beamtalk_runtime_api:whereis_class(ClassAtom) of
+                undefined ->
+                    beamtalk_repl_protocol:encode_error(
+                        make_class_not_found_error(ClassBin),
+                        Msg,
+                        fun beamtalk_repl_json:format_error_message/1
+                    );
+                ClassPid ->
+                    %% Guard all ClassPid gen_server calls against unload/reload races.
+                    try
+                        case
+                            validate_selector_if_present(
+                                ClassBin, ClassAtom, ClassPid, SelectorBin, Msg
+                            )
+                        of
+                            {error, ErrResponse} ->
+                                ErrResponse;
+                            ok ->
+                                compile_class_source(ClassBin, ClassAtom, ClassPid, Msg)
+                        end
+                    catch
+                        exit:{noproc, _} ->
+                            beamtalk_repl_protocol:encode_error(
+                                make_class_not_found_error(ClassBin),
+                                Msg,
+                                fun beamtalk_repl_json:format_error_message/1
+                            );
+                        exit:{timeout, _} ->
+                            Err0 = beamtalk_error:new(runtime_error, ClassAtom),
+                            Err1 = beamtalk_error:with_message(
+                                Err0,
+                                iolist_to_binary([
+                                    <<"Class '">>,
+                                    ClassBin,
+                                    <<"' is not responding (may be under heavy load)">>
+                                ])
+                            ),
+                            beamtalk_repl_protocol:encode_error(
+                                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+                            )
+                    end
+            end
+    end.
+
+%% @private
+%% @doc Retrieve the authoritative source for a loaded class and compile it for codegen.
+%%
+%% Reads from workspace_meta first (updated by :load and method patching), falling
+%% back to the on-disk file recorded in the beamtalk_source module attribute.
+-spec compile_class_source(
+    binary(), atom(), pid(), beamtalk_repl_protocol:protocol_msg()
+) -> binary().
+compile_class_source(ClassBin, ClassAtom, ClassPid, Msg) ->
+    ModuleName = beamtalk_runtime_api:module_name(ClassPid),
+    SourcePath = beamtalk_repl_modules:resolve_source_path(ModuleName),
+    %% Prefer the live in-memory source over the on-disk file; the metadata is
+    %% updated by handle_load and method-patching so it reflects the current state.
+    CompilePath =
+        if
+            SourcePath =:= "unknown" -> undefined;
+            true -> SourcePath
+        end,
+    SourceResult =
+        case beamtalk_workspace_meta:get_class_source(ClassBin) of
+            undefined when SourcePath =:= "unknown" ->
+                {error, no_source};
+            undefined ->
+                file:read_file(SourcePath);
+            SrcStr when is_list(SrcStr) ->
+                {ok, list_to_binary(SrcStr)}
+        end,
+    case SourceResult of
+        {error, no_source} ->
+            Err0 = beamtalk_error:new(runtime_error, ClassAtom),
+            Err1 = beamtalk_error:with_message(
+                Err0,
+                iolist_to_binary([
+                    <<"No source for ">>,
+                    ClassBin,
+                    <<". Class may have been defined inline.">>
+                ])
+            ),
+            beamtalk_repl_protocol:encode_error(
+                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+            );
+        {ok, SourceBin} ->
+            case beamtalk_repl_compiler:compile_file_for_codegen(SourceBin, CompilePath) of
+                {ok, CoreErlang, Warnings} ->
+                    encode_codegen_response(CoreErlang, Warnings, Msg);
+                {error, ErrorReason} ->
+                    WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
+                    beamtalk_repl_protocol:encode_error(
+                        WrappedReason, Msg, fun beamtalk_repl_json:format_error_message/1
+                    )
+            end;
+        {error, Reason} ->
+            Err0 = beamtalk_error:new(runtime_error, ClassAtom),
+            Err1 = beamtalk_error:with_message(
+                Err0,
+                iolist_to_binary(
+                    io_lib:format("Cannot read source file ~s: ~p", [SourcePath, Reason])
+                )
+            ),
+            beamtalk_repl_protocol:encode_error(
+                Err1, Msg, fun beamtalk_repl_json:format_error_message/1
+            )
+    end.
+
+%% @private
+%% @doc Validate that SelectorBin exists on the class (instance-side or class-side).
+%% Returns ok when selector is undefined (no validation needed) or when found.
+%% Returns {error, EncodedResponse} when the selector is unknown.
+-spec validate_selector_if_present(
+    binary(), atom(), pid(), binary() | undefined, beamtalk_repl_protocol:protocol_msg()
+) -> ok | {error, binary()}.
+validate_selector_if_present(_ClassBin, _ClassAtom, _ClassPid, undefined, _Msg) ->
+    ok;
+validate_selector_if_present(ClassBin, ClassAtom, ClassPid, SelectorBin, Msg) ->
+    InstanceMethods = beamtalk_runtime_api:local_instance_methods(ClassPid),
+    ClassMethods = beamtalk_runtime_api:local_class_methods(ClassPid),
+    AllMethods = InstanceMethods ++ ClassMethods,
+    SelectorFound =
+        case beamtalk_repl_errors:safe_to_existing_atom(SelectorBin) of
+            {error, badarg} -> false;
+            {ok, SelectorAtom} -> lists:member(SelectorAtom, AllMethods)
+        end,
+    case SelectorFound of
+        true ->
+            ok;
+        false ->
+            Err0 = beamtalk_error:new(not_found, ClassAtom),
+            Err1 = beamtalk_error:with_message(
+                Err0,
+                iolist_to_binary([
+                    <<"Selector '">>, SelectorBin, <<"' not found on ">>, ClassBin
+                ])
+            ),
+            Err2 = beamtalk_error:with_hint(
+                Err1,
+                iolist_to_binary([
+                    <<"Use :help ">>, ClassBin, <<" to see available selectors.">>
+                ])
+            ),
+            {error,
+                beamtalk_repl_protocol:encode_error(
+                    Err2, Msg, fun beamtalk_repl_json:format_error_message/1
+                )}
+    end.
+
+%% @private
+%% @doc Return the value if it is a non-empty binary, otherwise return undefined.
+%% Used to normalise optional params so that "" is treated the same as absent.
+-spec nonempty_or_undefined(binary() | undefined) -> binary() | undefined.
+nonempty_or_undefined(<<>>) -> undefined;
+nonempty_or_undefined(undefined) -> undefined;
+nonempty_or_undefined(Bin) when is_binary(Bin) -> Bin.
 
 %%% Test op helpers
 
@@ -1106,7 +1333,10 @@ describe_ops() ->
         <<"unload">> => #{<<"params">> => [<<"module">>]},
         <<"health">> => #{<<"params">> => []},
         <<"methods">> => #{<<"params">> => [<<"class">>]},
-        <<"show-codegen">> => #{<<"params">> => [<<"code">>]},
+        <<"show-codegen">> => #{
+            <<"params">> => [],
+            <<"optional">> => [<<"code">>, <<"class">>, <<"selector">>]
+        },
         <<"describe">> => #{<<"params">> => []},
         <<"shutdown">> => #{<<"params">> => [<<"cookie">>]}
     }.
