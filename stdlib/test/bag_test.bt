@@ -64,9 +64,11 @@ TestCase subclass: BagTest
 
   testDoIteratesEachOccurrence =>
     b := Bag withAll: #(1, 1, 2)
-    result := #()
-    b do: [:x | result := result addFirst: x]
+    result := Bag new
+    b do: [:x | result := result add: x]
     self assert: result size equals: 3
+    self assert: (result occurrencesOf: 1) equals: 2
+    self assert: (result occurrencesOf: 2) equals: 1
 
   testInjectInto =>
     b := Bag withAll: #(1, 2, 3)
@@ -83,16 +85,24 @@ TestCase subclass: BagTest
     b2 := b collect: [:x | x * 2]
     self assert: b2 class equals: Bag
     self assert: b2 size equals: 2
+    self assert: (b2 occurrencesOf: 2) equals: 1
+    self assert: (b2 occurrencesOf: 4) equals: 1
 
   testSelect =>
     b := Bag withAll: #(1, 2, 3, 4)
     b2 := b select: [:x | x > 2]
+    self assert: b2 class equals: Bag
     self assert: b2 size equals: 2
+    self assert: (b2 occurrencesOf: 3) equals: 1
+    self assert: (b2 occurrencesOf: 4) equals: 1
 
   testReject =>
     b := Bag withAll: #(1, 2, 3, 4)
     b2 := b reject: [:x | x > 2]
+    self assert: b2 class equals: Bag
     self assert: b2 size equals: 2
+    self assert: (b2 occurrencesOf: 1) equals: 1
+    self assert: (b2 occurrencesOf: 2) equals: 1
 
   testPrintString =>
     self assert: Bag new printString notNil
