@@ -389,7 +389,7 @@ test-install: build-release build-stdlib
         exit 1
     fi
 
-# Run compiled stdlib tests (ADR 0014 Phase 1, ~14s)
+# Run compiled stdlib tests (ADR 0014 Phase 1, ~20s)
 # Accepts optional path to run a single file: just test-stdlib bootstrap-test/arithmetic.btscript
 # Output: summary only (--quiet suppresses per-file lines)
 [working-directory: 'stdlib']
