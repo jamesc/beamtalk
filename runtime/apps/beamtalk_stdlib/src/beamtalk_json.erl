@@ -54,19 +54,19 @@
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
         error:badarg ->
-            Error0 = beamtalk_error:new(parse_error, 'JSON'),
+            Error0 = beamtalk_error:new(parse_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Check that the string is valid JSON">>),
             beamtalk_error:raise(Error2);
         _:Reason ->
-            Error0 = beamtalk_error:new(parse_error, 'JSON'),
+            Error0 = beamtalk_error:new(parse_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
             Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
             Error3 = beamtalk_error:with_hint(Error2, <<"Check that the string is valid JSON">>),
             beamtalk_error:raise(Error3)
     end;
 'parse:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'JSON'),
+    Error0 = beamtalk_error:new(type_error, 'Json'),
     Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a String">>),
     beamtalk_error:raise(Error2).
@@ -85,12 +85,12 @@
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
         error:badarg ->
-            Error0 = beamtalk_error:new(type_error, 'JSON'),
+            Error0 = beamtalk_error:new(type_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'generate:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Value cannot be converted to JSON">>),
             beamtalk_error:raise(Error2);
         _:Reason ->
-            Error0 = beamtalk_error:new(type_error, 'JSON'),
+            Error0 = beamtalk_error:new(type_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'generate:'),
             Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
             Error3 = beamtalk_error:with_hint(Error2, <<"Value cannot be converted to JSON">>),
@@ -108,12 +108,12 @@
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
         error:badarg ->
-            Error0 = beamtalk_error:new(type_error, 'JSON'),
+            Error0 = beamtalk_error:new(type_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'prettyPrint:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Value cannot be converted to JSON">>),
             beamtalk_error:raise(Error2);
         _:Reason ->
-            Error0 = beamtalk_error:new(type_error, 'JSON'),
+            Error0 = beamtalk_error:new(type_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'prettyPrint:'),
             Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
             Error3 = beamtalk_error:with_hint(Error2, <<"Value cannot be converted to JSON">>),
@@ -180,7 +180,7 @@ prepare_for_encode(V) when is_atom(V) ->
     atom_to_binary(V, utf8);
 prepare_for_encode(Other) ->
     %% No selector — callers add the correct one via their catch blocks
-    Error0 = beamtalk_error:new(type_error, 'JSON'),
+    Error0 = beamtalk_error:new(type_error, 'Json'),
     Error1 = beamtalk_error:with_details(Error0, #{value => Other}),
     Error2 = beamtalk_error:with_hint(
         Error1,

@@ -41,14 +41,14 @@ sealed Value subclass: HTTPResponse
 
   /// Parse the response body as JSON and return the decoded value.
   ///
-  /// Equivalent to `JSON parse: self body`. Raises a parse error if
+  /// Equivalent to `Json parse: self body`. Raises a parse error if
   /// the body is not valid JSON.
   ///
   /// ## Examples
   /// ```beamtalk
   /// resp bodyAsJson         // => a Dictionary or List
   /// ```
-  sealed bodyAsJson -> Object => JSON parse: self body
+  sealed bodyAsJson -> Object => Json parse: self body
 
   /// Human-readable representation: "an HTTPResponse(200)".
   ///

@@ -10,7 +10,7 @@
 //     delete:, request:url:options:)
 //   - HTTPClient instance methods (get:, post:body:, put:body:, delete:)
 //   - Custom request headers
-//   - JSON body round-trips
+//   - Json body round-trips
 //   - Non-2xx status codes
 //   - Error cases (connection refused, invalid URL, type errors)
 //   - HTTPS connections (requires network access)
@@ -76,9 +76,9 @@ TestCase subclass: HttpTest
   testResponseBodyAsJsonReturnsDictionary =>
     resp := HTTPClient get: self.baseUrl ++ "/json"
     json := resp bodyAsJson
-    // bodyAsJson is typed -> Object because JSON can be a Dictionary, List, or scalar.
+    // bodyAsJson is typed -> Object because Json can be a Dictionary, List, or scalar.
     // Both Dictionary and List implement at:, but Object does not expose it.
-    // This test knows the endpoint returns a JSON object, so the DNU is a false positive.
+    // This test knows the endpoint returns a Dictionary (JSON object), so the DNU is a false positive.
     @expect dnu
     self assert: (json at: "type") equals: "json"
 
@@ -213,14 +213,14 @@ TestCase subclass: HttpTest
     self assert: (headers at: "x-client-header") equals: "persistent"
     self assert: client stop equals: #ok
 
-  // ===== JSON body round-trip =====
+  // ===== Json body round-trip =====
   testJsonBodyRoundTrip =>
-    // Generate a JSON body, POST it, verify the server echoed it correctly
-    jsonBody := JSON generate: #{"message" => "hello"}
+    // Generate a Json body, POST it, verify the server echoed it correctly
+    jsonBody := Json generate: #{"message" => "hello"}
     resp := HTTPClient post: self.baseUrl ++ "/post" body: jsonBody
     @expect dnu  // bodyAsJson -> Object; at: is valid on Dictionary and List at runtime
     echoed := (resp bodyAsJson) at: "body"
-    parsed := JSON parse: echoed
+    parsed := Json parse: echoed
     self assert: (parsed at: "message") equals: "hello"
 
   // ===== Non-2xx status codes =====

@@ -206,6 +206,18 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
             p0.to_string(),
             ")"
         ]),
+        // Class-side factory: create a String from a single Unicode code point
+        "fromCodePoint:" => Some(docvec![
+            "call 'beamtalk_string':'from_code_point'(",
+            p0.to_string(),
+            ")"
+        ]),
+        // Class-side factory: create a String from a list of Unicode code points
+        "fromCodePoints:" => Some(docvec![
+            "call 'beamtalk_string':'from_code_points'(",
+            p0.to_string(),
+            ")"
+        ]),
         _ => None,
     }
 }

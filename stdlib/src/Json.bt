@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// JSON — JSON encoding and decoding.
+/// Json — JSON encoding and decoding.
 ///
 /// Provides class methods for parsing JSON strings into Beamtalk values
 /// and generating JSON strings from Beamtalk values. Uses `jsx` as the
@@ -21,14 +21,14 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// JSON parse: "42"                          // => 42
-/// JSON parse: "[1, 2, 3]"                   // => [1,2,3]
-/// JSON generate: #{"name" => "Ada"}
+/// Json parse: "42"                          // => 42
+/// Json parse: "[1, 2, 3]"                   // => [1,2,3]
+/// Json generate: #{"name" => "Ada"}
 /// // => _
-/// JSON prettyPrint: #{"name" => "Ada"}
+/// Json prettyPrint: #{"name" => "Ada"}
 /// // => _
 /// ```
-sealed Object subclass: JSON
+sealed Object subclass: Json
 
   /// Parse a JSON string into a Beamtalk value (class method).
   ///
@@ -38,9 +38,9 @@ sealed Object subclass: JSON
   ///
   /// ## Examples
   /// ```beamtalk
-  /// JSON parse: "[1, 2, 3]"            // => [1,2,3]
-  /// JSON parse: "42"                   // => 42
-  /// JSON parse: "null"                 // => nil
+  /// Json parse: "[1, 2, 3]"            // => [1,2,3]
+  /// Json parse: "42"                   // => 42
+  /// Json parse: "null"                 // => nil
   /// ```
   class sealed parse: jsonString :: String =>
     (Erlang beamtalk_json) parse: jsonString
@@ -53,9 +53,9 @@ sealed Object subclass: JSON
   ///
   /// ## Examples
   /// ```beamtalk
-  /// JSON generate: #(1, 2, 3)          // => [1,2,3]
-  /// JSON generate: nil                 // => null
-  /// JSON generate: 42                  // => 42
+  /// Json generate: #(1, 2, 3)          // => [1,2,3]
+  /// Json generate: nil                 // => null
+  /// Json generate: 42                  // => 42
   /// ```
   class sealed generate: value :: Object -> String =>
     (Erlang beamtalk_json) generate: value
@@ -64,7 +64,7 @@ sealed Object subclass: JSON
   ///
   /// ## Examples
   /// ```beamtalk
-  /// JSON prettyPrint: #{"name" => "Ada", "age" => 36}
+  /// Json prettyPrint: #{"name" => "Ada", "age" => 36}
   /// ```
   class sealed prettyPrint: value :: Object -> String =>
     (Erlang beamtalk_json) prettyPrint: value
