@@ -15,6 +15,7 @@
 
 -export([
     compile_expression/3,
+    compile_expression_trace/3,
     compile_file/4,
     compile_for_codegen/3,
     compile_for_method_reload/2,
@@ -49,6 +50,36 @@
     | {error, term()}.
 compile_expression(Expression, ModuleName, Bindings) ->
     compile_expression_via_port(Expression, ModuleName, Bindings).
+
+%% @doc Compile a Beamtalk expression in trace mode (BT-1238).
+%%
+%% Like `compile_expression/3' but the generated module's `eval/1' returns
+%% `{[{<<"src0">>, Val0}, ...], FinalState}' — one step per top-level statement.
+-spec compile_expression_trace(string(), atom(), map()) ->
+    {ok, binary(), [binary()]} | {error, term()}.
+compile_expression_trace(Expression, ModuleName, Bindings) ->
+    SourceBin = list_to_binary(Expression),
+    ModNameBin = atom_to_binary(ModuleName, utf8),
+    KnownVars = [
+        atom_to_binary(K, utf8)
+     || K <- maps:keys(Bindings),
+        is_atom(K),
+        not is_internal_key(K)
+    ],
+    CompileOpts = add_class_indexes(#{}),
+    wrap_compiler_errors(
+        fun() ->
+            case
+                beamtalk_compiler:compile_expression_trace(SourceBin, ModNameBin, KnownVars, CompileOpts)
+            of
+                {ok, CoreErlang, Warnings} ->
+                    compile_standard_expression(CoreErlang, Warnings);
+                {error, Diagnostics} ->
+                    {error, Diagnostics}
+            end
+        end,
+        direct
+    ).
 
 %% @doc Compile a Beamtalk file to bytecode.
 -spec compile_file(string(), string(), boolean(), binary() | undefined) ->

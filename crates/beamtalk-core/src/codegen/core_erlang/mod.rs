@@ -568,6 +568,47 @@ pub fn generate_repl_expressions_with_index(
     Ok(doc.to_pretty_string())
 }
 
+/// Generates Core Erlang for trace mode eval (BT-1238).
+///
+/// Generates a single `eval/1` module that returns
+/// `{[{<<"source0">>, Value0}, ...], FinalState}` instead of `{Result, FinalState}`,
+/// giving the Erlang runtime a value for every top-level statement in one call.
+/// Source texts are extracted from the input using expression spans.
+///
+/// Intended for the `eval` MCP tool's `trace: true` mode.
+///
+/// # Errors
+///
+/// Returns [`CodeGenError`] if code generation fails.
+#[allow(clippy::implicit_hasher)]
+pub fn generate_repl_expressions_traced(
+    expressions: &[Expression],
+    source: &str,
+    module_name: &str,
+    class_module_index: std::collections::HashMap<String, String>,
+) -> Result<String> {
+    if expressions.is_empty() {
+        return Err(CodeGenError::UnsupportedFeature {
+            feature: "empty expression list".to_string(),
+            location: module_name.to_string(),
+        });
+    }
+    let source_texts: Vec<String> = expressions
+        .iter()
+        .map(|expr| {
+            let span = expr.span();
+            let start = span.start() as usize;
+            let end = span.end() as usize;
+            source.get(start..end).unwrap_or("").trim().to_string()
+        })
+        .collect();
+
+    let mut generator = CoreErlangGenerator::new(module_name);
+    generator.class_module_index = class_module_index;
+    let doc = generator.generate_repl_module_multi_traced(expressions, &source_texts)?;
+    Ok(doc.to_pretty_string())
+}
+
 /// Generates Core Erlang for a test expression (no workspace bindings).
 ///
 /// Like [`generate_repl_expression`] but with `workspace_mode = false`,

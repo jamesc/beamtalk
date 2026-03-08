@@ -14,7 +14,7 @@
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([do_eval/2, do_eval/3, do_show_codegen/2, handle_load/2, handle_load_source/3]).
+-export([do_eval/2, do_eval/3, do_eval_trace/2, do_show_codegen/2, handle_load/2, handle_load_source/3]).
 %% BT-845: ADR 0040 Phase 2 — stateless class reload (called via erlang:apply from beamtalk_runtime)
 -export([reload_class_file/1, reload_class_file/2]).
 
@@ -82,6 +82,77 @@ do_eval(Expression, State, Subscriber) ->
                         Warnings,
                         NewState
                     );
+                {error, Reason} ->
+                    {error, {load_error, Reason}, <<>>, [], NewState}
+            end;
+        {error, Reason} ->
+            {error, {compile_error, Reason}, <<>>, [], NewState}
+    end.
+
+%% @doc Evaluate a Beamtalk expression in trace mode (BT-1238).
+%%
+%% Returns `{ok, Steps, Output, Warnings, State}' where
+%% `Steps = [{SourceBin, Value}]' — one entry per top-level statement —
+%% or `{error, Reason, Output, Warnings, State}' on failure.
+-spec do_eval_trace(string(), beamtalk_repl_state:state()) ->
+    {ok, [{binary(), term()}], binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+do_eval_trace(Expression, State) ->
+    Counter = beamtalk_repl_state:get_eval_counter(State),
+    ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
+    NewState = beamtalk_repl_state:increment_eval_counter(State),
+
+    SessionBindings = beamtalk_repl_state:get_bindings(State),
+    WorkspaceUserBindings = beamtalk_workspace_interface_primitives:get_user_bindings(),
+    WorkspaceOnlyBindings = maps:without(maps:keys(SessionBindings), WorkspaceUserBindings),
+    Bindings0 = maps:merge(WorkspaceUserBindings, SessionBindings),
+    Bindings = maps:put(?WORKSPACE_BINDINGS_KEY, WorkspaceOnlyBindings, Bindings0),
+
+    RegistryPid = beamtalk_repl_state:get_actor_registry(State),
+
+    case beamtalk_repl_compiler:compile_expression_trace(Expression, ModuleName, Bindings) of
+        {ok, Binary, _ResultExpr, Warnings} ->
+            case code:load_binary(ModuleName, "", Binary) of
+                {module, ModuleName} ->
+                    BindingsWithRegistry =
+                        case RegistryPid of
+                            undefined -> Bindings;
+                            _ -> maps:put(?INTERNAL_REGISTRY_KEY, RegistryPid, Bindings)
+                        end,
+                    CaptureRef = beamtalk_io_capture:start(undefined),
+                    EvalResult =
+                        try
+                            {RawSteps, UpdatedBindings} = apply(ModuleName, eval, [
+                                BindingsWithRegistry
+                            ]),
+                            CleanBindings = strip_internal_bindings(UpdatedBindings),
+                            Steps = [
+                                {Src, maybe_await_future(Val)}
+                             || {Src, Val} <- RawSteps
+                            ],
+                            FinalState = beamtalk_repl_state:set_bindings(CleanBindings, NewState),
+                            {ok, Steps, FinalState}
+                        catch
+                            Class:Reason:Stacktrace ->
+                                CaughtExObj = beamtalk_exception_handler:ensure_wrapped(
+                                    Class, Reason, Stacktrace
+                                ),
+                                CaughtBindings = maps:put('_error', CaughtExObj, Bindings),
+                                CaughtState = beamtalk_repl_state:set_bindings(
+                                    CaughtBindings, NewState
+                                ),
+                                {error, {eval_error, Class, CaughtExObj}, CaughtState}
+                        after
+                            cleanup_module(ModuleName, RegistryPid)
+                        end,
+                    Output = beamtalk_io_capture:stop(CaptureRef),
+                    case EvalResult of
+                        {ok, Steps2, FinalState2} ->
+                            {ok, Steps2, Output, Warnings, FinalState2};
+                        {error, ErrorReason, ErrorState} ->
+                            WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
+                            {error, WrappedReason, Output, Warnings, ErrorState}
+                    end;
                 {error, Reason} ->
                     {error, {load_error, Reason}, <<>>, [], NewState}
             end;

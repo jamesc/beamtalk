@@ -48,6 +48,12 @@ pub struct EvaluateParams {
     /// Beamtalk expression to evaluate.
     #[schemars(description = "A beamtalk expression to evaluate in the REPL")]
     pub code: String,
+    /// If true, return per-statement step values instead of a single result (BT-1238).
+    /// Each step has `src` (the source text) and `value` (the evaluated result).
+    #[schemars(
+        description = "If true, return per-statement trace steps instead of a single result value. Each step includes the source text and the evaluated value."
+    )]
+    pub trace: Option<bool>,
 }
 
 /// Parameters for the `complete` MCP tool.
@@ -174,15 +180,16 @@ impl BeamtalkMcp {
 
     /// Evaluate a beamtalk expression in the live REPL.
     #[tool(
-        description = "Evaluate a beamtalk expression in the live REPL. Returns the result value and any stdout output. Use this to interact with beamtalk objects, call methods, spawn actors, and explore the live system."
+        description = "Evaluate a beamtalk expression in the live REPL. Returns the result value and any stdout output. Use this to interact with beamtalk objects, call methods, spawn actors, and explore the live system. Set trace=true to get per-statement step values instead of a single result."
     )]
     async fn evaluate(
         &self,
         Parameters(params): Parameters<EvaluateParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let use_trace = params.trace.unwrap_or(false);
         let response = self
             .client
-            .eval(&params.code)
+            .evaluate_with_options(&params.code, use_trace)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
 
@@ -206,9 +213,27 @@ impl BeamtalkMcp {
                 parts.push(Content::text(format!("Output: {output}")));
             }
         }
-        let value = response.value_string();
-        if !value.is_empty() {
-            parts.push(Content::text(value));
+
+        if use_trace {
+            let steps = response.steps.unwrap_or_default();
+            if steps.is_empty() {
+                parts.push(Content::text("(no steps)"));
+            } else {
+                for step in &steps {
+                    let src = step.get("src").and_then(|v| v.as_str()).unwrap_or("?");
+                    let val = step.get("value").cloned().unwrap_or(serde_json::Value::Null);
+                    let val_str = match &val {
+                        serde_json::Value::String(s) => s.clone(),
+                        v => v.to_string(),
+                    };
+                    parts.push(Content::text(format!("{src} => {val_str}")));
+                }
+            }
+        } else {
+            let value = response.value_string();
+            if !value.is_empty() {
+                parts.push(Content::text(value));
+            }
         }
 
         if parts.is_empty() {

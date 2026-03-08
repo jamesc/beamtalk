@@ -196,12 +196,35 @@ impl ReplClient {
     }
 
     /// Send an eval operation.
+    // Used in integration tests (#[cfg(test)]) — suppress dead_code lint for binary crate.
+    #[allow(dead_code)]
     pub async fn eval(&self, code: &str) -> Result<ReplResponse, String> {
         let request = serde_json::json!({
             "op": "eval",
             "id": next_msg_id(),
             "code": code
         });
+        self.send(&request).await
+    }
+
+    /// Evaluate an expression with optional trace mode (BT-1238).
+    ///
+    /// Unified entry point used by the MCP evaluate tool. When `trace` is false,
+    /// behaves identically to the plain `eval` operation. When true, sets
+    /// `trace: true` in the protocol request and returns `steps` in the response.
+    pub async fn evaluate_with_options(
+        &self,
+        code: &str,
+        trace: bool,
+    ) -> Result<ReplResponse, String> {
+        let mut request = serde_json::json!({
+            "op": "eval",
+            "id": next_msg_id(),
+            "code": code
+        });
+        if trace {
+            request["trace"] = serde_json::Value::Bool(true);
+        }
         self.send(&request).await
     }
 
@@ -485,6 +508,9 @@ pub struct ReplResponse {
     pub errors: Option<Vec<serde_json::Value>>,
     /// Test results (test / test-all ops).
     pub results: Option<serde_json::Value>,
+    /// Per-statement trace steps (eval with trace=true, BT-1238).
+    /// Each entry is `{"src": "...", "value": ...}`.
+    pub steps: Option<Vec<serde_json::Value>>,
     /// Supported operations and protocol info (describe op).
     pub ops: Option<serde_json::Value>,
     /// Protocol and language versions (describe op).

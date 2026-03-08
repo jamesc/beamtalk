@@ -1056,7 +1056,7 @@ builtin_keywords() ->
 -spec describe_ops() -> map().
 describe_ops() ->
     #{
-        <<"eval">> => #{<<"params">> => [<<"code">>]},
+        <<"eval">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"trace">>]},
         <<"stdin">> => #{<<"params">> => [<<"value">>]},
         <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
         <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>, <<"file">>]},
