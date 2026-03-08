@@ -1178,11 +1178,11 @@ cwd_is_absolute_test() ->
         end,
     ?assert(IsAbsolute).
 
-cwd_direct_call_test() ->
-    %% cwd/0 is a direct call (no shim needed — 'cwd' and cwd are the same atom)
-    Result = beamtalk_file:'cwd'(),
-    ?assert(is_binary(Result)),
-    ?assert(byte_size(Result) > 0).
+cwd_matches_erlang_get_cwd_test() ->
+    %% Verify beamtalk_file:'cwd'() returns the same value as file:get_cwd/0
+    {ok, CwdList} = file:get_cwd(),
+    CwdBin = unicode:characters_to_binary(CwdList),
+    ?assertEqual(CwdBin, beamtalk_file:'cwd'()).
 
 %%% ============================================================================
 %%% tempDirectory/0

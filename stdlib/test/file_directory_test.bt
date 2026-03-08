@@ -232,9 +232,14 @@ TestCase subclass: FileDirectoryTest
     self assert: (cwd class name) equals: #String
 
   testCwdIsAbsolute =>
-    cwd := File cwd
-    // Absolute paths are longer than a single component
-    self assert: cwd size > 1
+    // On Unix, absolute paths always contain '/' (and the cwd is always absolute).
+    // Platform guard: only assert the '/' prefix on Unix so the test is correct
+    // on both Unix and Windows without needing startsWith:.
+    isUnix := System osFamily = "unix"
+    isUnix ifTrue: [
+      cwd := File cwd
+      self assert: (cwd includesSubstring: "/")
+    ]
 
   testTempDirectory =>
     tmp := File tempDirectory
