@@ -1481,15 +1481,36 @@ impl CoreErlangGenerator {
                                 ") in "
                             ]);
                         }
-                        Pattern::Literal(_, span) => {
-                            // Literal patterns (e.g. `{#ok, val}`) require pattern matching
-                            // semantics; use a `match:` expression or the `beamtalk_match`
-                            // mechanism instead of destructuring assignment.
-                            return Err(CodeGenError::UnsupportedFeature {
-                                feature: "Literal patterns in tuple destructuring assignment"
-                                    .to_string(),
-                                location: format!("{span:?}"),
-                            });
+                        Pattern::Literal(lit, _span) => {
+                            // Guard-check: extract the element and assert it equals the literal.
+                            // If it doesn't match, raise `{badmatch, Tuple}` to mirror the arity
+                            // check error format above.
+                            let elem_var = self.fresh_temp_var("Elem");
+                            let guard_ok_var = self.fresh_temp_var("GuardOk");
+                            let mismatch_var = self.fresh_temp_var("Mismatch");
+                            let lit_doc = self.generate_literal(lit)?;
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(elem_var.clone()),
+                                " = call 'erlang':'element'(",
+                                one_based,
+                                ", ",
+                                Document::String(tup_var.clone()),
+                                ") in "
+                            ]);
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(guard_ok_var),
+                                " = case ",
+                                Document::String(elem_var),
+                                " of <",
+                                lit_doc,
+                                "> when 'true' -> 'ok' <",
+                                Document::String(mismatch_var),
+                                "> when 'true' -> call 'erlang':'error'({'badmatch', ",
+                                Document::String(tup_var.clone()),
+                                "}) end in "
+                            ]);
                         }
                         Pattern::Wildcard(_) => {}
                         _ => {
