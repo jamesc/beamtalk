@@ -655,6 +655,11 @@ impl Analyser {
                     self.define_pattern_variables_in_scope(t);
                 }
             }
+            Pattern::Map { pairs, .. } => {
+                for pair in pairs {
+                    self.define_pattern_variables_in_scope(&pair.value);
+                }
+            }
             Pattern::Binary { .. } | Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
         }
     }

@@ -1114,6 +1114,21 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
             let joined = join_docs(elem_docs, ", ");
             docvec!["#[", joined, "]"]
         }
+        Pattern::Map { pairs, .. } => {
+            let pair_docs: Vec<Document<'static>> = pairs
+                .iter()
+                .map(|p| {
+                    docvec![
+                        "#",
+                        Document::String(p.key.to_string()),
+                        " => ",
+                        unparse_pattern(&p.value)
+                    ]
+                })
+                .collect();
+            let joined = join_docs(pair_docs, ", ");
+            docvec!["#{", joined, "}"]
+        }
     }
 }
 
