@@ -539,6 +539,10 @@ fn selector_hover_info(selector: &MessageSelector, span: Span) -> HoverInfo {
 /// falls within a variable's span. Mirrors `collect_pattern_variables` from
 /// codegen but produces `HoverInfo` instead of binding names.
 fn find_hover_in_pattern(pattern: &Pattern, offset: u32, type_map: &TypeMap) -> Option<HoverInfo> {
+    let span = pattern.span();
+    if offset < span.start() || offset >= span.end() {
+        return None;
+    }
     match pattern {
         Pattern::Variable(ident) => {
             if offset >= ident.span.start() && offset < ident.span.end() {
@@ -1837,8 +1841,8 @@ mod tests {
             "Should get hover info for pattern variable `a`"
         );
         assert!(
-            hover_a.unwrap().contents.contains('a'),
-            "Hover for `a` should mention the variable name"
+            hover_a.unwrap().contents.contains("`a`"),
+            "Hover for `a` should mention the exact variable name"
         );
 
         let hover_b = hover_at(source, Position::new(0, 4));
@@ -1847,8 +1851,8 @@ mod tests {
             "Should get hover info for pattern variable `b`"
         );
         assert!(
-            hover_b.unwrap().contents.contains('b'),
-            "Hover for `b` should mention the variable name"
+            hover_b.unwrap().contents.contains("`b`"),
+            "Hover for `b` should mention the exact variable name"
         );
     }
 
@@ -1862,8 +1866,8 @@ mod tests {
             "Should get hover info for pattern variable `a`"
         );
         assert!(
-            hover_a.unwrap().contents.contains('a'),
-            "Hover for `a` should mention the variable name"
+            hover_a.unwrap().contents.contains("`a`"),
+            "Hover for `a` should mention the exact variable name"
         );
 
         let hover_b = hover_at(source, Position::new(0, 5));
@@ -1872,8 +1876,8 @@ mod tests {
             "Should get hover info for pattern variable `b`"
         );
         assert!(
-            hover_b.unwrap().contents.contains('b'),
-            "Hover for `b` should mention the variable name"
+            hover_b.unwrap().contents.contains("`b`"),
+            "Hover for `b` should mention the exact variable name"
         );
     }
 
