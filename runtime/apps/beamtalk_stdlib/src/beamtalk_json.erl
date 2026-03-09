@@ -45,11 +45,14 @@
 %% JSON objects become Dictionaries (maps with binary keys), arrays become
 %% Lists, strings become Strings, numbers become Integer or Float,
 %% true/false stay as atoms, null becomes nil.
--spec 'parse:'(binary()) -> term().
+%%
+%% Returns `Result ok: value` on success, `Result error:` on invalid JSON.
+%% Type error (non-String argument) still raises.
+-spec 'parse:'(binary()) -> map().
 'parse:'(JsonStr) when is_binary(JsonStr) ->
     try
-        Result = jsx:decode(JsonStr, [return_maps]),
-        normalize_decoded(Result)
+        Value = jsx:decode(JsonStr, [return_maps]),
+        beamtalk_result:from_tagged_tuple({ok, normalize_decoded(Value)})
     catch
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
@@ -57,13 +60,13 @@
             Error0 = beamtalk_error:new(parse_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Check that the string is valid JSON">>),
-            beamtalk_error:raise(Error2);
+            beamtalk_result:from_tagged_tuple({error, Error2});
         _:Reason ->
             Error0 = beamtalk_error:new(parse_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
             Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
             Error3 = beamtalk_error:with_hint(Error2, <<"Check that the string is valid JSON">>),
-            beamtalk_error:raise(Error3)
+            beamtalk_result:from_tagged_tuple({error, Error3})
     end;
 'parse:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'Json'),

@@ -21,11 +21,11 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// Yaml parse: "answer: 42"                  // => _
-/// Yaml parse: "- 1\n- 2\n- 3"              // => _
+/// (Yaml parse: "answer: 42") unwrap         // => _
+/// (Yaml parse: "- 1\n- 2\n- 3") unwrap     // => #(1, 2, 3)
 /// Yaml generate: #{"name" => "Ada"}
 /// // => _
-/// Yaml parseFile: "/etc/myapp.yaml"
+/// (Yaml parseFile: "/etc/myapp.yaml") unwrap
 /// // => _
 /// ```
 sealed Object subclass: Yaml
@@ -42,11 +42,11 @@ sealed Object subclass: Yaml
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Yaml parse: "42"                        // => 42
-  /// Yaml parse: "- 1\n- 2\n- 3"            // => [1,2,3]
-  /// Yaml parse: "null"                      // => nil
+  /// (Yaml parse: "42") unwrap              // => 42
+  /// (Yaml parse: "- 1\n- 2\n- 3") unwrap  // => #(1, 2, 3)
+  /// (Yaml parse: "null") unwrap            // => nil
   /// ```
-  class sealed parse: yamlString :: String =>
+  class sealed parse: yamlString :: String -> Result =>
     (Erlang beamtalk_yaml) parse: yamlString
 
   /// Parse a multi-document YAML string into a List of values (class method).
@@ -56,9 +56,9 @@ sealed Object subclass: Yaml
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Yaml parseAll: "42\n---\n43"            // => _
+  /// (Yaml parseAll: "42\n---\n43") unwrap   // => _
   /// ```
-  class sealed parseAll: yamlString :: String -> List =>
+  class sealed parseAll: yamlString :: String -> Result =>
     (Erlang beamtalk_yaml) parseAll: yamlString
 
   /// Generate a YAML string from a Beamtalk value (class method).
@@ -84,7 +84,7 @@ sealed Object subclass: Yaml
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Yaml parseFile: "/etc/myapp.yaml"      // => _
+  /// (Yaml parseFile: "/etc/myapp.yaml") unwrap   // => _
   /// ```
-  class sealed parseFile: path :: String -> Object =>
+  class sealed parseFile: path :: String -> Result =>
     (Erlang beamtalk_yaml) parseFile: path

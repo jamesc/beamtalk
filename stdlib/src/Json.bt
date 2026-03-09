@@ -21,8 +21,8 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// Json parse: "42"                          // => 42
-/// Json parse: "[1, 2, 3]"                   // => [1,2,3]
+/// (Json parse: "42") unwrap                 // => 42
+/// (Json parse: "[1, 2, 3]") unwrap          // => #(1, 2, 3)
 /// Json generate: #{"name" => "Ada"}
 /// // => _
 /// Json prettyPrint: #{"name" => "Ada"}
@@ -38,11 +38,11 @@ sealed Object subclass: Json
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Json parse: "[1, 2, 3]"            // => [1,2,3]
-  /// Json parse: "42"                   // => 42
-  /// Json parse: "null"                 // => nil
+  /// (Json parse: "[1, 2, 3]") unwrap   // => #(1, 2, 3)
+  /// (Json parse: "42") unwrap          // => 42
+  /// (Json parse: "null") unwrap        // => nil
   /// ```
-  class sealed parse: jsonString :: String =>
+  class sealed parse: jsonString :: String -> Result =>
     (Erlang beamtalk_json) parse: jsonString
 
   /// Generate a JSON string from a Beamtalk value (class method).

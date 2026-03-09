@@ -6,11 +6,11 @@
 /// ## One-shot convenience methods (class-side)
 ///
 /// ```beamtalk
-/// resp := HTTPClient get: "https://httpbin.org/get"
+/// resp := (HTTPClient get: "https://httpbin.org/get") unwrap
 /// resp status     // => 200
 ///
-/// resp := HTTPClient post: "https://httpbin.org/post" body: "{}"
-/// resp := HTTPClient delete: "https://httpbin.org/delete"
+/// resp := (HTTPClient post: "https://httpbin.org/post" body: "{}") unwrap
+/// resp := (HTTPClient delete: "https://httpbin.org/delete") unwrap
 /// ```
 ///
 /// ## Persistent client (actor instance)
@@ -24,8 +24,8 @@
 ///   #headers => #(#("X-Custom", "value")),
 ///   #timeout => 10000
 /// }
-/// resp := client get: "/get"
-/// resp := client post: "/post" body: "{}"
+/// resp := (client get: "/get") unwrap
+/// resp := (client post: "/post" body: "{}") unwrap
 /// client stop
 /// ```
 Actor subclass: HTTPClient
@@ -39,40 +39,39 @@ Actor subclass: HTTPClient
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := HTTPClient get: "https://httpbin.org/get"
+  /// resp := (HTTPClient get: "https://httpbin.org/get") unwrap
   /// resp status   // => 200
   /// ```
-  class get: url :: String -> HTTPResponse => (Erlang beamtalk_http) get: url
+  class get: url :: String -> Result => (Erlang beamtalk_http) get: url
 
   /// Perform a one-shot POST request with body (class method).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := HTTPClient post: "https://httpbin.org/post" body: "{}"
+  /// resp := (HTTPClient post: "https://httpbin.org/post" body: "{}") unwrap
   /// resp ok   // => true
   /// ```
-  class post: url :: String body: body :: String -> HTTPResponse =>
+  class post: url :: String body: body :: String -> Result =>
     (Erlang beamtalk_http) post: url body: body
 
   /// Perform a one-shot PUT request with body (class method).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := HTTPClient put: "https://httpbin.org/put" body: "{}"
+  /// resp := (HTTPClient put: "https://httpbin.org/put" body: "{}") unwrap
   /// resp ok   // => true
   /// ```
-  class put: url :: String body: body :: String -> HTTPResponse =>
+  class put: url :: String body: body :: String -> Result =>
     (Erlang beamtalk_http) put: url body: body
 
   /// Perform a one-shot DELETE request (class method).
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := HTTPClient delete: "https://httpbin.org/delete"
+  /// resp := (HTTPClient delete: "https://httpbin.org/delete") unwrap
   /// resp ok   // => true
   /// ```
-  class delete: url :: String -> HTTPResponse =>
-    (Erlang beamtalk_http) delete: url
+  class delete: url :: String -> Result => (Erlang beamtalk_http) delete: url
 
   /// Perform a one-shot generic request (class method).
   ///
@@ -86,7 +85,7 @@ Actor subclass: HTTPClient
   /// resp := HTTPClient request: #patch url: "https://httpbin.org/patch"
   ///   options: #{#body => "{}", #timeout => 5000}
   /// ```
-  class request: method url: url :: String options: opts :: Dictionary -> HTTPResponse =>
+  class request: method url: url :: String options: opts :: Dictionary -> Result =>
     (Erlang beamtalk_http) request: method url: url options: opts
 
   // ===== Instance methods (persistent-client style) =====
@@ -99,10 +98,10 @@ Actor subclass: HTTPClient
   /// ## Examples
   /// ```beamtalk
   /// client := HTTPClient spawnWith: #{#baseUrl => "https://httpbin.org"}
-  /// resp := client get: "/get"
+  /// resp := (client get: "/get") unwrap
   /// resp ok   // => true
   /// ```
-  get: path :: String -> HTTPResponse =>
+  get: path :: String -> Result =>
     url := self.baseUrl ++ path
     (Erlang beamtalk_http) request: #get url: url options: #{
       #headers => self.headers,
@@ -113,10 +112,10 @@ Actor subclass: HTTPClient
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := client post: "/post" body: "{}"
+  /// resp := (client post: "/post" body: "{}") unwrap
   /// resp ok   // => true
   /// ```
-  post: path :: String body: body :: String -> HTTPResponse =>
+  post: path :: String body: body :: String -> Result =>
     url := self.baseUrl ++ path
     opts := #{#headers => self.headers, #timeout => self.timeout, #body => body}
     (Erlang beamtalk_http) request: #post url: url options: opts
@@ -125,10 +124,10 @@ Actor subclass: HTTPClient
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := client put: "/put" body: "{}"
+  /// resp := (client put: "/put" body: "{}") unwrap
   /// resp ok   // => true
   /// ```
-  put: path :: String body: body :: String -> HTTPResponse =>
+  put: path :: String body: body :: String -> Result =>
     url := self.baseUrl ++ path
     opts := #{#headers => self.headers, #timeout => self.timeout, #body => body}
     (Erlang beamtalk_http) request: #put url: url options: opts
@@ -137,10 +136,10 @@ Actor subclass: HTTPClient
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := client delete: "/delete"
+  /// resp := (client delete: "/delete") unwrap
   /// resp ok   // => true
   /// ```
-  delete: path :: String -> HTTPResponse =>
+  delete: path :: String -> Result =>
     url := self.baseUrl ++ path
     (Erlang beamtalk_http) request: #delete url: url options: #{
       #headers => self.headers,
@@ -160,7 +159,7 @@ Actor subclass: HTTPClient
   /// resp := client request: #patch path: "/patch" options: #{#body => "{}"}
   /// resp ok   // => true
   /// ```
-  request: method path: path :: String options: opts :: Dictionary -> HTTPResponse =>
+  request: method path: path :: String options: opts :: Dictionary -> Result =>
     url := self.baseUrl ++ path
     defaults := #{#headers => self.headers, #timeout => self.timeout}
     (Erlang beamtalk_http) request: method url: url options: (defaults merge: opts)

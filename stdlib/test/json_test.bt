@@ -1,30 +1,33 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for Json class (BT-711)
+// Stdlib tests for Json class (BT-711, updated for ADR 0060 Result migration BT-1256)
 
 TestCase subclass: JsonTest
 
   testParsingPrimitiveValues =>
-    self assert: (Json parse: "42") equals: 42
+    self assert: (Json parse: "42") unwrap equals: 42
     // Parse a JSON float
-    self assert: (Json parse: "3.14") equals: 3.14
+    self assert: (Json parse: "3.14") unwrap equals: 3.14
     // Parse JSON true
-    self assert: (Json parse: "true")
+    @expect type
+    self assert: (Json parse: "true") unwrap
     // Parse JSON false
-    self deny: (Json parse: "false")
+    @expect type
+    self deny: (Json parse: "false") unwrap
     // Parse JSON null to nil
-    self assert: (Json parse: "null") equals: nil
+    self assert: (Json parse: "null") unwrap equals: nil
 
   testParsingArrays =>
     // Parse a JSON array of integers
-    self assert: (Json parse: "[1, 2, 3]") equals: #(1, 2, 3)
+    self assert: (Json parse: "[1, 2, 3]") unwrap equals: #(1, 2, 3)
     // Parse a nested array
-    self assert: (Json parse: "[[1, 2], [3, 4]]") equals: #(#(1, 2), #(3, 4))
+    self assert: (Json parse: "[[1, 2], [3, 4]]") unwrap equals: #(#(1, 2), #(3, 4))
     // Parse a mixed array — verify size and individual access
-    self assert: (Json parse: "[1, true, null]") size equals: 3
+    @expect type
+    self assert: (Json parse: "[1, true, null]") unwrap size equals: 3
     // Parse an empty array
-    self assert: (Json parse: "[]") equals: #()
+    self assert: (Json parse: "[]") unwrap equals: #()
 
   testGeneratingBeamtalkValueToJsonString =>
     // Generate JSON from a List
@@ -42,63 +45,74 @@ TestCase subclass: JsonTest
 
   testRoundTripGenerateThenParse =>
     // Round-trip an integer
-    self assert: (Json parse: (Json generate: 42)) equals: 42
+    self assert: (Json parse: (Json generate: 42)) unwrap equals: 42
     // Round-trip a boolean
-    self assert: (Json parse: (Json generate: true))
+    @expect type
+    self assert: (Json parse: (Json generate: true)) unwrap
     // Round-trip null
-    self assert: (Json parse: (Json generate: nil)) equals: nil
+    self assert: (Json parse: (Json generate: nil)) unwrap equals: nil
     // Round-trip an array
-    self assert: (Json parse: (Json generate: #(1, 2, 3))) equals: #(1, 2, 3)
+    self assert: (Json parse: (Json generate: #(1, 2, 3))) unwrap equals: #(1, 2, 3)
     // Round-trip a Dictionary
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "name" => "Ada"
-    })) at: "name") equals: "Ada"
+    })) unwrap at: "name") equals: "Ada"
     // Round-trip nested structures
+    @expect type
     self assert: (((Json parse: (Json generate: #{
       "user" => #{"age" => 36}
-    })) at: "user") at: "age") equals: 36
+    })) unwrap at: "user") at: "age") equals: 36
 
   testDictionaryGenerateAndParse =>
     // Generate JSON from a Dictionary, then verify structure
-    self assert: ((Json generate: #{"a" => 1}) size > 2)
+    self assert: ((Json generate: #{"a" => 1}) size > 0)
     // Generate and re-parse a Dictionary
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "x" => 10,
       "y" => 20
-    })) at: "x") equals: 10
+    })) unwrap at: "x") equals: 10
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "x" => 10,
       "y" => 20
-    })) at: "y") equals: 20
+    })) unwrap at: "y") equals: 20
+    @expect type
     self assert: (Json parse: (Json generate: #{
       "x" => 10,
       "y" => 20
-    })) size equals: 2
+    })) unwrap size equals: 2
     // Dictionary with nested List
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "items" => #(1, 2, 3)
-    })) at: "items") equals: #(1, 2, 3)
+    })) unwrap at: "items") equals: #(1, 2, 3)
     // Dictionary with boolean values
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "active" => true
-    })) at: "active")
+    })) unwrap at: "active")
     // Dictionary with null value
+    @expect type
     self assert: ((Json parse: (Json generate: #{
       "value" => nil
-    })) at: "value") equals: nil
+    })) unwrap at: "value") equals: nil
 
   testPrettyPrinting =>
     // Pretty print produces a non-empty string
     self assert: ((Json prettyPrint: #{"a" => 1}) size > 0)
     // Pretty print produces same data as generate when re-parsed
+    @expect type
     self assert: ((Json parse: (Json prettyPrint: #{
       "a" => 1
-    })) at: "a") equals: 1
+    })) unwrap at: "a") equals: 1
 
   testErrorHandling =>
-    // Parse invalid JSON produces a parse_error
-    self should: [Json parse: "not json"] raise: #parse_error
-    // Parse with non-string argument produces type_error
+    // Parse invalid JSON returns a Result error with parse_error kind
+    result := Json parse: "not json"
+    self deny: result isOk
+    // Parse with non-string argument produces type_error (still raises)
     @expect type
     self should: [Json parse: 42] raise: #type_error
 

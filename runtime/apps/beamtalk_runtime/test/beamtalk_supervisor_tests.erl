@@ -248,3 +248,26 @@ stale_handle_stop_test() ->
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
         beamtalk_supervisor:stop(Self)
     ).
+
+root_registry_returns_nil_when_empty_test() ->
+    %% get_root/0 returns nil when no root has been registered.
+    %% Delete the table first so we start from a clean state.
+    catch ets:delete(beamtalk_root_supervisor),
+    ?assertEqual(nil, beamtalk_supervisor:get_root()).
+
+root_registry_roundtrip_test() ->
+    %% register_root/1 followed by get_root/0 returns the same tuple.
+    catch ets:delete(beamtalk_root_supervisor),
+    FakePid = self(),
+    SupTuple = {beamtalk_supervisor, 'AppSup', 'bt@my_app@app_sup', FakePid},
+    ok = beamtalk_supervisor:register_root(SupTuple),
+    ?assertEqual(SupTuple, beamtalk_supervisor:get_root()).
+
+root_registry_overwrite_test() ->
+    %% A second register_root/1 call replaces the previous entry.
+    catch ets:delete(beamtalk_root_supervisor),
+    Pid1 = self(),
+    Pid2 = spawn(fun() -> ok end),
+    beamtalk_supervisor:register_root({beamtalk_supervisor, 'Old', old_mod, Pid1}),
+    beamtalk_supervisor:register_root({beamtalk_supervisor, 'New', new_mod, Pid2}),
+    ?assertMatch({beamtalk_supervisor, 'New', new_mod, _}, beamtalk_supervisor:get_root()).

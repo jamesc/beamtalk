@@ -370,3 +370,26 @@ stderrLines_stream_yields_correct_sequence_test() ->
         _ ->
             {skip, "Unix-only test"}
     end.
+
+%%% ============================================================================
+%%% dispatch — open returns Result ok (ADR 0060)
+%%% ============================================================================
+
+dispatch_open_returns_result_ok_test() ->
+    case os:type() of
+        {unix, _} ->
+            {ok, SupPid} = beamtalk_subprocess_sup:start_link(),
+            R = beamtalk_subprocess:dispatch(
+                'open:args:',
+                [<<"/bin/true">>, []],
+                nil
+            ),
+            unlink(SupPid),
+            exit(SupPid, shutdown),
+            ?assertMatch(
+                #{'$beamtalk_class' := 'Result', 'isOk' := true},
+                R
+            );
+        _ ->
+            {skip, "Unix-only test"}
+    end.

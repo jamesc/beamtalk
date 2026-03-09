@@ -32,12 +32,7 @@ pub struct BeamtalkMcp {
 
 /// Create an error `CallToolResult` with `is_error` set to true.
 fn error_result(msg: impl Into<String>) -> CallToolResult {
-    CallToolResult {
-        content: vec![Content::text(msg.into())],
-        is_error: Some(true),
-        meta: None,
-        structured_content: None,
-    }
+    CallToolResult::error(vec![Content::text(msg.into())])
 }
 
 // --- Tool parameter types ---
@@ -354,12 +349,7 @@ impl BeamtalkMcp {
         // Partial loads (some files succeeded, some failed) are still reported as
         // errors so MCP clients that inspect is_error see the failure.
         if !errors.is_empty() {
-            return Ok(CallToolResult {
-                content: parts,
-                is_error: Some(true),
-                meta: None,
-                structured_content: None,
-            });
+            return Ok(CallToolResult::error(parts));
         }
 
         Ok(CallToolResult::success(parts))
@@ -776,12 +766,9 @@ impl BeamtalkMcp {
         let has_errors = !result.errors.is_empty();
         let text = serde_json::to_string_pretty(&result).unwrap_or_else(|_| format!("{result:?}"));
         let structured = serde_json::to_value(&result).ok();
-        let mut call_result = CallToolResult {
-            content: vec![Content::text(text)],
-            structured_content: structured,
-            is_error: None,
-            meta: None,
-        };
+        let mut call_result = CallToolResult::default();
+        call_result.content = vec![Content::text(text)];
+        call_result.structured_content = structured;
         if has_errors {
             call_result.is_error = Some(true);
         }
@@ -999,8 +986,8 @@ fn run_lint_structured(path: &str) -> LintResult {
 impl ServerHandler for BeamtalkMcp {
     /// Return server metadata and capabilities advertised to MCP clients.
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            instructions: Some(
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions(
                 "Beamtalk MCP server — interact with live beamtalk objects through the REPL. \
                  Use 'evaluate' to run beamtalk expressions, 'load_project' to load all files \
                  from a project in dependency order, 'load_file' to load a single source file, \
@@ -1009,12 +996,8 @@ impl ServerHandler for BeamtalkMcp {
                  'lint' to run style/redundancy checks on .bt source files, \
                  'show_codegen' to inspect generated Core Erlang (use class+selector for loaded classes), 'info' for symbol details, \
                  'describe' for capability discovery, 'clear' to reset bindings, \
-                 'unload' to remove a module, and 'interrupt' to cancel evaluations."
-                    .to_string(),
-            ),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            ..Default::default()
-        }
+                 'unload' to remove a module, and 'interrupt' to cancel evaluations.",
+            )
     }
 }
 

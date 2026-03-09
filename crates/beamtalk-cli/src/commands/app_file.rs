@@ -34,14 +34,16 @@ pub struct ClassMetadata {
 /// - `{modules, [...]}` auto-discovered from compiled modules
 /// - `{registered, []}`
 /// - `{applications, [kernel, stdlib, beamtalk_runtime]}`
+/// - `{mod, {beamtalk_{appname}_app, []}}` when `app_callback_module` is `Some`
 /// - `{env, [{classes, [...]}]}` class→module mapping
 pub fn generate_app_file(
     build_dir: &Utf8Path,
     manifest: &PackageManifest,
     module_names: &[String],
     class_metadata: &[ClassMetadata],
+    app_callback_module: Option<&str>,
 ) -> Result<()> {
-    let app_content = format_app_file(manifest, module_names, class_metadata);
+    let app_content = format_app_file(manifest, module_names, class_metadata, app_callback_module);
     let app_path = build_dir.join(format!("{}.app", manifest.name));
 
     fs::write(&app_path, app_content)
@@ -56,6 +58,7 @@ fn format_app_file(
     manifest: &PackageManifest,
     module_names: &[String],
     class_metadata: &[ClassMetadata],
+    app_callback_module: Option<&str>,
 ) -> String {
     let description = escape_erlang_string(
         manifest
@@ -68,13 +71,18 @@ fn format_app_file(
     let modules_list = format_modules_list(module_names);
     let classes_list = format_classes_list(class_metadata);
 
+    let mod_entry = match app_callback_module {
+        Some(cb_module) => format!("\n    {{mod, {{{cb_module}, []}}}},"),
+        None => String::new(),
+    };
+
     format!(
         r#"{{application, {name}, [
     {{description, "{description}"}},
     {{vsn, "{version}"}},
     {{modules, [{modules}]}},
     {{registered, []}},
-    {{applications, [kernel, stdlib, beamtalk_runtime]}},
+    {{applications, [kernel, stdlib, beamtalk_runtime]}},{mod_entry}
     {{env, [
         {{classes, [{classes}]}}
     ]}}
@@ -85,6 +93,7 @@ fn format_app_file(
         version = version,
         modules = modules_list,
         classes = classes_list,
+        mod_entry = mod_entry,
     )
 }
 
@@ -148,7 +157,7 @@ mod tests {
         ];
         let classes = vec![];
 
-        let result = format_app_file(&manifest, &modules, &classes);
+        let result = format_app_file(&manifest, &modules, &classes, None);
 
         assert!(result.contains("{application, my_app, ["));
         assert!(result.contains("{description, \"A test app\"}"));
@@ -158,12 +167,13 @@ mod tests {
         assert!(result.contains("{applications, [kernel, stdlib, beamtalk_runtime]}"));
         assert!(result.contains("{classes, []}"));
         assert!(result.ends_with(".\n"));
+        assert!(!result.contains("{mod,"));
     }
 
     #[test]
     fn test_format_app_file_default_description() {
         let manifest = test_manifest("my_app", "0.1.0", None);
-        let result = format_app_file(&manifest, &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None);
 
         assert!(result.contains("{description, \"A beamtalk package\"}"));
     }
@@ -178,7 +188,7 @@ mod tests {
             parent_class: "Actor".to_string(),
         }];
 
-        let result = format_app_file(&manifest, &modules, &classes);
+        let result = format_app_file(&manifest, &modules, &classes, None);
 
         assert!(result.contains("{'bt@my_counter@counter', 'Counter', 'Actor'}"));
     }
@@ -205,7 +215,7 @@ mod tests {
         let modules = vec!["bt@my_app@main".to_string()];
         let classes = vec![];
 
-        generate_app_file(&build_dir, &manifest, &modules, &classes).unwrap();
+        generate_app_file(&build_dir, &manifest, &modules, &classes, None).unwrap();
 
         let app_path = build_dir.join("my_app.app");
         assert!(app_path.exists());
@@ -236,7 +246,43 @@ mod tests {
     #[test]
     fn test_format_app_file_escapes_description() {
         let manifest = test_manifest("my_app", "0.1.0", Some(r#"A "quoted" app"#));
-        let result = format_app_file(&manifest, &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None);
         assert!(result.contains(r#"{description, "A \"quoted\" app"}"#));
+    }
+
+    #[test]
+    fn test_format_app_file_with_mod_entry() {
+        let manifest = test_manifest("my_app", "0.1.0", Some("An OTP app"));
+        let result = format_app_file(&manifest, &[], &[], Some("beamtalk_my_app_app"));
+        assert!(result.contains("{mod, {beamtalk_my_app_app, []}}"));
+    }
+
+    #[test]
+    fn test_format_app_file_without_mod_entry() {
+        let manifest = test_manifest("my_app", "0.1.0", None);
+        let result = format_app_file(&manifest, &[], &[], None);
+        assert!(!result.contains("{mod,"));
+    }
+
+    #[test]
+    fn test_generate_app_file_with_supervisor_writes_mod() {
+        let temp = TempDir::new().unwrap();
+        let build_dir = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let manifest = test_manifest("my_app", "0.1.0", Some("Test"));
+        let modules = vec!["bt@my_app@app_sup".to_string()];
+        let classes = vec![];
+
+        generate_app_file(
+            &build_dir,
+            &manifest,
+            &modules,
+            &classes,
+            Some("beamtalk_my_app_app"),
+        )
+        .unwrap();
+
+        let content = std::fs::read_to_string(build_dir.join("my_app.app")).unwrap();
+        assert!(content.contains("{mod, {beamtalk_my_app_app, []}}"));
     }
 }

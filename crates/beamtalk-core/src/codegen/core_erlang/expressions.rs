@@ -1408,25 +1408,85 @@ impl CoreErlangGenerator {
     ///
     /// Returns a `Vec<Document>` of `let X = ... in` bindings.
     /// Variables are bound in the current scope for subsequent expressions.
-    #[allow(clippy::too_many_lines)]
     pub(super) fn generate_destructure_bindings(
         &mut self,
         pattern: &Pattern,
         value: &Expression,
     ) -> Result<Vec<Document<'static>>> {
+        let (docs, _rhs_var, _bound) =
+            self.generate_destructure_extractions(pattern, value, "let ", " in ")?;
+        Ok(docs)
+    }
+
+    /// Core extraction logic shared between compiled-code and REPL destructuring.
+    ///
+    /// Evaluates `value` into a fresh temp var, then delegates to
+    /// [`Self::generate_pattern_extractions_from_var`] for the element bindings.
+    ///
+    /// The `indent` and `terminator` parameters control formatting:
+    /// - Non-REPL: `indent = "let "`, `terminator = " in "` (inline expression style)
+    /// - REPL: `indent = "    let "`, `terminator = " in\n"` (module body style)
+    ///
+    /// Returns `(extraction_docs, rhs_var_name, bound_pairs)` where:
+    /// - `extraction_docs` is the flat let-binding chain (RHS eval + element extractions)
+    /// - `rhs_var_name` is the Core Erlang var holding the evaluated RHS
+    /// - `bound_pairs` is `Vec<(beamtalk_name, core_erlang_var)>` for each `Pattern::Variable` bound
+    #[allow(clippy::type_complexity)]
+    pub(super) fn generate_destructure_extractions(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expression,
+        indent: &'static str,
+        terminator: &'static str,
+    ) -> Result<(Vec<Document<'static>>, String, Vec<(String, String)>)> {
+        let rhs_prefix = match pattern {
+            Pattern::Array { .. } => "Arr",
+            Pattern::Tuple { .. } => "Tup",
+            Pattern::Map { .. } => "Map",
+            _ => {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: "Unsupported destructuring pattern kind".to_string(),
+                    location: format!("{:?}", pattern.span()),
+                });
+            }
+        };
+        let rhs_var = self.fresh_temp_var(rhs_prefix);
+        let val_doc = self.expression_doc(value)?;
+        let mut docs = vec![docvec![
+            indent,
+            Document::String(rhs_var.clone()),
+            " = ",
+            val_doc,
+            terminator,
+        ]];
+        let (extraction_docs, bound_pairs) =
+            self.generate_pattern_extractions_from_var(pattern, &rhs_var, indent, terminator)?;
+        docs.extend(extraction_docs);
+        Ok((docs, rhs_var, bound_pairs))
+    }
+
+    /// Generates element-extraction let-bindings for a pattern given a pre-evaluated RHS var.
+    ///
+    /// Unlike [`Self::generate_destructure_extractions`], this function does **not** evaluate
+    /// the RHS expression — the caller is responsible for providing an already-evaluated
+    /// `rhs_var` (e.g., after unwrapping a mutation-threaded result in REPL mode).
+    ///
+    /// Returns `(extraction_docs, bound_pairs)` where:
+    /// - `extraction_docs` are the element-extraction let-bindings
+    /// - `bound_pairs` is `Vec<(beamtalk_name, core_erlang_var)>` for each `Pattern::Variable` bound
+    #[allow(clippy::too_many_lines, clippy::type_complexity)]
+    pub(super) fn generate_pattern_extractions_from_var(
+        &mut self,
+        pattern: &Pattern,
+        rhs_var: &str,
+        indent: &'static str,
+        terminator: &'static str,
+    ) -> Result<(Vec<Document<'static>>, Vec<(String, String)>)> {
         let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut bound_pairs: Vec<(String, String)> = Vec::new();
 
         match pattern {
             Pattern::Array { elements, .. } => {
-                let arr_var = self.fresh_temp_var("Arr");
-                let val_doc = self.expression_doc(value)?;
-                docs.push(docvec![
-                    "let ",
-                    Document::String(arr_var.clone()),
-                    " = ",
-                    val_doc,
-                    " in "
-                ]);
                 for (idx, elem) in elements.iter().enumerate() {
                     let one_based = Document::String((idx + 1).to_string());
                     match elem {
@@ -1434,14 +1494,16 @@ impl CoreErlangGenerator {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
                             docs.push(docvec![
-                                "let ",
-                                Document::String(core_var),
+                                indent,
+                                Document::String(core_var.clone()),
                                 " = call 'beamtalk_message_dispatch':'send'(",
-                                Document::String(arr_var.clone()),
+                                Document::String(rhs_var.to_string()),
                                 ", 'at:', [",
                                 one_based,
-                                "]) in "
+                                "])",
+                                terminator,
                             ]);
+                            bound_pairs.push((id.name.to_string(), core_var));
                         }
                         Pattern::Wildcard(_) => {}
                         _ => {
@@ -1454,31 +1516,23 @@ impl CoreErlangGenerator {
                 }
             }
             Pattern::Tuple { elements, .. } => {
-                let tup_var = self.fresh_temp_var("Tup");
-                let val_doc = self.expression_doc(value)?;
-                docs.push(docvec![
-                    "let ",
-                    Document::String(tup_var.clone()),
-                    " = ",
-                    val_doc,
-                    " in "
-                ]);
                 // Arity check: verify the tuple has the expected number of elements.
                 let expected_arity = Document::String(elements.len().to_string());
                 let size_ok_var = self.fresh_temp_var("SizeOk");
                 let bad_arity_var = self.fresh_temp_var("BadArity");
                 docs.push(docvec![
-                    "let ",
+                    indent,
                     Document::String(size_ok_var),
                     " = case call 'erlang':'tuple_size'(",
-                    Document::String(tup_var.clone()),
+                    Document::String(rhs_var.to_string()),
                     ") of <",
                     expected_arity,
                     "> when 'true' -> 'ok' <",
                     Document::String(bad_arity_var),
                     "> when 'true' -> call 'erlang':'error'({'badmatch', ",
-                    Document::String(tup_var.clone()),
-                    "}) end in "
+                    Document::String(rhs_var.to_string()),
+                    "}) end",
+                    terminator,
                 ]);
                 for (idx, elem) in elements.iter().enumerate() {
                     let one_based = Document::String((idx + 1).to_string());
@@ -1487,14 +1541,16 @@ impl CoreErlangGenerator {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
                             docs.push(docvec![
-                                "let ",
-                                Document::String(core_var),
+                                indent,
+                                Document::String(core_var.clone()),
                                 " = call 'erlang':'element'(",
                                 one_based,
                                 ", ",
-                                Document::String(tup_var.clone()),
-                                ") in "
+                                Document::String(rhs_var.to_string()),
+                                ")",
+                                terminator,
                             ]);
+                            bound_pairs.push((id.name.to_string(), core_var));
                         }
                         Pattern::Literal(lit, _span) => {
                             // Guard-check: extract the element and assert it equals the literal.
@@ -1505,16 +1561,17 @@ impl CoreErlangGenerator {
                             let mismatch_var = self.fresh_temp_var("Mismatch");
                             let lit_doc = self.generate_literal(lit)?;
                             docs.push(docvec![
-                                "let ",
+                                indent,
                                 Document::String(elem_var.clone()),
                                 " = call 'erlang':'element'(",
                                 one_based,
                                 ", ",
-                                Document::String(tup_var.clone()),
-                                ") in "
+                                Document::String(rhs_var.to_string()),
+                                ")",
+                                terminator,
                             ]);
                             docs.push(docvec![
-                                "let ",
+                                indent,
                                 Document::String(guard_ok_var),
                                 " = case ",
                                 Document::String(elem_var),
@@ -1523,8 +1580,9 @@ impl CoreErlangGenerator {
                                 "> when 'true' -> 'ok' <",
                                 Document::String(mismatch_var),
                                 "> when 'true' -> call 'erlang':'error'({'badmatch', ",
-                                Document::String(tup_var.clone()),
-                                "}) end in "
+                                Document::String(rhs_var.to_string()),
+                                "}) end",
+                                terminator,
                             ]);
                         }
                         Pattern::Wildcard(_) => {}
@@ -1538,15 +1596,6 @@ impl CoreErlangGenerator {
                 }
             }
             Pattern::Map { pairs, .. } => {
-                let map_var = self.fresh_temp_var("Map");
-                let val_doc = self.expression_doc(value)?;
-                docs.push(docvec![
-                    "let ",
-                    Document::String(map_var.clone()),
-                    " = ",
-                    val_doc,
-                    " in "
-                ]);
                 for pair in pairs {
                     match &pair.value {
                         Pattern::Variable(id) => {
@@ -1554,14 +1603,16 @@ impl CoreErlangGenerator {
                             self.bind_var(&id.name, &core_var);
                             let key_atom = Document::String(escape_atom_chars(pair.key.as_str()));
                             docs.push(docvec![
-                                "let ",
-                                Document::String(core_var),
+                                indent,
+                                Document::String(core_var.clone()),
                                 " = call 'erlang':'map_get'('",
                                 key_atom,
                                 "', ",
-                                Document::String(map_var.clone()),
-                                ") in "
+                                Document::String(rhs_var.to_string()),
+                                ")",
+                                terminator,
                             ]);
+                            bound_pairs.push((id.name.to_string(), core_var));
                         }
                         Pattern::Wildcard(_) => {}
                         _ => {
@@ -1576,12 +1627,12 @@ impl CoreErlangGenerator {
             _ => {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Unsupported destructuring pattern kind".to_string(),
-                    location: "generate_destructure_bindings".to_string(),
+                    location: format!("{:?}", pattern.span()),
                 });
             }
         }
 
-        Ok(docs)
+        Ok((docs, bound_pairs))
     }
 
     /// Generates cascade arguments, hoisting field-assignment bindings to outer scope.

@@ -58,6 +58,7 @@ get_endpoint_returns_200_test() ->
     {ok, _} = application:ensure_all_started(gun),
     Port = beamtalk_http_test_server:start(),
     Url = iolist_to_binary(["http://localhost:", integer_to_list(Port), "/get"]),
-    Resp = beamtalk_http:'get:'(Url),
+    #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Resp} =
+        beamtalk_http:'get:'(Url),
     ?assertEqual(200, maps:get(status, Resp)),
     beamtalk_http_test_server:stop().

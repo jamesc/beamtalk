@@ -22,6 +22,9 @@ pub struct Manifest {
     /// The optional `[run]` section of the manifest.
     #[serde(default)]
     pub run: Option<RunConfig>,
+    /// The optional `[application]` section of the manifest.
+    #[serde(default)]
+    pub application: Option<ApplicationConfig>,
 }
 
 /// REPL entry point configuration from the `[run]` section of `beamtalk.toml`.
@@ -32,6 +35,19 @@ pub struct Manifest {
 pub struct RunConfig {
     /// Beamtalk expression to evaluate at REPL startup (e.g. `"Main run"`).
     pub entry: String,
+}
+
+/// OTP application configuration from the `[application]` section of `beamtalk.toml`.
+///
+/// When present, `beamtalk build` generates an OTP application callback module
+/// (`beamtalk_{appname}_app.erl`) and includes `{mod, ...}` in the `.app` file.
+/// `beamtalk run` starts the package as an OTP application rather than calling
+/// an imperative start method.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ApplicationConfig {
+    /// Beamtalk class name of the root `Supervisor subclass:` for this OTP application
+    /// (e.g. `"AppSup"`). The generated `start/2` callback calls its `start_link`.
+    pub supervisor: String,
 }
 
 /// Package metadata from `beamtalk.toml`.
@@ -122,6 +138,26 @@ pub fn find_run_config(project_root: &Utf8Path) -> Result<Option<RunConfig>> {
         miette::bail!("{}", format_name_error(&manifest.package.name, &e));
     }
     Ok(manifest.run)
+}
+
+/// Look for `beamtalk.toml` in the given directory and return the `[application]` config if present.
+///
+/// Returns `None` if no manifest file exists or no `[application]` section is present.
+/// Returns an error if the file exists but is malformed.
+pub fn find_application_config(project_root: &Utf8Path) -> Result<Option<ApplicationConfig>> {
+    let manifest_path = project_root.join("beamtalk.toml");
+    if !manifest_path
+        .try_exists()
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to stat manifest '{manifest_path}'"))?
+    {
+        return Ok(None);
+    }
+    let manifest = parse_manifest_raw(&manifest_path)?;
+    if let Err(e) = validate_package_name(&manifest.package.name) {
+        miette::bail!("{}", format_name_error(&manifest.package.name, &e));
+    }
+    Ok(manifest.application)
 }
 
 /// Format a package name validation error with an optional suggestion.
@@ -815,5 +851,92 @@ version = "0.1.0"
         let _ = suggest_package_name("café");
         let _ = suggest_package_name("über_app");
         let _ = suggest_package_name("日本語");
+    }
+
+    #[test]
+    fn test_find_application_config_present() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[application]
+supervisor = "AppSup"
+"#,
+        );
+
+        let app_config = find_application_config(&path).unwrap();
+        assert!(app_config.is_some());
+        assert_eq!(app_config.unwrap().supervisor, "AppSup");
+    }
+
+    #[test]
+    fn test_find_application_config_absent() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+"#,
+        );
+
+        let app_config = find_application_config(&path).unwrap();
+        assert!(app_config.is_none());
+    }
+
+    #[test]
+    fn test_find_application_config_no_manifest() {
+        let temp = TempDir::new().unwrap();
+        let path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let app_config = find_application_config(&path).unwrap();
+        assert!(app_config.is_none());
+    }
+
+    #[test]
+    fn test_find_application_config_rejects_invalid_package_name() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "BadName"
+version = "0.1.0"
+
+[application]
+supervisor = "AppSup"
+"#,
+        );
+
+        let result = find_application_config(&path);
+        assert!(
+            result.is_err(),
+            "should reject manifest with invalid package name"
+        );
+    }
+
+    #[test]
+    fn test_parse_manifest_with_application_section() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[application]
+supervisor = "RootSup"
+"#,
+        );
+
+        let manifest = parse_manifest_raw(&path.join("beamtalk.toml")).unwrap();
+        assert!(manifest.application.is_some());
+        assert_eq!(manifest.application.unwrap().supervisor, "RootSup");
     }
 }
