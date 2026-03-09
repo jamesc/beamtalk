@@ -259,7 +259,9 @@ do_stateacc_mutation(List) ->
 %%       Total = element(1, StateAcc),
 %%       NewTotal = maybe_await(Total) + maybe_await(Item),
 %%       {NewTotal}
-%% After foldl: one maps:put to repack for outer method body.
+%% After foldl: element(1, FoldResult) extracts the final value.
+%% (The one-time maps:put repack for the outer method body is omitted here
+%% as it is not part of the per-element hot path being benchmarked.)
 -spec do_tuple_acc_mutation(list()) -> integer().
 do_tuple_acc_mutation(List) ->
     Total0 = 0,

@@ -182,7 +182,16 @@ impl ThreadingPlan {
         // Eligible when the body has only simple local var mutations — no field writes,
         // no self-sends, no tier-2 assignments, and no complex control-flow subexpressions
         // that generate `StateAcc`-dependent code (e.g. `ifTrue:` with inner mutations).
-        let use_tuple_acc = if !allow_tuple_acc || threaded_locals.is_empty() {
+        //
+        // ValueType methods have no `State` gen_server variable in scope; `collect:`,
+        // `select:`, and `inject:` tuple paths call `append_repack_stateacc` which seeds
+        // from `initial_state_var` (= the current `State` name). Using tuple-acc in
+        // ValueType context would reference an unbound variable — always fall through to
+        // the map-acc path which uses its own fresh `maps:new()` seed instead.
+        let use_tuple_acc = if !allow_tuple_acc
+            || threaded_locals.is_empty()
+            || matches!(generator.context, CodeGenContext::ValueType)
+        {
             false
         } else {
             let body_has_tier2_threaded_assign_tuple = body.body.iter().any(|s| {
