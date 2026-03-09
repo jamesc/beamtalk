@@ -107,8 +107,75 @@ fn test_generate_binary_op_wraps_non_literals() {
     );
     // Right operand is a literal: should NOT be wrapped.
     assert!(
-        !output.ends_with("maybe_await'(1))"),
+        !output.contains("maybe_await'(1)"),
         "literal right operand should not be wrapped; got: {output}"
+    );
+}
+
+#[test]
+fn test_generate_power_op_no_wrap_for_literals() {
+    use crate::ast::Identifier;
+    let mut generator = CoreErlangGenerator::new("test");
+    // Both literals: neither should be wrapped.
+    let left = Expression::Literal(Literal::Integer(2), Span::new(0, 1));
+    let right = vec![Expression::Literal(Literal::Integer(8), Span::new(4, 5))];
+    let doc = generator.generate_binary_op("**", &left, &right).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        !output.contains("maybe_await"),
+        "literal operands in ** should not be wrapped; got: {output}"
+    );
+
+    // Non-literal left operand: must be wrapped.
+    let left_var = Expression::Identifier(Identifier {
+        name: "base".into(),
+        span: Span::new(0, 4),
+    });
+    let right_lit = vec![Expression::Literal(Literal::Integer(2), Span::new(7, 8))];
+    let doc2 = generator
+        .generate_binary_op("**", &left_var, &right_lit)
+        .unwrap();
+    let output2 = doc2.to_pretty_string();
+    assert!(
+        output2.contains("maybe_await"),
+        "non-literal left operand in ** must be wrapped; got: {output2}"
+    );
+    assert!(
+        !output2.contains("maybe_await'(2)"),
+        "literal right operand in ** should not be wrapped; got: {output2}"
+    );
+}
+
+#[test]
+fn test_generate_concat_op_no_wrap_for_literals() {
+    use crate::ast::Identifier;
+    let mut generator = CoreErlangGenerator::new("test");
+    // String literal ++ string literal: neither should be wrapped.
+    let left = Expression::Literal(Literal::String("hello".into()), Span::new(0, 7));
+    let right = vec![Expression::Literal(
+        Literal::String(" world".into()),
+        Span::new(11, 19),
+    )];
+    let doc = generator.generate_binary_op("++", &left, &right).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        !output.contains("maybe_await"),
+        "literal string operands in ++ should not be wrapped; got: {output}"
+    );
+
+    // Non-literal right operand: must be wrapped.
+    let left_lit = Expression::Literal(Literal::String("hi".into()), Span::new(0, 4));
+    let right_var = vec![Expression::Identifier(Identifier {
+        name: "suffix".into(),
+        span: Span::new(8, 14),
+    })];
+    let doc2 = generator
+        .generate_binary_op("++", &left_lit, &right_var)
+        .unwrap();
+    let output2 = doc2.to_pretty_string();
+    assert!(
+        output2.contains("maybe_await"),
+        "non-literal right operand in ++ must be wrapped; got: {output2}"
     );
 }
 

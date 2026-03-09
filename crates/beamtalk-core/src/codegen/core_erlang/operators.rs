@@ -27,9 +27,10 @@ impl CoreErlangGenerator {
     /// the AST shape alone, without any scope tracking.
     fn is_definitely_sync(expr: &Expression) -> bool {
         match expr {
-            // All literal values (integers, floats, strings, symbols, booleans,
-            // nil, atoms, lists) are immediate values — never futures.
+            // All AST literals are immediate (non-future) values and can never be futures.
             Expression::Literal(_, _) => true,
+            // List literals (#(1, 2, 3)) are constructed values — never futures.
+            Expression::ListLiteral { .. } => true,
             // `self` refers to the current actor PID / value object — never a future.
             Expression::Identifier(id) if id.name == "self" => true,
             _ => false,
