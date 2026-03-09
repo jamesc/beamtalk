@@ -86,15 +86,49 @@ pub(crate) fn extract_btscript_from_markdown(content: &str) -> String {
 ///
 /// Lines that are already standalone `// => …` markers (or comments without `=>`) are left
 /// unchanged.
+/// Find the byte position of `// =>` in `line`, skipping occurrences inside
+/// double-quoted string literals.
+///
+/// Returns `None` if no unquoted `// =>` is present.
+fn find_assertion_marker_pos(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let marker = b"// =>";
+    let marker_len = marker.len();
+    let mut i = 0;
+    let mut in_string = false;
+
+    while i < len {
+        if in_string {
+            if bytes[i] == b'\\' {
+                // Skip escaped character (e.g. \" inside a string)
+                i += 2;
+                continue;
+            } else if bytes[i] == b'"' {
+                in_string = false;
+            }
+            i += 1;
+        } else if bytes[i] == b'"' {
+            in_string = true;
+            i += 1;
+        } else if i + marker_len <= len && &bytes[i..i + marker_len] == marker {
+            return Some(i);
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
 pub(crate) fn normalize_inline_assertions(content: &str) -> String {
     let mut out = String::with_capacity(content.len() + 64);
 
     for line in content.lines() {
-        // Detect an inline assertion: the line must contain `// =>` but must NOT start with `//`
-        // (which would be a standalone comment/assertion line already).
+        // Detect an inline assertion: the line must contain `// =>` outside
+        // string literals and must NOT start with `//` (standalone comment).
         let trimmed = line.trim();
         if !trimmed.starts_with("//") {
-            if let Some(pos) = line.find("// =>") {
+            if let Some(pos) = find_assertion_marker_pos(line) {
                 // Split into expression part and assertion part.
                 let expr_part = line[..pos].trim_end();
                 let assertion_part = line[pos..].trim_start(); // "// => value"
@@ -194,7 +228,11 @@ fn extract_to_btscript_files(
                 }
             })
             .collect();
-        let btscript_path = btscript_dir.join(format!("{safe_stem}.btscript"));
+        // Prefix with a zero-padded index to prevent collisions when two distinct
+        // filenames sanitise to the same safe_stem (e.g. "01-foo.md" and "01_foo.md"
+        // both become "01_foo").
+        let unique_stem = format!("{:03}_{safe_stem}", pairs.len());
+        let btscript_path = btscript_dir.join(format!("{unique_stem}.btscript"));
         fs::write(&btscript_path, &normalised)
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to write btscript for '{md_file}'"))?;
@@ -427,5 +465,60 @@ mod tests {
         let content = "x := 5  // => 5\n// A comment\nx + 1\n// => 6\n";
         let result = normalize_inline_assertions(content);
         assert_eq!(result, "x := 5\n// => 5\n// A comment\nx + 1\n// => 6\n");
+    }
+
+    #[test]
+    fn test_normalize_does_not_split_marker_inside_string_literal() {
+        // "// =>" inside a double-quoted string is NOT an assertion marker.
+        let content = "Transcript show: \"literal // => text\"\n";
+        assert_eq!(normalize_inline_assertions(content), content);
+    }
+
+    #[test]
+    fn test_normalize_splits_real_assertion_after_string_literal() {
+        // A real assertion after a string expression is still split correctly.
+        let content = "\"hello\" size  // => 5\n";
+        let result = normalize_inline_assertions(content);
+        assert_eq!(result, "\"hello\" size\n// => 5\n");
+    }
+
+    #[test]
+    fn test_normalize_marker_in_string_with_real_assertion() {
+        // String literal contains "// =>" AND there's a real assertion after.
+        // The string content should win — only the outside marker splits.
+        let content = "x greet: \"hi // => bye\"  // => ok\n";
+        let result = normalize_inline_assertions(content);
+        assert_eq!(result, "x greet: \"hi // => bye\"\n// => ok\n");
+    }
+
+    // ── find_assertion_marker_pos ──────────────────────────────────────────
+
+    #[test]
+    fn test_find_marker_not_in_string() {
+        assert_eq!(find_assertion_marker_pos("x + 1  // => 2"), Some(7));
+    }
+
+    #[test]
+    fn test_find_marker_inside_string_returns_none() {
+        assert_eq!(
+            find_assertion_marker_pos("Transcript show: \"literal // => text\""),
+            None
+        );
+    }
+
+    #[test]
+    fn test_find_marker_after_string() {
+        // Marker appears after a closed string literal — should be found.
+        let line = "\"hello\" size  // => 5";
+        let pos = find_assertion_marker_pos(line).expect("marker should be found");
+        assert!(pos > 0);
+        assert_eq!(&line[pos..], "// => 5");
+    }
+
+    #[test]
+    fn test_find_marker_escaped_quote_does_not_end_string() {
+        // "\\"" — escaped quote inside string, marker is still inside string.
+        let line = "x := \"say \\\"// => nope\\\"\"";
+        assert_eq!(find_assertion_marker_pos(line), None);
     }
 }
