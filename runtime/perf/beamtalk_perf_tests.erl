@@ -534,12 +534,28 @@ bench_block_threading() ->
         bench_block_threading:sum_direct_params_maybe_await(N)
     end, ?ITERATIONS, ?WARMUP),
 
+    %% BT-1286: scale loop — best-case for literal-skipping optimisation.
+    %% result := result * 2 repeated N times: 1 variable + 1 literal per op.
+    %% all_wrapped = pre-BT-1286 (4 maybe_await/iter), literal_opt = post (2/iter).
+    ScaleNativeTimings = run_benchmark(fun() ->
+        bench_block_threading:scale_native(N)
+    end, ?ITERATIONS, ?WARMUP),
+    ScaleAllWrappedTimings = run_benchmark(fun() ->
+        bench_block_threading:scale_direct_params_all_wrapped(N)
+    end, ?ITERATIONS, ?WARMUP),
+    ScaleLiteralOptTimings = run_benchmark(fun() ->
+        bench_block_threading:scale_direct_params_literal_opt(N)
+    end, ?ITERATIONS, ?WARMUP),
+
     NativeStats = stats(NativeTimings),
     StateAccStats = stats(StateAccTimings),
     StateAccAwaitStats = stats(StateAccAwaitTimings),
     ProcDictStats = stats(ProcDictTimings),
     DirectParamsStats = stats(DirectParamsTimings),
     DirectParamsAwaitStats = stats(DirectParamsAwaitTimings),
+    ScaleNativeStats = stats(ScaleNativeTimings),
+    ScaleAllWrappedStats = stats(ScaleAllWrappedTimings),
+    ScaleLiteralOptStats = stats(ScaleLiteralOptTimings),
 
     report("block/sum_native", NativeStats, ?ITERATIONS),
     report("block/sum_stateacc", StateAccStats, ?ITERATIONS),
@@ -547,6 +563,9 @@ bench_block_threading() ->
     report("block/sum_procdict", ProcDictStats, ?ITERATIONS),
     report("block/sum_direct_params", DirectParamsStats, ?ITERATIONS),
     report("block/sum_direct_params_maybe_await", DirectParamsAwaitStats, ?ITERATIONS),
+    report("block/scale_native", ScaleNativeStats, ?ITERATIONS),
+    report("block/scale_all_wrapped", ScaleAllWrappedStats, ?ITERATIONS),
+    report("block/scale_literal_opt", ScaleLiteralOptStats, ?ITERATIONS),
 
     NativeMedian = maps:get(median, NativeStats),
     StateAccMedian = maps:get(median, StateAccStats),
@@ -554,6 +573,9 @@ bench_block_threading() ->
     ProcDictMedian = maps:get(median, ProcDictStats),
     DirectParamsMedian = maps:get(median, DirectParamsStats),
     DirectParamsAwaitMedian = maps:get(median, DirectParamsAwaitStats),
+    ScaleNativeMedian = maps:get(median, ScaleNativeStats),
+    ScaleAllWrappedMedian = maps:get(median, ScaleAllWrappedStats),
+    ScaleLiteralOptMedian = maps:get(median, ScaleLiteralOptStats),
     io:format(standard_error,
         "PERF: block/stateacc_overhead ~.2fx vs native~n",
         [StateAccMedian / max(NativeMedian, 1)]),
@@ -575,6 +597,16 @@ bench_block_threading() ->
     io:format(standard_error,
         "PERF: block/direct_params_await_overhead ~.2fx vs native~n",
         [DirectParamsAwaitOverhead]),
+    %% BT-1286: Literal-skipping speedup on scale loop (50% fewer maybe_await calls).
+    io:format(standard_error,
+        "PERF: block/scale_all_wrapped_overhead ~.2fx vs native~n",
+        [ScaleAllWrappedMedian / max(ScaleNativeMedian, 1)]),
+    io:format(standard_error,
+        "PERF: block/scale_literal_opt_overhead ~.2fx vs native~n",
+        [ScaleLiteralOptMedian / max(ScaleNativeMedian, 1)]),
+    io:format(standard_error,
+        "PERF: block/scale_literal_opt_speedup ~.2fx vs all_wrapped~n",
+        [ScaleAllWrappedMedian / max(ScaleLiteralOptMedian, 1)]),
     ?assert(DirectParamsOverhead =< 3.0),
 
     %% --- collect: / lists:map ---
