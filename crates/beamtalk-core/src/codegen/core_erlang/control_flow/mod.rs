@@ -28,13 +28,864 @@ mod exception_handling;
 mod list_ops;
 mod while_loops;
 
+use std::fmt::Write as FmtWrite;
+
 use super::document::Document;
 use super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::Expression;
 use crate::docvec;
 
+// ─── ThreadingPlan ────────────────────────────────────────────────────────────
+
+/// Selects the naming convention for state-map keys.
+#[derive(Clone, Debug)]
+pub(super) enum KeyStyle {
+    /// `__local__x` prefix (actor and value-type methods).
+    LocalPrefixed,
+    /// Plain variable name (REPL mode).
+    ReplPlain,
+}
+
+/// Pre-computed contract for threading mutable state through a loop body.
+///
+/// Created once per loop and shared across pack / unpack / extract steps,
+/// eliminating the copy-paste that previously existed in 7+ generators.
+pub(super) struct ThreadingPlan {
+    /// Variables that must be threaded through the loop's `StateAcc`.
+    pub threaded_locals: Vec<String>,
+    /// The `StateAcc` variable name in effect before the loop begins.
+    pub initial_state_var: String,
+    /// Determines how map keys are named for threaded locals.
+    pub key_style: KeyStyle,
+    /// The code-generation context (Actor, `ValueType`, or `Repl`).
+    pub context: CodeGenContext,
+}
+
+impl ThreadingPlan {
+    /// Creates a `ThreadingPlan` for the given loop body.
+    ///
+    /// Also sets `repl_loop_mutated` on the generator when in REPL mode.
+    pub fn new(
+        generator: &mut CoreErlangGenerator,
+        body: &crate::ast::Block,
+        condition: Option<&Expression>,
+    ) -> Self {
+        if generator.is_repl_mode {
+            generator.repl_loop_mutated = true;
+        }
+        let key_style = if generator.is_repl_mode {
+            KeyStyle::ReplPlain
+        } else {
+            KeyStyle::LocalPrefixed
+        };
+        let context = generator.context;
+        let threaded_locals = generator.compute_threaded_locals_for_loop(body, condition);
+        let initial_state_var = generator.current_state_var();
+        Self {
+            threaded_locals,
+            initial_state_var,
+            key_style,
+            context,
+        }
+    }
+
+    /// Returns the state-map key for a threaded local variable.
+    pub fn state_key(&self, var_name: &str) -> String {
+        match self.key_style {
+            KeyStyle::LocalPrefixed => CoreErlangGenerator::local_state_key(var_name),
+            KeyStyle::ReplPlain => var_name.to_string(),
+        }
+    }
+
+    /// Generates the pack prefix: a `maps:put` chain that loads the initial `StateAcc`.
+    ///
+    /// Returns `(pack_doc, init_state_var)` where `init_state_var` names the variable
+    /// to pass as the initial `StateAcc` argument to the loop.
+    ///
+    /// For value-type methods (BT-1053), starts from a fresh `maps:new()` instead
+    /// of the actor State (which does not exist in value-type context).
+    pub fn generate_pack_prefix(
+        &self,
+        generator: &mut CoreErlangGenerator,
+    ) -> (Document<'static>, String) {
+        if self.threaded_locals.is_empty() {
+            return (Document::Nil, self.initial_state_var.clone());
+        }
+        let mut pack_str = String::new();
+        // BT-1053: Value-type methods have no actor State — start from a fresh empty map.
+        let mut current = if matches!(self.context, CodeGenContext::ValueType) {
+            let init_map_var = generator.fresh_temp_var("InitMap");
+            let _ = write!(pack_str, "let {init_map_var} = call 'maps':'new'() in ");
+            init_map_var
+        } else {
+            self.initial_state_var.clone()
+        };
+        for var_name in &self.threaded_locals {
+            let packed_var = generator.fresh_temp_var("Packed");
+            let core_var = generator
+                .lookup_var(var_name)
+                .cloned()
+                .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(var_name));
+            let key = self.state_key(var_name);
+            let _ = write!(
+                pack_str,
+                "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
+            );
+            current = packed_var;
+        }
+        (Document::String(pack_str), current)
+    }
+
+    /// Generates `let X = maps:get(key, StateAcc) in` for each threaded local
+    /// and registers each binding in the generator's current scope.
+    ///
+    /// Returns the binding documents to prepend to the loop body.
+    pub fn generate_unpack_at_iteration_start(
+        &self,
+        generator: &mut CoreErlangGenerator,
+    ) -> Vec<Document<'static>> {
+        let mut docs = Vec::new();
+        for var_name in &self.threaded_locals {
+            let core_var = CoreErlangGenerator::to_core_erlang_var(var_name);
+            let key = self.state_key(var_name);
+            generator.bind_var(var_name, &core_var);
+            docs.push(Document::String(format!(
+                "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
+            )));
+        }
+        docs
+    }
+
+    /// Generates `let X = maps:get(key, FinalState) in` for each threaded local
+    /// to extract updated values after the loop completes.
+    ///
+    /// Returns the extract code as a `String` for easy embedding in `format!` expressions.
+    pub fn generate_extract_suffix(
+        &self,
+        final_state_var: &str,
+        generator: &CoreErlangGenerator,
+    ) -> String {
+        let mut s = String::new();
+        for var_name in &self.threaded_locals {
+            let core_var = generator
+                .lookup_var(var_name)
+                .cloned()
+                .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(var_name));
+            let key = self.state_key(var_name);
+            let _ = write!(
+                s,
+                "let {core_var} = call 'maps':'get'('{key}', {final_state_var}) in "
+            );
+        }
+        s
+    }
+}
+
+// ─── BodyKind ─────────────────────────────────────────────────────────────────
+
+/// Controls how `generate_threaded_loop_body` handles the final expression.
+pub(super) enum BodyKind {
+    /// Letrec loop body: document ends with a trailing ` in `; caller appends
+    /// the recursive `apply` call.  The last non-assignment expression uses the
+    /// nested-state-extraction pattern when there are no direct field assignments.
+    Letrec,
+
+    /// Foldl `do:` body: final accumulator is `StateAcc{N}`.
+    FoldlDo,
+
+    /// Foldl `collect:` body: final accumulator is `{[Result | AccList], StateAcc{N}}`.
+    FoldlCollect,
+
+    /// Foldl `select:`/`reject:` body: last expression becomes a predicate;
+    /// a `case` expression conditionally includes the item.
+    FoldlFilter {
+        /// The item variable used to include in the result list.
+        item_var: String,
+        /// When `true`, negates the predicate (for `reject:`).
+        negate: bool,
+    },
+
+    /// Foldl `inject:into:` body: final accumulator is `{NewAcc, StateAcc{N}}`.
+    FoldlInject,
+}
+
+// ─── CountedLoopFrame ─────────────────────────────────────────────────────────
+
+/// Describes the loop-type-specific structure of a counted (`letrec`-based) loop.
+///
+/// Each `generate_*_with_mutations` for counted loops becomes a thin wrapper
+/// that builds a `CountedLoopFrame` and calls `generate_counted_stateful_loop`.
+pub(super) struct CountedLoopFrame {
+    /// Variable bindings emitted before the `letrec` (e.g. `let N = recv in`).
+    pub preamble: Document<'static>,
+    /// Name of the letrec function (e.g. `"repeat"` or `"loop"`).
+    pub fn_name: String,
+    /// The condition header up to `<'true'> when 'true' ->` for the continue arm.
+    pub continue_header: Document<'static>,
+    /// Expression used as the next counter in the recursive call
+    /// (e.g. `"call 'erlang':'+'(I, 1)"`).
+    pub next_counter: String,
+    /// Initial counter argument for the first `apply` call (e.g. `"1"` or `StartVar`).
+    pub initial_counter: String,
+    /// The `false` arm and `end` (e.g. `"<'false'> when 'true' -> {'nil', StateAcc} end"`).
+    pub false_arm: Document<'static>,
+    /// Optional Beamtalk block-parameter name to bind to `"I"`.
+    pub body_param: Option<String>,
+}
+
+// ─── CoreErlangGenerator impls ────────────────────────────────────────────────
+
 impl CoreErlangGenerator {
-    /// Generate a local variable assignment inside a loop body with state threading (BT-153).
+    /// Generates the per-statement body for a stateful loop with state threading.
+    ///
+    /// This is the **single, unified body generator** replacing 7+
+    /// `generate_*_body_with_threading` copies.  All per-statement dispatch
+    /// (field / self-send / local var / block-local / Tier 2 / nested construct)
+    /// lives here exactly once.
+    ///
+    /// # Caller responsibilities
+    ///
+    /// - Push any necessary scope **before** calling this function (for block params
+    ///   and/or threaded-local unpack bindings).
+    /// - Pop the scope **after** this function returns.
+    /// - Emit the unpack bindings via `plan.generate_unpack_at_iteration_start`
+    ///   before the body (for list ops) or as part of the loop preamble (for letrec loops).
+    ///
+    /// # Returns
+    ///
+    /// `(body_doc, final_state_version)` — body document and the `StateAcc` version
+    /// number in effect at the end of the body.
+    #[allow(clippy::too_many_lines)]
+    pub(super) fn generate_threaded_loop_body(
+        &mut self,
+        body: &crate::ast::Block,
+        plan: &ThreadingPlan,
+        kind: &BodyKind,
+    ) -> Result<(Document<'static>, usize)> {
+        let saved_state_version = self.state_version();
+        self.set_state_version(0);
+        let previous_in_loop_body = self.in_loop_body;
+        self.in_loop_body = true;
+
+        // Needed for Letrec: detect whether body has direct field assignments.
+        let has_direct_field_assignments = body
+            .body
+            .iter()
+            .any(|s| Self::is_field_assignment(&s.expression));
+
+        let filtered_body: Vec<&Expression> = body
+            .body
+            .iter()
+            .map(|s| &s.expression)
+            .filter(|e| !matches!(e, Expression::ExpectDirective { .. }))
+            .collect();
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        let mut has_mutations = false;
+        let mut has_plain_lets = false;
+
+        // For FoldlFilter, allocate a pred_var upfront.
+        let pred_var: Option<String> = if matches!(kind, BodyKind::FoldlFilter { .. }) {
+            Some(self.fresh_temp_var("Pred"))
+        } else {
+            None
+        };
+
+        for (i, expr) in filtered_body.iter().enumerate() {
+            let is_last = i == filtered_body.len() - 1;
+
+            // Letrec body uses a space separator between statements.
+            if i > 0 && matches!(kind, BodyKind::Letrec) {
+                docs.push(Document::Str(" "));
+            }
+
+            if Self::is_field_assignment(expr) {
+                has_mutations = true;
+                let doc = self.generate_field_assignment_open(expr)?;
+                docs.push(doc);
+                if is_last {
+                    self.emit_field_assign_last_expr(&mut docs, kind, pred_var.as_ref());
+                }
+            } else if self.is_actor_self_send(expr) {
+                has_mutations = true;
+                let doc = self.generate_self_dispatch_open(expr)?;
+                docs.push(doc);
+                if is_last {
+                    self.emit_self_send_last_expr(&mut docs, kind, pred_var.as_ref());
+                }
+            } else if Self::is_local_var_assignment(expr) {
+                if let Some(doc) =
+                    self.try_generate_block_local_plain_let(expr, is_last, &plan.threaded_locals)?
+                {
+                    has_plain_lets = true;
+                    docs.push(doc);
+                } else {
+                    has_mutations = true;
+                    let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
+                    docs.push(assign_doc);
+                    if is_last {
+                        self.emit_local_assign_last_expr(&mut docs, kind, pred_var.as_ref());
+                    }
+                }
+            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                has_plain_lets = true;
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                for d in binding_docs {
+                    docs.push(d);
+                }
+                if is_last {
+                    self.emit_destructure_last_expr(
+                        &mut docs,
+                        kind,
+                        pred_var.as_ref(),
+                        has_mutations,
+                    );
+                }
+            } else if matches!(kind, BodyKind::FoldlDo)
+                && (self.control_flow_has_mutations(expr)
+                    || Self::inline_conditional_writes_threaded(expr, &plan.threaded_locals))
+            {
+                // BT-1053: Inline conditional with local mutations returns {Result, NewStateAcc}.
+                // Unpack element(2) so subsequent iterations see the updated StateAcc.
+                has_mutations = true;
+                let tuple_var = self.fresh_temp_var("CondResult");
+                let doc = self.generate_expression(expr)?;
+                let new_version = self.state_version() + 1;
+                self.set_state_version(new_version);
+                let new_state = self.current_state_var();
+                docs.push(docvec![
+                    "let ",
+                    Document::String(tuple_var.clone()),
+                    " = ",
+                    doc,
+                    " in let ",
+                    Document::String(new_state.clone()),
+                    " = call 'erlang':'element'(2, ",
+                    Document::String(tuple_var),
+                    ") in ",
+                ]);
+                if is_last {
+                    docs.push(Document::String(self.current_state_var()));
+                }
+            } else {
+                // Non-assignment expression: handling depends on BodyKind.
+                self.emit_non_assign_expr(
+                    &mut docs,
+                    expr,
+                    i,
+                    is_last,
+                    has_mutations,
+                    has_plain_lets,
+                    has_direct_field_assignments,
+                    kind,
+                    pred_var.as_ref(),
+                )?;
+            }
+        }
+
+        // FoldlFilter: append the predicate case expression after all statements.
+        if let BodyKind::FoldlFilter { item_var, negate } = kind {
+            let final_state = if has_mutations {
+                self.current_state_var()
+            } else {
+                "StateAcc".to_string()
+            };
+            if let Some(pv) = &pred_var {
+                let condition = if *negate {
+                    format!("call 'erlang':'not'({pv})")
+                } else {
+                    pv.clone()
+                };
+                docs.push(Document::String(format!(
+                    "case {condition} of \
+                     <'true'> when 'true' -> {{[{item_var} | AccList], {final_state}}} \
+                     <'false'> when 'true' -> {{AccList, {final_state}}} end"
+                )));
+            }
+        }
+
+        let final_state_version = self.state_version();
+        self.in_loop_body = previous_in_loop_body;
+        self.set_state_version(saved_state_version);
+        Ok((Document::Vec(docs), final_state_version))
+    }
+
+    // ── Body finalizer helpers (called from generate_threaded_loop_body) ─────
+
+    fn emit_field_assign_last_expr(
+        &self,
+        docs: &mut Vec<Document<'static>>,
+        kind: &BodyKind,
+        pred_var: Option<&String>,
+    ) {
+        match kind {
+            BodyKind::Letrec => {
+                // Trailing " in " already in doc; caller appends recursive call.
+            }
+            BodyKind::FoldlDo => {
+                docs.push(Document::String(self.current_state_var()));
+            }
+            BodyKind::FoldlCollect => {
+                let fs = self.current_state_var();
+                docs.push(Document::String(format!("{{[_Val | AccList], {fs}}}")));
+            }
+            BodyKind::FoldlFilter { .. } => {
+                if let Some(pv) = pred_var {
+                    docs.push(Document::String(format!("let {pv} = _Val in ")));
+                }
+            }
+            BodyKind::FoldlInject => {
+                let fs = self.current_state_var();
+                docs.push(Document::String(format!("{{_Val, {fs}}}")));
+            }
+        }
+    }
+
+    fn emit_self_send_last_expr(
+        &mut self,
+        docs: &mut Vec<Document<'static>>,
+        kind: &BodyKind,
+        pred_var: Option<&String>,
+    ) {
+        match kind {
+            BodyKind::Letrec => {
+                // Nothing; caller appends recursive call.
+            }
+            BodyKind::FoldlDo => {
+                docs.push(Document::String(self.current_state_var()));
+            }
+            BodyKind::FoldlCollect => {
+                let fs = self.current_state_var();
+                if let Some(dv) = self.last_dispatch_var.clone() {
+                    let ir = self.fresh_temp_var("ItemResult");
+                    docs.push(Document::String(format!(
+                        "let {ir} = call 'erlang':'element'(1, {dv}) in \
+                         {{[{ir} | AccList], {fs}}}"
+                    )));
+                } else {
+                    docs.push(Document::String(format!("{{['nil' | AccList], {fs}}}")));
+                }
+            }
+            BodyKind::FoldlFilter { .. } => {
+                if let Some(pv) = pred_var {
+                    if let Some(dv) = self.last_dispatch_var.clone() {
+                        docs.push(Document::String(format!(
+                            "let {pv} = call 'erlang':'element'(1, {dv}) in "
+                        )));
+                    } else {
+                        docs.push(Document::String(format!("let {pv} = 'nil' in ")));
+                    }
+                }
+            }
+            BodyKind::FoldlInject => {
+                let fs = self.current_state_var();
+                if let Some(dv) = self.last_dispatch_var.clone() {
+                    let ar = self.fresh_temp_var("AccResult");
+                    docs.push(Document::String(format!(
+                        "let {ar} = call 'erlang':'element'(1, {dv}) in {{{ar}, {fs}}}"
+                    )));
+                } else {
+                    docs.push(Document::String(format!("{{'nil', {fs}}}")));
+                }
+            }
+        }
+    }
+
+    fn emit_local_assign_last_expr(
+        &self,
+        docs: &mut Vec<Document<'static>>,
+        kind: &BodyKind,
+        pred_var: Option<&String>,
+    ) {
+        match kind {
+            BodyKind::Letrec => {
+                // Nothing; caller appends recursive call.
+            }
+            BodyKind::FoldlDo => {
+                docs.push(Document::String(format!(" {}", self.current_state_var())));
+            }
+            BodyKind::FoldlCollect => {
+                let fs = self.current_state_var();
+                docs.push(Document::String(format!(" {{[_Val | AccList], {fs}}}")));
+            }
+            BodyKind::FoldlFilter { .. } => {
+                if let Some(pv) = pred_var {
+                    docs.push(Document::String(format!(" let {pv} = _Val in ")));
+                }
+            }
+            BodyKind::FoldlInject => {
+                let fs = self.current_state_var();
+                docs.push(Document::String(format!(" {{_Val, {fs}}}")));
+            }
+        }
+    }
+
+    fn emit_destructure_last_expr(
+        &self,
+        docs: &mut Vec<Document<'static>>,
+        kind: &BodyKind,
+        pred_var: Option<&String>,
+        has_mutations: bool,
+    ) {
+        match kind {
+            BodyKind::Letrec => {
+                // Nothing; caller appends recursive call.
+            }
+            BodyKind::FoldlDo => {
+                docs.push(Document::String(self.current_state_var()));
+            }
+            BodyKind::FoldlCollect => {
+                let fs = if has_mutations {
+                    self.current_state_var()
+                } else {
+                    "StateAcc".to_string()
+                };
+                docs.push(Document::String(format!("{{['nil' | AccList], {fs}}}")));
+            }
+            BodyKind::FoldlFilter { .. } => {
+                if let Some(pv) = pred_var {
+                    docs.push(Document::String(format!("let {pv} = 'false' in ")));
+                }
+            }
+            BodyKind::FoldlInject => {
+                let fs = if has_mutations {
+                    self.current_state_var()
+                } else {
+                    "StateAcc".to_string()
+                };
+                docs.push(Document::String(format!("{{'nil', {fs}}}")));
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
+    fn emit_non_assign_expr(
+        &mut self,
+        docs: &mut Vec<Document<'static>>,
+        expr: &Expression,
+        _i: usize,
+        is_last: bool,
+        has_mutations: bool,
+        has_plain_lets: bool,
+        has_direct_field_assignments: bool,
+        kind: &BodyKind,
+        pred_var: Option<&String>,
+    ) -> Result<()> {
+        match kind {
+            BodyKind::Letrec => {
+                if is_last && !has_direct_field_assignments {
+                    // BT-478/BT-483: Mutations come from nested constructs.
+                    // Extract updated state via element(2).
+                    let next_version = self.state_version() + 1;
+                    let next_var = format!("StateAcc{next_version}");
+                    let tuple_var = format!("_NestTuple{next_version}");
+                    let expr_code = self.expression_doc(expr)?;
+                    self.set_state_version(next_version);
+                    docs.push(docvec![
+                        format!("let {tuple_var} = "),
+                        expr_code,
+                        format!(" in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"),
+                    ]);
+                } else {
+                    let expr_code = self.expression_doc(expr)?;
+                    docs.push(docvec!["let _ = ", expr_code, " in"]);
+                }
+            }
+            BodyKind::FoldlDo => {
+                if !is_last {
+                    docs.push(Document::Str("let _ = "));
+                }
+                let doc = self.generate_expression(expr)?;
+                docs.push(doc);
+                if is_last && (has_mutations || has_plain_lets) {
+                    docs.push(Document::String(format!(
+                        " in {}",
+                        self.current_state_var()
+                    )));
+                } else if !is_last {
+                    docs.push(Document::Str(" in "));
+                }
+            }
+            BodyKind::FoldlCollect => {
+                if !is_last {
+                    docs.push(Document::Str("let _ = "));
+                }
+                if is_last {
+                    let result_var = self.fresh_temp_var("CollectItem");
+                    let expr_code = self.expression_doc(expr)?;
+                    let fs = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    docs.push(docvec![
+                        format!("let {result_var} = "),
+                        expr_code,
+                        format!(" in {{[{result_var} | AccList], {fs}}}"),
+                    ]);
+                } else {
+                    let doc = self.generate_expression(expr)?;
+                    docs.push(doc);
+                    docs.push(Document::Str(" in "));
+                }
+            }
+            BodyKind::FoldlFilter { .. } => {
+                if !is_last {
+                    docs.push(Document::Str("let _ = "));
+                }
+                if is_last {
+                    if let Some(pv) = pred_var {
+                        let expr_code = self.expression_doc(expr)?;
+                        docs.push(docvec![format!("let {pv} = "), expr_code, " in "]);
+                    }
+                } else {
+                    let doc = self.generate_expression(expr)?;
+                    docs.push(doc);
+                    docs.push(Document::Str(" in "));
+                }
+            }
+            BodyKind::FoldlInject => {
+                if !is_last {
+                    docs.push(Document::Str("let _ = "));
+                }
+                if is_last {
+                    let acc_var = self.fresh_temp_var("AccOut");
+                    let expr_code = self.expression_doc(expr)?;
+                    let fs = if has_mutations {
+                        self.current_state_var()
+                    } else {
+                        "StateAcc".to_string()
+                    };
+                    docs.push(docvec![
+                        format!("let {acc_var} = "),
+                        expr_code,
+                        format!(" in {{{acc_var}, {fs}}}"),
+                    ]);
+                } else {
+                    let doc = self.generate_expression(expr)?;
+                    docs.push(doc);
+                    docs.push(Document::Str(" in "));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Generates a stateful counted loop using a `letrec` with a `(I, StateAcc)` signature.
+    ///
+    /// Handles `timesRepeat:`, `to:do:`, and `to:by:do:` by accepting a `CountedLoopFrame`
+    /// that captures the loop-type-specific preamble, condition, and step expression.
+    pub(super) fn generate_counted_stateful_loop(
+        &mut self,
+        frame: &CountedLoopFrame,
+        body: &crate::ast::Block,
+        plan: &ThreadingPlan,
+    ) -> Result<Document<'static>> {
+        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.push(pack_doc);
+        docs.push(frame.preamble.clone());
+        docs.push(Document::String(format!(
+            " letrec '{fn_name}'/2 = fun (I, StateAcc) -> ",
+            fn_name = frame.fn_name
+        )));
+
+        self.push_scope();
+
+        // Bind the block counter param if any (e.g. to:do: [:i | ...] → bind "i" → "I")
+        if let Some(ref bt_name) = frame.body_param {
+            self.bind_var(bt_name, "I");
+        }
+
+        // Unpack threaded locals at the top of each iteration
+        let unpack_docs = plan.generate_unpack_at_iteration_start(self);
+        docs.extend(unpack_docs);
+
+        // Condition + true arm
+        docs.push(frame.continue_header.clone());
+
+        // Body
+        let (body_doc, final_state_version) =
+            self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
+        docs.push(body_doc);
+        let final_state_var = if final_state_version == 0 {
+            "StateAcc".to_string()
+        } else {
+            format!("StateAcc{final_state_version}")
+        };
+
+        self.pop_scope();
+
+        // Recursive call + false arm + initial apply
+        docs.push(docvec![
+            format!(
+                " apply '{fn_name}'/2 ({next}, {fstate}) ",
+                fn_name = frame.fn_name,
+                next = frame.next_counter,
+                fstate = final_state_var,
+            ),
+            frame.false_arm.clone(),
+            Document::String(format!(
+                "in apply '{fn_name}'/2 ({init_ctr}, {init_state})",
+                fn_name = frame.fn_name,
+                init_ctr = frame.initial_counter,
+            )),
+        ]);
+
+        Ok(Document::Vec(docs))
+    }
+
+    // ── Compat shim ───────────────────────────────────────────────────────────
+
+    /// Generates the foldl lambda body for a `do:` loop with state threading.
+    ///
+    /// This is a forwarding shim used by `value_type_codegen::generate_value_type_do_open`,
+    /// which manages its own pack/extract prefix/suffix independently.
+    pub(in crate::codegen::core_erlang) fn generate_list_do_body_with_threading(
+        &mut self,
+        body: &crate::ast::Block,
+        item_var: &str,
+    ) -> Result<Document<'static>> {
+        let plan = ThreadingPlan::new(self, body, None);
+        self.push_scope();
+        if let Some(param) = body.parameters.first() {
+            self.bind_var(&param.name, item_var);
+        }
+        let mut docs = plan.generate_unpack_at_iteration_start(self);
+        let (body_doc, _) = self.generate_threaded_loop_body(body, &plan, &BodyKind::FoldlDo)?;
+        docs.push(body_doc);
+        self.pop_scope();
+        Ok(Document::Vec(docs))
+    }
+
+    // ── Shared helpers ────────────────────────────────────────────────────────
+
+    /// BT-598: Returns the state map key for a local variable.
+    /// Uses a `__local__` prefix to prevent collision with actor field names.
+    pub(super) fn local_state_key(var_name: &str) -> String {
+        format!("__local__{var_name}")
+    }
+
+    /// BT-598/BT-1053: Compute local variables that need threading through a loop's `StateAcc`.
+    ///
+    /// For actor methods: returns vars that are both read and written in the block
+    /// (excluding block parameters). Reads from an optional condition block are merged.
+    ///
+    /// For value-type methods (BT-1053): returns vars that are captured from the outer
+    /// scope AND written in the block. Using `captured_reads` (not all reads) avoids
+    /// threading block-internal temporaries that happen to be read+written within the block.
+    ///
+    /// Returns empty for REPL mode (handled separately) and other contexts.
+    pub(super) fn compute_threaded_locals_for_loop(
+        &self,
+        body: &crate::ast::Block,
+        condition: Option<&Expression>,
+    ) -> Vec<String> {
+        if self.is_repl_mode {
+            return Vec::new();
+        }
+
+        let analysis = block_analysis::analyze_block(body);
+        let block_params: std::collections::HashSet<String> =
+            body.parameters.iter().map(|p| p.name.to_string()).collect();
+
+        match self.context {
+            CodeGenContext::Actor => {
+                // BT-1224: Only thread vars captured from the outer scope that are also
+                // written in the block. Using `captured_reads` (not `local_reads`) excludes
+                // block-internal temporaries that are first defined then read within the block.
+                // Using `local_reads` caused unbound_var errors in dispatch/4 because packing
+                // code tried to reference unbound Core Erlang variables (e.g. `Y`) that only
+                // exist inside the lambda, not in the outer dispatch/4 function.
+                let mut all_captured_reads = analysis.captured_reads.clone();
+                let mut all_writes = analysis.local_writes.clone();
+                if let Some(Expression::Block(cond_block)) = condition {
+                    let cond_analysis = block_analysis::analyze_block(cond_block);
+                    all_captured_reads = all_captured_reads
+                        .union(&cond_analysis.captured_reads)
+                        .cloned()
+                        .collect();
+                    // BT-1224: Also include writes from the condition block so that
+                    // variables first written in a condition are included in threading.
+                    all_writes = all_writes
+                        .union(&cond_analysis.local_writes)
+                        .cloned()
+                        .collect();
+                }
+                all_captured_reads
+                    .intersection(&all_writes)
+                    .filter(|v| !block_params.contains(*v))
+                    .cloned()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect()
+            }
+            CodeGenContext::ValueType => {
+                // BT-1053: Only thread vars captured from the outer scope that are also
+                // written in the block. `captured_reads` excludes block-internal temps.
+                analysis
+                    .captured_reads
+                    .intersection(&analysis.local_writes)
+                    .filter(|v| !block_params.contains(*v))
+                    .cloned()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .collect()
+            }
+            CodeGenContext::Repl => Vec::new(),
+        }
+    }
+
+    /// BT-1224: Try to generate a plain `let Var = value in` binding for a block-local
+    /// variable assignment that does NOT need `StateAcc` threading.
+    ///
+    /// Returns `Some(doc)` when the assignment is:
+    /// - not the last expression in the block (`!is_last`)
+    /// - not in the `threaded` set (block-local, not captured from outer scope)
+    /// - not in REPL mode (REPL always uses `StateAcc` for local vars)
+    ///
+    /// Returns `None` when the variable needs `StateAcc` threading (caller should use
+    /// `generate_local_var_assignment_in_loop` instead).
+    pub(super) fn try_generate_block_local_plain_let(
+        &mut self,
+        expr: &Expression,
+        is_last: bool,
+        threaded: &[String],
+    ) -> Result<Option<Document<'static>>> {
+        if is_last || self.is_repl_mode {
+            return Ok(None);
+        }
+        let Expression::Assignment { target, value, .. } = expr else {
+            return Ok(None);
+        };
+        let Expression::Identifier(id) = target.as_ref() else {
+            return Ok(None);
+        };
+        if threaded.contains(&id.name.to_string()) {
+            return Ok(None);
+        }
+        // BT-912: Tier-2 block calls return {Result, NewStateAcc}. Fall back to
+        // generate_local_var_assignment_in_loop which already handles Tier-2 unpacking
+        // and StateAcc propagation correctly.
+        if self.is_tier2_value_call(value) {
+            return Ok(None);
+        }
+        let core_var = self
+            .lookup_var(&id.name)
+            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+        let val_doc = self.expression_doc(value)?;
+        self.bind_var(&id.name, &core_var);
+        Ok(Some(docvec![
+            "let ",
+            Document::String(core_var),
+            " = ",
+            val_doc,
+            " in ",
+        ]))
+    }
+
+    /// BT-153: Generate a local variable assignment inside a loop body with state threading.
     ///
     /// Generates code like:
     /// ```erlang
@@ -150,127 +1001,36 @@ impl CoreErlangGenerator {
         Ok(Document::Nil)
     }
 
-    /// BT-598/BT-1053: Compute local variables that need threading through a loop's `StateAcc`.
+    /// Returns `true` if `expr` is an inline conditional (`ifTrue:` / `ifFalse:` /
+    /// `ifTrue:ifFalse:`) whose block argument writes to at least one variable in `threaded`.
     ///
-    /// For actor methods: returns vars that are both read and written in the block
-    /// (excluding block parameters). Reads from an optional condition block are merged.
-    ///
-    /// For value-type methods (BT-1053): returns vars that are captured from the outer
-    /// scope AND written in the block. Using `captured_reads` (not all reads) avoids
-    /// threading block-internal temporaries that happen to be read+written within the block.
-    ///
-    /// Returns empty for REPL mode (handled separately) and other contexts.
-    pub(super) fn compute_threaded_locals_for_loop(
-        &self,
-        body: &crate::ast::Block,
-        condition: Option<&Expression>,
-    ) -> Vec<String> {
-        if self.is_repl_mode {
-            return Vec::new();
-        }
-
-        let analysis = block_analysis::analyze_block(body);
-        let block_params: std::collections::HashSet<String> =
-            body.parameters.iter().map(|p| p.name.to_string()).collect();
-
-        match self.context {
-            CodeGenContext::Actor => {
-                // BT-1224: Only thread vars captured from the outer scope that are also
-                // written in the block. Using `captured_reads` (not `local_reads`) excludes
-                // block-internal temporaries that are first defined then read within the block.
-                // Using `local_reads` caused unbound_var errors in dispatch/4 because packing
-                // code tried to reference unbound Core Erlang variables (e.g. `Y`) that only
-                // exist inside the lambda, not in the outer dispatch/4 function.
-                let mut all_captured_reads = analysis.captured_reads.clone();
-                let mut all_writes = analysis.local_writes.clone();
-                if let Some(Expression::Block(cond_block)) = condition {
-                    let cond_analysis = block_analysis::analyze_block(cond_block);
-                    all_captured_reads = all_captured_reads
-                        .union(&cond_analysis.captured_reads)
-                        .cloned()
-                        .collect();
-                    // BT-1224: Also include writes from the condition block so that
-                    // variables first written in a condition are included in threading.
-                    all_writes = all_writes
-                        .union(&cond_analysis.local_writes)
-                        .cloned()
-                        .collect();
-                }
-                all_captured_reads
-                    .intersection(&all_writes)
-                    .filter(|v| !block_params.contains(*v))
-                    .cloned()
-                    .collect::<std::collections::BTreeSet<_>>()
-                    .into_iter()
-                    .collect()
-            }
-            CodeGenContext::ValueType => {
-                // BT-1053: Only thread vars captured from the outer scope that are also
-                // written in the block. `captured_reads` excludes block-internal temps.
-                analysis
-                    .captured_reads
-                    .intersection(&analysis.local_writes)
-                    .filter(|v| !block_params.contains(*v))
-                    .cloned()
-                    .collect::<std::collections::BTreeSet<_>>()
-                    .into_iter()
-                    .collect()
-            }
-            CodeGenContext::Repl => Vec::new(),
-        }
-    }
-
-    /// BT-598: Returns the state map key for a local variable.
-    /// Uses a `__local__` prefix to prevent collision with actor field names.
-    pub(super) fn local_state_key(var_name: &str) -> String {
-        format!("__local__{var_name}")
-    }
-
-    /// BT-1224: Try to generate a plain `let Var = value in` binding for a block-local
-    /// variable assignment that does NOT need `StateAcc` threading.
-    ///
-    /// Returns `Some(doc)` when the assignment is:
-    /// - not the last expression in the block (`!is_last`)
-    /// - not in the `threaded` set (block-local, not captured from outer scope)
-    /// - not in REPL mode (REPL always uses `StateAcc` for local vars)
-    ///
-    /// Returns `None` when the variable needs `StateAcc` threading (caller should use
-    /// `generate_local_var_assignment_in_loop` instead).
-    pub(super) fn try_generate_block_local_plain_let(
-        &mut self,
+    /// This catches the "pure-overwrite" pattern like `each > max ifTrue: [max := each]`
+    /// where `max` is in `threaded` but the inner block's `captured_reads` is empty
+    /// (no read-before-write), so `control_flow_has_mutations` returns false even
+    /// though we must thread `max` through `StateAcc`.
+    pub(super) fn inline_conditional_writes_threaded(
         expr: &Expression,
-        is_last: bool,
         threaded: &[String],
-    ) -> Result<Option<Document<'static>>> {
-        if is_last || self.is_repl_mode {
-            return Ok(None);
+    ) -> bool {
+        use crate::ast::MessageSelector;
+        if let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        {
+            let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+            if matches!(sel.as_str(), "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:") {
+                for arg in arguments {
+                    if let Expression::Block(block) = arg {
+                        let analysis = block_analysis::analyze_block(block);
+                        if analysis.local_writes.iter().any(|v| threaded.contains(v)) {
+                            return true;
+                        }
+                    }
+                }
+            }
         }
-        let Expression::Assignment { target, value, .. } = expr else {
-            return Ok(None);
-        };
-        let Expression::Identifier(id) = target.as_ref() else {
-            return Ok(None);
-        };
-        if threaded.contains(&id.name.to_string()) {
-            return Ok(None);
-        }
-        // BT-912: Tier-2 block calls return {Result, NewStateAcc}. Fall back to
-        // generate_local_var_assignment_in_loop which already handles Tier-2 unpacking
-        // and StateAcc propagation correctly.
-        if self.is_tier2_value_call(value) {
-            return Ok(None);
-        }
-        let core_var = self
-            .lookup_var(&id.name)
-            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-        let val_doc = self.expression_doc(value)?;
-        self.bind_var(&id.name, &core_var);
-        Ok(Some(docvec![
-            "let ",
-            Document::String(core_var),
-            " = ",
-            val_doc,
-            " in ",
-        ]))
+        false
     }
 }

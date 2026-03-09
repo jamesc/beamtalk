@@ -9,10 +9,9 @@
 //! variants of `timesRepeat:`, `to:do:`, and `to:by:do:`.
 //! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods (BT-1054).
 
-use std::fmt::Write;
-
 use super::super::document::Document;
 use super::super::{CoreErlangGenerator, Result};
+use super::{CountedLoopFrame, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
 
@@ -44,173 +43,25 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        // BT-478: Simplified loop signature — only (I, StateAcc), no separate field params.
-
-        // BT-245: Signal to REPL codegen that this loop mutates bindings
-        if self.is_repl_mode {
-            self.repl_loop_mutated = true;
-        }
-
-        // BT-598: Compute threaded locals for actor methods
-        let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
+        let plan = ThreadingPlan::new(self, body, None);
 
         let n_var = self.fresh_temp_var("temp");
         let receiver_code = self.expression_doc(receiver)?;
 
-        // BT-598: Pack threaded locals into state before starting the loop
-        let initial_state = self.current_state_var();
-        let mut init_state_code = initial_state.clone();
-        let mut pack_prefix = String::new();
-        if !threaded_locals.is_empty() {
-            let mut current = initial_state;
-            for var_name in &threaded_locals {
-                let packed_var = self.fresh_temp_var("Packed");
-                let core_var = self
-                    .lookup_var(var_name)
-                    .cloned()
-                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
-                let key = Self::local_state_key(var_name);
-                let _ = write!(
-                    pack_prefix,
-                    "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
-                );
-                current = packed_var;
-            }
-            init_state_code = current;
-        }
-
-        let mut docs: Vec<Document<'static>> = vec![
-            Document::String(pack_prefix),
-            docvec![
-                format!("let {n_var} = "),
-                receiver_code,
-                " in letrec 'repeat'/2 = fun (I, StateAcc) -> ",
+        let frame = CountedLoopFrame {
+            preamble: docvec![format!("let {n_var} = "), receiver_code, " in"],
+            fn_name: "repeat".to_string(),
+            continue_header: docvec![
+                format!("case call 'erlang':'=<'(I, {n_var}) of "),
+                "<'true'> when 'true' -> ",
             ],
-        ];
-
-        // BT-598: At the start of each loop iteration, read threaded locals from StateAcc.
-        self.push_scope();
-        for var_name in &threaded_locals {
-            let core_var = Self::to_core_erlang_var(var_name);
-            let key = Self::local_state_key(var_name);
-            self.bind_var(var_name, &core_var);
-            docs.push(Document::String(format!(
-                "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
-            )));
-        }
-
-        docs.push(docvec![
-            format!("case call 'erlang':'=<'(I, {n_var}) of "),
-            "<'true'> when 'true' -> ",
-        ]);
-
-        let (body_doc, final_state_version) =
-            self.generate_times_repeat_body_with_threading(body, &threaded_locals)?;
-        docs.push(body_doc);
-        let final_state_var = if final_state_version == 0 {
-            "StateAcc".to_string()
-        } else {
-            format!("StateAcc{final_state_version}")
+            next_counter: "call 'erlang':'+'(I, 1)".to_string(),
+            initial_counter: "1".to_string(),
+            false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
+            body_param: None,
         };
 
-        // Pop scope to restore original bindings
-        self.pop_scope();
-
-        // Initial call with packed state
-        docs.push(docvec![
-            format!(" apply 'repeat'/2 (call 'erlang':'+'(I, 1), {final_state_var}) "),
-            "<'false'> when 'true' -> {'nil', StateAcc} ",
-            "end ",
-            format!("in apply 'repeat'/2 (1, {init_state_code})"),
-        ]);
-
-        Ok(Document::Vec(docs))
-    }
-
-    pub(in crate::codegen::core_erlang) fn generate_times_repeat_body_with_threading(
-        &mut self,
-        body: &Block,
-        threaded_locals: &[String],
-    ) -> Result<(Document<'static>, usize)> {
-        let saved_state_version = self.state_version();
-        self.set_state_version(0);
-
-        // BT-153: Mark that we're in a loop body so identifier lookup uses StateAcc
-        // Save the previous loop-body context so nested loops don't corrupt it
-        let previous_in_loop_body = self.in_loop_body;
-        self.in_loop_body = true;
-
-        // BT-478: Check if body has direct field assignments. If not, mutations
-        // come from nested constructs and the last expression's result must be bound.
-        let has_direct_field_assignments = body
-            .body
-            .iter()
-            .any(|s| Self::is_field_assignment(&s.expression));
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-
-        for (i, stmt) in body.body.iter().enumerate() {
-            let expr = &stmt.expression;
-            if i > 0 {
-                docs.push(Document::Str(" "));
-            }
-            let is_last = i == body.body.len() - 1;
-
-            if Self::is_field_assignment(expr) {
-                // Field assignment - already writes "let _Val = ... in let StateAcc{n} = ... in "
-                // Field assignment handles state version internally
-                // (removed - generate_field_assignment_open does this)
-                let doc = self.generate_field_assignment_open(expr)?;
-                docs.push(doc);
-                // Note: generate_field_assignment_open already writes trailing " in "
-            } else if self.is_actor_self_send(expr) {
-                // BT-245: Self-sends may mutate state — thread state through dispatch
-                let doc = self.generate_self_dispatch_open(expr)?;
-                docs.push(doc);
-            } else if Self::is_local_var_assignment(expr) {
-                // BT-1224: Block-local vars (not in threaded_locals) use plain let.
-                // Threaded captured vars use StateAcc threading.
-                if let Some(doc) =
-                    self.try_generate_block_local_plain_let(expr, is_last, threaded_locals)?
-                {
-                    docs.push(doc);
-                } else {
-                    // BT-153: Threaded variable — thread through StateAcc
-                    let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
-                    docs.push(assign_doc);
-                }
-            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                for d in binding_docs {
-                    docs.push(d);
-                }
-            } else if is_last && !has_direct_field_assignments {
-                // BT-478/BT-483: Last expression with no direct field assignments in body.
-                // Mutations come from nested constructs (e.g., inner to:do:).
-                // Nested constructs return {Result, State} — extract State via element(2).
-                let next_version = self.state_version() + 1;
-                let next_var = format!("StateAcc{next_version}");
-                let tuple_var = format!("_NestTuple{next_version}");
-                let expr_code = self.expression_doc(expr)?;
-                self.set_state_version(next_version);
-                docs.push(docvec![
-                    format!("let {tuple_var} = "),
-                    expr_code,
-                    format!(" in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in"),
-                ]);
-            } else {
-                let expr_code = self.expression_doc(expr)?;
-                docs.push(docvec!["let _ = ", expr_code, " in"]);
-            }
-        }
-
-        // Capture the final state version before restoring
-        let final_state_version = self.state_version();
-
-        // Restore state
-        self.in_loop_body = previous_in_loop_body;
-        self.set_state_version(saved_state_version);
-        Ok((Document::Vec(docs), final_state_version))
+        self.generate_counted_stateful_loop(&frame, body, &plan)
     }
 
     pub(in crate::codegen::core_erlang) fn generate_to_do_with_mutations(
@@ -219,196 +70,36 @@ impl CoreErlangGenerator {
         limit: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        // BT-478: Simplified loop signature — only (I, StateAcc), no separate field params.
-
-        // BT-245: Signal to REPL codegen that this loop mutates bindings
-        if self.is_repl_mode {
-            self.repl_loop_mutated = true;
-        }
-
-        // BT-598: Compute threaded locals for actor methods
-        let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
+        let plan = ThreadingPlan::new(self, body, None);
 
         let start_var = self.fresh_temp_var("temp");
         let receiver_code = self.expression_doc(receiver)?;
-
         let end_var = self.fresh_temp_var("temp");
         let limit_code = self.expression_doc(limit)?;
 
-        // BT-598: Pack threaded locals into state before starting the loop
-        let initial_state = self.current_state_var();
-        let mut init_state_code = initial_state.clone();
-        let mut pack_prefix = String::new();
-        if !threaded_locals.is_empty() {
-            let mut current = initial_state;
-            for var_name in &threaded_locals {
-                let packed_var = self.fresh_temp_var("Packed");
-                let core_var = self
-                    .lookup_var(var_name)
-                    .cloned()
-                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
-                let key = Self::local_state_key(var_name);
-                let _ = write!(
-                    pack_prefix,
-                    "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
-                );
-                current = packed_var;
-            }
-            init_state_code = current;
-        }
+        // Bind the block parameter name (e.g. "i" in [:i | ...])
+        let body_param = body.parameters.first().map(|p| p.name.to_string());
 
-        let mut docs: Vec<Document<'static>> = vec![
-            Document::String(pack_prefix),
-            docvec![
+        let frame = CountedLoopFrame {
+            preamble: docvec![
                 format!("let {start_var} = "),
                 receiver_code,
                 format!(" in let {end_var} = "),
                 limit_code,
-                " in letrec 'loop'/2 = fun (I, StateAcc) -> ",
+                " in",
             ],
-        ];
-
-        // BT-598: At the start of each loop iteration, read threaded locals from StateAcc.
-        self.push_scope();
-        for var_name in &threaded_locals {
-            let core_var = Self::to_core_erlang_var(var_name);
-            let key = Self::local_state_key(var_name);
-            self.bind_var(var_name, &core_var);
-            docs.push(Document::String(format!(
-                "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
-            )));
-        }
-
-        docs.push(docvec![
-            format!("case call 'erlang':'=<'(I, {end_var}) of "),
-            "<'true'> when 'true' -> ",
-        ]);
-
-        let (body_doc, final_state_version) =
-            self.generate_to_do_body_with_threading(body, &threaded_locals)?;
-        docs.push(body_doc);
-        let final_state_var = if final_state_version == 0 {
-            "StateAcc".to_string()
-        } else {
-            format!("StateAcc{final_state_version}")
+            fn_name: "loop".to_string(),
+            continue_header: docvec![
+                format!("case call 'erlang':'=<'(I, {end_var}) of "),
+                "<'true'> when 'true' -> ",
+            ],
+            next_counter: "call 'erlang':'+'(I, 1)".to_string(),
+            initial_counter: start_var,
+            false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
+            body_param,
         };
 
-        // Pop scope to restore original bindings
-        self.pop_scope();
-
-        // Initial call with packed state
-        docs.push(docvec![
-            format!(" apply 'loop'/2 (call 'erlang':'+'(I, 1), {final_state_var}) "),
-            "<'false'> when 'true' -> {'nil', StateAcc} ",
-            "end ",
-            format!(" in apply 'loop'/2 ({start_var}, {init_state_code})"),
-        ]);
-
-        Ok(Document::Vec(docs))
-    }
-
-    pub(in crate::codegen::core_erlang) fn generate_to_do_body_with_threading(
-        &mut self,
-        body: &Block,
-        threaded_locals: &[String],
-    ) -> Result<(Document<'static>, usize)> {
-        // Bind the block parameter to I
-        self.push_scope();
-        if let Some(param) = body.parameters.first() {
-            self.bind_var(&param.name, "I");
-        }
-
-        let saved_state_version = self.state_version();
-        self.set_state_version(0);
-
-        // BT-153: Mark that we're in a loop body so identifier lookup uses StateAcc
-        // Save the previous loop-body context so nested loops don't corrupt it
-        let previous_in_loop_body = self.in_loop_body;
-        self.in_loop_body = true;
-
-        // BT-478: Check if body has direct field assignments vs only nested mutations.
-        // Direct field assignments update StateAcc via generate_field_assignment_open.
-        // Nested mutations (e.g., inner to:do: with field writes) return the updated
-        // state as the expression result.
-        let has_direct_field_assignments = body
-            .body
-            .iter()
-            .any(|s| Self::is_field_assignment(&s.expression));
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-
-        // Generate body expressions
-        for (i, stmt) in body.body.iter().enumerate() {
-            let expr = &stmt.expression;
-            let is_last = i == body.body.len() - 1;
-
-            if Self::is_field_assignment(expr) {
-                // Field assignment - generate_field_assignment_open writes:
-                //   "let _Val = <value> in let StateAccN = maps:put(..., StateAccN-1) in "
-                let doc = self.generate_field_assignment_open(expr)?;
-                docs.push(doc);
-
-                // BT-478: Do NOT write a bare state var for the last expression.
-                // The trailing "in " from generate_field_assignment_open means the
-                // caller's recursive apply will be the body of the let, which is valid
-                // Core Erlang: "let StateAcc1 = ... in apply 'loop'/2 (I+1, StateAcc1)"
-            } else if Self::is_local_var_assignment(expr) {
-                // BT-1224: Block-local vars (not in threaded_locals) use plain let.
-                // Threaded captured vars use StateAcc threading.
-                if let Some(doc) =
-                    self.try_generate_block_local_plain_let(expr, is_last, threaded_locals)?
-                {
-                    docs.push(doc);
-                } else {
-                    // BT-153: Threaded variable — thread through StateAcc
-                    let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
-                    docs.push(assign_doc);
-                    docs.push(Document::Str(" "));
-                }
-            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-                for d in binding_docs {
-                    docs.push(d);
-                }
-            } else {
-                // Non-assignment expression (could be a nested control flow construct)
-                if is_last && !has_direct_field_assignments {
-                    // BT-478/BT-483: Last expression with no direct field assignments in body.
-                    // This means mutations come from nested constructs (e.g., inner to:do:).
-                    // Nested constructs return {Result, State} — extract State via element(2).
-                    //
-                    // IMPORTANT: Compute the next var name WITHOUT incrementing state_version
-                    // first, so the inner expression generates code that reads from the
-                    // CURRENT StateAcc, not the binding we're about to create.
-                    let next_version = self.state_version() + 1;
-                    let next_var = format!("StateAcc{next_version}");
-                    let tuple_var = format!("_NestTuple{next_version}");
-                    let expr_code = self.expression_doc(expr)?;
-                    // NOW increment state version
-                    self.set_state_version(next_version);
-                    // Write: let _NestTupleN = <inner loop> in let StateAccN = element(2, _NestTupleN) in
-                    docs.push(docvec![
-                        format!("let {tuple_var} = "),
-                        expr_code,
-                        format!(" in let {next_var} = call 'erlang':'element'(2, {tuple_var}) in "),
-                    ]);
-                } else {
-                    // Not last, or there are direct field assignments that update state
-                    let expr_code = self.expression_doc(expr)?;
-                    docs.push(docvec!["let _ = ", expr_code, " in "]);
-                }
-            }
-        }
-
-        // Capture the final state version before restoring
-        let final_state_version = self.state_version();
-
-        // Restore state
-        self.in_loop_body = previous_in_loop_body;
-        self.set_state_version(saved_state_version);
-        self.pop_scope();
-
-        Ok((Document::Vec(docs), final_state_version))
+        self.generate_counted_stateful_loop(&frame, body, &plan)
     }
 
     pub(in crate::codegen::core_erlang) fn generate_to_by_do_with_mutations(
@@ -418,104 +109,46 @@ impl CoreErlangGenerator {
         step: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        // BT-478: Simplified loop signature — only (I, StateAcc), no separate field params.
-
-        // BT-245: Signal to REPL codegen that this loop mutates bindings
-        if self.is_repl_mode {
-            self.repl_loop_mutated = true;
-        }
-
-        // BT-598: Compute threaded locals for actor methods
-        let threaded_locals = self.compute_threaded_locals_for_loop(body, None);
+        let plan = ThreadingPlan::new(self, body, None);
 
         let start_var = self.fresh_temp_var("temp");
         let receiver_code = self.expression_doc(receiver)?;
-
         let end_var = self.fresh_temp_var("temp");
         let limit_code = self.expression_doc(limit)?;
-
         let step_var = self.fresh_temp_var("temp");
         let step_code = self.expression_doc(step)?;
 
-        // BT-598: Pack threaded locals into state before starting the loop
-        let initial_state = self.current_state_var();
-        let mut init_state_code = initial_state.clone();
-        let mut pack_prefix = String::new();
-        if !threaded_locals.is_empty() {
-            let mut current = initial_state;
-            for var_name in &threaded_locals {
-                let packed_var = self.fresh_temp_var("Packed");
-                let core_var = self
-                    .lookup_var(var_name)
-                    .cloned()
-                    .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
-                let key = Self::local_state_key(var_name);
-                let _ = write!(
-                    pack_prefix,
-                    "let {packed_var} = call 'maps':'put'('{key}', {core_var}, {current}) in "
-                );
-                current = packed_var;
-            }
-            init_state_code = current;
-        }
+        let body_param = body.parameters.first().map(|p| p.name.to_string());
 
-        let mut docs: Vec<Document<'static>> = vec![
-            Document::String(pack_prefix),
-            docvec![
+        let frame = CountedLoopFrame {
+            preamble: docvec![
                 format!("let {start_var} = "),
                 receiver_code,
                 format!(" in let {end_var} = "),
                 limit_code,
                 format!(" in let {step_var} = "),
                 step_code,
-                " in letrec 'loop'/2 = fun (I, StateAcc) -> ",
+                " in",
             ],
-        ];
-
-        // BT-598: At the start of each loop iteration, read threaded locals from StateAcc.
-        self.push_scope();
-        for var_name in &threaded_locals {
-            let core_var = Self::to_core_erlang_var(var_name);
-            let key = Self::local_state_key(var_name);
-            self.bind_var(var_name, &core_var);
-            docs.push(Document::String(format!(
-                "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
-            )));
-        }
-
-        docs.push(docvec![
-            format!("let Continue = case call 'erlang':'>'({step_var}, 0) of "),
-            format!("<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "),
-            "<'false'> when 'true' -> ",
-            format!("case call 'erlang':'<'({step_var}, 0) of "),
-            format!("<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "),
-            "<'false'> when 'true' -> 'false' ",
-            "end ",
-            "end in case Continue of ",
-            "<'true'> when 'true' -> ",
-        ]);
-
-        let (body_doc, final_state_version) =
-            self.generate_to_do_body_with_threading(body, &threaded_locals)?;
-        docs.push(body_doc);
-        let final_state_var = if final_state_version == 0 {
-            "StateAcc".to_string()
-        } else {
-            format!("StateAcc{final_state_version}")
+            fn_name: "loop".to_string(),
+            continue_header: docvec![
+                format!("let Continue = case call 'erlang':'>'({step_var}, 0) of "),
+                format!("<'true'> when 'true' -> call 'erlang':'=<'(I, {end_var}) "),
+                "<'false'> when 'true' -> ",
+                format!("case call 'erlang':'<'({step_var}, 0) of "),
+                format!("<'true'> when 'true' -> call 'erlang':'>='(I, {end_var}) "),
+                "<'false'> when 'true' -> 'false' ",
+                "end ",
+                "end in case Continue of ",
+                "<'true'> when 'true' -> ",
+            ],
+            next_counter: format!("call 'erlang':'+'(I, {step_var})"),
+            initial_counter: start_var,
+            false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
+            body_param,
         };
 
-        // Pop scope to restore original bindings
-        self.pop_scope();
-
-        // Initial call with packed state
-        docs.push(docvec![
-            format!(" apply 'loop'/2 (call 'erlang':'+'(I, {step_var}), {final_state_var}) "),
-            "<'false'> when 'true' -> {'nil', StateAcc} ",
-            "end ",
-            format!(" in apply 'loop'/2 ({start_var}, {init_state_code})"),
-        ]);
-
-        Ok(Document::Vec(docs))
+        self.generate_counted_stateful_loop(&frame, body, &plan)
     }
 }
 
