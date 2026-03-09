@@ -46,9 +46,7 @@ impl CoreErlangGenerator {
         self.class_identity = Some(ClassIdentity::new(&class.name.name));
 
         match class.supervisor_kind.as_ref().ok_or_else(|| {
-            CodeGenError::Internal(
-                "supervisor_kind must be set for supervisor module".to_string(),
-            )
+            CodeGenError::Internal("supervisor_kind must be set for supervisor module".to_string())
         })? {
             SupervisorKind::Static => self.generate_static_supervisor(module),
             SupervisorKind::Dynamic => self.generate_dynamic_supervisor(module),
@@ -58,9 +56,7 @@ impl CoreErlangGenerator {
     /// Generates a static supervisor module (`Supervisor subclass:`).
     fn generate_static_supervisor(&mut self, module: &Module) -> Result<Document<'static>> {
         let class = module.classes.first().ok_or_else(|| {
-            CodeGenError::Internal(
-                "static supervisor module must have a class".to_string(),
-            )
+            CodeGenError::Internal("static supervisor module must have a class".to_string())
         })?;
         let class_name = class.name.name.clone();
         let module_name = self.module_name.clone();
@@ -135,9 +131,7 @@ impl CoreErlangGenerator {
     /// Generates a dynamic supervisor module (`DynamicSupervisor subclass:`).
     fn generate_dynamic_supervisor(&mut self, module: &Module) -> Result<Document<'static>> {
         let class = module.classes.first().ok_or_else(|| {
-            CodeGenError::Internal(
-                "dynamic supervisor module must have a class".to_string(),
-            )
+            CodeGenError::Internal("dynamic supervisor module must have a class".to_string())
         })?;
         let class_name = class.name.name.clone();
         let module_name = self.module_name.clone();
