@@ -298,55 +298,67 @@ fn analyze_expression(
 }
 
 /// Adds all variable names bound by `pattern` to `ctx.local_bindings` and
-/// `analysis.local_writes`. Wildcards and literals are skipped; nested patterns
-/// are walked recursively.
+/// `analysis.local_writes`, then processes binary segment size expressions as reads.
+///
+/// Delegates variable collection to `semantic_analysis::extract_pattern_bindings`
+/// and handles the codegen-specific binary segment size expression reads separately.
 fn collect_pattern_bindings(
+    pattern: &crate::ast::Pattern,
+    analysis: &mut BlockMutationAnalysis,
+    ctx: &mut AnalysisContext,
+) {
+    // Delegate variable name collection to the canonical semantic analysis function.
+    // Diagnostics (duplicate bindings) are discarded — they are surfaced in the
+    // semantic analysis pass and need not be re-emitted during block mutation analysis.
+    let (identifiers, _diagnostics) =
+        crate::semantic_analysis::extract_pattern_bindings(pattern);
+    for id in identifiers {
+        let name = id.name.to_string();
+        ctx.local_bindings.insert(name.clone());
+        analysis.local_writes.insert(name);
+    }
+
+    // Binary segment size expressions (e.g. `len` in `<<payload:len/binary>>`) are
+    // reads in the codegen context. This concern is not part of semantic pattern
+    // extraction, so we handle it with a separate traversal.
+    collect_binary_size_reads(pattern, analysis, ctx);
+}
+
+/// Walks `pattern` recursively and calls `analyze_expression` for any binary segment
+/// size expressions, recording them as reads in the analysis context.
+fn collect_binary_size_reads(
     pattern: &crate::ast::Pattern,
     analysis: &mut BlockMutationAnalysis,
     ctx: &mut AnalysisContext,
 ) {
     use crate::ast::Pattern;
     match pattern {
-        Pattern::Variable(id) => {
-            let name = id.name.to_string();
-            if ctx.local_bindings.contains(name.as_str()) {
-                // Rebinding an existing local in this block — record the write
-                analysis.local_writes.insert(name.clone());
-            } else {
-                ctx.local_bindings.insert(name.clone());
-                analysis.local_writes.insert(name);
-            }
-        }
-        Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
-            for elem in elements {
-                collect_pattern_bindings(elem, analysis, ctx);
-            }
-        }
-        Pattern::List { elements, tail, .. } => {
-            for elem in elements {
-                collect_pattern_bindings(elem, analysis, ctx);
-            }
-            if let Some(t) = tail {
-                collect_pattern_bindings(t, analysis, ctx);
-            }
-        }
         Pattern::Binary { segments, .. } => {
             for seg in segments {
-                collect_pattern_bindings(&seg.value, analysis, ctx);
-                // Size expressions (e.g. `len` in `<<payload:len/binary>>`) are reads
                 if let Some(size_expr) = &seg.size {
                     analyze_expression(size_expr, analysis, ctx);
                 }
             }
         }
-        Pattern::Map { pairs, .. } => {
-            for pair in pairs {
-                collect_pattern_bindings(&pair.value, analysis, ctx);
+        Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
+            for elem in elements {
+                collect_binary_size_reads(elem, analysis, ctx);
             }
         }
-        Pattern::Wildcard(..) | Pattern::Literal(..) => {
-            // No bindings introduced
+        Pattern::List { elements, tail, .. } => {
+            for elem in elements {
+                collect_binary_size_reads(elem, analysis, ctx);
+            }
+            if let Some(t) = tail {
+                collect_binary_size_reads(t, analysis, ctx);
+            }
         }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                collect_binary_size_reads(&pair.value, analysis, ctx);
+            }
+        }
+        Pattern::Variable(_) | Pattern::Wildcard(..) | Pattern::Literal(..) => {}
     }
 }
 
