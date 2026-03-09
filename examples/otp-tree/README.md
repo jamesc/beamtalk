@@ -12,7 +12,7 @@ policies — and how the tree keeps a service running when individual actors cra
 | **Dynamic supervisor** | `WorkerPool` — `DynamicSupervisor subclass:` for runtime-spawned workers |
 | **Restart policies** | `#permanent`, `#transient`, `#temporary` on each actor class |
 | **Fault isolation** | A crashed worker does not disturb the logger or other workers |
-| **`current` lookup** | Finding a running actor by class name without holding a reference |
+| **`current` lookup** | Finding a running supervisor by class name without holding a reference |
 | **OTP application** | `[application] supervisor =` in `beamtalk.toml` for `beamtalk run` |
 
 ## Supervision Tree
@@ -34,7 +34,7 @@ The other children continue running unchanged.
 | `AppSupervisor` | Supervisor | — | Root supervisor; declares `EventLogger` and `WorkerPool` as children |
 | `EventLogger` | Actor | `#permanent` | Appends log messages; always restarted if it crashes |
 | `WorkerPool` | DynamicSupervisor | `#permanent` | Pool of `TaskWorker` actors; started/stopped at runtime |
-| `TaskWorker` | Actor | `#transient` | Doubles an input value; crashes intentionally on `process: 0` |
+| `TaskWorker` | Actor | `#transient` | Doubles an input value; raises an error to the caller on `process: 0` |
 
 ## Starting the Workspace
 
@@ -61,13 +61,14 @@ Its two children — `EventLogger` and `WorkerPool` — start automatically.
 2
 ```
 
-### 2. Reach named actors without a direct reference
+### 2. Reach named supervisors without a direct reference
 
-`current` looks up a running process by its class name:
+`current` looks up a running supervisor by its class name.  Use `which:` to
+reach a worker actor managed by the supervisor:
 
 ```text
-> logger := EventLogger current
 > pool := WorkerPool current
+> logger := sup which: EventLogger
 ```
 
 ### 3. Log some events
@@ -106,39 +107,43 @@ Its two children — `EventLogger` and `WorkerPool` — start automatically.
 1
 ```
 
-### 6. Crash a worker — watch the supervisor restart it
+### 6. Trigger an error — observe fault isolation
 
-`process: 0` deliberately raises an error inside the worker:
+`process: 0` raises an error back to the caller via `self error:`.  The worker
+actor itself stays alive; the error propagates to whoever called `process: 0`:
 
 ```text
 > w1 process: 0
 ERROR: TaskWorker: refusing zero — crashing now
 ```
 
-`w1` has crashed and its process is gone.  The `WorkerPool` supervisor detects
-the abnormal exit and restarts a fresh `TaskWorker` in its place.
-
-The rest of the tree is unaffected:
+The error is isolated to the caller.  `w1` is still running, and the rest of
+the tree is completely unaffected:
 
 ```text
-> logger log: "worker crashed — supervisor restarted it"
+> logger log: "error handled — other actors unaffected"
 > logger events
-#("system started", "ready", "worker crashed — supervisor restarted it")
+#("system started", "ready", "error handled — other actors unaffected")
 
 > w2 process: 5
 10
+
+> w1 process: 3
+6
 ```
 
-`w2` kept running throughout.  The logger kept running throughout.
+`w2` kept running throughout.  `w1` kept running throughout.  The logger kept
+running throughout.
 
-### 7. Verify pool still has two children
+### 7. Verify the pool still has two children
 
 ```text
 > pool count
 2
 ```
 
-The supervisor replaced the crashed worker automatically.
+Both workers are still alive — no restart was needed because neither process
+crashed.
 
 ### 8. Tear down cleanly
 
@@ -200,7 +205,9 @@ live root supervisor instance.
 - **`DynamicSupervisor subclass:`** for pools — children added and removed at
   runtime
 - **`supervisionPolicy`** on each actor class controls restart behaviour
-- **`supervise`** starts the supervisor; **`current`** finds the live instance
+- **`supervise`** starts the supervisor; **`current`** finds the live supervisor
+  instance (Supervisor/DynamicSupervisor only); **`which:`** reaches a specific
+  child actor managed by the supervisor
 - **Fault isolation is automatic** — OTP's one_for_one strategy contains crashes
   to the failing child only
 - **`[application] supervisor`** in `beamtalk.toml` wires the tree into the OTP

@@ -43,9 +43,9 @@ All source files in `src/` load automatically when you start the REPL.
   `#transient`, `#temporary`). Read by the supervisor when building child specs.
 - **`supervise`** — starts the supervisor process (or returns the already-running
   instance if called again).
-- **`current`** — returns the running supervisor or actor instance looked up by
-  class name. Use this from any actor to find a named peer without holding a
-  direct reference.
+- **`current`** — returns the running supervisor instance looked up by class
+  name. Available on `Supervisor` and `DynamicSupervisor` subclasses. Regular
+  actors do not have `current`; reach them via the supervisor using `which:`.
 - **Fault isolation** — a crash in `TaskWorker` does not affect `EventLogger`
   or the `WorkerPool` supervisor itself; only the crashed worker is restarted.
 
@@ -66,11 +66,14 @@ whether code is correct, evaluate it directly rather than inferring from source.
 
 ## Common Pitfalls
 
-- `current` returns `nil` if the supervisor/actor has not been started yet.
-  Always call `supervise` before `current`.
+- `current` returns `nil` if the supervisor has not been started yet.
+  Always call `supervise` before `current`. Note: `current` is only available
+  on `Supervisor`/`DynamicSupervisor` subclasses, not on plain `Actor` subclasses.
 - `DynamicSupervisor` has no `class children` — only `class childClass`.
   Defining `children` on a `DynamicSupervisor` subclass has no effect.
 - A `#temporary` worker that crashes is **not restarted** — that is intentional.
   Use `#transient` if you want crash-only restarts, `#permanent` for always.
-- Calling `process: 0` on `TaskWorker` intentionally crashes it (for the demo).
-  The `WorkerPool` supervisor restarts a fresh worker for the next `startChild`.
+- Calling `process: 0` on `TaskWorker` raises a `user_error` to the caller via
+  `self error:`. This does NOT crash the actor process — the gen_server stays
+  alive. The demo illustrates error isolation (other actors unaffected), not
+  supervisor restart. Use `w1 stop` to terminate a worker cleanly.

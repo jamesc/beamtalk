@@ -17,7 +17,7 @@ This is a [Beamtalk](https://jamesc.github.io/beamtalk) workspace demonstrating 
 - `class children =>` — returns the list of child classes for the supervisor
 - `class childClass =>` — the worker class for a DynamicSupervisor
 - `supervise` — starts the supervisor (or returns the running instance)
-- `current` — returns the running supervisor/actor instance by class name
+- `current` — returns the running supervisor instance by class name (Supervisor/DynamicSupervisor only)
 - `startChild` — spawns a new dynamic child
 
 ## Beamtalk Syntax

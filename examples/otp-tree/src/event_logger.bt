@@ -3,8 +3,8 @@
 
 // EventLogger — permanent actor that records events from across the system.
 // Because its supervisionPolicy is #permanent, the supervisor always restarts
-// it on crash.  All other actors in the tree can send it log messages without
-// holding a direct reference — they call `EventLogger current log: msg`.
+// it on crash.  Other actors can reach the running instance via the root
+// supervisor: `(AppSupervisor current which: EventLogger) log: msg`.
 
 Actor subclass: EventLogger
   state: events = #()

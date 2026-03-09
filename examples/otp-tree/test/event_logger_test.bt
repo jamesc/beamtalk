@@ -6,13 +6,11 @@ TestCase subclass: EventLoggerTest
   testInitialEventsIsEmpty =>
     logger := EventLogger spawn
     self assert: logger events size equals: 0
-    // => _
 
   testLogAddsEvent =>
     logger := EventLogger spawn
     logger log: "hello"
     self assert: logger events size equals: 1
-    // => _
 
   testLogAccumulatesEvents =>
     logger := EventLogger spawn
@@ -20,7 +18,6 @@ TestCase subclass: EventLoggerTest
     logger log: "second"
     logger log: "third"
     self assert: logger events size equals: 3
-    // => _
 
   testClearEmptiesEvents =>
     logger := EventLogger spawn
@@ -28,4 +25,3 @@ TestCase subclass: EventLoggerTest
     logger log: "world"
     logger clear
     self assert: logger events size equals: 0
-    // => _

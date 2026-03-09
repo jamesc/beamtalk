@@ -11,28 +11,22 @@ TestCase subclass: SupervisorConfigTest
 
   testAppSupervisorStrategy =>
     self assert: AppSupervisor strategy equals: #oneForOne
-    // => _
 
   testAppSupervisorMaxRestarts =>
     self assert: AppSupervisor maxRestarts equals: 10
-    // => _
 
   testAppSupervisorRestartWindow =>
     self assert: AppSupervisor restartWindow equals: 60
-    // => _
 
   testAppSupervisorIsSupervisor =>
     self assert: AppSupervisor isSupervisor equals: true
-    // => _
 
   testWorkerPoolIsSupervisor =>
     self assert: WorkerPool isSupervisor equals: true
-    // => _
 
   testEventLoggerSupervisionPolicy =>
     self assert: EventLogger supervisionPolicy equals: #permanent
-    // => _
 
   testTaskWorkerSupervisionPolicy =>
     self assert: TaskWorker supervisionPolicy equals: #transient
-    // => _
+
