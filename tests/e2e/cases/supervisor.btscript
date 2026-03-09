@@ -16,6 +16,7 @@
 // @load tests/e2e/fixtures/e2e_inner_supervisor.bt
 // @load tests/e2e/fixtures/e2e_outer_supervisor.bt
 // @load tests/e2e/fixtures/e2e_stop_supervisor.bt
+// @load tests/e2e/fixtures/e2e_args_supervisor.bt
 
 // ===========================================================================
 // STATIC SUPERVISOR — DISPLAY FORMAT
@@ -143,3 +144,23 @@ innerSup := outer which: E2EInnerSupervisor
 // the inner supervisor has its own Counter child
 innerSup count
 // => 1
+
+// ===========================================================================
+// SUPERVISIONSPEC withArgs: — spawnWith: start path
+// ===========================================================================
+
+// E2EArgsSupervisor uses SupervisionSpec withArgs: to start a Counter with
+// initial value 42, exercising the spawnWith: code path in spec_to_otp.
+argsSup := E2EArgsSupervisor supervise
+// => #Supervisor<E2EArgsSupervisor,_>
+
+// The supervisor has one Counter child
+argsSup count
+// => 1
+
+// The child Counter was started with initial value 42 via spawnWith:
+argsChild := argsSup which: Counter
+// => #Actor<Counter,_>
+
+argsChild getValue
+// => 42

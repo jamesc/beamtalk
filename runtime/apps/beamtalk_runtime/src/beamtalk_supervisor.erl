@@ -512,16 +512,17 @@ spec_to_otp(BtSpec) ->
                             %% No init args — start with empty state map.
                             [#{}];
                         'spawnWith:' ->
-                            %% startArgs is a Beamtalk Array #(ArgsMap) — unwrap and extract.
-                            StartArgsBtArray = array:get(2, StartErlArray),
-                            StartArgsErlArray = maps:get(data, StartArgsBtArray),
-                            [array:get(0, StartArgsErlArray)];
+                            %% #(self args) uses list syntax (#(...)) so it compiles to an
+                            %% Erlang list [ArgsMap] — use it directly as the start_link arg.
+                            array:get(2, StartErlArray);
                         Other ->
                             %% Unknown start function — raise structured error rather than crashing.
+                            %% Tag as 'SupervisionSpec'/'childSpec' to reflect where the spec
+                            %% originated (SupervisionSpec>>childSpec), not the supervisor itself.
                             Error = beamtalk_error:new(
                                 runtime_error,
-                                ChildClass,
-                                supervise,
+                                'SupervisionSpec',
+                                childSpec,
                                 iolist_to_binary(
                                     io_lib:format(
                                         "unsupported child start function: ~p (expected spawn or spawnWith:)",

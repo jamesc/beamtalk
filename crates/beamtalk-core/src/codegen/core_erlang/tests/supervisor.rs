@@ -128,19 +128,10 @@ fn test_static_supervisor_init_delegates_to_static_init() {
     // init/1 must delegate to beamtalk_supervisor:static_init/2 to avoid a gen_server
     // deadlock: the class gen_server is blocked waiting for supervisor:start_link to return,
     // so calling class_send from init/1 would deadlock.
-    // The call must pass both the module atom and the class name atom so the runtime
-    // can call class module functions directly (bypassing the gen_server) via ETS hierarchy walk.
+    // Match the exact call shape to verify argument order (module atom first, class atom second).
     assert!(
-        code.contains("beamtalk_supervisor':'static_init'"),
-        "init/1 must delegate to beamtalk_supervisor:static_init/2. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'bt@webapp'"),
-        "init/1 must pass module atom to static_init. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'WebApp'"),
-        "init/1 must pass class name atom to static_init. Got:\n{code}"
+        code.contains("call 'beamtalk_supervisor':'static_init'('bt@webapp', 'WebApp')"),
+        "init/1 must delegate to beamtalk_supervisor:static_init/2 with module and class atoms. Got:\n{code}"
     );
     // Must NOT contain direct class_send calls — those would deadlock.
     assert!(
@@ -198,15 +189,15 @@ fn test_dynamic_supervisor_has_supervisor_behaviour() {
 }
 
 #[test]
-fn test_dynamic_supervisor_init_uses_simple_one_for_one() {
+fn test_dynamic_supervisor_init_delegates_to_dynamic_init() {
     let module = make_dynamic_supervisor_module();
     let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
         .expect("codegen should succeed");
     // simple_one_for_one is set inside beamtalk_supervisor:dynamic_init/2 (runtime),
-    // not in the generated init/1. Verify the delegation is correct.
+    // not in the generated init/1. Verify the delegation with correct argument order.
     assert!(
-        code.contains("beamtalk_supervisor':'dynamic_init'"),
-        "Dynamic supervisor init/1 must delegate to beamtalk_supervisor:dynamic_init/2. Got:\n{code}"
+        code.contains("call 'beamtalk_supervisor':'dynamic_init'('bt@workerpool', 'WorkerPool')"),
+        "Dynamic supervisor init/1 must delegate to beamtalk_supervisor:dynamic_init/2 with module and class atoms. Got:\n{code}"
     );
 }
 
