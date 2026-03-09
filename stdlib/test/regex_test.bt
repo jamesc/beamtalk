@@ -1,16 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for Regex class (BT-709)
+// Stdlib tests for Regex class (BT-709, updated for ADR 0060 Result migration BT-1256)
 
 TestCase subclass: RegexTest
 
   testRegexConstruction =>
-    self assert: (Regex from: "[0-9]+") class equals: Regex
+    self assert: (Regex from: "[0-9]+") unwrap class equals: Regex
     // Source returns the original pattern
-    self assert: (Regex from: "[0-9]+") source equals: "[0-9]+"
+    @expect type
+    self assert: (Regex from: "[0-9]+") unwrap source equals: "[0-9]+"
     // Compile with options
-    self assert: (Regex from: "[a-z]+" options: #(#caseless)) class equals: Regex
+    self assert: (Regex from: "[a-z]+" options: #(#caseless)) unwrap class equals: Regex
 
   testStringMatchesregexWithStringPatterns =>
     // Simple digit match
@@ -26,9 +27,9 @@ TestCase subclass: RegexTest
 
   testStringMatchesregexWithCompiledRegexObjects =>
     // Match with compiled regex
-    self assert: ("hello123" matchesRegex: (Regex from: "[0-9]+"))
+    self assert: ("hello123" matchesRegex: (Regex from: "[0-9]+") unwrap)
     // No match with compiled regex
-    self deny: ("hello" matchesRegex: (Regex from: "[0-9]+"))
+    self deny: ("hello" matchesRegex: (Regex from: "[0-9]+") unwrap)
 
   testStringMatchesregexOptions =>
     // Case-insensitive matching
@@ -42,7 +43,7 @@ TestCase subclass: RegexTest
     // No match returns nil
     self assert: ("hello" firstMatch: "[0-9]+") equals: nil
     // First match with compiled regex
-    self assert: ("abc42def" firstMatch: (Regex from: "[0-9]+")) equals: "42"
+    self assert: ("abc42def" firstMatch: (Regex from: "[0-9]+") unwrap) equals: "42"
 
   testStringAllmatches =>
     // All matches returns list of matched strings
@@ -50,7 +51,7 @@ TestCase subclass: RegexTest
     // No matches returns empty list
     self assert: ("hello" allMatches: "[0-9]+") equals: #()
     // All matches with compiled regex
-    self assert: ("x10y20z30" allMatches: (Regex from: "[0-9]+")) equals: #("10", "20", "30")
+    self assert: ("x10y20z30" allMatches: (Regex from: "[0-9]+") unwrap) equals: #("10", "20", "30")
     // Single match returns single-element list
     self assert: ("abc123def" allMatches: "[0-9]+") equals: #("123")
 
@@ -60,7 +61,7 @@ TestCase subclass: RegexTest
     // No match leaves string unchanged
     self assert: ("hello" replaceRegex: "[0-9]+" with: "X") equals: "hello"
     // Replace first match with compiled regex
-    self assert: ("abc123def456" replaceRegex: (Regex from: "[0-9]+") with: "NUM") equals: "abcNUMdef456"
+    self assert: ("abc123def456" replaceRegex: (Regex from: "[0-9]+") unwrap with: "NUM") equals: "abcNUMdef456"
 
   testStringReplaceallregexWith =>
     // Replace all matches
@@ -68,7 +69,7 @@ TestCase subclass: RegexTest
     // No match leaves string unchanged
     self assert: ("hello" replaceAllRegex: "[0-9]+" with: "X") equals: "hello"
     // Replace all with compiled regex
-    self assert: ("a1b2c3" replaceAllRegex: (Regex from: "[0-9]+") with: "N") equals: "aNbNcN"
+    self assert: ("a1b2c3" replaceAllRegex: (Regex from: "[0-9]+") unwrap with: "N") equals: "aNbNcN"
 
   testStringSplitregex =>
     // Split on one or more commas
@@ -76,10 +77,11 @@ TestCase subclass: RegexTest
     // Split on whitespace
     self assert: ("hello   world   test" splitRegex: " +") equals: #("hello", "world", "test")
     // Split with compiled regex
-    self assert: ("a1b2c3" splitRegex: (Regex from: "[0-9]+")) equals: #("a", "b", "c")
+    self assert: ("a1b2c3" splitRegex: (Regex from: "[0-9]+") unwrap) equals: #("a", "b", "c")
 
   testErrorHandling =>
-    // Invalid regex pattern produces regex_error
-    self should: [Regex from: "[invalid"] raise: #regex_error
-    // Invalid pattern in String method also produces regex_error
+    // Invalid regex pattern returns a Result error with regex_error kind
+    result := Regex from: "[invalid"
+    self deny: result isOk
+    // Invalid pattern in String method still raises regex_error
     self should: ["hello" matchesRegex: "[invalid"] raise: #regex_error

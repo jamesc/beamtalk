@@ -42,21 +42,25 @@
 %%% ============================================================================
 
 %% @doc Compile a regex pattern string into a Regex object.
+%%
+%% Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
 -spec 'from:'(binary()) -> map().
 'from:'(Pattern) when is_binary(Pattern) ->
     case re:compile(Pattern) of
         {ok, MP} ->
-            #{
-                '$beamtalk_class' => 'Regex',
-                source => Pattern,
-                compiled => MP
-            };
+            beamtalk_result:from_tagged_tuple(
+                {ok, #{
+                    '$beamtalk_class' => 'Regex',
+                    source => Pattern,
+                    compiled => MP
+                }}
+            );
         {error, {ErrStr, Pos}} ->
             Msg = iolist_to_binary(io_lib:format("~s at position ~p", [ErrStr, Pos])),
             Error0 = beamtalk_error:new(regex_error, 'Regex'),
             Error1 = beamtalk_error:with_selector(Error0, 'from:'),
             Error2 = beamtalk_error:with_hint(Error1, Msg),
-            beamtalk_error:raise(Error2)
+            beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'from:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'Regex'),
@@ -65,22 +69,27 @@
     beamtalk_error:raise(Error2).
 
 %% @doc Compile a regex pattern string with PCRE options.
+%%
+%% Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
+%% Unknown options still raise (programming error).
 -spec 'from:options:'(binary(), list()) -> map().
 'from:options:'(Pattern, Options) when is_binary(Pattern), is_list(Options) ->
     ErlOpts = translate_options(Options),
     case re:compile(Pattern, ErlOpts) of
         {ok, MP} ->
-            #{
-                '$beamtalk_class' => 'Regex',
-                source => Pattern,
-                compiled => MP
-            };
+            beamtalk_result:from_tagged_tuple(
+                {ok, #{
+                    '$beamtalk_class' => 'Regex',
+                    source => Pattern,
+                    compiled => MP
+                }}
+            );
         {error, {ErrStr, Pos}} ->
             Msg = iolist_to_binary(io_lib:format("~s at position ~p", [ErrStr, Pos])),
             Error0 = beamtalk_error:new(regex_error, 'Regex'),
             Error1 = beamtalk_error:with_selector(Error0, 'from:options:'),
             Error2 = beamtalk_error:with_hint(Error1, Msg),
-            beamtalk_error:raise(Error2)
+            beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'from:options:'(_, _) ->
     Error0 = beamtalk_error:new(type_error, 'Regex'),

@@ -19,44 +19,44 @@
 
 parse_integer_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(42, beamtalk_yaml:'parse:'(<<"42">>)).
+    ?assertEqual(42, unwrap_ok(beamtalk_yaml:'parse:'(<<"42">>))).
 
 parse_negative_integer_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(-7, beamtalk_yaml:'parse:'(<<"-7">>)).
+    ?assertEqual(-7, unwrap_ok(beamtalk_yaml:'parse:'(<<"-7">>))).
 
 parse_float_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(3.14, beamtalk_yaml:'parse:'(<<"3.14">>)).
+    ?assertEqual(3.14, unwrap_ok(beamtalk_yaml:'parse:'(<<"3.14">>))).
 
 parse_string_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(<<"hello">>, beamtalk_yaml:'parse:'(<<"hello">>)).
+    ?assertEqual(<<"hello">>, unwrap_ok(beamtalk_yaml:'parse:'(<<"hello">>))).
 
 parse_unicode_string_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(<<"héllo"/utf8>>, beamtalk_yaml:'parse:'(<<"héllo"/utf8>>)).
+    ?assertEqual(<<"héllo"/utf8>>, unwrap_ok(beamtalk_yaml:'parse:'(<<"héllo"/utf8>>))).
 
 parse_true_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(true, beamtalk_yaml:'parse:'(<<"true">>)).
+    ?assertEqual(true, unwrap_ok(beamtalk_yaml:'parse:'(<<"true">>))).
 
 parse_false_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(false, beamtalk_yaml:'parse:'(<<"false">>)).
+    ?assertEqual(false, unwrap_ok(beamtalk_yaml:'parse:'(<<"false">>))).
 
 parse_null_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(nil, beamtalk_yaml:'parse:'(<<"null">>)).
+    ?assertEqual(nil, unwrap_ok(beamtalk_yaml:'parse:'(<<"null">>))).
 
 parse_tilde_null_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(nil, beamtalk_yaml:'parse:'(<<"~">>)).
+    ?assertEqual(nil, unwrap_ok(beamtalk_yaml:'parse:'(<<"~">>))).
 
 parse_empty_document_test() ->
     application:ensure_all_started(yamerl),
     %% Empty YAML string produces nil (no documents)
-    ?assertEqual(nil, beamtalk_yaml:'parse:'(<<"">>)).
+    ?assertEqual(nil, unwrap_ok(beamtalk_yaml:'parse:'(<<"">>))).
 
 %%% ============================================================================
 %%% parse: — sequences
@@ -64,19 +64,22 @@ parse_empty_document_test() ->
 
 parse_empty_sequence_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual([], beamtalk_yaml:'parse:'(<<"[]">>)).
+    ?assertEqual([], unwrap_ok(beamtalk_yaml:'parse:'(<<"[]">>))).
 
 parse_integer_sequence_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual([1, 2, 3], beamtalk_yaml:'parse:'(<<"[1, 2, 3]">>)).
+    ?assertEqual([1, 2, 3], unwrap_ok(beamtalk_yaml:'parse:'(<<"[1, 2, 3]">>))).
 
 parse_mixed_sequence_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual([1, <<"hello">>, true, nil], beamtalk_yaml:'parse:'(<<"[1, hello, true, null]">>)).
+    ?assertEqual(
+        [1, <<"hello">>, true, nil],
+        unwrap_ok(beamtalk_yaml:'parse:'(<<"[1, hello, true, null]">>))
+    ).
 
 parse_nested_sequence_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual([[1, 2], [3, 4]], beamtalk_yaml:'parse:'(<<"[[1, 2], [3, 4]]">>)).
+    ?assertEqual([[1, 2], [3, 4]], unwrap_ok(beamtalk_yaml:'parse:'(<<"[[1, 2], [3, 4]]">>))).
 
 %%% ============================================================================
 %%% parse: — mappings
@@ -84,26 +87,26 @@ parse_nested_sequence_test() ->
 
 parse_string_key_mapping_test() ->
     application:ensure_all_started(yamerl),
-    Result = beamtalk_yaml:'parse:'(<<"{name: Ada, age: 36}">>),
+    Result = unwrap_ok(beamtalk_yaml:'parse:'(<<"{name: Ada, age: 36}">>)),
     ?assertEqual(<<"Ada">>, maps:get(<<"name">>, Result)),
     ?assertEqual(36, maps:get(<<"age">>, Result)).
 
 parse_integer_key_mapping_test() ->
     application:ensure_all_started(yamerl),
     %% Integer keys remain as integers (not coerced to strings)
-    Result = beamtalk_yaml:'parse:'(<<"{1: one, 2: two}">>),
+    Result = unwrap_ok(beamtalk_yaml:'parse:'(<<"{1: one, 2: two}">>)),
     ?assertEqual(<<"one">>, maps:get(1, Result)),
     ?assertEqual(<<"two">>, maps:get(2, Result)).
 
 parse_empty_mapping_test() ->
     application:ensure_all_started(yamerl),
-    Result = beamtalk_yaml:'parse:'(<<"{}">>),
+    Result = unwrap_ok(beamtalk_yaml:'parse:'(<<"{}">>)),
     ?assert(is_map(Result)),
     ?assertEqual(0, map_size(Result)).
 
 parse_nested_mapping_test() ->
     application:ensure_all_started(yamerl),
-    Result = beamtalk_yaml:'parse:'(<<"{user: {name: Ada, age: 36}}">>),
+    Result = unwrap_ok(beamtalk_yaml:'parse:'(<<"{user: {name: Ada, age: 36}}">>)),
     User = maps:get(<<"user">>, Result),
     ?assertEqual(<<"Ada">>, maps:get(<<"name">>, User)),
     ?assertEqual(36, maps:get(<<"age">>, User)).
@@ -130,37 +133,52 @@ parse_type_error_atom_test() ->
 
 parse_invalid_yaml_test() ->
     application:ensure_all_started(yamerl),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}},
-        beamtalk_yaml:'parse:'(<<"key: [unclosed">>)
+    R = beamtalk_yaml:'parse:'(<<"key: [unclosed">>),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}}
+        },
+        R
     ).
 
 %%% ============================================================================
 %%% parse: — unsupported YAML features (BT-1126)
 %%% ============================================================================
 
-parse_binary_tag_raises_parse_error_test() ->
-    %% !!binary produces a yamerl_binary node — unsupported, must raise parse_error
-    %% attributed to the parse: selector.
+parse_binary_tag_returns_result_error_test() ->
+    %% !!binary produces a yamerl_binary node — unsupported, must return Result error
+    %% with parse_error attributed to the parse: selector.
     %% "SGVsbG8=" is base64 for "Hello".
     application:ensure_all_started(yamerl),
-    ?assertError(
+    R = beamtalk_yaml:'parse:'(<<"!!binary \"SGVsbG8=\"">>),
+    ?assertMatch(
         #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = parse_error, selector = 'parse:'}
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{kind = parse_error, selector = 'parse:'}
+            }
         },
-        beamtalk_yaml:'parse:'(<<"!!binary \"SGVsbG8=\"">>)
+        R
     ).
 
-parse_all_binary_tag_raises_parse_error_test() ->
+parse_all_binary_tag_returns_result_error_test() ->
     %% Same unsupported node via parseAll: — error selector must be parseAll:.
     application:ensure_all_started(yamerl),
-    ?assertError(
+    R = beamtalk_yaml:'parseAll:'(<<"!!binary \"SGVsbG8=\"">>),
+    ?assertMatch(
         #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = parse_error, selector = 'parseAll:'}
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{kind = parse_error, selector = 'parseAll:'}
+            }
         },
-        beamtalk_yaml:'parseAll:'(<<"!!binary \"SGVsbG8=\"">>)
+        R
     ).
 
 %%% ============================================================================
@@ -169,16 +187,15 @@ parse_all_binary_tag_raises_parse_error_test() ->
 
 parse_all_single_document_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual([42], beamtalk_yaml:'parseAll:'(<<"42">>)).
+    ?assertEqual([42], unwrap_ok(beamtalk_yaml:'parseAll:'(<<"42">>))).
 
 parse_all_multi_document_test() ->
     application:ensure_all_started(yamerl),
-    Result = beamtalk_yaml:'parseAll:'(<<"42\n---\n43">>),
-    ?assertEqual([42, 43], Result).
+    ?assertEqual([42, 43], unwrap_ok(beamtalk_yaml:'parseAll:'(<<"42\n---\n43">>))).
 
 parse_all_sequence_document_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual([[1, 2, 3]], beamtalk_yaml:'parseAll:'(<<"[1, 2, 3]">>)).
+    ?assertEqual([[1, 2, 3]], unwrap_ok(beamtalk_yaml:'parseAll:'(<<"[1, 2, 3]">>))).
 
 parse_all_type_error_test() ->
     ?assertError(
@@ -245,52 +262,57 @@ generate_type_error_test() ->
 
 roundtrip_integer_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(42, beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(42))).
+    ?assertEqual(42, unwrap_ok(beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(42)))).
 
 roundtrip_float_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(3.14, beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(3.14))).
+    ?assertEqual(3.14, unwrap_ok(beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(3.14)))).
 
 roundtrip_string_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(<<"hello">>, beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(<<"hello">>))).
+    ?assertEqual(
+        <<"hello">>, unwrap_ok(beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(<<"hello">>)))
+    ).
 
 roundtrip_true_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(true, beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(true))).
+    ?assertEqual(true, unwrap_ok(beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(true)))).
 
 roundtrip_nil_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(nil, beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(nil))).
+    ?assertEqual(nil, unwrap_ok(beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(nil)))).
 
 roundtrip_list_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual([1, 2, 3], beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'([1, 2, 3]))).
+    ?assertEqual(
+        [1, 2, 3], unwrap_ok(beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'([1, 2, 3])))
+    ).
 
 roundtrip_map_test() ->
     application:ensure_all_started(yamerl),
     Original = #{<<"name">> => <<"Ada">>, <<"age">> => 36},
-    Result = beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(Original)),
+    Result = unwrap_ok(beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(Original))),
     ?assertEqual(<<"Ada">>, maps:get(<<"name">>, Result)),
     ?assertEqual(36, maps:get(<<"age">>, Result)).
 
 roundtrip_nested_test() ->
     application:ensure_all_started(yamerl),
     Original = #{<<"user">> => #{<<"age">> => 36}},
-    Result = beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(Original)),
+    Result = unwrap_ok(beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(Original))),
     ?assertEqual(36, maps:get(<<"age">>, maps:get(<<"user">>, Result))).
 
 roundtrip_unicode_test() ->
     application:ensure_all_started(yamerl),
     ?assertEqual(
-        <<"héllo"/utf8>>, beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(<<"héllo"/utf8>>))
+        <<"héllo"/utf8>>,
+        unwrap_ok(beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(<<"héllo"/utf8>>)))
     ).
 
 roundtrip_integer_key_map_test() ->
     %% Integer keys must survive generate: → parse: as integers, not strings
     application:ensure_all_started(yamerl),
     Original = #{1 => <<"one">>, 2 => <<"two">>},
-    Result = beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(Original)),
+    Result = unwrap_ok(beamtalk_yaml:'parse:'(beamtalk_yaml:'generate:'(Original))),
     ?assertEqual(<<"one">>, maps:get(1, Result)),
     ?assertEqual(<<"two">>, maps:get(2, Result)).
 
@@ -307,21 +329,26 @@ generate_integer_key_unquoted_test() ->
 parse_file_test() ->
     application:ensure_all_started(yamerl),
     Path = write_temp_yaml(<<"42">>),
-    ?assertEqual(42, beamtalk_yaml:'parseFile:'(Path)),
+    ?assertEqual(42, unwrap_ok(beamtalk_yaml:'parseFile:'(Path))),
     file:delete(Path).
 
 parse_file_mapping_test() ->
     application:ensure_all_started(yamerl),
     Path = write_temp_yaml(<<"{name: Ada, age: 36}">>),
-    Result = beamtalk_yaml:'parseFile:'(Path),
+    Result = unwrap_ok(beamtalk_yaml:'parseFile:'(Path)),
     ?assertEqual(<<"Ada">>, maps:get(<<"name">>, Result)),
     file:delete(Path).
 
 parse_file_not_found_test() ->
     application:ensure_all_started(yamerl),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}},
-        beamtalk_yaml:'parseFile:'(<<"/nonexistent/path/that/does/not/exist.yaml">>)
+    R = beamtalk_yaml:'parseFile:'(<<"/nonexistent/path/that/does/not/exist.yaml">>),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}}
+        },
+        R
     ).
 
 parse_file_type_error_test() ->
@@ -336,7 +363,7 @@ parse_file_type_error_test() ->
 
 parse_alias_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual(42, beamtalk_yaml:parse(<<"42">>)).
+    ?assertEqual(42, unwrap_ok(beamtalk_yaml:parse(<<"42">>))).
 
 parse_alias_type_error_test() ->
     ?assertError(
@@ -346,7 +373,7 @@ parse_alias_type_error_test() ->
 
 parse_all_alias_test() ->
     application:ensure_all_started(yamerl),
-    ?assertEqual([42, 43], beamtalk_yaml:parseAll(<<"42\n---\n43">>)).
+    ?assertEqual([42, 43], unwrap_ok(beamtalk_yaml:parseAll(<<"42\n---\n43">>))).
 
 generate_alias_test() ->
     ?assertEqual(<<"42">>, beamtalk_yaml:generate(42)).
@@ -360,6 +387,12 @@ parse_file_alias_type_error_test() ->
 %%% ============================================================================
 %%% Helpers
 %%% ============================================================================
+
+%% @private Unwrap a Result ok value, failing the test if it is an error.
+unwrap_ok(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := V}) ->
+    V;
+unwrap_ok(Other) ->
+    error({expected_result_ok, Other}).
 
 %% @private Write content to a temporary file and return its binary path.
 write_temp_yaml(Content) ->

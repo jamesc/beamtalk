@@ -10,7 +10,7 @@
 /// ## Basic usage
 ///
 /// ```beamtalk
-/// agent := Subprocess open: "echo" args: #("hello")
+/// agent := (Subprocess open: "echo" args: #("hello")) unwrap
 /// line := agent readLine.   // => "hello"
 /// agent exitCode.           // => 0
 /// agent close.
@@ -37,18 +37,18 @@ Actor subclass: Subprocess
   ///
   /// ## Examples
   /// ```beamtalk
-  /// agent := Subprocess open: "ls" args: #("-la")
+  /// agent := (Subprocess open: "ls" args: #("-la")) unwrap
   /// ```
-  class open: command args: args =>
+  class open: command args: args -> Result =>
     (Erlang beamtalk_subprocess) open: command args: args
 
   /// Convenience factory — open a subprocess with command, args, environment, and working directory.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// agent := Subprocess open: "make" args: #("test") env: #{#"CI" => #"true"} dir: #"/tmp"
+  /// agent := (Subprocess open: "make" args: #("test") env: #{#"CI" => #"true"} dir: #"/tmp") unwrap
   /// ```
-  class open: command args: args env: env dir: dir =>
+  class open: command args: args env: env dir: dir -> Result =>
     (Erlang beamtalk_subprocess) open: command args: args env: env dir: dir
 
   /// Write a line to the subprocess's stdin (appends newline).

@@ -18,16 +18,20 @@
 %%% ============================================================================
 
 parse_integer_test() ->
-    ?assertEqual(42, beamtalk_json:'parse:'(<<"42">>)).
+    R = beamtalk_json:'parse:'(<<"42">>),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 42}, R).
 
 parse_string_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_json:'parse:'(<<"\"hello\"">>)).
+    R = beamtalk_json:'parse:'(<<"\"hello\"">>),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := <<"hello">>}, R).
 
 parse_array_test() ->
-    ?assertEqual([1, 2, 3], beamtalk_json:'parse:'(<<"[1,2,3]">>)).
+    R = beamtalk_json:'parse:'(<<"[1,2,3]">>),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := [1, 2, 3]}, R).
 
 parse_null_test() ->
-    ?assertEqual(nil, beamtalk_json:'parse:'(<<"null">>)).
+    R = beamtalk_json:'parse:'(<<"null">>),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil}, R).
 
 parse_type_error_test() ->
     ?assertError(
@@ -36,9 +40,14 @@ parse_type_error_test() ->
     ).
 
 parse_invalid_json_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}},
-        beamtalk_json:'parse:'(<<"{invalid">>)
+    R = beamtalk_json:'parse:'(<<"{invalid">>),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}}
+        },
+        R
     ).
 
 %%% ============================================================================
@@ -67,7 +76,8 @@ pretty_print_test() ->
 %%% ============================================================================
 
 parse_alias_test() ->
-    ?assertEqual(42, beamtalk_json:parse(<<"42">>)).
+    R = beamtalk_json:parse(<<"42">>),
+    ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 42}, R).
 
 parse_alias_type_error_test() ->
     ?assertError(

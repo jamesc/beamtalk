@@ -170,23 +170,28 @@ exitCode(#beamtalk_object{pid = Pid}) ->
 close(#beamtalk_object{pid = Pid}) ->
     beamtalk_actor:sync_send(Pid, close, []).
 
-%% @private Start a supervised beamtalk_subprocess gen_server and return a beamtalk_object.
--spec start_subprocess(map(), atom()) -> #beamtalk_object{}.
+%% @private Start a supervised beamtalk_subprocess gen_server.
+%%
+%% Returns `Result ok: subprocessObject` on success, `Result error:` if the
+%% process cannot be started (e.g. binary not found, permission denied).
+-spec start_subprocess(map(), atom()) -> map().
 start_subprocess(Config, Selector) ->
     case beamtalk_subprocess_sup:start_child(Config) of
         {ok, Pid} ->
-            #beamtalk_object{
-                class = 'Subprocess',
-                class_mod = 'bt@stdlib@subprocess',
-                pid = Pid
-            };
+            beamtalk_result:from_tagged_tuple(
+                {ok, #beamtalk_object{
+                    class = 'Subprocess',
+                    class_mod = 'bt@stdlib@subprocess',
+                    pid = Pid
+                }}
+            );
         {error, Reason} ->
             Err0 = beamtalk_error:new(runtime_error, 'Subprocess', Selector),
             Err1 = beamtalk_error:with_message(
                 Err0,
                 iolist_to_binary(io_lib:format("Failed to start subprocess: ~p", [Reason]))
             ),
-            beamtalk_error:raise(Err1)
+            beamtalk_result:from_tagged_tuple({error, Err1})
     end.
 
 %% @private Convert a Beamtalk Array (tagged map or plain list) to an Erlang list.

@@ -161,25 +161,35 @@ request_type_error_non_map_options_test() ->
     ).
 
 %%% ============================================================================
-%%% Invalid URL raises http_error
+%%% Invalid URL returns Result error
 %%% ============================================================================
 
 get_invalid_url_test() ->
-    ?assertError(
+    R = beamtalk_http:'get:'(<<"not-a-url">>),
+    ?assertMatch(
         #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = http_error, selector = 'get:headers:'}
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{kind = http_error, selector = 'get:headers:'}
+            }
         },
-        beamtalk_http:'get:'(<<"not-a-url">>)
+        R
     ).
 
 get_ftp_url_rejected_test() ->
-    ?assertError(
+    R = beamtalk_http:'get:'(<<"ftp://example.com/file">>),
+    ?assertMatch(
         #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = http_error, selector = 'get:headers:'}
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{kind = http_error, selector = 'get:headers:'}
+            }
         },
-        beamtalk_http:'get:'(<<"ftp://example.com/file">>)
+        R
     ).
 
 %%% ============================================================================

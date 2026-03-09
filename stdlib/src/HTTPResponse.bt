@@ -15,7 +15,7 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// resp := HTTPClient get: "https://httpbin.org/get"
+/// resp := (HTTPClient get: "https://httpbin.org/get") unwrap
 /// resp status      // => 200
 /// resp headers     // => #(#("content-type", "application/json"), ...)
 /// resp body        // => "{...}"
@@ -48,7 +48,7 @@ sealed Value subclass: HTTPResponse
   /// ```beamtalk
   /// resp bodyAsJson         // => a Dictionary or List
   /// ```
-  sealed bodyAsJson -> Object => Json parse: self body
+  sealed bodyAsJson -> Object => (Json parse: self body) unwrap
 
   /// Human-readable representation: "an HTTPResponse(200)".
   ///

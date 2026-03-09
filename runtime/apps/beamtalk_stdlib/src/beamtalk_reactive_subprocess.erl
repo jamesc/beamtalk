@@ -134,23 +134,28 @@ dispatch(Selector, _Args, _Self) ->
     Err1 = beamtalk_error:with_selector(Err0, Selector),
     beamtalk_error:raise(Err1).
 
-%% @private Start a supervised beamtalk_reactive_subprocess gen_server and return a beamtalk_object.
--spec start_subprocess(map(), atom()) -> #beamtalk_object{}.
+%% @private Start a supervised beamtalk_reactive_subprocess gen_server.
+%%
+%% Returns `Result ok: subprocessObject` on success, `Result error:` if the
+%% process cannot be started (e.g. binary not found, permission denied).
+-spec start_subprocess(map(), atom()) -> map().
 start_subprocess(Config, Selector) ->
     case beamtalk_reactive_subprocess_sup:start_child(Config) of
         {ok, Pid} ->
-            #beamtalk_object{
-                class = 'ReactiveSubprocess',
-                class_mod = 'bt@stdlib@reactive_subprocess',
-                pid = Pid
-            };
+            beamtalk_result:from_tagged_tuple(
+                {ok, #beamtalk_object{
+                    class = 'ReactiveSubprocess',
+                    class_mod = 'bt@stdlib@reactive_subprocess',
+                    pid = Pid
+                }}
+            );
         {error, Reason} ->
             Err0 = beamtalk_error:new(runtime_error, 'ReactiveSubprocess', Selector),
             Err1 = beamtalk_error:with_message(
                 Err0,
                 iolist_to_binary(io_lib:format("Failed to start reactive subprocess: ~p", [Reason]))
             ),
-            beamtalk_error:raise(Err1)
+            beamtalk_result:from_tagged_tuple({error, Err1})
     end.
 
 %%% ============================================================================
