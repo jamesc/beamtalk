@@ -14,7 +14,9 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{
+    Error as WsError, Message, error::ProtocolError as WsProtocolError,
+};
 use tracing::instrument;
 
 /// Default timeout for REPL I/O operations.
@@ -452,15 +454,19 @@ impl ReplClient {
 
     /// Send a JSON request and receive a JSON response for non-idempotent operations.
     ///
-    /// Unlike [`send`], this method only reconnects during the **send phase** (before
-    /// the request reaches the server). Once the request has been transmitted, receive
-    /// failures are propagated directly without a reconnect — retrying after a partial
-    /// success could cause double-execution on the server.
+    /// Unlike [`send`], this method uses a narrower reconnect policy to reduce
+    /// double-execution risk:
     ///
-    /// Reconnecting on a closed-before-send connection is safe: "Trying to work with
-    /// closed connection" means the request was never transmitted, so the server has
-    /// not processed it yet. This recovers from connection drops between requests
-    /// without the double-execution risk of a full retry.
+    /// - **Send phase** — reconnects and retries only when the WebSocket is
+    ///   definitively closed *before* the send starts
+    ///   ([`tungstenite::Error::ConnectionClosed`] / [`tungstenite::Error::AlreadyClosed`]).
+    ///   These errors guarantee the request was never transmitted, so a retry is safe.
+    ///   Send timeouts and other I/O errors are propagated directly without a retry,
+    ///   because partial transmission cannot be ruled out.
+    ///
+    /// - **Receive phase** — receive failures are propagated without reconnect.
+    ///   Once a request is in-flight, the server may have processed it; retrying
+    ///   would cause double-execution.
     ///
     /// Used by: [`eval`], [`evaluate_with_options`], [`load_file`], [`load_project`],
     /// [`reload`], [`clear`], [`unload`], [`interrupt`], [`test_class`], [`test_file`], [`test_all`].
@@ -471,10 +477,7 @@ impl ReplClient {
         for attempt in 0..2 {
             let mut inner = self.inner.lock().await;
 
-            // Send phase: if the WebSocket is already closed, the error is immediate
-            // (the request never reached the server), so reconnecting and retrying is safe.
-            //
-            // Apply the same REPL_IO_TIMEOUT to the send so a half-open TCP connection
+            // Send phase: apply REPL_IO_TIMEOUT so a half-open TCP connection
             // (send buffer full, OS hasn't yet detected the dead link) cannot block forever.
             let send_result = tokio::time::timeout(
                 REPL_IO_TIMEOUT,
@@ -482,25 +485,39 @@ impl ReplClient {
             )
             .await;
 
-            let send_err = match send_result {
-                Ok(Ok(())) => None,
-                Ok(Err(e)) => Some(format!("Failed to send: {e}")),
-                Err(_) => Some(format!(
-                    "REPL I/O timed out after {}s — the REPL may be unresponsive",
-                    REPL_IO_TIMEOUT.as_secs()
-                )),
-            };
-
-            if let Some(err) = send_err {
-                if attempt == 0 {
+            match send_result {
+                Ok(Ok(())) => {} // send succeeded — fall through to receive phase
+                Ok(Err(
+                    e @ (WsError::ConnectionClosed
+                    | WsError::AlreadyClosed
+                    | WsError::Protocol(WsProtocolError::SendAfterClosing)),
+                )) if attempt == 0 => {
+                    // Connection was definitively closed before the send started —
+                    // the server never saw the request, so reconnecting is safe.
+                    // Covers: ConnectionClosed (close handshake complete),
+                    //         AlreadyClosed (post-ConnectionClosed write),
+                    //         SendAfterClosing (write after local close frame).
                     drop(inner); // release lock before reconnecting
-                    tracing::warn!("send_once: {err}, attempting reconnect");
+                    tracing::warn!("send_once: connection closed ({e}), attempting reconnect");
                     if let Err(re) = self.reconnect().await {
-                        return Err(format!("{err}; reconnect failed: {re}"));
+                        return Err(format!("Failed to send: {e}; reconnect failed: {re}"));
                     }
                     continue; // retry with fresh connection
                 }
-                return Err(err);
+                Ok(Err(e)) => {
+                    // Other send error (I/O error, protocol error, or second-attempt
+                    // closed-connection): cannot guarantee the server received nothing,
+                    // so do not retry.
+                    return Err(format!("Failed to send: {e}"));
+                }
+                Err(_) => {
+                    // Send timed out: the request may have been partially transmitted —
+                    // do not retry.
+                    return Err(format!(
+                        "REPL I/O timed out after {}s — the REPL may be unresponsive",
+                        REPL_IO_TIMEOUT.as_secs()
+                    ));
+                }
             }
 
             // Receive phase: the request is now in-flight.
