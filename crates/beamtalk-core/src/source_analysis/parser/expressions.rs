@@ -19,7 +19,7 @@
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart,
-    Literal, MapPair, MatchArm, MessageSelector, Pattern, StringSegment,
+    Literal, MapPair, MapPatternPair, MatchArm, MessageSelector, Pattern, StringSegment,
 };
 use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
@@ -92,6 +92,7 @@ impl Parser {
     }
 
     /// Parses an assignment or regular expression.
+    #[allow(clippy::too_many_lines)]
     fn parse_assignment(&mut self) -> Expression {
         // Tuple destructuring: `{a, b} := expr`
         // Tuples are not valid expressions, so we intercept `{` here before
@@ -171,6 +172,39 @@ impl Parser {
                 }
             }
 
+            // Map destructuring: `#{#key => var, ...} := expr`
+            if let Expression::MapLiteral {
+                pairs,
+                span: lhs_span,
+            } = &expr
+            {
+                match Self::map_pairs_to_pattern(pairs, *lhs_span) {
+                    Ok(pattern) => {
+                        if let Err(error) = self.enter_nesting(*lhs_span) {
+                            return error;
+                        }
+                        let value = Box::new(self.parse_assignment());
+                        self.leave_nesting();
+                        let span = lhs_span.merge(value.span());
+                        return Expression::DestructureAssignment {
+                            pattern,
+                            value,
+                            span,
+                        };
+                    }
+                    Err(bad_span) => {
+                        self.diagnostics.push(Diagnostic::error(
+                            "Map destructuring: keys must be symbols and values must be identifiers or '_'",
+                            bad_span,
+                        ));
+                        return Expression::Error {
+                            message: "Invalid map destructuring pattern".into(),
+                            span: *lhs_span,
+                        };
+                    }
+                }
+            }
+
             // Validate assignment target
             if !matches!(
                 expr,
@@ -228,6 +262,36 @@ impl Parser {
         Ok(Pattern::Array {
             elements: patterns,
             list_syntax,
+            span,
+        })
+    }
+
+    /// Converts map literal pairs to a destructuring pattern.
+    ///
+    /// Returns `Ok(Pattern::Map)` if keys are symbol literals and values are
+    /// identifiers or `_`, or `Err(span)` pointing at the first invalid element.
+    fn map_pairs_to_pattern(pairs: &[MapPair], span: Span) -> Result<Pattern, Span> {
+        let mut pattern_pairs = Vec::new();
+        for pair in pairs {
+            // Key must be a symbol literal
+            let key = match &pair.key {
+                Expression::Literal(Literal::Symbol(s), _) => s.clone(),
+                _ => return Err(pair.key.span()),
+            };
+            // Value must be an identifier (variable or `_`)
+            let value = match &pair.value {
+                Expression::Identifier(id) if id.name == "_" => Pattern::Wildcard(id.span),
+                Expression::Identifier(id) => Pattern::Variable(id.clone()),
+                _ => return Err(pair.value.span()),
+            };
+            pattern_pairs.push(MapPatternPair {
+                key,
+                value,
+                span: pair.span,
+            });
+        }
+        Ok(Pattern::Map {
+            pairs: pattern_pairs,
             span,
         })
     }
@@ -1014,6 +1078,9 @@ impl Parser {
             // Array pattern: #[p1, p2, ...]
             TokenKind::ArrayOpen => self.parse_array_pattern(),
 
+            // Map destructuring pattern: #{#key => var, ...}
+            TokenKind::MapOpen => self.parse_map_pattern(),
+
             // Binary pattern: <<seg, seg, ...>>
             TokenKind::LtLt => self.parse_binary_pattern(),
 
@@ -1084,6 +1151,116 @@ impl Parser {
         Pattern::Array {
             elements,
             list_syntax: false,
+            span: start.merge(end),
+        }
+    }
+
+    /// Parses a map destructuring pattern: `#{#key => var, ...}`
+    ///
+    /// Keys must be symbol literals (`#key`) or bare lowercase identifiers treated as symbols.
+    /// Values must be variable identifiers or `_` wildcards.
+    fn parse_map_pattern(&mut self) -> Pattern {
+        let start = self
+            .expect(&TokenKind::MapOpen, "Expected '#{'")
+            .map_or_else(|| self.current_token().span(), |t: Token| t.span());
+
+        let mut pairs = Vec::new();
+
+        if !self.check(&TokenKind::RightBrace) {
+            loop {
+                if self.is_at_end() {
+                    break;
+                }
+
+                let pair_start = self.current_token().span();
+
+                // Parse key: must be a symbol (#key) or bare lowercase identifier
+                let key: EcoString = match self.current_kind() {
+                    TokenKind::Symbol(s) => {
+                        let s = s.clone();
+                        self.advance();
+                        s
+                    }
+                    TokenKind::Identifier(name)
+                        if name.chars().next().is_some_and(char::is_lowercase)
+                            && matches!(self.peek_kind(), Some(TokenKind::FatArrow)) =>
+                    {
+                        let name = name.clone();
+                        self.advance();
+                        name
+                    }
+                    _ => {
+                        let bad = self.advance();
+                        self.diagnostics.push(Diagnostic::error(
+                            "Map destructuring key must be a symbol (e.g. #key)",
+                            bad.span(),
+                        ));
+                        EcoString::from("_")
+                    }
+                };
+
+                // Expect '=>'
+                if !matches!(self.current_kind(), TokenKind::FatArrow) {
+                    let bad = self.advance();
+                    self.diagnostics.push(Diagnostic::error(
+                        "Expected '=>' after map pattern key",
+                        bad.span(),
+                    ));
+                    break;
+                }
+                self.advance(); // consume '=>'
+
+                // Parse value: must be a variable identifier or `_` wildcard.
+                // Reject literals, tuples, nested patterns — they are not supported
+                // in map destructuring and would fail codegen with a confusing error.
+                let value_span = self.current_token().span();
+                let value = match self.current_kind() {
+                    TokenKind::Identifier(name) if name.as_str() == "_" => {
+                        let span = self.advance().span();
+                        Pattern::Wildcard(span)
+                    }
+                    TokenKind::Identifier(_) => {
+                        let token = self.advance();
+                        let span = token.span();
+                        let TokenKind::Identifier(name) = token.into_kind() else {
+                            unreachable!()
+                        };
+                        Pattern::Variable(Identifier::new(name, span))
+                    }
+                    _ => {
+                        let bad = self.advance();
+                        self.diagnostics.push(Diagnostic::error(
+                            "Map destructuring value must be a variable or '_' (e.g. #{#key => var})",
+                            bad.span(),
+                        ));
+                        Pattern::Wildcard(value_span)
+                    }
+                };
+                let pair_span = pair_start.merge(value.span());
+                pairs.push(MapPatternPair {
+                    key,
+                    value,
+                    span: pair_span,
+                });
+
+                if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",")
+                {
+                    self.advance();
+                    if self.check(&TokenKind::RightBrace) {
+                        break; // trailing comma
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+
+        let end = self
+            .expect(&TokenKind::RightBrace, "Expected '}' to close map pattern")
+            .map_or(start, |t: Token| t.span());
+
+        Pattern::Map {
+            pairs,
             span: start.merge(end),
         }
     }

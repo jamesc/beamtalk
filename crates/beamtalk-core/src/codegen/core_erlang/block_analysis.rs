@@ -339,6 +339,11 @@ fn collect_pattern_bindings(
                 }
             }
         }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                collect_pattern_bindings(&pair.value, analysis, ctx);
+            }
+        }
         Pattern::Wildcard(..) | Pattern::Literal(..) => {
             // No bindings introduced
         }

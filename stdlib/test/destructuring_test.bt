@@ -219,3 +219,62 @@ TestCase subclass: DestructuringTest
         a + b
       ]
     self assert: result equals: #(11, 22)
+
+  // === Map destructuring ===
+  testMapDestructuringSingleKey =>
+    dict := #{#name => "Alice"}
+    #{#name => name} := dict
+    self assert: name equals: "Alice"
+
+  testMapDestructuringMultipleKeys =>
+    dict := #{#x => 10, #y => 20}
+    #{#x => x, #y => y} := dict
+    self assert: x equals: 10
+    self assert: y equals: 20
+
+  testMapDestructuringWithWildcard =>
+    dict := #{#sid => "abc123", #runner => "runner1"}
+    #{#sid => sid, #runner => _} := dict
+    self assert: sid equals: "abc123"
+
+  testMapDestructuringSubset =>
+    // Destructuring only some keys is allowed; extra keys are ignored.
+    dict := #{#a => 1, #b => 2, #c => 3}
+    #{#a => a, #c => c} := dict
+    self assert: a equals: 1
+    self assert: c equals: 3
+
+  testMapDestructuringMissingKeyRaisesError =>
+    // Accessing a missing key raises a {badkey, Key} error via erlang:map_get/2.
+    result := [
+      #{#missing => _val} := #{#present => 42}
+      #did_not_raise
+    ] on: RuntimeError do: [:e | e message includesSubstring: "badkey"]
+    self assert: result equals: true
+
+  testMapDestructuringOnlyStatement =>
+    // Map destructuring as the only statement in a method.
+    #{#x => _} := #{#x => 99}
+
+  testMapDestructuringVariablesUsedAfter =>
+    dict := #{#name => "Bob", #age => 30}
+    #{#name => name, #age => age} := dict
+    self assert: name equals: "Bob"
+    self assert: age equals: 30
+
+  testMapDestructuringSequential =>
+    d1 := #{#a => 1}
+    d2 := #{#b => 2}
+    #{#a => a} := d1
+    #{#b => b} := d2
+    self assert: a + b equals: 3
+
+  testMapDestructuringInCollectBlock =>
+    // Map destructuring inside a collect: block.
+    dicts := #[#{#x => 1, #y => 10}, #{#x => 2, #y => 20}]
+    sums := dicts
+      collect: [:d |
+        #{#x => x, #y => y} := d
+        x + y
+      ]
+    self assert: sums equals: #[11, 22]

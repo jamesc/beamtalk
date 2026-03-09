@@ -108,6 +108,13 @@ fn extract_pattern_bindings_impl(
             }
         }
 
+        // Map patterns: extract variable bindings from value patterns
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                extract_pattern_bindings_impl(&pair.value, bindings, seen, diagnostics);
+            }
+        }
+
         // Wildcards and literals don't bind variables
         Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
     }

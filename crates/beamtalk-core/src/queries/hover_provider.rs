@@ -570,6 +570,9 @@ fn find_hover_in_pattern(pattern: &Pattern, offset: u32, type_map: &TypeMap) -> 
         Pattern::Binary { segments, .. } => segments
             .iter()
             .find_map(|seg| find_hover_in_pattern(&seg.value, offset, type_map)),
+        Pattern::Map { pairs, .. } => pairs
+            .iter()
+            .find_map(|pair| find_hover_in_pattern(&pair.value, offset, type_map)),
         Pattern::Wildcard(_) | Pattern::Literal(_, _) => None,
     }
 }
