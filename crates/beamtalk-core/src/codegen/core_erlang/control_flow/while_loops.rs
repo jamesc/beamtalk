@@ -161,14 +161,20 @@ impl CoreErlangGenerator {
     ///
     /// `negate = false` → continue when condition is `'true'` (whileTrue:).
     /// `negate = true`  → continue when condition is `'false'` (whileFalse:).
+    ///
+    /// In direct-params mode (BT-1275, no field mutations) the fun signature is
+    /// `(Var1, ..., VarN)` instead of `(StateAcc)`.
     fn generate_while_loop_with_mutations(
         &mut self,
         condition: &Expression,
         body: &Block,
         negate: bool,
     ) -> Result<Document<'static>> {
-        // BT-478: Simplified loop signature — only (StateAcc), no separate field params.
-        let plan = ThreadingPlan::new(self, body, Some(condition));
+        let plan = ThreadingPlan::new_for_letrec(self, body, Some(condition));
+
+        if plan.use_direct_params {
+            return self.generate_while_loop_direct(condition, body, &plan, negate);
+        }
 
         let cond_var = self.fresh_temp_var("CondFun");
 
@@ -243,6 +249,114 @@ impl CoreErlangGenerator {
         // Initial call with packed state
         docs.push(Document::String(format!(
             "in apply 'while'/1 ({init_state})"
+        )));
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-1275: Direct-params variant of `generate_while_loop_with_mutations`.
+    ///
+    /// Uses `fun (Var1, ..., VarN)` instead of `fun (StateAcc)`.
+    /// The `StateAcc` map is rebuilt only once in the false (exit) arm.
+    fn generate_while_loop_direct(
+        &mut self,
+        condition: &Expression,
+        body: &Block,
+        plan: &ThreadingPlan,
+        negate: bool,
+    ) -> Result<Document<'static>> {
+        // Collect initial arg values from the outer scope (before push_scope).
+        let initial_direct_args = plan.initial_direct_args(self);
+
+        let param_names: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
+            .collect();
+        let arity = param_names.len();
+        let param_list = param_names.join(", ");
+
+        let cond_var = self.fresh_temp_var("CondFun");
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.push(Document::String(format!(
+            "letrec 'while'/{arity} = fun ({param_list}) -> "
+        )));
+
+        self.push_scope();
+        // Register var bindings — no unpack docs in direct-params mode.
+        let unpack_docs = plan.generate_unpack_at_iteration_start(self);
+        debug_assert!(unpack_docs.is_empty());
+
+        // The condition closure captures the current vars from scope.
+        // We pass only the params (not StateAcc) since there is no StateAcc.
+        docs.push(Document::String(format!(
+            "let {cond_var} = fun ({param_list}) -> "
+        )));
+
+        let prev_in_loop_body = self.in_loop_body;
+        let prev_state_version = self.state_version();
+        self.in_loop_body = true;
+        self.set_state_version(0);
+
+        if let Expression::Block(cond_block) = condition {
+            docs.push(self.generate_block_body(cond_block)?);
+        } else {
+            docs.push(self.generate_expression(condition)?);
+        }
+
+        self.in_loop_body = prev_in_loop_body;
+        self.set_state_version(prev_state_version);
+
+        // Apply condition with current params.
+        let current_args = param_names.join(", ");
+        if negate {
+            docs.push(docvec![
+                format!(" in case apply {cond_var} ({current_args}) of "),
+                "<'false'> when 'true' -> ",
+            ]);
+        } else {
+            docs.push(docvec![
+                format!(" in case apply {cond_var} ({current_args}) of "),
+                "<'true'> when 'true' -> ",
+            ]);
+        }
+
+        let (body_doc, _) = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
+        docs.push(body_doc);
+
+        // Collect final var names after body execution.
+        let final_args: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| {
+                self.lookup_var(v)
+                    .cloned()
+                    .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v))
+            })
+            .collect();
+
+        // Build exit StateAcc using the CURRENT iteration's param names.
+        let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);
+
+        let final_args_str = final_args.join(", ");
+        if negate {
+            docs.push(docvec![
+                format!(" apply 'while'/{arity} ({final_args_str}) "),
+                Document::String(format!("<'true'> when 'true' -> {exit_stateacc} end ")),
+            ]);
+        } else {
+            docs.push(docvec![
+                format!(" apply 'while'/{arity} ({final_args_str}) "),
+                Document::String(format!("<'false'> when 'true' -> {exit_stateacc} end ")),
+            ]);
+        }
+
+        self.pop_scope();
+
+        let initial_args_str = initial_direct_args.join(", ");
+        docs.push(Document::String(format!(
+            "in apply 'while'/{arity} ({initial_args_str})"
         )));
 
         Ok(Document::Vec(docs))
@@ -323,6 +437,56 @@ mod tests {
         assert!(
             code.contains("maps':'put'('n'"),
             "whileTrue: body should update 'n' via maps:put. Got:\n{code}"
+        );
+    }
+
+    // ── BT-1275: direct-params optimisation ──────────────────────────────────
+
+    #[test]
+    fn test_while_true_local_var_only_uses_direct_params() {
+        // whileTrue: with only local-var mutations uses direct fun params, not StateAcc.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + 1]\n    self.n := sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("letrec"),
+            "whileTrue: with local mutation should generate a letrec. Got:\n{code}"
+        );
+        // Direct-params: fun takes (Sum) not (StateAcc).
+        assert!(
+            code.contains("fun (Sum)"),
+            "direct-params: whileTrue: fun should take Sum as direct param. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("fun (StateAcc)"),
+            "direct-params: whileTrue: fun must not use StateAcc signature. Got:\n{code}"
+        );
+        // Exactly one maps:put for exit StateAcc rebuild.
+        assert!(
+            code.match_indices("maps':'put'('__local__sum'").count() == 1,
+            "direct-params: whileTrue: at most one maps:put (exit rebuild). Got:\n{code}"
+        );
+        assert!(
+            code.contains("ExitSA"),
+            "direct-params: whileTrue: exit StateAcc rebuild expected. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_while_false_local_var_only_uses_direct_params() {
+        // whileFalse: with only local-var mutations uses direct fun params.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum >= 10] whileFalse: [sum := sum + 1]\n    self.n := sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("fun (Sum)"),
+            "direct-params: whileFalse: fun should take Sum as direct param. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("fun (StateAcc)"),
+            "direct-params: whileFalse: fun must not use StateAcc signature. Got:\n{code}"
+        );
+        assert!(
+            code.contains("ExitSA"),
+            "direct-params: whileFalse: exit StateAcc rebuild expected. Got:\n{code}"
         );
     }
 }
