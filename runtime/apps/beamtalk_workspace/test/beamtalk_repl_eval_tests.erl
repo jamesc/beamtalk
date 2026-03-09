@@ -155,6 +155,60 @@ do_eval_preserves_bindings_on_error_test() ->
     %% New binding should NOT be there (eval failed)
     ?assertEqual(false, maps:is_key(z, FinalBindings)).
 
+%%% rebuild_bindings_from_steps tests (BT-1261)
+
+rebuild_bindings_from_steps_simple_assignment_test() ->
+    %% A single assignment step stores the awaited value under the variable name.
+    Steps = [{<<"x := 42">>, 42}],
+    Bindings = #{},
+    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, Bindings),
+    ?assertEqual(42, maps:get(x, Result)).
+
+rebuild_bindings_from_steps_overwrites_raw_future_test() ->
+    %% When CleanBindings holds a raw future handle, the awaited value must replace it.
+    FakeFuture = {beamtalk_future, self()},
+    Steps = [{<<"x := asyncOp">>, resolved_value}],
+    Bindings = #{x => FakeFuture},
+    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, Bindings),
+    ?assertEqual(resolved_value, maps:get(x, Result)).
+
+rebuild_bindings_from_steps_non_assignment_leaves_bindings_unchanged_test() ->
+    %% Steps that are not assignments must not modify existing bindings.
+    Steps = [{<<"x + 1">>, 43}],
+    Bindings = #{x => 42},
+    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, Bindings),
+    ?assertEqual(42, maps:get(x, Result)),
+    ?assertEqual(1, maps:size(Result)).
+
+rebuild_bindings_from_steps_chained_assignments_test() ->
+    %% Each assignment in a multi-step trace is applied in order.
+    Steps = [
+        {<<"x := 10">>, 10},
+        {<<"y := 20">>, 20}
+    ],
+    Bindings = #{},
+    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, Bindings),
+    ?assertEqual(10, maps:get(x, Result)),
+    ?assertEqual(20, maps:get(y, Result)).
+
+rebuild_bindings_from_steps_mixed_steps_test() ->
+    %% A mix of assignment and expression steps: only assignments update bindings.
+    Steps = [
+        {<<"x := 5">>, 5},
+        {<<"x + 1">>, 6},
+        {<<"y := 7">>, 7}
+    ],
+    Bindings = #{},
+    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, Bindings),
+    ?assertEqual(5, maps:get(x, Result)),
+    ?assertEqual(7, maps:get(y, Result)),
+    ?assertEqual(2, maps:size(Result)).
+
+rebuild_bindings_from_steps_empty_steps_test() ->
+    %% Empty step list must return bindings unchanged.
+    Bindings = #{x => 99},
+    Result = beamtalk_repl_eval:rebuild_bindings_from_steps([], Bindings),
+    ?assertEqual(Bindings, Result).
 %%% Additional handle_load tests
 
 handle_load_read_error_directory_test() ->

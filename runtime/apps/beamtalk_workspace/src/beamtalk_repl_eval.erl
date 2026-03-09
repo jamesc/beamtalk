@@ -25,6 +25,7 @@
 -export([
     extract_assignment/1,
     maybe_await_future/1,
+    rebuild_bindings_from_steps/2,
     should_purge_module/2,
     strip_internal_bindings/1,
     inject_output/3,
@@ -155,8 +156,14 @@ do_eval_trace(Expression, State) ->
                                     ),
                                     {error, FutExObj, ErrState};
                                 false ->
+                                    %% BT-1261: Rebuild bindings from awaited step values so that
+                                    %% variable assignments whose RHS was a future are stored with
+                                    %% the resolved value rather than the raw future handle.
+                                    FinalBindings = rebuild_bindings_from_steps(
+                                        AwaitedSteps, CleanBindings
+                                    ),
                                     FinalState = beamtalk_repl_state:set_bindings(
-                                        CleanBindings, NewState
+                                        FinalBindings, NewState
                                     ),
                                     {ok, AwaitedSteps, FinalState}
                             end
@@ -357,6 +364,26 @@ cleanup_module(ModuleName, RegistryPid) ->
             ok
     end,
     ok.
+
+%% @doc Rebuild bindings by extracting variable assignments from awaited trace steps (BT-1261).
+%%
+%% For each step whose source text is a simple assignment (`VarName := Expr`), the
+%% binding is updated with the awaited (resolved) value from the step.  This ensures
+%% that if the RHS was a future the session binding holds the final value, not the
+%% raw `{beamtalk_future, Pid}` handle stored by the evaluator before awaiting.
+-spec rebuild_bindings_from_steps([{binary(), term()}], map()) -> map().
+rebuild_bindings_from_steps(Steps, Bindings) ->
+    lists:foldl(
+        fun({Src, AwaitedVal}, Acc) ->
+            SrcStr = binary_to_list(Src),
+            case extract_assignment(SrcStr) of
+                {ok, VarName} -> maps:put(VarName, AwaitedVal, Acc);
+                none -> Acc
+            end
+        end,
+        Bindings,
+        Steps
+    ).
 
 %% @doc Extract variable name from assignment expression.
 -spec extract_assignment(string()) -> {ok, atom()} | none.
