@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// WorkerPool — DynamicSupervisor that manages TaskWorker children.
+// Workers are started on demand at runtime via `pool startChild`.
+// Each worker is supervised independently: a crash in one worker does not
+// affect the others or the rest of the tree.
+
+DynamicSupervisor subclass: WorkerPool
+  class childClass => TaskWorker

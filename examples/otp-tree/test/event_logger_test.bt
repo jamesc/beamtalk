@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+TestCase subclass: EventLoggerTest
+
+  testInitialEventsIsEmpty =>
+    logger := EventLogger spawn
+    self assert: logger events size equals: 0
+
+  testLogAddsEvent =>
+    logger := EventLogger spawn
+    logger log: "hello"
+    self assert: logger events size equals: 1
+
+  testLogAccumulatesEvents =>
+    logger := EventLogger spawn
+    logger log: "first"
+    logger log: "second"
+    logger log: "third"
+    self assert: logger events size equals: 3
+
+  testClearEmptiesEvents =>
+    logger := EventLogger spawn
+    logger log: "hello"
+    logger log: "world"
+    logger clear
+    self assert: logger events size equals: 0
