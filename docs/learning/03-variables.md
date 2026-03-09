@@ -118,7 +118,7 @@ myVar             // => hello
 
 ## Summary
 
-```
+```text
 x := expr        assign (introduce or rebind)
 x                read
 #[a, b] := arr   destructure

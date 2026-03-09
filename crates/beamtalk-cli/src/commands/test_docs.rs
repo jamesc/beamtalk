@@ -17,11 +17,19 @@ use super::test_stdlib::{
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 
 // ──────────────────────────────────────────────────────────────────────────
 // Markdown extraction
 // ──────────────────────────────────────────────────────────────────────────
+
+/// Return `true` if the markdown content contains at least one ` ```beamtalk ` fence.
+pub(crate) fn has_beamtalk_blocks(content: &str) -> bool {
+    content.lines().any(|l| {
+        let t = l.trim();
+        t == "```beamtalk" || t == "``` beamtalk"
+    })
+}
 
 /// Extract ` ```beamtalk ` code blocks that contain `// =>` assertions.
 ///
@@ -159,6 +167,11 @@ fn extract_to_btscript_files(
             .wrap_err_with(|| format!("Failed to read '{md_file}'"))?;
         let extracted = extract_btscript_from_markdown(&content);
         if extracted.trim().is_empty() {
+            if has_beamtalk_blocks(&content) {
+                warn!(
+                    "'{md_file}' has beamtalk code blocks but none contain `// =>` assertions — skipped"
+                );
+            }
             continue;
         }
         let normalised = normalize_inline_assertions(&extracted);

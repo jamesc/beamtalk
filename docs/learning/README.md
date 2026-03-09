@@ -14,13 +14,13 @@ Smalltalk.
 
 **Try it yourself** — start the REPL and type along:
 
-```
+```bash
 beamtalk repl
 ```
 
 **Run the examples** — all chapters are executable:
 
-```
+```bash
 just test-learn
 ```
 
@@ -54,6 +54,7 @@ just test-learn
 ```bash
 just test-learn           # run all learning guide doctests
 ```
+
 
 ---
 

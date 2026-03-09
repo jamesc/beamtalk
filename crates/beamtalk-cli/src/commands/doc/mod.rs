@@ -118,15 +118,22 @@ pub fn run_site(lib_path: &str, docs_path: &str, output_dir: &str) -> Result<()>
     let apidocs_path = output_path.join("apidocs");
     generate_api_docs(&lib_source, &apidocs_path, "../")?;
 
-    // 2. Generate ADR pages; collect link-rewriting pairs for prose rendering
     let docs_source = Utf8PathBuf::from(docs_path);
-    let adr_links = generate_adr_docs(&docs_source, &output_path)?;
 
-    // 3. Generate prose docs in docs/ subdirectory (with ADR link rewriting)
-    generate_prose_docs(&docs_source, &output_path, PROSE_PAGES, &adr_links)?;
-
-    // 4. Generate learning guide in learning/ subdirectory
+    // 2. Generate learning guide first so nav builders know whether to include the link.
     let learning_available = generate_learning_guide(&docs_source, &output_path)?;
+
+    // 3. Generate ADR pages; collect link-rewriting pairs for prose rendering
+    let adr_links = generate_adr_docs(&docs_source, &output_path, learning_available)?;
+
+    // 4. Generate prose docs in docs/ subdirectory (with ADR link rewriting)
+    generate_prose_docs(
+        &docs_source,
+        &output_path,
+        PROSE_PAGES,
+        &adr_links,
+        learning_available,
+    )?;
 
     // 5. Generate landing page
     write_site_landing_page(&output_path, PROSE_PAGES, learning_available)?;
