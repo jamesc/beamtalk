@@ -8,7 +8,7 @@
 //! Generates code for `whileTrue:` and `whileFalse:` loop constructs
 //! with both pure and state-threading variants.
 
-use super::super::document::Document;
+use super::super::document::{Document, join};
 use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use super::{BodyKind, ThreadingPlan};
@@ -274,14 +274,23 @@ impl CoreErlangGenerator {
             .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
             .collect();
         let arity = param_names.len();
-        let param_list = param_names.join(", ");
+        let param_list_doc = || {
+            join(
+                param_names.iter().map(|v| Document::String(v.clone())),
+                &Document::Str(", "),
+            )
+        };
 
         let cond_var = self.fresh_temp_var("CondFun");
 
         let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.push(Document::String(format!(
-            "letrec 'while'/{arity} = fun ({param_list}) -> "
-        )));
+        docs.push(docvec![
+            "letrec 'while'/",
+            Document::String(arity.to_string()),
+            " = fun (",
+            param_list_doc(),
+            ") -> ",
+        ]);
 
         self.push_scope();
         // Register var bindings — no unpack docs in direct-params mode.
@@ -290,9 +299,13 @@ impl CoreErlangGenerator {
 
         // The condition closure captures the current vars from scope.
         // We pass only the params (not StateAcc) since there is no StateAcc.
-        docs.push(Document::String(format!(
-            "let {cond_var} = fun ({param_list}) -> "
-        )));
+        docs.push(docvec![
+            "let ",
+            Document::String(cond_var.clone()),
+            " = fun (",
+            param_list_doc(),
+            ") -> ",
+        ]);
 
         let prev_in_loop_body = self.in_loop_body;
         let prev_state_version = self.state_version();
@@ -309,18 +322,19 @@ impl CoreErlangGenerator {
         self.set_state_version(prev_state_version);
 
         // Apply condition with current params.
-        let current_args = param_names.join(", ");
-        if negate {
-            docs.push(docvec![
-                format!(" in case apply {cond_var} ({current_args}) of "),
-                "<'false'> when 'true' -> ",
-            ]);
+        let case_arm = if negate {
+            "<'false'> when 'true' -> "
         } else {
-            docs.push(docvec![
-                format!(" in case apply {cond_var} ({current_args}) of "),
-                "<'true'> when 'true' -> ",
-            ]);
-        }
+            "<'true'> when 'true' -> "
+        };
+        docs.push(docvec![
+            " in case apply ",
+            Document::String(cond_var),
+            " (",
+            param_list_doc(),
+            ") of ",
+            case_arm,
+        ]);
 
         let (body_doc, _) = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
         docs.push(body_doc);
@@ -339,29 +353,39 @@ impl CoreErlangGenerator {
         // Build exit StateAcc using the CURRENT iteration's param names.
         let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);
 
-        let final_args_str = final_args.join(", ");
-        if negate {
-            docs.push(docvec![
-                format!(" apply 'while'/{arity} ({final_args_str}) "),
-                "<'true'> when 'true' -> ",
-                exit_stateacc,
-                " end ",
-            ]);
+        let final_args_doc = join(
+            final_args.into_iter().map(Document::String),
+            &Document::Str(", "),
+        );
+        let exit_arm = if negate {
+            "<'true'> when 'true' -> "
         } else {
-            docs.push(docvec![
-                format!(" apply 'while'/{arity} ({final_args_str}) "),
-                "<'false'> when 'true' -> ",
-                exit_stateacc,
-                " end ",
-            ]);
-        }
+            "<'false'> when 'true' -> "
+        };
+        docs.push(docvec![
+            " apply 'while'/",
+            Document::String(arity.to_string()),
+            " (",
+            final_args_doc,
+            ") ",
+            exit_arm,
+            exit_stateacc,
+            " end ",
+        ]);
 
         self.pop_scope();
 
-        let initial_args_str = initial_direct_args.join(", ");
-        docs.push(Document::String(format!(
-            "in apply 'while'/{arity} ({initial_args_str})"
-        )));
+        let initial_args_doc = join(
+            initial_direct_args.into_iter().map(Document::String),
+            &Document::Str(", "),
+        );
+        docs.push(docvec![
+            "in apply 'while'/",
+            Document::String(arity.to_string()),
+            " (",
+            initial_args_doc,
+            ")",
+        ]);
 
         Ok(Document::Vec(docs))
     }

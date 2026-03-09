@@ -30,7 +30,7 @@ mod while_loops;
 
 use std::fmt::Write as FmtWrite;
 
-use super::document::Document;
+use super::document::{Document, join};
 use super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::Expression;
 use crate::docvec;
@@ -226,9 +226,13 @@ impl ThreadingPlan {
             generator.bind_var(var_name, &core_var);
             if !self.use_direct_params {
                 let key = self.state_key(var_name);
-                docs.push(Document::String(format!(
-                    "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
-                )));
+                docs.push(docvec![
+                    "let ",
+                    Document::String(core_var),
+                    " = call 'maps':'get'('",
+                    Document::String(key),
+                    "', StateAcc) in ",
+                ]);
             }
         }
         docs
@@ -923,17 +927,23 @@ impl CoreErlangGenerator {
             .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
             .collect();
         let arity = 1 + param_names.len();
-        let param_list = std::iter::once("I".to_string())
-            .chain(param_names.iter().cloned())
-            .collect::<Vec<_>>()
-            .join(", ");
+        let param_list_doc = join(
+            std::iter::once(Document::Str("I"))
+                .chain(param_names.iter().map(|v| Document::String(v.clone()))),
+            &Document::Str(", "),
+        );
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(frame.preamble.clone());
-        docs.push(Document::String(format!(
-            " letrec '{fn_name}'/{arity} = fun ({param_list}) -> ",
-            fn_name = frame.fn_name
-        )));
+        docs.push(docvec![
+            " letrec '",
+            Document::String(frame.fn_name.clone()),
+            "'/",
+            Document::String(arity.to_string()),
+            " = fun (",
+            param_list_doc,
+            ") -> ",
+        ]);
 
         self.push_scope();
 
@@ -972,29 +982,37 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
 
-        // Build arg strings for the recursive call and the initial apply.
-        let recursive_args = std::iter::once(frame.next_counter.clone())
-            .chain(final_args)
-            .collect::<Vec<_>>()
-            .join(", ");
-        let initial_args = std::iter::once(frame.initial_counter.clone())
-            .chain(initial_direct_args)
-            .collect::<Vec<_>>()
-            .join(", ");
+        // Build Document arg lists for the recursive call and the initial apply.
+        let recursive_args_doc = join(
+            std::iter::once(Document::String(frame.next_counter.clone()))
+                .chain(final_args.into_iter().map(Document::String)),
+            &Document::Str(", "),
+        );
+        let initial_args_doc = join(
+            std::iter::once(Document::String(frame.initial_counter.clone()))
+                .chain(initial_direct_args.into_iter().map(Document::String)),
+            &Document::Str(", "),
+        );
 
         // Recursive call + false arm (with rebuilt StateAcc) + initial apply.
         docs.push(docvec![
-            format!(
-                " apply '{fn_name}'/{arity} ({recursive_args}) ",
-                fn_name = frame.fn_name
-            ),
+            " apply '",
+            Document::String(frame.fn_name.clone()),
+            "'/",
+            Document::String(arity.to_string()),
+            " (",
+            recursive_args_doc,
+            ") ",
             "<'false'> when 'true' -> ",
             exit_stateacc,
             " end ",
-            Document::String(format!(
-                "in apply '{fn_name}'/{arity} ({initial_args})",
-                fn_name = frame.fn_name
-            )),
+            "in apply '",
+            Document::String(frame.fn_name.clone()),
+            "'/",
+            Document::String(arity.to_string()),
+            " (",
+            initial_args_doc,
+            ")",
         ]);
 
         Ok(Document::Vec(docs))
