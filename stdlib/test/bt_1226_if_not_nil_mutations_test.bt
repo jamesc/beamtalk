@@ -47,3 +47,15 @@ TestCase subclass: BT1226IfNotNilMutationsTest
     a := IfNotNilMutActor spawn
     result := a touch: "missing"
     self assert: result equals: #{}
+
+  // ifNotNil: expression return value must be correct (not just state side-effect).
+  // Tests that the {Result, State} tuple has Result and State in the right positions.
+  testIfNotNilReturnValueIsCorrect =>
+    a := IfNotNilMutActor spawn
+    a addEntry: "x" withValue: 10
+    // Block mutates state AND returns entry + 1 as the expression result
+    branchResult := a incrementAndReturnNewValue: "x"
+    self assert: branchResult equals: 11
+    // Nil case: expression result is nil
+    nilResult := a incrementAndReturnNewValue: "absent"
+    self assert: nilResult equals: nil

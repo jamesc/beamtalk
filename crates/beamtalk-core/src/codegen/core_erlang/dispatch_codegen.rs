@@ -1161,7 +1161,10 @@ impl CoreErlangGenerator {
                 selector: MessageSelector::Keyword(parts),
                 ..
             } => {
-                // Check for control flow selectors that thread state
+                // Check for control flow selectors that thread state.
+                // TODO BT-1281: centralize this list into a shared helper to avoid drift
+                // when new selectors are added (same list exists in control_flow_has_mutations
+                // and inline_conditional_writes_threaded).
                 let selector: String = parts.iter().map(|p| p.keyword.as_str()).collect();
                 matches!(
                     selector.as_str(),

@@ -22,3 +22,12 @@ Actor subclass: IfNotNilMutActor
       nil
     ]) ifNotNil: [self.running := self.running at: id put: 99]
     self.running
+
+  // Returns the ifNotNil: expression result (entry + 1) as the branch value,
+  // AND mutates state. Tests that both {Result, State} elements are correct.
+  incrementAndReturnNewValue: id =>
+    (self.running at: id ifAbsent: [nil])
+      ifNotNil: [:entry |
+        self.running := self.running at: id put: (entry + 1)
+        entry + 1
+      ]
