@@ -99,7 +99,7 @@ Chapter 10 (Value Classes) and Chapter 11 (Actors) cover instance variables.
 The key distinction:
 
 - `x := 42` — local variable, lives in the current method/script
-- `self.x := 42` — instance variable, lives in the object (actors only)
+- `self.x := 42` — slot assignment on an object; valid for `Actor subclass:` and `Object subclass:`, but rejected at compile time for `Value subclass:` (values are immutable)
 
 For now, all variables we've seen are local.
 

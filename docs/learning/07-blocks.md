@@ -152,13 +152,13 @@ Example (this works correctly inside a method):
 
 When `^` fires inside the block, the *method* returns immediately.
 
-In the learning guide scripts, `^` in a block is an early block return:
+In Beamtalk, `^` inside a block is a **non-local return** — it exits the *enclosing method* (or activation), not just the block. In these learning guide scripts the enclosing activation is the script runner itself, so the non-local return still yields:
 
 ```beamtalk
 [:x | ^x + 10] value: 5  // => 15
 ```
 
-In a method body, it exits the method entirely.
+Inside a class method, `^` inside a block exits the entire method immediately — useful for early returns but can cause surprises if the block outlives the method.
 
 ## whileFalse: / whileTrue:
 

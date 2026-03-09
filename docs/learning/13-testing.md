@@ -3,7 +3,7 @@
 Beamtalk's test framework is BUnit — a Smalltalk-style xUnit framework.
 Tests live in `TestCase subclass:` definitions.
 
-Test runner: `just test-bunit` (BUnit tests) or `just test-stdlib` (btscript)
+Test runner: `beamtalk test` (BUnit tests) or `beamtalk test-script` (btscript inline assertions)
 
 ## Basic structure
 
@@ -82,6 +82,7 @@ TestCase subclass: Ch13SetupExample
 
   setUp =>
     self.counter := Counter spawn
+    self
 
   tearDown =>
     self.counter isAlive ifTrue: [self.counter stop]
@@ -138,6 +139,7 @@ TestCase subclass: StackTest
   setUp =>
     self.stack := Stack spawn
     self.stack initialize
+    self
 
   testNewStackIsEmpty =>
     self assert: self.stack isEmpty
@@ -217,8 +219,8 @@ self assert: obj isKindOf: Class
 Run tests:
 
 ```bash
-just test-bunit                   # all BUnit tests
-just test-bunit test/my_test.bt   # one file
+beamtalk test                     # all BUnit tests
+beamtalk test test/my_test.bt     # one file
 ```
 
 Next: Chapter 14 — Pattern Matching

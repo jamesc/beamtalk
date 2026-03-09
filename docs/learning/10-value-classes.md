@@ -3,8 +3,11 @@
 A value class is an immutable object — like a record or struct. Once created,
 its slots cannot change. "Mutations" return a new object with the change applied.
 
-Use `Value subclass:` (or `Object subclass:`) for data that travels between
-methods without needing concurrency or identity.
+Use `Value subclass:` for data that travels between methods without needing
+concurrency or identity. `Value subclass:` enforces immutability at compile
+time — direct slot assignment (`self.x := ...`) is a compile error. Use
+`Object subclass:` when you want the same immutable style with snapshot
+semantics but are comfortable with runtime rather than compile-time enforcement.
 
 Examples: coordinates, money amounts, colours, dates, config records.
 
