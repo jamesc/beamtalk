@@ -758,6 +758,7 @@ mod tests {
                 Pattern::Variable(make_id("first")),
                 Pattern::Variable(make_id("second")),
             ],
+            list_syntax: false,
             span: Span::new(1, 15),
         };
 

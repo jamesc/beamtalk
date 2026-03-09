@@ -130,12 +130,43 @@ impl Parser {
         // Check for assignment operators
         if self.match_token(&TokenKind::Assign) {
             // Array destructuring: `#[a, b] := expr`
+            // List destructuring: `#(a, b) := expr` (BT-1279)
+            // Both use the same Pattern::Array node and at:-based codegen.
+            // The `list_syntax` flag preserves the original delimiter for
+            // round-trip formatting and future type checking.
+
+            // Reject cons-style list syntax on the LHS: `#(a | rest) := expr`.
+            // Provide a specific error rather than falling through to the generic
+            // "must be identifier" message.
+            if let Expression::ListLiteral {
+                tail: Some(_),
+                span: lhs_span,
+                ..
+            } = &expr
+            {
+                let span = *lhs_span;
+                self.diagnostics.push(Diagnostic::error(
+                    "Cons syntax `#(head | tail)` is not supported in destructuring patterns; use `#(a, b, c) := expr` instead",
+                    span,
+                ));
+                return Expression::Error {
+                    message: "Invalid destructuring pattern".into(),
+                    span,
+                };
+            }
+
+            let list_syntax = matches!(&expr, Expression::ListLiteral { tail: None, .. });
             if let Expression::ArrayLiteral {
                 elements,
                 span: lhs_span,
+            }
+            | Expression::ListLiteral {
+                elements,
+                tail: None,
+                span: lhs_span,
             } = &expr
             {
-                match Self::array_elements_to_pattern(elements, *lhs_span) {
+                match Self::collection_elements_to_pattern(elements, *lhs_span, list_syntax) {
                     Ok(pattern) => {
                         if let Err(error) = self.enter_nesting(*lhs_span) {
                             return error;
@@ -151,11 +182,11 @@ impl Parser {
                     }
                     Err(bad_span) => {
                         self.diagnostics.push(Diagnostic::error(
-                            "Array destructuring patterns may only contain identifiers, '_', or literals",
+                            "Destructuring patterns may only contain identifiers, '_', or literals",
                             bad_span,
                         ));
                         return Expression::Error {
-                            message: "Invalid array destructuring pattern".into(),
+                            message: "Invalid destructuring pattern".into(),
                             span: *lhs_span,
                         };
                     }
@@ -228,12 +259,17 @@ impl Parser {
         expr
     }
 
-    /// Converts array literal elements to a destructuring pattern.
+    /// Converts collection literal elements to a destructuring pattern.
     ///
     /// Returns `Ok(Pattern::Array)` if all elements are valid pattern positions
     /// (identifiers, `_`, or literals), or `Err(span)` pointing at the first
-    /// invalid element.
-    fn array_elements_to_pattern(elements: &[Expression], span: Span) -> Result<Pattern, Span> {
+    /// invalid element. The `list_syntax` flag preserves whether the source
+    /// used `#(...)` or `#[...]` delimiters.
+    fn collection_elements_to_pattern(
+        elements: &[Expression],
+        span: Span,
+        list_syntax: bool,
+    ) -> Result<Pattern, Span> {
         let mut patterns = Vec::new();
         for elem in elements {
             let pat = match elem {
@@ -246,6 +282,7 @@ impl Parser {
         }
         Ok(Pattern::Array {
             elements: patterns,
+            list_syntax,
             span,
         })
     }
@@ -1134,6 +1171,7 @@ impl Parser {
 
         Pattern::Array {
             elements,
+            list_syntax: false,
             span: start.merge(end),
         }
     }
