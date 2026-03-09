@@ -46,7 +46,7 @@ sealed Object subclass: Yaml
   /// Yaml parse: "- 1\n- 2\n- 3"            // => [1,2,3]
   /// Yaml parse: "null"                      // => nil
   /// ```
-  class sealed parse: yamlString :: String =>
+  class sealed parse: yamlString :: String -> Result =>
     (Erlang beamtalk_yaml) parse: yamlString
 
   /// Parse a multi-document YAML string into a List of values (class method).
@@ -58,7 +58,7 @@ sealed Object subclass: Yaml
   /// ```beamtalk
   /// Yaml parseAll: "42\n---\n43"            // => _
   /// ```
-  class sealed parseAll: yamlString :: String -> List =>
+  class sealed parseAll: yamlString :: String -> Result =>
     (Erlang beamtalk_yaml) parseAll: yamlString
 
   /// Generate a YAML string from a Beamtalk value (class method).
@@ -86,5 +86,5 @@ sealed Object subclass: Yaml
   /// ```beamtalk
   /// Yaml parseFile: "/etc/myapp.yaml"      // => _
   /// ```
-  class sealed parseFile: path :: String -> Object =>
+  class sealed parseFile: path :: String -> Result =>
     (Erlang beamtalk_yaml) parseFile: path

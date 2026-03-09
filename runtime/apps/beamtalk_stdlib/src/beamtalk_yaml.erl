@@ -48,12 +48,26 @@
 %% scalar type — string keys become Strings, integer keys become Integers),
 %% sequences become Lists, strings become Strings, integers become Integers,
 %% floats become Floats, true/false become booleans, null/~ become nil.
--spec 'parse:'(binary()) -> term().
+%%
+%% Returns `Result ok: value` on success, `Result error:` on invalid YAML.
+%% Type error (non-String argument) still raises.
+-spec 'parse:'(binary()) -> map().
 'parse:'(YamlStr) when is_binary(YamlStr) ->
-    Docs = parse_yaml_string(YamlStr, 'parse:'),
-    case Docs of
-        [] -> nil;
-        [Doc | _] -> convert_node(Doc, 'parse:')
+    case parse_yaml_string(YamlStr, 'parse:') of
+        {error, _} = Err ->
+            beamtalk_result:from_tagged_tuple(Err);
+        {ok, Docs} ->
+            try
+                Value =
+                    case Docs of
+                        [] -> nil;
+                        [Doc | _] -> convert_node(Doc, 'parse:')
+                    end,
+                beamtalk_result:from_tagged_tuple({ok, Value})
+            catch
+                error:#{error := #beamtalk_error{}} = E ->
+                    beamtalk_result:from_tagged_tuple({error, maps:get(error, E)})
+            end
     end;
 'parse:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'Yaml'),
@@ -63,11 +77,24 @@
 
 %% @doc Parse a YAML string containing multiple documents.
 %%
-%% Returns a List of Beamtalk values, one per YAML document (separated by ---).
--spec 'parseAll:'(binary()) -> list().
+%% Returns `Result ok: list` where list contains one value per YAML document
+%% (separated by ---). Returns `Result error:` on invalid YAML.
+%% Type error (non-String argument) still raises.
+-spec 'parseAll:'(binary()) -> map().
 'parseAll:'(YamlStr) when is_binary(YamlStr) ->
-    Docs = parse_yaml_string(YamlStr, 'parseAll:'),
-    [convert_node(Doc, 'parseAll:') || Doc <- Docs];
+    case parse_yaml_string(YamlStr, 'parseAll:') of
+        {error, _} = Err ->
+            beamtalk_result:from_tagged_tuple(Err);
+        {ok, Docs} ->
+            try
+                beamtalk_result:from_tagged_tuple(
+                    {ok, [convert_node(Doc, 'parseAll:') || Doc <- Docs]}
+                )
+            catch
+                error:#{error := #beamtalk_error{}} = E ->
+                    beamtalk_result:from_tagged_tuple({error, maps:get(error, E)})
+            end
+    end;
 'parseAll:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'Yaml'),
     Error1 = beamtalk_error:with_selector(Error0, 'parseAll:'),
@@ -97,8 +124,9 @@
 
 %% @doc Read a file and parse it as YAML (first document).
 %%
-%% Convenience method combining file reading with YAML parsing.
--spec 'parseFile:'(binary()) -> term().
+%% Returns `Result ok: value` on success, `Result error:` if the file cannot
+%% be read or the YAML is invalid. Type error (non-String argument) still raises.
+-spec 'parseFile:'(binary()) -> map().
 'parseFile:'(Path) when is_binary(Path) ->
     case file:read_file(Path) of
         {ok, Content} ->
@@ -110,7 +138,7 @@
             Error3 = beamtalk_error:with_hint(
                 Error2, <<"Check that the file exists and is readable">>
             ),
-            beamtalk_error:raise(Error3)
+            beamtalk_result:from_tagged_tuple({error, Error3})
     end;
 'parseFile:'(_) ->
     Error0 = beamtalk_error:new(type_error, 'Yaml'),
@@ -127,7 +155,7 @@
 parse(X) -> 'parse:'(X).
 
 %% @doc FFI alias for parseAll:/1 — called via (Erlang beamtalk_yaml) parseAll: str.
--spec parseAll(binary()) -> list().
+-spec parseAll(binary()) -> map().
 parseAll(X) -> 'parseAll:'(X).
 
 %% @doc FFI alias for generate:/1 — called via (Erlang beamtalk_yaml) generate: val.
@@ -145,6 +173,8 @@ parseFile(X) -> 'parseFile:'(X).
 %% @private
 %% @doc Parse a YAML binary using yamerl detailed mode.
 %%
+%% Returns `{ok, Docs}` or `{error, #beamtalk_error{}}`.
+%%
 %% Uses `{detailed_constr, true}` to get typed yamerl node records, which
 %% allows reliable type-safe conversion without the string/sequence ambiguity
 %% present in simplified mode.
@@ -152,27 +182,35 @@ parseFile(X) -> 'parseFile:'(X).
 %% Ensures yamerl is started before use. The test runner does not start OTP
 %% applications via application:ensure_all_started, so yamerl must be started
 %% lazily here.
--spec parse_yaml_string(binary(), atom()) -> [term()].
+-spec parse_yaml_string(binary(), atom()) -> {ok, [term()]} | {error, #beamtalk_error{}}.
 parse_yaml_string(YamlStr, Selector) ->
-    ok = ensure_yamerl_started(Selector),
-    try
-        Docs = yamerl_constr:string(YamlStr, [{detailed_constr, true}]),
-        [unwrap_doc(D) || D <- Docs]
-    catch
-        error:#{error := #beamtalk_error{}} = E:_ ->
-            error(E);
-        throw:{yamerl_exception, _} = Ex ->
-            Error0 = beamtalk_error:new(parse_error, 'Yaml'),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_details(Error1, #{reason => Ex}),
-            Error3 = beamtalk_error:with_hint(Error2, <<"Check that the string is valid YAML">>),
-            beamtalk_error:raise(Error3);
-        _:Reason ->
-            Error0 = beamtalk_error:new(parse_error, 'Yaml'),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
-            Error3 = beamtalk_error:with_hint(Error2, <<"Check that the string is valid YAML">>),
-            beamtalk_error:raise(Error3)
+    case ensure_yamerl_started(Selector) of
+        {error, _} = Err ->
+            Err;
+        ok ->
+            try
+                Docs = yamerl_constr:string(YamlStr, [{detailed_constr, true}]),
+                {ok, [unwrap_doc(D) || D <- Docs]}
+            catch
+                error:#{error := #beamtalk_error{}} = E:_ ->
+                    error(E);
+                throw:{yamerl_exception, _} = Ex ->
+                    Error0 = beamtalk_error:new(parse_error, 'Yaml'),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error2 = beamtalk_error:with_details(Error1, #{reason => Ex}),
+                    Error3 = beamtalk_error:with_hint(
+                        Error2, <<"Check that the string is valid YAML">>
+                    ),
+                    {error, Error3};
+                _:Reason ->
+                    Error0 = beamtalk_error:new(parse_error, 'Yaml'),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
+                    Error3 = beamtalk_error:with_hint(
+                        Error2, <<"Check that the string is valid YAML">>
+                    ),
+                    {error, Error3}
+            end
     end.
 
 %% @private
@@ -182,8 +220,8 @@ parse_yaml_string(YamlStr, Selector) ->
 %% test runner does not use application:ensure_all_started, so yamerl must
 %% be started lazily. This call is idempotent.
 %%
-%% Takes the calling selector so error messages attribute failures correctly.
--spec ensure_yamerl_started(atom()) -> ok.
+%% Returns `ok` on success or `{error, #beamtalk_error{}}` on failure.
+-spec ensure_yamerl_started(atom()) -> ok | {error, #beamtalk_error{}}.
 ensure_yamerl_started(Selector) ->
     case application:ensure_all_started(yamerl) of
         {ok, _Started} ->
@@ -195,7 +233,7 @@ ensure_yamerl_started(Selector) ->
                 Error1, <<"Failed to start yamerl YAML library">>
             ),
             Error3 = beamtalk_error:with_details(Error2, #{reason => Reason}),
-            beamtalk_error:raise(Error3)
+            {error, Error3}
     end.
 
 %% @private

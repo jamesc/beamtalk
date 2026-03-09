@@ -52,7 +52,7 @@ Actor subclass: ReactiveSubprocess
   /// ```beamtalk
   /// proc := ReactiveSubprocess open: "echo" args: #("hello") notify: delegate
   /// ```
-  class open: command args: args notify: notify =>
+  class open: command args: args notify: notify -> Result =>
     @primitive "open:args:notify:"
 
   /// Open a subprocess with environment and working directory, delivering lines to `notify`.
@@ -64,7 +64,7 @@ Actor subclass: ReactiveSubprocess
   ///   env: #{#"CI" => #"true"} dir: #"/tmp"
   ///   notify: delegate
   /// ```
-  class open: command args: args env: env dir: dir notify: notify =>
+  class open: command args: args env: env dir: dir notify: notify -> Result =>
     @primitive "open:args:env:dir:notify:"
 
   /// Write a line to the subprocess's stdin (appends newline).

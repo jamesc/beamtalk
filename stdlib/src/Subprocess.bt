@@ -39,7 +39,7 @@ Actor subclass: Subprocess
   /// ```beamtalk
   /// agent := Subprocess open: "ls" args: #("-la")
   /// ```
-  class open: command args: args =>
+  class open: command args: args -> Result =>
     (Erlang beamtalk_subprocess) open: command args: args
 
   /// Convenience factory — open a subprocess with command, args, environment, and working directory.
@@ -48,7 +48,7 @@ Actor subclass: Subprocess
   /// ```beamtalk
   /// agent := Subprocess open: "make" args: #("test") env: #{#"CI" => #"true"} dir: #"/tmp"
   /// ```
-  class open: command args: args env: env dir: dir =>
+  class open: command args: args env: env dir: dir -> Result =>
     (Erlang beamtalk_subprocess) open: command args: args env: env dir: dir
 
   /// Write a line to the subprocess's stdin (appends newline).

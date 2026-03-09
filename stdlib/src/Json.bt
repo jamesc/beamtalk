@@ -42,7 +42,7 @@ sealed Object subclass: Json
   /// Json parse: "42"                   // => 42
   /// Json parse: "null"                 // => nil
   /// ```
-  class sealed parse: jsonString :: String =>
+  class sealed parse: jsonString :: String -> Result =>
     (Erlang beamtalk_json) parse: jsonString
 
   /// Generate a JSON string from a Beamtalk value (class method).

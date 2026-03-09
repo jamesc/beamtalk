@@ -139,15 +139,16 @@ has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
 %%% ============================================================================
 
 %% @doc Perform a GET request with no extra headers.
--spec 'get:'(binary()) -> beamtalk_http_response:t().
+-spec 'get:'(binary()) -> map().
 'get:'(Url) ->
     'get:headers:'(Url, []).
 
 %% @doc Perform a GET request.
 %%
 %% `Headers` is a list of `[Name, Value]` binary pairs.
-%% Returns an `HTTPResponse` tagged map.
--spec 'get:headers:'(binary(), list()) -> beamtalk_http_response:t().
+%% Returns `Result ok: httpResponse` on success, `Result error:` on network failure.
+%% HTTP status codes (e.g. 404) are not errors — they are on the HTTPResponse.
+-spec 'get:headers:'(binary(), list()) -> map().
 'get:headers:'(Url, Headers) when is_binary(Url), is_list(Headers) ->
     do_request(<<"GET">>, Url, Headers, <<>>, ?DEFAULT_TIMEOUT, 'get:headers:');
 'get:headers:'(_, Headers) when not is_list(Headers) ->
@@ -156,12 +157,12 @@ has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
     type_error('get:headers:', <<"Url must be a String">>).
 
 %% @doc Perform a POST request with body and no extra headers.
--spec 'post:body:'(binary(), binary()) -> beamtalk_http_response:t().
+-spec 'post:body:'(binary(), binary()) -> map().
 'post:body:'(Url, Body) ->
     'post:headers:body:'(Url, [], Body).
 
 %% @doc Perform a POST request with headers and body.
--spec 'post:headers:body:'(binary(), list(), binary()) -> beamtalk_http_response:t().
+-spec 'post:headers:body:'(binary(), list(), binary()) -> map().
 'post:headers:body:'(Url, Headers, Body) when is_binary(Url), is_list(Headers), is_binary(Body) ->
     do_request(<<"POST">>, Url, Headers, Body, ?DEFAULT_TIMEOUT, 'post:headers:body:');
 'post:headers:body:'(Url, _, _) when not is_binary(Url) ->
@@ -172,12 +173,12 @@ has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
     type_error('post:headers:body:', <<"Body must be a String">>).
 
 %% @doc Perform a PUT request with body and no extra headers.
--spec 'put:body:'(binary(), binary()) -> beamtalk_http_response:t().
+-spec 'put:body:'(binary(), binary()) -> map().
 'put:body:'(Url, Body) ->
     'put:headers:body:'(Url, [], Body).
 
 %% @doc Perform a PUT request with headers and body.
--spec 'put:headers:body:'(binary(), list(), binary()) -> beamtalk_http_response:t().
+-spec 'put:headers:body:'(binary(), list(), binary()) -> map().
 'put:headers:body:'(Url, Headers, Body) when is_binary(Url), is_list(Headers), is_binary(Body) ->
     do_request(<<"PUT">>, Url, Headers, Body, ?DEFAULT_TIMEOUT, 'put:headers:body:');
 'put:headers:body:'(Url, _, _) when not is_binary(Url) ->
@@ -188,12 +189,12 @@ has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
     type_error('put:headers:body:', <<"Body must be a String">>).
 
 %% @doc Perform a DELETE request with no extra headers.
--spec 'delete:'(binary()) -> beamtalk_http_response:t().
+-spec 'delete:'(binary()) -> map().
 'delete:'(Url) ->
     'delete:headers:'(Url, []).
 
 %% @doc Perform a DELETE request.
--spec 'delete:headers:'(binary(), list()) -> beamtalk_http_response:t().
+-spec 'delete:headers:'(binary(), list()) -> map().
 'delete:headers:'(Url, Headers) when is_binary(Url), is_list(Headers) ->
     do_request(<<"DELETE">>, Url, Headers, <<>>, ?DEFAULT_TIMEOUT, 'delete:headers:');
 'delete:headers:'(_, Headers) when not is_list(Headers) ->
@@ -205,7 +206,7 @@ has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
 %%
 %% `Method` is a binary like `<<"GET">>` or a symbol like `#get`.
 %% `Options` is a map with optional keys: `headers`, `body`, `timeout`.
--spec 'request:url:options:'(term(), binary(), map()) -> beamtalk_http_response:t().
+-spec 'request:url:options:'(term(), binary(), map()) -> map().
 'request:url:options:'(Method, Url, Options) when is_binary(Url), is_map(Options) ->
     MethodBin = normalise_method(Method),
     Headers = maps:get(headers, Options, []),
@@ -223,24 +224,24 @@ has_method(Selector) -> beamtalk_object_ops:has_method(Selector).
 %%% ============================================================================
 
 %% @doc GET delegate called by `(Erlang beamtalk_http) get: url` from Beamtalk.
--spec get(binary()) -> beamtalk_http_response:t().
+-spec get(binary()) -> map().
 get(Url) -> 'get:'(Url).
 
 %% @doc POST delegate called by `(Erlang beamtalk_http) post: url body: body`.
--spec post(binary(), binary()) -> beamtalk_http_response:t().
+-spec post(binary(), binary()) -> map().
 post(Url, Body) -> 'post:body:'(Url, Body).
 
 %% @doc PUT delegate called by `(Erlang beamtalk_http) put: url body: body`.
--spec put(binary(), binary()) -> beamtalk_http_response:t().
+-spec put(binary(), binary()) -> map().
 put(Url, Body) -> 'put:body:'(Url, Body).
 
 %% @doc DELETE delegate called by `(Erlang beamtalk_http) delete: url`.
--spec delete(binary()) -> beamtalk_http_response:t().
+-spec delete(binary()) -> map().
 delete(Url) -> 'delete:'(Url).
 
 %% @doc Generic request delegate called by
 %% `(Erlang beamtalk_http) request: method url: url options: opts`.
--spec request(term(), binary(), map()) -> beamtalk_http_response:t().
+-spec request(term(), binary(), map()) -> map().
 request(Method, Url, Options) -> 'request:url:options:'(Method, Url, Options).
 
 %%% ============================================================================
@@ -249,10 +250,15 @@ request(Method, Url, Options) -> 'request:url:options:'(Method, Url, Options).
 
 %% @private Execute an HTTP request via gun.
 %%
+%% Returns `Result ok: httpResponse` on a completed HTTP exchange, or
+%% `Result error:` for network-level failures (invalid URL, connection
+%% refused, timeout). HTTP status codes (e.g. 404) are not errors — they are
+%% returned on the HTTPResponse object inside `Result ok:`.
+%%
 %% `Selector` is the public API selector, used in error reports so the user
 %% sees `'get:'` rather than the internal `'do_request'` helper name.
 -spec do_request(binary(), binary(), list(), binary(), non_neg_integer(), atom()) ->
-    beamtalk_http_response:t().
+    map().
 do_request(Method, Url, BtHeaders, Body, Timeout, Selector) ->
     case parse_url(Url) of
         {error, invalid_url} ->
@@ -312,18 +318,22 @@ do_request(Method, Url, BtHeaders, Body, Timeout, Selector) ->
 %% `Deadline` is an absolute monotonic timestamp (ms) so the total wall-clock
 %% time across all gun:await calls is bounded by the original timeout.
 -spec collect_response(pid(), reference(), reference(), integer(), atom()) ->
-    beamtalk_http_response:t().
+    map().
 collect_response(ConnPid, StreamRef, MRef, Deadline, Selector) ->
     case gun:await(ConnPid, StreamRef, remaining(Deadline), MRef) of
         {response, fin, Status, GunHeaders} ->
             %% No body (e.g. 204 No Content, HEAD)
-            make_response(Status, GunHeaders, <<>>);
+            beamtalk_result:from_tagged_tuple({ok, make_response(Status, GunHeaders, <<>>)});
         {response, nofin, Status, GunHeaders} ->
             case gun:await_body(ConnPid, StreamRef, remaining(Deadline), MRef) of
                 {ok, Body} ->
-                    make_response(Status, GunHeaders, Body);
+                    beamtalk_result:from_tagged_tuple(
+                        {ok, make_response(Status, GunHeaders, Body)}
+                    );
                 {ok, Body, _Trailers} ->
-                    make_response(Status, GunHeaders, Body);
+                    beamtalk_result:from_tagged_tuple(
+                        {ok, make_response(Status, GunHeaders, Body)}
+                    );
                 {error, timeout} ->
                     http_error(Selector, #{}, <<"Response body timed out">>);
                 {error, Reason} ->
@@ -371,7 +381,7 @@ collect_response(ConnPid, StreamRef, MRef, Deadline, Selector) ->
 %% the call is safe because the module is always loaded before HTTP requests
 %% can be made (beamtalk_stdlib starts after beamtalk_runtime).
 -dialyzer({nowarn_function, make_response/3}).
--spec make_response(non_neg_integer(), list(), binary()) -> beamtalk_http_response:t().
+-spec make_response(non_neg_integer(), list(), binary()) -> map().
 
 make_response(Status, GunHeaders, Body) ->
     BtHeaders = from_gun_headers(GunHeaders),
@@ -518,14 +528,14 @@ deadline(Timeout) ->
 remaining(Deadline) ->
     max(0, Deadline - erlang:monotonic_time(millisecond)).
 
-%% @private Raise a typed HTTP error.
--spec http_error(atom(), map(), binary()) -> no_return().
+%% @private Return a Result error for a network-level HTTP failure.
+-spec http_error(atom(), map(), binary()) -> map().
 http_error(Selector, Details, Message) ->
     Error0 = beamtalk_error:new(http_error, 'Http'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_details(Error1, Details),
     Error3 = beamtalk_error:with_hint(Error2, Message),
-    beamtalk_error:raise(Error3).
+    beamtalk_result:from_tagged_tuple({error, Error3}).
 
 %% @private Raise a type error for a bad argument.
 -spec type_error(atom(), binary() | iolist()) -> no_return().
