@@ -249,11 +249,16 @@ fn run_package_as_otp_application(
 
     // Start the OTP application. The generated beamtalk_{appname}_app module's
     // start/2 will bring up the root supervisor rooted in the OTP tree.
+    // Monitor the root supervisor PID so the eval process exits when the
+    // application terminates (rather than waiting for an unsent 'stop' message).
     let app_name = &pkg.name;
     let eval_cmd = format!(
         "{{ok, _}} = application:ensure_all_started(beamtalk_runtime), \
          {{ok, _}} = application:ensure_all_started({app_name}), \
-         receive stop -> ok end."
+         SupTuple = beamtalk_supervisor:get_root(), \
+         Pid = element(4, SupTuple), \
+         Ref = erlang:monitor(process, Pid), \
+         receive {{'DOWN', Ref, process, _, _}} -> ok end."
     );
 
     args.push(OsString::from("-eval"));
