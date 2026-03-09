@@ -660,17 +660,10 @@ impl CoreErlangGenerator {
     ) -> Result<(Vec<Document<'static>>, String)> {
         let mut docs: Vec<Document<'static>> = Vec::new();
 
-        // Pre-evaluate the RHS into a temp var so we can detect and unwrap
+        // Pre-evaluate the RHS using the shared helper so we can detect and unwrap
         // mutation-threaded results ({Result, StateAcc}) before extraction.
-        let raw_var = self.fresh_temp_var("Rhs");
-        let val_doc = self.expression_doc(value)?;
-        docs.push(docvec![
-            "    let ",
-            Document::String(raw_var.clone()),
-            " = ",
-            val_doc,
-            " in\n",
-        ]);
+        let (rhs_doc, raw_var) = self.eval_rhs_to_temp_var(value, "Rhs", "    let ", " in\n")?;
+        docs.push(rhs_doc);
 
         // If the RHS was a mutation-threaded expression (e.g. a loop), it returned
         // {Result, StateAcc}. Hoist the unwrapped value and advance REPL state so

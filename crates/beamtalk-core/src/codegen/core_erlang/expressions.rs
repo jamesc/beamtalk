@@ -1418,10 +1418,32 @@ impl CoreErlangGenerator {
         Ok(docs)
     }
 
+    /// Evaluates `value` into a fresh temporary variable, returning the binding document and var name.
+    ///
+    /// Shared first step for [`Self::generate_destructure_extractions`] (compiled-code) and
+    /// [`CoreErlangGenerator::generate_repl_destructure`] (REPL), which both need to evaluate
+    /// the RHS before extracting individual elements.
+    ///
+    /// Returns `(binding_doc, var_name)` where:
+    /// - `binding_doc` is the `let var = <value> terminator` document
+    /// - `var_name` is the temp variable holding the evaluated RHS
+    pub(super) fn eval_rhs_to_temp_var(
+        &mut self,
+        value: &Expression,
+        prefix: &str,
+        indent: &'static str,
+        terminator: &'static str,
+    ) -> Result<(Document<'static>, String)> {
+        let var = self.fresh_temp_var(prefix);
+        let val_doc = self.expression_doc(value)?;
+        let binding_doc = docvec![indent, Document::String(var.clone()), " = ", val_doc, terminator];
+        Ok((binding_doc, var))
+    }
+
     /// Core extraction logic shared between compiled-code and REPL destructuring.
     ///
-    /// Evaluates `value` into a fresh temp var, then delegates to
-    /// [`Self::generate_pattern_extractions_from_var`] for the element bindings.
+    /// Evaluates `value` into a fresh temp var via [`Self::eval_rhs_to_temp_var`], then
+    /// delegates to [`Self::generate_pattern_extractions_from_var`] for the element bindings.
     ///
     /// The `indent` and `terminator` parameters control formatting:
     /// - Non-REPL: `indent = "let "`, `terminator = " in "` (inline expression style)
@@ -1450,15 +1472,8 @@ impl CoreErlangGenerator {
                 });
             }
         };
-        let rhs_var = self.fresh_temp_var(rhs_prefix);
-        let val_doc = self.expression_doc(value)?;
-        let mut docs = vec![docvec![
-            indent,
-            Document::String(rhs_var.clone()),
-            " = ",
-            val_doc,
-            terminator,
-        ]];
+        let (rhs_doc, rhs_var) = self.eval_rhs_to_temp_var(value, rhs_prefix, indent, terminator)?;
+        let mut docs = vec![rhs_doc];
         let (extraction_docs, bound_pairs) =
             self.generate_pattern_extractions_from_var(pattern, &rhs_var, indent, terminator)?;
         docs.extend(extraction_docs);
