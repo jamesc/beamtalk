@@ -215,11 +215,11 @@ TestCase subclass: DestructuringTest
     self assert: c equals: 3
 
   testMapDestructuringMissingKeyRaisesError =>
-    // Accessing a missing key raises an error.
+    // Accessing a missing key raises a {badkey, Key} error via erlang:map_get/2.
     result := [
       #{#missing => _val} := #{#present => 42}
       #did_not_raise
-    ] on: RuntimeError do: [:e | true]
+    ] on: RuntimeError do: [:e | e message includesSubstring: "badkey"]
     self assert: result equals: true
 
   testMapDestructuringOnlyStatement =>
