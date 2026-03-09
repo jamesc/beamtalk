@@ -44,7 +44,8 @@ z
 // ARRAY DESTRUCTURING — SINGLE EXPRESSION
 // ===========================================================================
 
-// #[x, y] := #[10, 20] — binds x and y; display is the original array
+// #[x, y] := #[10, 20] — binds x and y; display is intentionally unchecked
+// because the JSON representation of Beamtalk arrays is implementation-defined.
 #[x, y] := #[10, 20]
 // => _
 
@@ -61,7 +62,8 @@ y
 // TAGGED TUPLE DESTRUCTURING
 // ===========================================================================
 
-// {#ok, val} := (tuple from FFI) — binds val; display is the original tuple
+// {#ok, val} := (tuple from FFI) — binds val; display is intentionally unchecked
+// because the JSON representation of Erlang tuples is implementation-defined.
 {#ok, val} := Erlang erlang list_to_tuple: #(#ok, 42)
 // => _
 

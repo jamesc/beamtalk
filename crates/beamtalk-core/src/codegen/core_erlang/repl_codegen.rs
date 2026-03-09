@@ -10,7 +10,7 @@
 //! with the provided bindings map.
 
 use super::document::Document;
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{Expression, Pattern};
 use crate::docvec;
 
@@ -644,175 +644,37 @@ impl CoreErlangGenerator {
 
     /// Generates REPL state-threading let-bindings for a destructuring assignment.
     ///
-    /// Like the destructure-binding helpers in `expressions.rs`, but also emits
-    /// `maps:put` calls to persist each bound variable into the REPL State map.
+    /// Delegates extraction to the shared `generate_destructure_extractions` helper
+    /// (which handles Array, Tuple, and Map patterns), then appends `maps:put` calls
+    /// to persist each bound variable into the REPL State map.
     ///
     /// Returns `(binding_docs, rhs_var)` where:
-    /// - `binding_docs` is the flat chain of `let X = ... in\n` and
-    ///   `let StateN = maps:put('x', X, StateN-1) in\n` documents
+    /// - `binding_docs` is the flat chain of `let X = ... in\n` extraction docs
+    ///   followed by `let StateN = maps:put('x', X, StateN-1) in\n` state updates
     /// - `rhs_var` is the temp variable name holding the original RHS value
     ///   (used as the display result for the REPL)
-    #[allow(clippy::too_many_lines)]
     fn generate_repl_destructure(
         &mut self,
         pattern: &Pattern,
         value: &Expression,
     ) -> Result<(Vec<Document<'static>>, String)> {
-        let mut docs: Vec<Document<'static>> = Vec::new();
-
-        match pattern {
-            Pattern::Array { elements, .. } => {
-                let arr_var = self.fresh_temp_var("Arr");
-                let val_doc = self.expression_doc(value)?;
-                docs.push(docvec![
-                    "    let ",
-                    Document::String(arr_var.clone()),
-                    " = ",
-                    val_doc,
-                    " in\n",
-                ]);
-                for (idx, elem) in elements.iter().enumerate() {
-                    let one_based = Document::String((idx + 1).to_string());
-                    match elem {
-                        Pattern::Variable(id) => {
-                            let var_name = id.name.to_string();
-                            let core_var = Self::to_core_erlang_var(&id.name);
-                            self.bind_var(&id.name, &core_var);
-                            docs.push(docvec![
-                                "    let ",
-                                Document::String(core_var.clone()),
-                                " = call 'beamtalk_message_dispatch':'send'(",
-                                Document::String(arr_var.clone()),
-                                ", 'at:', [",
-                                one_based,
-                                "]) in\n",
-                            ]);
-                            let current_state = self.current_state_var();
-                            let new_state = self.next_state_var();
-                            docs.push(docvec![
-                                "    let ",
-                                Document::String(new_state),
-                                " = call 'maps':'put'('",
-                                Document::String(var_name),
-                                "', ",
-                                Document::String(core_var),
-                                ", ",
-                                Document::String(current_state),
-                                ") in\n",
-                            ]);
-                        }
-                        Pattern::Wildcard(_) => {}
-                        _ => {
-                            return Err(CodeGenError::UnsupportedFeature {
-                                feature: "Nested patterns in array destructuring".to_string(),
-                                location: format!("{:?}", elem.span()),
-                            });
-                        }
-                    }
-                }
-                Ok((docs, arr_var))
-            }
-            Pattern::Tuple { elements, .. } => {
-                let tup_var = self.fresh_temp_var("Tup");
-                let val_doc = self.expression_doc(value)?;
-                docs.push(docvec![
-                    "    let ",
-                    Document::String(tup_var.clone()),
-                    " = ",
-                    val_doc,
-                    " in\n",
-                ]);
-                // Arity check: verify the tuple has the expected number of elements.
-                let expected_arity = Document::String(elements.len().to_string());
-                let size_ok_var = self.fresh_temp_var("SizeOk");
-                let bad_arity_var = self.fresh_temp_var("BadArity");
-                docs.push(docvec![
-                    "    let ",
-                    Document::String(size_ok_var),
-                    " = case call 'erlang':'tuple_size'(",
-                    Document::String(tup_var.clone()),
-                    ") of <",
-                    expected_arity,
-                    "> when 'true' -> 'ok' <",
-                    Document::String(bad_arity_var),
-                    "> when 'true' -> call 'erlang':'error'({'badmatch', ",
-                    Document::String(tup_var.clone()),
-                    "}) end in\n",
-                ]);
-                for (idx, elem) in elements.iter().enumerate() {
-                    let one_based = Document::String((idx + 1).to_string());
-                    match elem {
-                        Pattern::Variable(id) => {
-                            let var_name = id.name.to_string();
-                            let core_var = Self::to_core_erlang_var(&id.name);
-                            self.bind_var(&id.name, &core_var);
-                            docs.push(docvec![
-                                "    let ",
-                                Document::String(core_var.clone()),
-                                " = call 'erlang':'element'(",
-                                one_based,
-                                ", ",
-                                Document::String(tup_var.clone()),
-                                ") in\n",
-                            ]);
-                            let current_state = self.current_state_var();
-                            let new_state = self.next_state_var();
-                            docs.push(docvec![
-                                "    let ",
-                                Document::String(new_state),
-                                " = call 'maps':'put'('",
-                                Document::String(var_name),
-                                "', ",
-                                Document::String(core_var),
-                                ", ",
-                                Document::String(current_state),
-                                ") in\n",
-                            ]);
-                        }
-                        Pattern::Literal(lit, _span) => {
-                            // Guard-check: extract the element and assert it equals the literal.
-                            let elem_var = self.fresh_temp_var("Elem");
-                            let guard_ok_var = self.fresh_temp_var("GuardOk");
-                            let mismatch_var = self.fresh_temp_var("Mismatch");
-                            let lit_doc = self.generate_literal(lit)?;
-                            docs.push(docvec![
-                                "    let ",
-                                Document::String(elem_var.clone()),
-                                " = call 'erlang':'element'(",
-                                one_based,
-                                ", ",
-                                Document::String(tup_var.clone()),
-                                ") in\n",
-                            ]);
-                            docs.push(docvec![
-                                "    let ",
-                                Document::String(guard_ok_var),
-                                " = case ",
-                                Document::String(elem_var),
-                                " of <",
-                                lit_doc,
-                                "> when 'true' -> 'ok' <",
-                                Document::String(mismatch_var),
-                                "> when 'true' -> call 'erlang':'error'({'badmatch', ",
-                                Document::String(tup_var.clone()),
-                                "}) end in\n",
-                            ]);
-                        }
-                        Pattern::Wildcard(_) => {}
-                        _ => {
-                            return Err(CodeGenError::UnsupportedFeature {
-                                feature: "Nested patterns in tuple destructuring".to_string(),
-                                location: format!("{:?}", elem.span()),
-                            });
-                        }
-                    }
-                }
-                Ok((docs, tup_var))
-            }
-            _ => Err(CodeGenError::UnsupportedFeature {
-                feature: "Unsupported destructuring pattern kind in REPL".to_string(),
-                location: "generate_repl_destructure".to_string(),
-            }),
+        let (mut docs, rhs_var, bound_pairs) =
+            self.generate_destructure_extractions(pattern, value, "    let ", " in\n")?;
+        for (name, core_var) in bound_pairs {
+            let current_state = self.current_state_var();
+            let new_state = self.next_state_var();
+            docs.push(docvec![
+                "    let ",
+                Document::String(new_state),
+                " = call 'maps':'put'('",
+                Document::String(name),
+                "', ",
+                Document::String(core_var),
+                ", ",
+                Document::String(current_state),
+                ") in\n",
+            ]);
         }
+        Ok((docs, rhs_var))
     }
 }
