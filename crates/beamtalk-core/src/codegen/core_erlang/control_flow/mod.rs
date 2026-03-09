@@ -158,7 +158,7 @@ impl ThreadingPlan {
     /// For value-type methods (BT-1053), starts from a fresh `maps:new()` instead
     /// of the actor State (which does not exist in value-type context).
     ///
-    /// In direct-params mode (BT-1275) this is a no-op — returns `(Nil, "")` since
+    /// In direct-params mode (BT-1275) this is a no-op — returns `(Nil, initial_state_var)` since
     /// variables are passed as separate fun arguments instead.
     pub fn generate_pack_prefix(
         &self,
