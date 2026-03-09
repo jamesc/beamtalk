@@ -44,9 +44,9 @@
 [42 noSuchMethod] on: Exception do: [:e | e selector]
 // => noSuchMethod
 
-// Exception printString returns formatted error
+// Exception printString returns formatted error as a single string
 [42 noSuchMethod] on: Exception do: [:e | e printString]
-// => ["Integer does not understand 'noSuchMethod'","\nHint: ","Check spelling or use 'respondsTo:' to verify method exists"]
+// => Integer does not understand 'noSuchMethod'\nHint: Check spelling or use 'respondsTo:' to verify method exists
 
 // Exception hint — nil when no hint available
 [1 / 0] on: Exception do: [:e | e hint]

@@ -233,7 +233,8 @@ file_lines_take_closes_handle_test() ->
     TmpFile = "test_stream_finalizer_tmp.txt",
     ok = file:write_file(TmpFile, <<"line1\nline2\nline3\nline4\nline5\n">>),
     try
-        Stream = beamtalk_file:'lines:'(list_to_binary(TmpFile)),
+        LinesResult = beamtalk_file:'lines:'(list_to_binary(TmpFile)),
+        #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Stream} = LinesResult,
         Result = beamtalk_stream:take(Stream, 1),
         ?assertEqual([<<"line1">>], Result),
         timer:sleep(10),

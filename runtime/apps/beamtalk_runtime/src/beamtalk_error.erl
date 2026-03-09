@@ -118,14 +118,16 @@ with_details(Error, Details) ->
 %% Returns a formatted error message as a binary, suitable for printing
 %% or returning to the user. Uses user-facing names (e.g., 'self' not 'Self').
 %%
+%% Always returns a binary — safe to pass directly to Beamtalk as a String.
+%%
 %% Example:
-%%   iolist_to_binary(beamtalk_error:format(Error))
+%%   beamtalk_error:format(Error)
 %%   % => <<"Integer does not understand 'foo'\nHint: Check spelling">>
--spec format(#beamtalk_error{}) -> iolist().
+-spec format(#beamtalk_error{}) -> binary().
 format(#beamtalk_error{message = Message, hint = undefined}) ->
     Message;
 format(#beamtalk_error{message = Message, hint = Hint}) ->
-    [Message, <<"\nHint: ">>, Hint].
+    iolist_to_binary([Message, <<"\nHint: ">>, Hint]).
 
 %% @doc Wrap an error as an Exception object and raise it.
 %%

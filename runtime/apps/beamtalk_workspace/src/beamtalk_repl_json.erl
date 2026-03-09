@@ -480,7 +480,7 @@ format_error_message(Reason) ->
 %%% Internal Helpers
 
 %% @doc Format a rejection reason for display in #Future<rejected: ...>.
--spec format_rejection_reason(term()) -> iolist().
+-spec format_rejection_reason(term()) -> binary().
 format_rejection_reason(#beamtalk_error{} = Error) ->
     beamtalk_error:format(Error);
 format_rejection_reason(Reason) ->
