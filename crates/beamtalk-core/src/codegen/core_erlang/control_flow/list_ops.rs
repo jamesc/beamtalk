@@ -978,4 +978,20 @@ mod tests {
             "inject: tuple acc should use element(2, ...) for first threaded var. Got:\n{code}"
         );
     }
+
+    #[test]
+    fn test_filter_with_local_mutation_uses_tuple_acc() {
+        // BT-1276: select: with only local mutation should use tuple accumulator.
+        // element(2, ...) reads the first threaded var (slot 1 is AccList).
+        let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    items select: [:item | count := count + 1. item > 0]\n";
+        let code = codegen(src);
+        assert!(
+            !code.contains("maps':'get'('__local__count'"),
+            "select: with local mutation should NOT use maps:get inside lambda. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'erlang':'element'(2,"),
+            "select: tuple acc should use element(2, ...) for first threaded var. Got:\n{code}"
+        );
+    }
 }

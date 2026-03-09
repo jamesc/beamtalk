@@ -2018,6 +2018,42 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-1276: Check for collect:/select:/reject: with literal block.
+        // These list-ops pack updated locals into the StateAcc map returned as
+        // element(2, ...) of the result tuple, so the outer method body can extract them
+        // via maps:get — same pattern as do:/inject:into:.
+        if matches!(
+            selector_name.as_str(),
+            "collect:" | "select:" | "reject:"
+        ) && arguments
+            .first()
+            .is_some_and(|a| matches!(a, Expression::Block(_)))
+        {
+            let Some(Expression::Block(body_block)) = arguments.first() else {
+                return None;
+            };
+
+            let body_analysis = analyze_block(body_block);
+
+            let block_params: std::collections::HashSet<String> = body_block
+                .parameters
+                .iter()
+                .map(|p| p.name.to_string())
+                .collect();
+
+            // BT-1224: Use captured_reads to exclude block-local vars from threading.
+            let threaded: Vec<String> = body_analysis
+                .captured_reads
+                .intersection(&body_analysis.local_writes)
+                .filter(|v| !block_params.contains(*v))
+                .cloned()
+                .collect();
+
+            if !threaded.is_empty() {
+                return Some(threaded);
+            }
+        }
+
         None
     }
 
