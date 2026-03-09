@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+TestCase subclass: TaskWorkerTest
+
+  testInitialJobCountIsZero =>
+    worker := TaskWorker spawn
+    self assert: worker jobCount equals: 0
+    // => _
+
+  testProcessDoublesValue =>
+    worker := TaskWorker spawn
+    self assert: (worker process: 7) equals: 14
+    // => _
+
+  testProcessCountsJobs =>
+    worker := TaskWorker spawn
+    worker process: 1
+    worker process: 2
+    self assert: worker jobCount equals: 2
+    // => _
+
+  testProcessZeroCrashes =>
+    worker := TaskWorker spawn
+    self should: [worker process: 0] raise: #user_error
+    // => _

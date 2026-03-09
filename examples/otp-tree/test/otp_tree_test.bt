@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Supervisor class-side configuration tests.
+//
+// Supervisor lifecycle (supervise/startChild/stop) requires a live OTP
+// application and cannot run in the compiled BUnit context — see the REPL
+// walkthrough in README.md for that.
+
+TestCase subclass: SupervisorConfigTest
+
+  testAppSupervisorStrategy =>
+    self assert: AppSupervisor strategy equals: #oneForOne
+    // => _
+
+  testAppSupervisorMaxRestarts =>
+    self assert: AppSupervisor maxRestarts equals: 10
+    // => _
+
+  testAppSupervisorRestartWindow =>
+    self assert: AppSupervisor restartWindow equals: 60
+    // => _
+
+  testAppSupervisorIsSupervisor =>
+    self assert: AppSupervisor isSupervisor equals: true
+    // => _
+
+  testWorkerPoolIsSupervisor =>
+    self assert: WorkerPool isSupervisor equals: true
+    // => _
+
+  testEventLoggerSupervisionPolicy =>
+    self assert: EventLogger supervisionPolicy equals: #permanent
+    // => _
+
+  testTaskWorkerSupervisionPolicy =>
+    self assert: TaskWorker supervisionPolicy equals: #transient
+    // => _

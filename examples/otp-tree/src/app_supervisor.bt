@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// AppSupervisor — root supervisor for the otp-tree application.
+//
+// Strategy #oneForOne: if a child crashes, only that child is restarted.
+// EventLogger is a permanent worker — always restarted on crash.
+// WorkerPool is a permanent DynamicSupervisor — always restarted, which
+// also restarts any workers it was managing.
+//
+// This class is referenced in beamtalk.toml [application] supervisor,
+// so `beamtalk run` starts it automatically as an OTP application.
+
+Supervisor subclass: AppSupervisor
+  class strategy -> Symbol => #oneForOne
+  class children => #(EventLogger, WorkerPool)

@@ -13,6 +13,7 @@ Open a workspace in Claude Code and the MCP server starts automatically.
 | [getting-started/](getting-started/) | Hello world, Counter, Hanoi, closures, inheritance |
 | [bank/](bank/) | Actor coordination: accounts, transfers, overdraft protection |
 | [chat-room/](chat-room/) | Multi-actor: actors, inheritance, Set/List, message broadcasting |
+| [otp-tree/](otp-tree/) | OTP supervision tree: static supervisor, dynamic pool, fault isolation |
 | [sicp/](sicp/) _(coming soon)_ | SICP Scheme compiler written in Beamtalk |
 | [gof-patterns/](gof-patterns/) _(coming soon)_ | Gang of Four patterns in idiomatic Beamtalk |
 

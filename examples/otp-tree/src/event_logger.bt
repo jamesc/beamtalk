@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// EventLogger — permanent actor that records events from across the system.
+// Because its supervisionPolicy is #permanent, the supervisor always restarts
+// it on crash.  All other actors in the tree can send it log messages without
+// holding a direct reference — they call `EventLogger current log: msg`.
+
+Actor subclass: EventLogger
+  state: events = #()
+
+  class supervisionPolicy -> Symbol => #permanent
+
+  log: message =>
+    self.events := self.events add: message
+
+  events => self.events
+
+  clear =>
+    self.events := #()

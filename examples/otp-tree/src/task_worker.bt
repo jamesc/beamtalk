@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// TaskWorker — transient actor managed by WorkerPool.
+// supervisionPolicy #transient: the supervisor restarts it only if it exits
+// abnormally (crash).  A clean shutdown is not restarted.
+//
+// Intentional crash: sending `process: 0` raises an error, which lets the
+// REPL walkthrough demonstrate a crash-and-restart cycle.
+
+Actor subclass: TaskWorker
+  state: jobCount = 0
+
+  class supervisionPolicy -> Symbol => #transient
+
+  process: value =>
+    value =:= 0 ifTrue: [self error: "TaskWorker: refusing zero — crashing now"]
+    self.jobCount := self.jobCount + 1
+    value * 2
+
+  jobCount => self.jobCount

@@ -1,0 +1,12 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "otp_tree"
+version = "0.1.0"
+description = "OTP supervision tree — fault-tolerant service with static and dynamic supervisors"
+
+[application]
+supervisor = "AppSupervisor"
+
+[dependencies]
