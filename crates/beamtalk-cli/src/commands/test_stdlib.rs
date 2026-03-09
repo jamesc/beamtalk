@@ -427,13 +427,13 @@ fn compile_fixture(
 // ──────────────────────────────────────────────────────────────────────────
 
 /// Metadata for a compiled test file, ready to be run.
-struct CompiledTestFile {
+pub(crate) struct CompiledTestFile {
     /// Original source file path.
-    source_file: Utf8PathBuf,
+    pub(crate) source_file: Utf8PathBuf,
     /// `EUnit` module name (e.g., `arithmetic_tests`).
-    module_name: String,
+    pub(crate) module_name: String,
     /// Number of assertions in this file.
-    assertion_count: usize,
+    pub(crate) assertion_count: usize,
 }
 
 /// Run stdlib tests.
@@ -528,7 +528,7 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
 }
 
 /// Print per-file results and final summary.
-fn report_results(
+pub(crate) fn report_results(
     compiled_files: &[CompiledTestFile],
     eunit_result: &EunitBatchResult,
     file_count: usize,
@@ -597,23 +597,23 @@ fn report_results(
 }
 
 /// Result of compiling a single test file (no execution yet).
-struct CompilationResult {
+pub(crate) struct CompilationResult {
     /// `EUnit` test module name.
-    test_module_name: String,
+    pub(crate) test_module_name: String,
     /// Core Erlang files generated for this test file's expressions.
-    core_files: Vec<Utf8PathBuf>,
+    pub(crate) core_files: Vec<Utf8PathBuf>,
     /// `EUnit` wrapper `.erl` file.
-    erl_file: Utf8PathBuf,
+    pub(crate) erl_file: Utf8PathBuf,
     /// Number of test assertions.
-    test_count: usize,
+    pub(crate) test_count: usize,
     /// Fixture module names from `@load` directives (need `code:ensure_loaded`).
-    fixture_modules: Vec<String>,
+    pub(crate) fixture_modules: Vec<String>,
 }
 
 /// Compile a single `.btscript` test file into Core Erlang modules + `EUnit` wrapper.
 ///
 /// Does NOT execute — just produces files ready for batch compilation and execution.
-fn compile_single_test_file(
+pub(crate) fn compile_single_test_file(
     test_file: &Utf8Path,
     build_dir: &Utf8Path,
     suppress_warnings: bool,
@@ -730,7 +730,7 @@ fn compile_single_test_file(
 }
 
 /// Compile Erlang source files with erlc (batch).
-fn compile_erl_files(erl_files: &[Utf8PathBuf], output_dir: &Utf8Path) -> Result<()> {
+pub(crate) fn compile_erl_files(erl_files: &[Utf8PathBuf], output_dir: &Utf8Path) -> Result<()> {
     if erl_files.is_empty() {
         return Ok(());
     }
@@ -758,18 +758,18 @@ fn compile_erl_files(erl_files: &[Utf8PathBuf], output_dir: &Utf8Path) -> Result
 
 /// Result of running all `EUnit` tests in a single BEAM process.
 /// Per-module test result with actual pass/fail counts.
-struct ModuleResult {
-    passed: usize,
-    failed: usize,
+pub(crate) struct ModuleResult {
+    pub(crate) passed: usize,
+    pub(crate) failed: usize,
     /// Individual failure messages (FAIL lines from `beamtalk_stdlib_test`).
-    failures: Vec<String>,
+    pub(crate) failures: Vec<String>,
 }
 
-struct EunitBatchResult {
+pub(crate) struct EunitBatchResult {
     /// Per-module results parsed from RESULTS: lines.
-    module_results: std::collections::HashMap<String, ModuleResult>,
+    pub(crate) module_results: std::collections::HashMap<String, ModuleResult>,
     /// Modules that failed without structured output (fallback).
-    failed_modules: std::collections::HashMap<String, String>,
+    pub(crate) failed_modules: std::collections::HashMap<String, String>,
 }
 
 /// Run all `EUnit` test modules in a single BEAM process.
@@ -808,7 +808,7 @@ fn cover_fragments(
     (preamble, epilogue)
 }
 
-fn run_all_eunit_tests(
+pub(crate) fn run_all_eunit_tests(
     test_module_names: &[&str],
     fixture_modules: &[String],
     build_dir: &Utf8Path,

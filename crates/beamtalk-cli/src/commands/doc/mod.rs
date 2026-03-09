@@ -35,7 +35,9 @@ use assets::{write_css, write_search_js};
 use extractor::{collect_inherited_methods, find_source_files, parse_class_info};
 use layout::build_sidebar_html;
 use renderer::{write_class_page, write_index_page};
-use site::{generate_adr_docs, generate_prose_docs, write_site_landing_page};
+use site::{
+    generate_adr_docs, generate_learning_guide, generate_prose_docs, write_site_landing_page,
+};
 
 /// Prose documentation pages to render from the docs/ directory.
 const PROSE_PAGES: &[(&str, &str, &str)] = &[
@@ -123,13 +125,16 @@ pub fn run_site(lib_path: &str, docs_path: &str, output_dir: &str) -> Result<()>
     // 3. Generate prose docs in docs/ subdirectory (with ADR link rewriting)
     generate_prose_docs(&docs_source, &output_path, PROSE_PAGES, &adr_links)?;
 
-    // 4. Generate landing page
-    write_site_landing_page(&output_path, PROSE_PAGES)?;
+    // 4. Generate learning guide in learning/ subdirectory
+    let learning_available = generate_learning_guide(&docs_source, &output_path)?;
 
-    // 5. Copy images (logo SVGs, favicons) from docs/images/ to site root
+    // 5. Generate landing page
+    write_site_landing_page(&output_path, PROSE_PAGES, learning_available)?;
+
+    // 6. Copy images (logo SVGs, favicons) from docs/images/ to site root
     copy_images(&docs_source, &output_path)?;
 
-    // 6. Write shared CSS to root (prose pages and landing page reference it)
+    // 7. Write shared CSS to root (prose pages and landing page reference it)
     write_css(&output_path)?;
 
     println!("  Site root: {output_path}/");
@@ -748,5 +753,67 @@ mod tests {
         // No docs/images/ dir — should succeed without creating site/images/
         copy_images(&docs_dir, &site_dir).unwrap();
         assert!(!site_dir.join("images").exists());
+    }
+
+    #[test]
+    fn test_generate_site_with_learning_guide() {
+        let temp = TempDir::new().unwrap();
+        let lib_dir = Utf8PathBuf::from_path_buf(temp.path().join("stdlib/src")).unwrap();
+        let docs_dir = Utf8PathBuf::from_path_buf(temp.path().join("docs")).unwrap();
+        let learning_dir = docs_dir.join("learning");
+        let out_dir = Utf8PathBuf::from_path_buf(temp.path().join("site")).unwrap();
+        fs::create_dir_all(&lib_dir).unwrap();
+        fs::create_dir_all(&learning_dir).unwrap();
+
+        fs::write(
+            lib_dir.join("Counter.bt"),
+            "/// A counter.\nActor subclass: Counter\n  increment => 1\n",
+        )
+        .unwrap();
+
+        // Minimal prose pages required by PROSE_PAGES
+        for (src, _out, title) in PROSE_PAGES {
+            let fname = src.to_string();
+            fs::write(
+                docs_dir.join(&fname),
+                format!("# {title}\n\nStub content.\n"),
+            )
+            .unwrap();
+        }
+
+        // Two learning chapters
+        fs::write(
+            learning_dir.join("01-getting-started.md"),
+            "# Getting Started\n\nHello world.\n\n```beamtalk\n'hello' // => 'hello'\n```\n",
+        )
+        .unwrap();
+        fs::write(
+            learning_dir.join("02-basic-types.md"),
+            "# Basic Types\n\nIntegers and floats.\n",
+        )
+        .unwrap();
+
+        run_site(lib_dir.as_str(), docs_dir.as_str(), out_dir.as_str()).unwrap();
+
+        // Learning guide index
+        assert!(out_dir.join("learning/index.html").exists());
+        let index = fs::read_to_string(out_dir.join("learning/index.html")).unwrap();
+        assert!(index.contains("Getting Started"));
+        assert!(index.contains("Basic Types"));
+        assert!(index.contains("01-getting-started.html"));
+
+        // Individual chapter pages
+        assert!(out_dir.join("learning/01-getting-started.html").exists());
+        assert!(out_dir.join("learning/02-basic-types.html").exists());
+        let ch1 = fs::read_to_string(out_dir.join("learning/01-getting-started.html")).unwrap();
+        assert!(ch1.contains("Getting Started"));
+        assert!(ch1.contains("../style.css"));
+        // Chapter nav lists both chapters
+        assert!(ch1.contains("02-basic-types.html"));
+
+        // Landing page has a "Learn Beamtalk" card
+        let landing = fs::read_to_string(out_dir.join("index.html")).unwrap();
+        assert!(landing.contains("learning/"));
+        assert!(landing.contains("Learn Beamtalk"));
     }
 }

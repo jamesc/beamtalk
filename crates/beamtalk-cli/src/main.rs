@@ -195,10 +195,30 @@ enum Command {
         action: commands::workspace::cli::WorkspaceCommand,
     },
 
-    /// Run compiled bootstrap tests
-    TestStdlib {
+    /// Run `.btscript` expression tests (assertions via `// =>`)
+    #[command(name = "test-script", alias = "test-stdlib")]
+    TestScript {
         /// File or directory containing .btscript test files
         #[arg(default_value = "bootstrap-test")]
+        path: String,
+
+        /// Suppress warning diagnostics when compiling test fixtures
+        #[arg(long)]
+        no_warnings: bool,
+
+        /// Suppress per-file output, show only summary
+        #[arg(long, short)]
+        quiet: bool,
+
+        /// Show detailed test output including `EUnit` verbose mode
+        #[arg(long = "show-output")]
+        show_output: bool,
+    },
+
+    /// Run doctests extracted from Markdown files (` ```beamtalk ` blocks with `// =>` assertions)
+    TestDocs {
+        /// File or directory containing .md files
+        #[arg(default_value = ".")]
         path: String,
 
         /// Suppress warning diagnostics when compiling test fixtures
@@ -432,12 +452,18 @@ fn run() -> Result<()> {
         Command::FmtCheck { paths } => commands::fmt::run_fmt(&paths, true),
         Command::Lint { path, format } => commands::lint::run_lint(&path, format),
         Command::Workspace { action } => commands::workspace::cli::run(action),
-        Command::TestStdlib {
+        Command::TestScript {
             path,
             no_warnings,
             quiet,
             show_output,
         } => commands::test_stdlib::run_tests(&path, no_warnings, quiet, show_output),
+        Command::TestDocs {
+            path,
+            no_warnings,
+            quiet,
+            show_output,
+        } => commands::test_docs::run_tests(&path, no_warnings, quiet, show_output),
         Command::Test {
             path,
             warnings_as_errors,
