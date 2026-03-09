@@ -171,3 +171,15 @@ TestCase subclass: FileStreamTest
   testUnicodeFileContent =>
     // Unicode content (multi-byte UTF-8) reads correctly through streams
     self assert: (File lines: "test/fixtures/stream_unicode.txt") asList equals: #("Hello 世界", "café", "über")
+
+  testOpenDoConcreteReturnValueCheck =>
+    // BT-1273: File open:do: returns Object (type erasure). With @expect type,
+    // we can call concrete methods on the result rather than relying on
+    // assert:equals: to avoid the DNU hint.
+    result := File open: "test/fixtures/stream_test.txt" do: [:handle |
+      handle lines asList
+    ]
+    // result is typed as Object — calling size produces a DNU hint at the
+    // type-erasure boundary. @expect type suppresses it.
+    @expect type
+    self assert: result size equals: 3
