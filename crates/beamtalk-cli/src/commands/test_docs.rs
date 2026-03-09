@@ -26,7 +26,7 @@ use tracing::{info, instrument};
 /// Extract ` ```beamtalk ` code blocks that contain `// =>` assertions.
 ///
 /// Only blocks that contain at least one `// =>` marker are included — blocks
-/// without assertions (e.g. BUnit `TestCase subclass:` examples) are silently
+/// without assertions (class definition examples) are silently
 /// skipped. Qualifying blocks are concatenated in document order, separated by
 /// a blank line so the parser treats them as independent top-level expressions
 /// while still sharing variable scope.
