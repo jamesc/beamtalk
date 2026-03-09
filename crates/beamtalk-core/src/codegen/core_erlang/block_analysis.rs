@@ -298,8 +298,13 @@ fn analyze_expression(
 }
 
 /// Adds all variable names bound by `pattern` to `ctx.local_bindings` and
-/// `analysis.local_writes`. Wildcards and literals are skipped; nested patterns
-/// are walked recursively.
+/// `analysis.local_writes`, and processes binary segment size expressions as reads.
+///
+/// Delegates variable collection to `semantic_analysis::extract_pattern_bindings`
+/// for leaf patterns. Binary patterns are handled segment-by-segment to preserve
+/// correct `captured_reads` semantics: a size expression that references a variable
+/// bound by a *later* segment in the same binary must still be recorded as a
+/// captured read (read before its local definition).
 fn collect_pattern_bindings(
     pattern: &crate::ast::Pattern,
     analysis: &mut BlockMutationAnalysis,
@@ -307,16 +312,26 @@ fn collect_pattern_bindings(
 ) {
     use crate::ast::Pattern;
     match pattern {
-        Pattern::Variable(id) => {
-            let name = id.name.to_string();
-            if ctx.local_bindings.contains(name.as_str()) {
-                // Rebinding an existing local in this block — record the write
-                analysis.local_writes.insert(name.clone());
-            } else {
-                ctx.local_bindings.insert(name.clone());
-                analysis.local_writes.insert(name);
+        // Binary patterns: bind each segment's value variables *before* analyzing
+        // its size expression so that forward-referenced names (e.g. `len` used as
+        // a size in segment N but bound by segment N+1) are correctly classified as
+        // captured reads.
+        Pattern::Binary { segments, .. } => {
+            for seg in segments {
+                let (ids, _) = crate::semantic_analysis::extract_pattern_bindings(&seg.value);
+                for id in ids {
+                    let name = id.name.to_string();
+                    ctx.local_bindings.insert(name.clone());
+                    analysis.local_writes.insert(name);
+                }
+                if let Some(size_expr) = &seg.size {
+                    analyze_expression(size_expr, analysis, ctx);
+                }
             }
         }
+
+        // Container patterns may contain nested Binary segments; recurse to
+        // ensure sequential binding semantics are applied throughout the tree.
         Pattern::Tuple { elements, .. } | Pattern::Array { elements, .. } => {
             for elem in elements {
                 collect_pattern_bindings(elem, analysis, ctx);
@@ -330,22 +345,21 @@ fn collect_pattern_bindings(
                 collect_pattern_bindings(t, analysis, ctx);
             }
         }
-        Pattern::Binary { segments, .. } => {
-            for seg in segments {
-                collect_pattern_bindings(&seg.value, analysis, ctx);
-                // Size expressions (e.g. `len` in `<<payload:len/binary>>`) are reads
-                if let Some(size_expr) = &seg.size {
-                    analyze_expression(size_expr, analysis, ctx);
-                }
-            }
-        }
         Pattern::Map { pairs, .. } => {
             for pair in pairs {
                 collect_pattern_bindings(&pair.value, analysis, ctx);
             }
         }
-        Pattern::Wildcard(..) | Pattern::Literal(..) => {
-            // No bindings introduced
+
+        // Leaf patterns have no ordering constraints or size expressions.
+        // Delegate to the canonical semantic analysis extractor.
+        Pattern::Variable(_) | Pattern::Wildcard(..) | Pattern::Literal(..) => {
+            let (identifiers, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
+            for id in identifiers {
+                let name = id.name.to_string();
+                ctx.local_bindings.insert(name.clone());
+                analysis.local_writes.insert(name);
+            }
         }
     }
 }
@@ -833,6 +847,74 @@ mod tests {
         assert!(
             analysis.captured_reads.contains("len"),
             "len should be in captured_reads (read before definition)"
+        );
+    }
+
+    #[test]
+    fn test_binary_forward_ref_size_is_captured_read() {
+        // BT-1269 regression: <<payload:len/binary, len:8>> — the size expression
+        // `len` in segment 1 must still be a captured read even though `len` is
+        // bound by segment 2 of the same binary pattern.
+        use crate::ast::{BinarySegment, Pattern};
+
+        let binary_pattern = Pattern::Binary {
+            segments: vec![
+                // Segment 1: payload:len/binary  (size refers to `len`, not yet bound)
+                BinarySegment {
+                    value: Pattern::Variable(make_id("payload")),
+                    size: Some(Box::new(make_expr_id("len"))),
+                    segment_type: None,
+                    signedness: None,
+                    endianness: None,
+                    unit: None,
+                    span: Span::new(2, 16),
+                },
+                // Segment 2: len:8  (binds `len`)
+                BinarySegment {
+                    value: Pattern::Variable(make_id("len")),
+                    size: Some(Box::new(Expression::Literal(
+                        crate::ast::Literal::Integer(8),
+                        Span::new(19, 20),
+                    ))),
+                    segment_type: None,
+                    signedness: None,
+                    endianness: None,
+                    unit: None,
+                    span: Span::new(18, 22),
+                },
+            ],
+            span: Span::new(0, 24),
+        };
+
+        let block = Block::new(
+            vec![],
+            vec![bare(Expression::DestructureAssignment {
+                pattern: binary_pattern,
+                value: Box::new(make_expr_id("bin")),
+                span: Span::new(0, 30),
+            })],
+            Span::new(0, 32),
+        );
+        let analysis = analyze_block(&block);
+
+        // Both pattern variables must be recorded as writes
+        assert!(
+            analysis.local_writes.contains("payload"),
+            "payload should be in local_writes"
+        );
+        assert!(
+            analysis.local_writes.contains("len"),
+            "len should be in local_writes"
+        );
+        // `len` is used as a size expression before it is bound by segment 2;
+        // it must be a captured read (read before local definition).
+        assert!(
+            analysis.local_reads.contains("len"),
+            "len (size expression) should be in local_reads"
+        );
+        assert!(
+            analysis.captured_reads.contains("len"),
+            "len should be in captured_reads — it is read before it is bound"
         );
     }
 
