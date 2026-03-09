@@ -45,11 +45,8 @@ pub(super) fn is_conditional_selector(sel: &str) -> bool {
     )
 }
 
-/// Returns `true` if `sel` (a keyword selector string) requires state threading.
-///
-/// This covers loop, exception, and conditional selectors.
-#[must_use]
-pub(super) fn is_state_threading_keyword_selector(sel: &str) -> bool {
+/// Returns `true` if `sel` is a loop/iteration keyword selector.
+fn is_loop_selector(sel: &str) -> bool {
     matches!(
         sel,
         "whileTrue:"
@@ -62,13 +59,16 @@ pub(super) fn is_state_threading_keyword_selector(sel: &str) -> bool {
             | "select:"
             | "reject:"
             | "inject:into:"
-            | "on:do:"
-            | "ensure:"
-            | "ifTrue:"
-            | "ifFalse:"
-            | "ifTrue:ifFalse:"
-            | "ifNotNil:"
     )
+}
+
+/// Returns `true` if `sel` (a keyword selector string) requires state threading.
+///
+/// Composed from the three sub-groups so that adding a selector to any group
+/// automatically includes it here — no separate list to keep in sync.
+#[must_use]
+pub(super) fn is_state_threading_keyword_selector(sel: &str) -> bool {
+    is_loop_selector(sel) || is_exception_selector(sel) || is_conditional_selector(sel)
 }
 
 /// Returns `true` if `sel` (a unary selector string) requires state threading.
