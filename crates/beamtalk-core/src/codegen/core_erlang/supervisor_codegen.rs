@@ -249,7 +249,7 @@ impl CoreErlangGenerator {
     /// ```
     fn generate_static_sup_init(class_name: &str) -> Document<'static> {
         docvec![
-            "'init'/1 = fun ([]) ->",
+            "'init'/1 = fun (_Args) ->",
             "\n    let SupCp = call 'beamtalk_class_registry':'whereis_class'('",
             Document::String(class_name.to_string()),
             "') in",
@@ -280,7 +280,7 @@ impl CoreErlangGenerator {
     /// ```
     fn generate_dynamic_sup_init(class_name: &str) -> Document<'static> {
         docvec![
-            "'init'/1 = fun ([]) ->",
+            "'init'/1 = fun (_Args) ->",
             "\n    let SupCp = call 'beamtalk_class_registry':'whereis_class'('",
             Document::String(class_name.to_string()),
             "') in",

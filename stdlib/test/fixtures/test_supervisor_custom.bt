@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1222: Concrete Supervisor subclass with overridden config — fixture for supervisor_defaults_test.bt
+
+Supervisor subclass: TestSupervisorCustom
+
+  class children => #()
+
+  class strategy -> Symbol => #oneForAll
+
+  class maxRestarts -> Integer => 3
+
+  class restartWindow -> Integer => 30
