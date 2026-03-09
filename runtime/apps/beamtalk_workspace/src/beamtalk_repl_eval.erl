@@ -273,7 +273,8 @@ handle_class_definition(
                     wrap_load_err(LoadReason, Warnings, NewState2)
             end;
         {error, Reason, NewState2} ->
-            {error, Reason, <<>>, Warnings, NewState2}
+            Err = beamtalk_repl_errors:ensure_structured_error(Reason),
+            {error, Err, <<>>, Warnings, NewState2}
     end.
 
 %% @doc Handle standalone method definition: recompile and reload target class.

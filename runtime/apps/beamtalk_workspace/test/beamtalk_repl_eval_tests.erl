@@ -767,7 +767,7 @@ handle_class_definition_load_error_test() ->
     Result = beamtalk_repl_eval:handle_class_definition(
         ClassInfo, [], "test", #{}, State, undefined, undefined
     ),
-    ?assertMatch({error, {load_error, _}, <<>>, [], _}, Result).
+    ?assertMatch({error, #beamtalk_error{}, <<>>, [], _}, Result).
 
 handle_class_definition_empty_classes_test() ->
     %% Test fallback branch when Classes is empty (lines 219-223)
@@ -783,7 +783,7 @@ handle_class_definition_empty_classes_test() ->
     Result = beamtalk_repl_eval:handle_class_definition(
         ClassInfo, [<<"warn">>], "test", #{}, State, undefined, undefined
     ),
-    ?assertMatch({error, {load_error, _}, <<>>, [<<"warn">>], _}, Result).
+    ?assertMatch({error, #beamtalk_error{}, <<>>, [<<"warn">>], _}, Result).
 
 %% ===================================================================
 %% handle_method_definition (BT-627)
