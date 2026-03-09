@@ -19,10 +19,12 @@
 %% Setup helpers
 %%====================================================================
 
-%% Delete the table before each test for isolation.
+%% Clear the table before each test for isolation.
+%% Uses delete_all_objects (not ets:delete) to preserve table ownership,
+%% matching the pattern in beamtalk_class_hierarchy_table_tests.
 fresh_table() ->
-    catch ets:delete(beamtalk_class_module),
-    beamtalk_class_module_table:new().
+    beamtalk_class_module_table:new(),
+    ets:delete_all_objects(beamtalk_class_module).
 
 %%====================================================================
 %% Tests: new/0
