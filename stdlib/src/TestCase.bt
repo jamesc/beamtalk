@@ -116,3 +116,43 @@ Object subclass: TestCase
   /// Equivalent to `self skip: ""`. The test is counted as skipped, not
   /// failed. Use `^` to exit the test method early after calling this.
   skip -> Nil => self skip: ""
+
+  /// Assert that `result` is a successful Result and return its value.
+  ///
+  /// Fails the test with a clear message if `result` is an error Result.
+  /// Returns the unwrapped value so it can be used directly in the next
+  /// assertion.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// def := self assertOk: (WorkflowLoader parse: src)
+  /// self assert: def name equals: "hello"
+  ///
+  /// self assertOk: (Result ok: 42)       // => 42
+  /// self assertOk: (Result error: #nope) // fails: "Expected Result ok: but got Result error: #nope"
+  /// ```
+  assertOk: result -> Object =>
+    result ok ifFalse: [
+      self fail: "Expected Result ok: but got {result printString}"
+    ]
+    result value
+
+  /// Assert that `result` is an error Result whose reason equals `expected`.
+  ///
+  /// Fails the test with a clear message if `result` is ok, or if the error
+  /// reason does not match `expected`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// self assertError: (Result error: #not_found) equals: #not_found   // passes
+  /// self assertError: (Result ok: 42) equals: #not_found              // fails: "Expected Result error:..."
+  /// self assertError: (Result error: #wrong) equals: #not_found       // fails: "Expected error #not_found, got #wrong"
+  /// ```
+  assertError: result equals: expected -> Nil =>
+    result isError ifFalse: [
+      self fail: "Expected Result error: but got {result printString}"
+    ]
+    (result error =:= expected) ifFalse: [
+      self fail: "Expected Result error: {expected printString}, got Result error: {result error printString}"
+    ]
+    nil
