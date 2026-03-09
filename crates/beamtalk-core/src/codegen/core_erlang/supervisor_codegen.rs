@@ -23,7 +23,7 @@
 
 use super::document::Document;
 use super::util::ClassIdentity;
-use super::{spec_codegen, CodeGenContext, CoreErlangGenerator, Result};
+use super::{spec_codegen, CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{MethodKind, Module, SupervisorKind};
 use crate::docvec;
 
@@ -40,17 +40,16 @@ impl CoreErlangGenerator {
         // Use ValueType context — no actor state threading for supervisors.
         self.context = CodeGenContext::ValueType;
 
-        let class = module
-            .classes
-            .first()
-            .expect("supervisor module must have a class");
+        let class = module.classes.first().ok_or_else(|| {
+            CodeGenError::Internal("supervisor module must have a class".to_string())
+        })?;
         self.class_identity = Some(ClassIdentity::new(&class.name.name));
 
-        match class
-            .supervisor_kind
-            .as_ref()
-            .expect("supervisor_kind must be set for supervisor module")
-        {
+        match class.supervisor_kind.as_ref().ok_or_else(|| {
+            CodeGenError::Internal(
+                "supervisor_kind must be set for supervisor module".to_string(),
+            )
+        })? {
             SupervisorKind::Static => self.generate_static_supervisor(module),
             SupervisorKind::Dynamic => self.generate_dynamic_supervisor(module),
         }
@@ -58,24 +57,30 @@ impl CoreErlangGenerator {
 
     /// Generates a static supervisor module (`Supervisor subclass:`).
     fn generate_static_supervisor(&mut self, module: &Module) -> Result<Document<'static>> {
-        let class = module.classes.first().unwrap();
+        let class = module.classes.first().ok_or_else(|| {
+            CodeGenError::Internal(
+                "static supervisor module must have a class".to_string(),
+            )
+        })?;
         let class_name = class.name.name.clone();
         let module_name = self.module_name.clone();
 
-        // Build export list
-        let mut exports: Vec<String> = vec!["'start_link'/0".to_string(), "'init'/1".to_string()];
-        // User-defined class-side methods
+        // Build export list as Documents (CLAUDE.md: use Document/docvec!, never format!)
+        let mut class_method_exports: Document<'static> = Document::Nil;
         for m in class
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
         {
             let arity = m.selector.arity() + 2; // +2 for ClassSelf + ClassVars
-            exports.push(format!("'class_{}'/{}", m.selector.name(), arity));
+            class_method_exports = docvec![
+                class_method_exports,
+                ", 'class_",
+                Document::String(m.selector.name().to_string()),
+                "'/",
+                Document::String(arity.to_string()),
+            ];
         }
-        exports.push("'superclass'/0".to_string());
-        exports.push("'__beamtalk_meta'/0".to_string());
-        exports.push("'register_class'/0".to_string());
 
         // Module attributes
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
@@ -89,11 +94,11 @@ impl CoreErlangGenerator {
 
         // Module header
         docs.push(docvec![
-            Document::String(format!(
-                "module '{}' [{}]\n",
-                module_name,
-                exports.join(", ")
-            )),
+            "module '",
+            Document::String(module_name.clone()),
+            "' ['start_link'/0, 'init'/1",
+            class_method_exports,
+            ", 'superclass'/0, '__beamtalk_meta'/0, 'register_class'/0]\n",
             "  attributes ['behaviour' = ['supervisor'], 'on_load' = [{'register_class', 0}]",
             beamtalk_class_attr,
             file_attr,
@@ -129,30 +134,30 @@ impl CoreErlangGenerator {
 
     /// Generates a dynamic supervisor module (`DynamicSupervisor subclass:`).
     fn generate_dynamic_supervisor(&mut self, module: &Module) -> Result<Document<'static>> {
-        let class = module.classes.first().unwrap();
+        let class = module.classes.first().ok_or_else(|| {
+            CodeGenError::Internal(
+                "dynamic supervisor module must have a class".to_string(),
+            )
+        })?;
         let class_name = class.name.name.clone();
         let module_name = self.module_name.clone();
 
-        // Build export list
-        let mut exports: Vec<String> = vec![
-            "'start_link'/0".to_string(),
-            "'init'/1".to_string(),
-            // BT-1220: childClass/0 is called directly by beamtalk_supervisor:startChild/1,2
-            // (SupMod:'childClass'() at runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl:217)
-            "'childClass'/0".to_string(),
-        ];
-        // User-defined class-side methods
+        // Build export list as Documents (CLAUDE.md: use Document/docvec!, never format!)
+        let mut class_method_exports: Document<'static> = Document::Nil;
         for m in class
             .class_methods
             .iter()
             .filter(|m| m.kind == MethodKind::Primary)
         {
             let arity = m.selector.arity() + 2;
-            exports.push(format!("'class_{}'/{}", m.selector.name(), arity));
+            class_method_exports = docvec![
+                class_method_exports,
+                ", 'class_",
+                Document::String(m.selector.name().to_string()),
+                "'/",
+                Document::String(arity.to_string()),
+            ];
         }
-        exports.push("'superclass'/0".to_string());
-        exports.push("'__beamtalk_meta'/0".to_string());
-        exports.push("'register_class'/0".to_string());
 
         // Module attributes
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
@@ -165,12 +170,14 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         // Module header
+        // BT-1220: childClass/0 is called directly by beamtalk_supervisor:startChild/1,2
+        // (SupMod:'childClass'() at `beamtalk_supervisor.erl:217`)
         docs.push(docvec![
-            Document::String(format!(
-                "module '{}' [{}]\n",
-                module_name,
-                exports.join(", ")
-            )),
+            "module '",
+            Document::String(module_name.clone()),
+            "' ['start_link'/0, 'init'/1, 'childClass'/0",
+            class_method_exports,
+            ", 'superclass'/0, '__beamtalk_meta'/0, 'register_class'/0]\n",
             "  attributes ['behaviour' = ['supervisor'], 'on_load' = [{'register_class', 0}]",
             beamtalk_class_attr,
             file_attr,
