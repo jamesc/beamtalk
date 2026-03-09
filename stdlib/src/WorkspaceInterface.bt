@@ -141,5 +141,4 @@ sealed Object subclass: WorkspaceInterface
   /// Workspace supervisor                  // => #Supervisor<AppSup, <0.200.0>>
   /// Workspace supervisor children         // => #(#DatabasePool #HTTPRouter)
   /// ```
-  supervisor =>
-    (Erlang beamtalk_workspace_interface_primitives) rootSupervisor
+  supervisor => (Erlang beamtalk_workspace_interface_primitives) rootSupervisor
