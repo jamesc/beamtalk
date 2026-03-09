@@ -269,6 +269,7 @@ is_constructible(ClassPid) ->
 init({ClassName, ClassInfo}) ->
     beamtalk_class_registry:ensure_pg_started(),
     beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_module_table(),
     ok = pg:join(beamtalk_classes, self()),
 
     Superclass = maps:get(superclass, ClassInfo, none),
@@ -295,6 +296,8 @@ init({ClassName, ClassInfo}) ->
     ),
 
     beamtalk_class_hierarchy_table:insert(ClassName, Superclass),
+    %% BT-1285: Store module name in ETS for deadlock-free lookup during supervisor init.
+    beamtalk_class_module_table:insert(ClassName, Module),
 
     %% BT-893: Store class metadata in process dictionary so class_send can
     %% bypass gen_server for self-calls (new/spawn from within class methods).
@@ -629,6 +632,7 @@ terminate(_Reason, #class_state{name = ClassName}) ->
     %% ensuring the class is fully removed from the runtime registries.
     %% Wrapped in catch/try to be safe during node shutdown when ETS/pg may be gone.
     _ = (catch beamtalk_class_hierarchy_table:delete(ClassName)),
+    _ = (catch beamtalk_class_module_table:delete(ClassName)),
     _ = (catch pg:leave(beamtalk_classes, self())),
     ok.
 
@@ -877,6 +881,8 @@ apply_class_info(State, ClassInfo) ->
             {ok, S} -> S
         end,
     beamtalk_class_hierarchy_table:insert(State#class_state.name, NewSuperclass),
+    %% BT-1285: Keep module ETS table in sync when module changes on hot-reload.
+    beamtalk_class_module_table:insert(State#class_state.name, NewModule),
 
     State#class_state{
         module = NewModule,
