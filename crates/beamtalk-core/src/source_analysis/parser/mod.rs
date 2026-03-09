@@ -4177,6 +4177,24 @@ Actor subclass: Rectangle
     }
 
     #[test]
+    fn parse_list_keyword_element_with_cons_tail() {
+        // #(obj kw: 42 | rest) → one-element list with keyword send head and cons tail
+        let module = parse_ok("#(obj kw: 42 | rest)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0].expression {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(tail.is_some(), "Expected cons tail");
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, .. } if selector.name() == "kw:"),
+                    "Expected keyword send as head element"
+                );
+            }
+            other => panic!("Expected list literal with cons, got: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_array_single_keyword_element() {
         // #[obj kw: arg] → single-element array containing the keyword send
         let module = parse_ok("#[obj kw: 42]");
@@ -4204,6 +4222,23 @@ Actor subclass: Rectangle
                 assert!(
                     matches!(&elements[0], Expression::MessageSend { selector, .. } if selector.name() == "kw:"),
                     "First element should be keyword send"
+                );
+            }
+            other => panic!("Expected array literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_array_multi_keyword_element() {
+        // #[obj kw1: 1 kw2: 2] → single-element array containing multi-keyword send
+        let module = parse_ok("#[obj kw1: 1 kw2: 2]");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0].expression {
+            Expression::ArrayLiteral { elements, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, .. } if selector.name() == "kw1:kw2:"),
+                    "Expected multi-keyword send as array element"
                 );
             }
             other => panic!("Expected array literal, got: {other:?}"),
