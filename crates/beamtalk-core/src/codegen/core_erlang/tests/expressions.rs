@@ -59,7 +59,124 @@ fn test_generate_binary_op_addition() {
     let right = vec![Expression::Literal(Literal::Integer(4), Span::new(4, 5))];
     let doc = generator.generate_binary_op("+", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(output.contains("call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(3), call 'beamtalk_future':'maybe_await'(4))"));
+    // Literal operands are provably non-future: no maybe_await wrapping needed.
+    assert_eq!(output, "call 'erlang':'+'(3, 4)");
+}
+
+#[test]
+fn test_generate_binary_op_no_wrap_for_literals() {
+    // Literals (integer, float, symbol, string) are never futures:
+    // is_definitely_sync should suppress maybe_await for all literal types.
+    let mut generator = CoreErlangGenerator::new("test");
+    for (op, l, r) in [
+        (
+            "+",
+            Expression::Literal(Literal::Integer(1), Span::new(0, 1)),
+            Expression::Literal(Literal::Integer(2), Span::new(2, 3)),
+        ),
+        (
+            "<",
+            Expression::Literal(Literal::Integer(0), Span::new(0, 1)),
+            Expression::Literal(Literal::Float(1.0), Span::new(2, 4)),
+        ),
+    ] {
+        let doc = generator.generate_binary_op(op, &l, &[r]).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            !output.contains("maybe_await"),
+            "literal operands should not be wrapped in maybe_await; got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_generate_binary_op_wraps_non_literals() {
+    use crate::ast::Identifier;
+    // Identifiers (other than self) may be futures: must still be wrapped.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Identifier(Identifier {
+        name: "x".into(),
+        span: Span::new(0, 1),
+    });
+    let right = vec![Expression::Literal(Literal::Integer(1), Span::new(4, 5))];
+    let doc = generator.generate_binary_op("+", &left, &right).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("maybe_await"),
+        "non-literal left operand must be wrapped; got: {output}"
+    );
+    // Right operand is a literal: should NOT be wrapped.
+    assert!(
+        !output.contains("maybe_await'(1)"),
+        "literal right operand should not be wrapped; got: {output}"
+    );
+}
+
+#[test]
+fn test_generate_power_op_no_wrap_for_literals() {
+    use crate::ast::Identifier;
+    let mut generator = CoreErlangGenerator::new("test");
+    // Both literals: neither should be wrapped.
+    let left = Expression::Literal(Literal::Integer(2), Span::new(0, 1));
+    let right = vec![Expression::Literal(Literal::Integer(8), Span::new(4, 5))];
+    let doc = generator.generate_binary_op("**", &left, &right).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        !output.contains("maybe_await"),
+        "literal operands in ** should not be wrapped; got: {output}"
+    );
+
+    // Non-literal left operand: must be wrapped.
+    let left_var = Expression::Identifier(Identifier {
+        name: "base".into(),
+        span: Span::new(0, 4),
+    });
+    let right_lit = vec![Expression::Literal(Literal::Integer(2), Span::new(7, 8))];
+    let doc2 = generator
+        .generate_binary_op("**", &left_var, &right_lit)
+        .unwrap();
+    let output2 = doc2.to_pretty_string();
+    assert!(
+        output2.contains("maybe_await"),
+        "non-literal left operand in ** must be wrapped; got: {output2}"
+    );
+    assert!(
+        !output2.contains("maybe_await'(2)"),
+        "literal right operand in ** should not be wrapped; got: {output2}"
+    );
+}
+
+#[test]
+fn test_generate_concat_op_no_wrap_for_literals() {
+    use crate::ast::Identifier;
+    let mut generator = CoreErlangGenerator::new("test");
+    // String literal ++ string literal: neither should be wrapped.
+    let left = Expression::Literal(Literal::String("hello".into()), Span::new(0, 7));
+    let right = vec![Expression::Literal(
+        Literal::String(" world".into()),
+        Span::new(11, 19),
+    )];
+    let doc = generator.generate_binary_op("++", &left, &right).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        !output.contains("maybe_await"),
+        "literal string operands in ++ should not be wrapped; got: {output}"
+    );
+
+    // Non-literal right operand: must be wrapped.
+    let left_lit = Expression::Literal(Literal::String("hi".into()), Span::new(0, 4));
+    let right_var = vec![Expression::Identifier(Identifier {
+        name: "suffix".into(),
+        span: Span::new(8, 14),
+    })];
+    let doc2 = generator
+        .generate_binary_op("++", &left_lit, &right_var)
+        .unwrap();
+    let output2 = doc2.to_pretty_string();
+    assert!(
+        output2.contains("maybe_await"),
+        "non-literal right operand in ++ must be wrapped; got: {output2}"
+    );
 }
 
 #[test]
@@ -119,10 +236,8 @@ fn test_generate_loose_equality_operator() {
         output.contains("call 'erlang':'=='"),
         "Should use loose equality ==. Got: {output}",
     );
-    assert_eq!(
-        output,
-        "call 'erlang':'=='(call 'beamtalk_future':'maybe_await'(5), call 'beamtalk_future':'maybe_await'(5))"
-    );
+    // Literal operands are provably non-future: no maybe_await wrapping needed.
+    assert_eq!(output, "call 'erlang':'=='(5, 5)");
 }
 
 #[test]

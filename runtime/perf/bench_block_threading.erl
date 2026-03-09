@@ -24,6 +24,10 @@
     sum_procdict/1,
     sum_direct_params/1,
     sum_direct_params_maybe_await/1,
+    %% scale loop: multiply-by-literal, 1 variable + 1 literal per op
+    scale_native/1,
+    scale_direct_params_all_wrapped/1,
+    scale_direct_params_literal_opt/1,
     %% collect: / lists:map equivalents
     double_native/1,
     double_stateacc_block/1,
@@ -166,6 +170,79 @@ sum_direct_params_await_loop(0, Sum) ->
 sum_direct_params_await_loop(I, Sum) ->
     Sum1 = beamtalk_future:maybe_await(Sum) + beamtalk_future:maybe_await(1),
     sum_direct_params_await_loop(beamtalk_future:maybe_await(I) - 1, Sum1).
+
+%%====================================================================
+%% Scale loop: multiply-by-literal
+%%
+%% This is the best-case benchmark for the BT-1286 literal-skipping
+%% optimisation: every binary op has exactly one variable operand and
+%% one literal operand, so BT-1286 eliminates 50% of the maybe_await
+%% calls (1 saved out of 2 per op).
+%%
+%%   N timesRepeat: [:i | result := result * 2]
+%%
+%% Three variants:
+%%   scale_native              — idiomatic Erlang, zero overhead
+%%   scale_direct_params_all_wrapped  — BT-1275 shape, ALL operands wrapped
+%%                                      (pre-BT-1286 codegen)
+%%   scale_direct_params_literal_opt  — BT-1275 + BT-1286: literal 2 not wrapped
+%%                                      (post-BT-1286 codegen)
+%%====================================================================
+
+%% @doc Idiomatic Erlang baseline.
+%%
+%% Assigns result := I * 2 each iteration so values stay fixnum (max = 2*N).
+-spec scale_native(non_neg_integer()) -> integer().
+scale_native(N) ->
+    scale_native_loop(N, 0).
+
+scale_native_loop(0, Result) -> Result;
+scale_native_loop(I, _Result) ->
+    scale_native_loop(I - 1, I * 2).
+
+%% @doc Pre-BT-1286: all operands wrapped in maybe_await.
+%%
+%% Simulates (result := I * 2 each iteration):
+%%   let Result1 = call 'erlang':'*'(
+%%       call 'beamtalk_future':'maybe_await'(I),
+%%       call 'beamtalk_future':'maybe_await'(2)) in
+%%   apply 'repeat'/2 (call 'erlang':'-'(
+%%       call 'beamtalk_future':'maybe_await'(I),
+%%       call 'beamtalk_future':'maybe_await'(1)), Result1)
+%%
+%% 4 maybe_await calls per iteration.
+-spec scale_direct_params_all_wrapped(non_neg_integer()) -> integer().
+scale_direct_params_all_wrapped(N) ->
+    {_, FinalState} = scale_all_wrapped_loop(N, 0),
+    maps:get('__local__result', FinalState).
+
+scale_all_wrapped_loop(0, Result) ->
+    {nil, maps:put('__local__result', Result, maps:new())};
+scale_all_wrapped_loop(I, _Result) ->
+    Result1 = beamtalk_future:maybe_await(I) * beamtalk_future:maybe_await(2),
+    scale_all_wrapped_loop(beamtalk_future:maybe_await(I) - beamtalk_future:maybe_await(1), Result1).
+
+%% @doc Post-BT-1286: literal operands (2, 1) not wrapped.
+%%
+%% Simulates (result := I * 2 each iteration, literals skip maybe_await):
+%%   let Result1 = call 'erlang':'*'(
+%%       call 'beamtalk_future':'maybe_await'(I),
+%%       2) in                                         %% literal — no wrap
+%%   apply 'repeat'/2 (call 'erlang':'-'(
+%%       call 'beamtalk_future':'maybe_await'(I),
+%%       1), Result1)                                  %% literal — no wrap
+%%
+%% 2 maybe_await calls per iteration (50% reduction vs all_wrapped).
+-spec scale_direct_params_literal_opt(non_neg_integer()) -> integer().
+scale_direct_params_literal_opt(N) ->
+    {_, FinalState} = scale_literal_opt_loop(N, 0),
+    maps:get('__local__result', FinalState).
+
+scale_literal_opt_loop(0, Result) ->
+    {nil, maps:put('__local__result', Result, maps:new())};
+scale_literal_opt_loop(I, _Result) ->
+    Result1 = beamtalk_future:maybe_await(I) * 2,
+    scale_literal_opt_loop(beamtalk_future:maybe_await(I) - 1, Result1).
 
 %%====================================================================
 %% collect: / lists:map pattern

@@ -20,6 +20,34 @@ impl CoreErlangGenerator {
         docvec!["call 'beamtalk_future':'maybe_await'(", doc, ")"]
     }
 
+    /// Returns `true` if `expr` is provably non-future and does not need
+    /// `beamtalk_future:maybe_await/1` wrapping before use in a binary operation.
+    ///
+    /// Conservative: only handles cases where the type is known statically from
+    /// the AST shape alone, without any scope tracking.
+    fn is_definitely_sync(expr: &Expression) -> bool {
+        match expr {
+            // All AST literals and list literals are immediate (non-future) values.
+            Expression::Literal(_, _) | Expression::ListLiteral { .. } => true,
+            // `self` refers to the current actor PID / value object — never a future.
+            Expression::Identifier(id) if id.name == "self" => true,
+            _ => false,
+        }
+    }
+
+    /// Wraps `doc` with `beamtalk_future:maybe_await/1` only when `expr` might be
+    /// a future at runtime.
+    ///
+    /// If `is_definitely_sync` returns `true` for `expr`, the document is returned
+    /// unchanged; otherwise the standard `maybe_await` wrapper is applied.
+    fn wrap_if_needed(expr: &Expression, doc: Document<'static>) -> Document<'static> {
+        if Self::is_definitely_sync(expr) {
+            doc
+        } else {
+            Self::wrap_maybe_await(doc)
+        }
+    }
+
     /// Generates code for binary operators.
     ///
     /// Maps Beamtalk binary operators to Erlang's built-in operators:
@@ -80,8 +108,10 @@ impl CoreErlangGenerator {
             }
         };
 
-        let left_code = Self::wrap_maybe_await(self.expression_doc(left)?);
-        let right_code = Self::wrap_maybe_await(self.expression_doc(&arguments[0])?);
+        let left_doc = self.expression_doc(left)?;
+        let right_doc = self.expression_doc(&arguments[0])?;
+        let left_code = Self::wrap_if_needed(left, left_doc);
+        let right_code = Self::wrap_if_needed(&arguments[0], right_doc);
 
         Ok(docvec![
             format!("call 'erlang':'{erlang_op}'("),
@@ -105,8 +135,10 @@ impl CoreErlangGenerator {
         left: &Expression,
         right: &Expression,
     ) -> Result<Document<'static>> {
-        let left_code = Self::wrap_maybe_await(self.expression_doc(left)?);
-        let right_code = Self::wrap_maybe_await(self.expression_doc(right)?);
+        let left_doc = self.expression_doc(left)?;
+        let right_doc = self.expression_doc(right)?;
+        let left_code = Self::wrap_if_needed(left, left_doc);
+        let right_code = Self::wrap_if_needed(right, right_doc);
         Ok(docvec![
             "call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(",
             left_code,
@@ -137,8 +169,10 @@ impl CoreErlangGenerator {
 
         if is_list {
             // List concatenation: erlang:'++'
-            let left_code = Self::wrap_maybe_await(self.expression_doc(left)?);
-            let right_code = Self::wrap_maybe_await(self.expression_doc(right)?);
+            let left_doc = self.expression_doc(left)?;
+            let right_doc = self.expression_doc(right)?;
+            let left_code = Self::wrap_if_needed(left, left_doc);
+            let right_code = Self::wrap_if_needed(right, right_doc);
             Ok(docvec![
                 "call 'erlang':'++'(",
                 left_code,
@@ -148,8 +182,10 @@ impl CoreErlangGenerator {
             ])
         } else if is_string {
             // String concatenation: iolist_to_binary
-            let left_code = Self::wrap_maybe_await(self.expression_doc(left)?);
-            let right_code = Self::wrap_maybe_await(self.expression_doc(right)?);
+            let left_doc = self.expression_doc(left)?;
+            let right_doc = self.expression_doc(right)?;
+            let left_code = Self::wrap_if_needed(left, left_doc);
+            let right_code = Self::wrap_if_needed(right, right_doc);
             Ok(docvec![
                 "call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
                 left_code,
@@ -161,8 +197,10 @@ impl CoreErlangGenerator {
             // Runtime dispatch: check is_list at runtime
             let left_var = self.fresh_temp_var("ConcatLeft");
             let right_var = self.fresh_temp_var("ConcatRight");
-            let left_code = Self::wrap_maybe_await(self.expression_doc(left)?);
-            let right_code = Self::wrap_maybe_await(self.expression_doc(right)?);
+            let left_doc = self.expression_doc(left)?;
+            let right_doc = self.expression_doc(right)?;
+            let left_code = Self::wrap_if_needed(left, left_doc);
+            let right_code = Self::wrap_if_needed(right, right_doc);
             Ok(docvec![
                 format!("let {left_var} = "),
                 left_code,
