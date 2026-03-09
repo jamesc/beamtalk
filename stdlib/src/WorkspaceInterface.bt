@@ -129,3 +129,16 @@ sealed Object subclass: WorkspaceInterface
   /// ```
   unbind: bindingName :: Symbol -> Nil =>
     (Erlang beamtalk_workspace_interface_primitives) unbind: bindingName
+
+  /// Return the OTP application root supervisor, or nil if not configured.
+  ///
+  /// Returns the `Supervisor` instance registered when a package with
+  /// `[application] supervisor = "ClassName"` starts. Returns nil if the
+  /// application has not been started with an OTP supervisor root.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace supervisor                  // => #Supervisor<AppSup, <0.200.0>>
+  /// Workspace supervisor children         // => #(#DatabasePool #HTTPRouter)
+  /// ```
+  supervisor => (Erlang beamtalk_workspace_interface_primitives) rootSupervisor

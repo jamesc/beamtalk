@@ -42,11 +42,18 @@
     countChildren/1,
     stop/1,
     build_child_specs/1,
-    is_supervisor/1
+    is_supervisor/1,
+    register_root/1,
+    get_root/0
 ]).
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
+
+%% ETS table name for the OTP application root supervisor registry (BT-1191).
+%% Stores `{root, SupervisorTuple}` where SupervisorTuple is a
+%% `{beamtalk_supervisor, ClassName, Module, Pid}` value.
+-define(ROOT_SUPERVISOR_TABLE, beamtalk_root_supervisor).
 
 %%% ============================================================================
 %%% Public API
@@ -314,6 +321,32 @@ is_supervisor(ClassName) ->
     beamtalk_class_registry:inherits_from(ClassName, 'Supervisor') orelse
         beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor').
 
+%% @doc Register the OTP application root supervisor (BT-1191).
+%%
+%% Called from the generated `beamtalk_{appname}_app:start/2` callback after
+%% the root supervisor has started. SupervisorTuple must be a
+%% `{beamtalk_supervisor, ClassName, Module, Pid}` value as returned by
+%% `startLink/1`. Creates the ETS table if it does not already exist.
+-spec register_root(tuple()) -> ok.
+register_root(SupervisorTuple) ->
+    ensure_root_table(),
+    ets:insert(?ROOT_SUPERVISOR_TABLE, {root, SupervisorTuple}),
+    ok.
+
+%% @doc Return the registered OTP application root supervisor, or `nil`.
+%%
+%% Called by `Workspace supervisor` via the workspace interface primitives.
+%% Returns the `{beamtalk_supervisor, ClassName, Module, Pid}` tuple registered
+%% by `register_root/1`, or the Beamtalk `nil` atom if no root supervisor has
+%% been registered (e.g. no `[application]` section in `beamtalk.toml`).
+-spec get_root() -> tuple() | nil.
+get_root() ->
+    ensure_root_table(),
+    case ets:lookup(?ROOT_SUPERVISOR_TABLE, root) of
+        [{root, Sup}] -> Sup;
+        [] -> nil
+    end.
+
 %%% ============================================================================
 %%% Internal helpers
 %%% ============================================================================
@@ -415,4 +448,24 @@ with_live_supervisor(ClassName, Selector, Fun) ->
                 <<"supervisor is not running — the handle is stale">>
             ),
             error(beamtalk_exception_handler:ensure_wrapped(Error))
+    end.
+
+%% @private
+%% Ensure the root supervisor ETS table exists.
+%% Uses `public` access so the generated app callback and workspace primitives
+%% can both read/write without process ownership constraints.
+-spec ensure_root_table() -> ok.
+ensure_root_table() ->
+    case ets:info(?ROOT_SUPERVISOR_TABLE, id) of
+        undefined ->
+            try
+                ets:new(?ROOT_SUPERVISOR_TABLE, [named_table, public, set])
+            catch
+                error:badarg ->
+                    %% Another process created the table concurrently — that's fine
+                    ok
+            end,
+            ok;
+        _ ->
+            ok
     end.

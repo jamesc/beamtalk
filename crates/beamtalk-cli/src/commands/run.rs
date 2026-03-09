@@ -57,14 +57,22 @@ pub fn run(path: &str) -> Result<()> {
     }
 }
 
-/// Run a package with a start module.
+/// Run a package.
 ///
-/// Compiles the package, starts a BEAM node, and calls the start module's
-/// `start` method. The node stays alive so actors remain supervised.
+/// If `[application] supervisor` is set, starts the package as a proper OTP
+/// application via `application:ensure_all_started/1`. Otherwise, falls back
+/// to calling the `start` module's `start` method imperatively.
 fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> Result<()> {
+    // Check for OTP application mode (BT-1191)
+    let app_config = manifest::find_application_config(project_root)?;
+    if app_config.is_some() {
+        return run_package_as_otp_application(project_root, pkg);
+    }
+
     let start_module = pkg.start.as_deref().ok_or_else(|| {
         miette!(
-            "No start module defined — add start = \"module_name\" to [package] in beamtalk.toml"
+            "No start module defined — add start = \"module_name\" to [package] in beamtalk.toml\n\
+             Or use [application] supervisor = \"MyRootSup\" for a supervised OTP application"
         )
     })?;
 
@@ -183,6 +191,111 @@ fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> R
     }
 
     info!("Run command completed");
+    Ok(())
+}
+
+/// Run a package as a proper OTP application (BT-1191).
+///
+/// Compiles the package (which generates the OTP app callback module), then
+/// starts a BEAM node that calls `application:ensure_all_started(AppName)`
+/// to bring up the root supervisor as an OTP application. The node stays alive
+/// until the application terminates.
+fn run_package_as_otp_application(
+    project_root: &Utf8PathBuf,
+    pkg: &manifest::PackageManifest,
+) -> Result<()> {
+    info!(name = %pkg.name, "Running as OTP application");
+
+    println!("Building...");
+    super::build::build(
+        project_root.as_str(),
+        &beamtalk_core::CompilerOptions::default(),
+    )?;
+
+    println!(
+        "\nStarting {} v{} (OTP application)...",
+        pkg.name, pkg.version
+    );
+
+    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
+    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+
+    if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
+        info!("Building Beamtalk runtime...");
+        let status = Command::new("rebar3")
+            .arg("compile")
+            .current_dir(&runtime_dir)
+            .status()
+            .map_err(|e| miette!("Failed to build runtime: {e}"))?;
+
+        if !status.success() {
+            return Err(miette!("Failed to build Beamtalk runtime"));
+        }
+    }
+
+    let mut args = repl_startup::beam_pa_args(&paths);
+
+    let ebin_dir = project_root.join("_build").join("dev").join("ebin");
+    args.push(OsString::from("-pa"));
+    #[cfg(windows)]
+    {
+        let ebin_path = ebin_dir.as_str().replace('\\', "/");
+        args.push(OsString::from(ebin_path));
+    }
+    #[cfg(not(windows))]
+    {
+        args.push(OsString::from(ebin_dir.as_str()));
+    }
+
+    // Start the OTP application. The generated beamtalk_{appname}_app module's
+    // start/2 will bring up the root supervisor rooted in the OTP tree.
+    // Monitor the root supervisor PID so the eval process exits when the
+    // application terminates (rather than waiting for an unsent 'stop' message).
+    let app_name = &pkg.name;
+    let eval_cmd = format!(
+        "{{ok, _}} = application:ensure_all_started(beamtalk_runtime), \
+         {{ok, _}} = application:ensure_all_started({app_name}), \
+         SupTuple = beamtalk_supervisor:get_root(), \
+         Pid = element(4, SupTuple), \
+         Ref = erlang:monitor(process, Pid), \
+         receive {{'DOWN', Ref, process, _, _}} -> ok end."
+    );
+
+    args.push(OsString::from("-eval"));
+    args.push(OsString::from(&eval_cmd));
+
+    let mut cmd = Command::new("erl");
+    cmd.arg("-noshell")
+        .args(&args)
+        .current_dir(project_root.as_std_path())
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            let compiler_port = bin_dir.join("beamtalk-compiler-port");
+            if compiler_port.exists() {
+                cmd.env("BEAMTALK_COMPILER_PORT_BIN", &compiler_port);
+            }
+        }
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| miette!("Failed to start BEAM node: {e}\nIs Erlang/OTP installed?"))?;
+
+    let status = child
+        .wait()
+        .map_err(|e| miette!("Failed to wait for BEAM node: {e}"))?;
+
+    if !status.success() {
+        if let Some(code) = status.code() {
+            miette::bail!("Program exited with code {code}");
+        }
+    }
+
+    info!("OTP application run completed");
     Ok(())
 }
 
