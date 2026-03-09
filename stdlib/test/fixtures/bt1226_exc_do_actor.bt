@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1226: Actor fixture for exception handler followed by state mutation in do: block.
+// Exercises acceptance criterion 1: [risky] on: Exception do: [handler] followed by
+// self.field := ... in the same do: block iteration.
+
+Actor subclass: BT1226ExcDoActor
+  state: results = #()
+  state: errors = 0
+
+  // Exception handler before state mutation in do: block body
+  process: list =>
+    list
+      do: [:x |
+        [x / 0] on: Exception do: [:e | self.errors := self.errors + 1]
+        self.results := self.results add: x
+      ]
+    #{#results => self.results, #errors => self.errors}
+
+  // Exception handler that does not fire, then state mutation
+  processNoError: list =>
+    list
+      do: [:x |
+        [x + 1] on: Exception do: [:e | self.errors := self.errors + 1]
+        self.results := self.results add: x
+      ]
+    #{#results => self.results, #errors => self.errors}

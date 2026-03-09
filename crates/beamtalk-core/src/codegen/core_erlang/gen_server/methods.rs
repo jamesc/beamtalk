@@ -1813,7 +1813,11 @@ impl CoreErlangGenerator {
             // BT-915: For Boolean conditionals, any block argument may contain mutations.
             // Check all block arguments (not just the last) since ifTrue:ifFalse: has
             // mutations in the first block but not necessarily in the second.
-            if matches!(sel.as_str(), "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:") {
+            // BT-1226: ifNotNil: also needs per-block mutation detection.
+            if matches!(
+                sel.as_str(),
+                "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNotNil:"
+            ) {
                 for arg in arguments {
                     if let Expression::Block(block) = arg {
                         let analysis = block_analysis::analyze_block(block);

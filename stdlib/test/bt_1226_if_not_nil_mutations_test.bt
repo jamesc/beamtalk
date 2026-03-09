@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1226: Tests for ifNotNil: with state mutation threading in actor methods.
+//
+// Previously, ifNotNil: blocks that mutated actor state did not thread state
+// correctly: the mutation was applied inside a closure but the updated state
+// was never returned to the handle_call level.
+
+TestCase subclass: BT1226IfNotNilMutationsTest
+
+  // Exact issue pattern: receiver reads state, 1-arg block mutates state
+  testIfNotNilWithMutationThreadsState =>
+    a := IfNotNilMutActor spawn
+    a addEntry: "x" withValue: 10
+    result := a update: "x"
+    // Mutation must persist: entry should be incremented from 10 to 11
+    self assert: (result at: "x") equals: 11
+
+  // When receiver is nil, state must remain unchanged
+  testIfNotNilWithNilReceiverLeavesStateUnchanged =>
+    a := IfNotNilMutActor spawn
+    a addEntry: "x" withValue: 10
+    result := a update: "y"
+    // "y" is absent (nil), block should not execute, "x" untouched
+    self assert: (result at: "x") equals: 10
+    self deny: (result includesKey: "y")
+
+  // Multiple sequential updates must each persist
+  testIfNotNilMultipleUpdates =>
+    a := IfNotNilMutActor spawn
+    a addEntry: "x" withValue: 0
+    a update: "x"
+    a update: "x"
+    result := a update: "x"
+    self assert: (result at: "x") equals: 3
+
+  // 0-arg ifNotNil: block with mutation
+  testIfNotNilZeroArgBlockMutatesState =>
+    a := IfNotNilMutActor spawn
+    a addEntry: "k" withValue: 5
+    result := a touch: "k"
+    self assert: (result at: "k") equals: 99
+
+  // 0-arg ifNotNil: with nil receiver: no mutation
+  testIfNotNilZeroArgBlockNilLeavesState =>
+    a := IfNotNilMutActor spawn
+    result := a touch: "missing"
+    self assert: result equals: #{}
+
+  // ifNotNil: expression return value must be correct (not just state side-effect).
+  // Tests that the {Result, State} tuple has Result and State in the right positions.
+  testIfNotNilReturnValueIsCorrect =>
+    a := IfNotNilMutActor spawn
+    a addEntry: "x" withValue: 10
+    // Block mutates state AND returns entry + 1 as the expression result
+    branchResult := a incrementAndReturnNewValue: "x"
+    self assert: branchResult equals: 11
+    // Nil case: expression result is nil
+    nilResult := a incrementAndReturnNewValue: "absent"
+    self assert: nilResult equals: nil

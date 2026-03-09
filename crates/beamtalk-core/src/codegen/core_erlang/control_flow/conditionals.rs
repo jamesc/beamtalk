@@ -180,6 +180,58 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// Generates inline code for `obj ifNotNil: [block]` or `obj ifNotNil: [:v | block]`
+    /// in actor context when the block contains field mutations.
+    ///
+    /// Returns `{Result, NewState}`:
+    /// - Nil branch: `{'nil', unchanged_state}`
+    /// - Non-nil branch: `{block_result, mutated_state}`
+    ///
+    /// If the block has a parameter (`:v`), it is bound to the receiver object value
+    /// inside the branch body.
+    pub(in crate::codegen::core_erlang) fn generate_if_not_nil_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        block: &Block,
+    ) -> Result<Document<'static>> {
+        let obj_var = self.fresh_temp_var("Obj");
+        let recv_code = self.expression_doc(receiver)?;
+        let outer_state = self.current_state_var();
+
+        let saved_version = self.state_version();
+        let saved_in_loop = self.in_loop_body;
+        self.set_state_version(0);
+        self.in_loop_body = true;
+
+        // Push a scope so the block-parameter binding is cleaned up after generation
+        self.push_scope();
+        if let Some(param) = block.parameters.first() {
+            // Bind the block parameter to the receiver value (already bound to obj_var)
+            self.bind_var(&param.name, &obj_var);
+        }
+        let (branch_doc, _) = self.generate_conditional_branch_inline(block)?;
+        self.pop_scope();
+
+        self.in_loop_body = saved_in_loop;
+        self.set_state_version(saved_version);
+
+        Ok(docvec![
+            "let ",
+            Document::String(obj_var.clone()),
+            " = ",
+            recv_code,
+            " in case ",
+            Document::String(obj_var),
+            " of <'nil'> when 'true' -> {'nil', ",
+            Document::String(outer_state.clone()),
+            "} <_> when 'true' -> let StateAcc = ",
+            Document::String(outer_state),
+            " in ",
+            branch_doc,
+            " end",
+        ])
+    }
+
     /// Generates an inline block body for a conditional branch with field mutation threading.
     ///
     /// **Precondition**: Caller must set `in_loop_body = true` and `state_version = 0`
