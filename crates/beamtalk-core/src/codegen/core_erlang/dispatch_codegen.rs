@@ -1156,43 +1156,21 @@ impl CoreErlangGenerator {
     /// Note: `inject:into:` is included because it may appear inside actor methods
     /// with field mutations, requiring inline compilation for proper state threading.
     pub(super) fn is_state_threading_control_flow(expr: &Expression) -> bool {
+        use super::state_threading_selectors::{
+            is_state_threading_keyword_selector, is_state_threading_unary_selector,
+        };
         match expr {
             Expression::MessageSend {
                 selector: MessageSelector::Keyword(parts),
                 ..
             } => {
-                // Check for control flow selectors that thread state.
-                // TODO BT-1281: centralize this list into a shared helper to avoid drift
-                // when new selectors are added (same list exists in control_flow_has_mutations
-                // and inline_conditional_writes_threaded).
                 let selector: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-                matches!(
-                    selector.as_str(),
-                    "whileTrue:"
-                        | "whileFalse:"
-                        | "timesRepeat:"
-                        | "to:do:"
-                        | "to:by:do:"
-                        | "do:"
-                        | "collect:"
-                        | "select:"
-                        | "reject:"
-                        | "inject:into:"
-                        | "on:do:"
-                        | "ensure:"
-                        | "ifTrue:"
-                        | "ifFalse:"
-                        | "ifTrue:ifFalse:"
-                        | "ifNotNil:"
-                )
+                is_state_threading_keyword_selector(selector.as_str())
             }
             Expression::MessageSend {
                 selector: MessageSelector::Unary(name),
                 ..
-            } => {
-                // Check for unary control flow
-                matches!(name.as_str(), "whileTrue" | "whileFalse" | "timesRepeat")
-            }
+            } => is_state_threading_unary_selector(name.as_str()),
             _ => false,
         }
     }
