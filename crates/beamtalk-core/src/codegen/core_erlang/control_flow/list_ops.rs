@@ -661,4 +661,49 @@ mod tests {
             "do: body should update 'sum' via maps:put. Got:\n{code}"
         );
     }
+
+    #[test]
+    fn test_list_do_multi_stmt_first_is_pure_generates_let_underscore() {
+        // Multi-statement do: body where the first statement is a pure expression
+        // must emit `let _ = <expr> in ...` (not bare `<expr> in ...`) — Core Erlang requires
+        // non-last expressions to be bound.  The "+" call must appear as the RHS of a let.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items do: [:item | item + 1. self.n := self.n + 1]\n";
+        let code = codegen(src);
+        // The first expression (item + 1) is non-last; it must be bound as `let _ = ... in`
+        // not emitted bare as `<expr> in` which is invalid Core Erlang.
+        let has_bare_expr_in = code.contains("call 'erlang':'+'") && {
+            // Find the position of the '+' call and check what precedes it
+            if let Some(pos) = code.find("call 'erlang':'+'") {
+                // Look for "let _ = " immediately before the + call (within 20 chars)
+                let before = &code[pos.saturating_sub(20)..pos];
+                !before.contains("let _ = ") && !before.contains("let _")
+            } else {
+                false
+            }
+        };
+        assert!(
+            !has_bare_expr_in,
+            "First non-last pure expr in do: body must emit 'let _ = ...' binding, not bare expr. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_list_collect_multi_stmt_first_is_pure_generates_let_underscore() {
+        // Same fix for collect: — first non-last pure expr must be bound.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items collect: [:item | item + 1. self.n := self.n + 1. item * 2]\n";
+        let code = codegen(src);
+        // item + 1 is first and non-last — must be wrapped with let _ = ... in
+        let has_bare_expr_in = code.contains("call 'erlang':'+'") && {
+            if let Some(pos) = code.find("call 'erlang':'+'") {
+                let before = &code[pos.saturating_sub(20)..pos];
+                !before.contains("let _ = ") && !before.contains("let _")
+            } else {
+                false
+            }
+        };
+        assert!(
+            !has_bare_expr_in,
+            "First non-last pure expr in collect: body must emit 'let _ = ...' binding. Got:\n{code}"
+        );
+    }
 }

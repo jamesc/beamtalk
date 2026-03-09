@@ -563,7 +563,7 @@ impl CoreErlangGenerator {
         &mut self,
         docs: &mut Vec<Document<'static>>,
         expr: &Expression,
-        i: usize,
+        _i: usize,
         is_last: bool,
         has_mutations: bool,
         has_plain_lets: bool,
@@ -592,7 +592,7 @@ impl CoreErlangGenerator {
                 }
             }
             BodyKind::FoldlDo => {
-                if i > 0 {
+                if !is_last {
                     docs.push(Document::Str("let _ = "));
                 }
                 let doc = self.generate_expression(expr)?;
@@ -607,7 +607,7 @@ impl CoreErlangGenerator {
                 }
             }
             BodyKind::FoldlCollect => {
-                if i > 0 && !is_last {
+                if !is_last {
                     docs.push(Document::Str("let _ = "));
                 }
                 if is_last {
@@ -630,7 +630,7 @@ impl CoreErlangGenerator {
                 }
             }
             BodyKind::FoldlFilter { .. } => {
-                if i > 0 && !is_last {
+                if !is_last {
                     docs.push(Document::Str("let _ = "));
                 }
                 if is_last {
@@ -645,7 +645,7 @@ impl CoreErlangGenerator {
                 }
             }
             BodyKind::FoldlInject => {
-                if i > 0 && !is_last {
+                if !is_last {
                     docs.push(Document::Str("let _ = "));
                 }
                 if is_last {
