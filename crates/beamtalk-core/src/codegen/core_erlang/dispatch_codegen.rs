@@ -1180,6 +1180,7 @@ impl CoreErlangGenerator {
                         | "ifTrue:"
                         | "ifFalse:"
                         | "ifTrue:ifFalse:"
+                        | "ifNotNil:"
                 )
             }
             Expression::MessageSend {

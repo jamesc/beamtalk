@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1226: Tests for exception handler followed by state mutation in do: block.
+//
+// Acceptance criterion 1: [risky] on: Exception do: [handler] followed by
+// self.field := ... in the same do: block iteration must compile and run correctly.
+
+TestCase subclass: BT1226ExcDoMutationsTest
+
+  // Exception fires, then state mutation must still persist
+  testExceptionHandlerBeforeStateMutation =>
+    a := BT1226ExcDoActor spawn
+    result := a process: #(1, 2, 3)
+    // All items should be added to results despite the exception on each iteration
+    self assert: (result at: #results) equals: #(1, 2, 3)
+    // Each iteration fires the exception (x / 0), so errors = 3
+    self assert: (result at: #errors) equals: 3
+
+  // No exception fires, state mutation must still persist
+  testNoExceptionBeforeStateMutation =>
+    a := BT1226ExcDoActor spawn
+    result := a processNoError: #(10, 20)
+    self assert: (result at: #results) equals: #(10, 20)
+    self assert: (result at: #errors) equals: 0

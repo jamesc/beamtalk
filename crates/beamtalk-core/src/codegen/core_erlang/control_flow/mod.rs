@@ -1020,7 +1020,10 @@ impl CoreErlangGenerator {
         } = expr
         {
             let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-            if matches!(sel.as_str(), "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:") {
+            if matches!(
+                sel.as_str(),
+                "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNotNil:"
+            ) {
                 for arg in arguments {
                     if let Expression::Block(block) = arg {
                         let analysis = block_analysis::analyze_block(block);
