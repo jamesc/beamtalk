@@ -544,6 +544,67 @@ Starting at C would require building all five simultaneously — workspace sync,
 
 **The BEAM makes this path uniquely viable.** OTP's native hot code loading, two-version module support, release handlers, and `code_change` callbacks mean "workspace as deployable image" isn't a novel runtime — it's leveraging infrastructure that already exists. Beamtalk just needs to expose it with the right abstractions.
 
+## Amendment: OTP Application Root Supervisor (BT-1191)
+
+**Status:** Implemented (2026-03-09)
+
+### Context
+
+ADR 0059 (Supervision Tree Syntax) introduced `Supervisor subclass:` as the Beamtalk way to declare OTP supervision trees. However, the `[run] entry = "Main run"` pattern remained an imperative startup script — actors spawned this way are not rooted in an OTP application supervisor. If the node restarts, they do not come back automatically, and `observer:start()` shows them as unattached named processes.
+
+### Decision
+
+Add an optional `[application]` section to `beamtalk.toml`:
+
+```toml
+[package]
+name = "my_web_app"
+version = "0.1.0"
+
+[application]
+supervisor = "AppSup"    # Root Supervisor subclass for this OTP application
+```
+
+When `[application] supervisor` is set:
+
+1. **`beamtalk build`** generates `beamtalk_{appname}_app.erl` — an OTP application callback module:
+   ```erlang
+   %% Generated: beamtalk_myweb_app_app.erl
+   start(_Type, _Args) -> 'bt@my_web_app@app_sup':'start_link'().
+   stop(_State) -> ok.
+   ```
+   And emits `{mod, {beamtalk_myweb_app_app, []}}` in the `.app` file.
+
+2. **`beamtalk run`** starts the OTP application via `application:ensure_all_started/1` rather than calling an imperative start method. The application root supervisor is automatically rooted in the OTP supervision tree.
+
+3. **`Workspace supervisor`** returns the running application root supervisor, backed by a supervisor ETS registry in `beamtalk_supervisor.erl`. Returns `nil` if no `[application]` section is configured or the application has not started.
+
+The `[run] entry =` field continues to work for scripts and tools (short-running imperative entry points). The two modes are independent.
+
+### Manifest Schema Addition
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `[application].supervisor` | String | No | Beamtalk class name of the root `Supervisor subclass:` |
+
+### Files Modified
+
+- `crates/beamtalk-cli/src/commands/manifest.rs` — `ApplicationConfig` struct, `find_application_config()`
+- `crates/beamtalk-cli/src/commands/app_file.rs` — `{mod, ...}` in `.app` when supervisor is set
+- `crates/beamtalk-cli/src/commands/build.rs` — generate OTP application callback `.erl`
+- `crates/beamtalk-cli/src/commands/run.rs` — OTP application start path
+- `runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl` — supervisor ETS registry (`register_root/1`, `get_root/0`)
+- `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_interface_primitives.erl` — `rootSupervisor/0`
+- `stdlib/src/WorkspaceInterface.bt` — `supervisor` method
+
+### References
+
+- ADR 0059 (Supervision Tree Syntax)
+- ADR 0009 (OTP Application Structure)
+- BT-1191
+
+---
+
 ## Implementation Tracking
 
 **Epic:** BT-600

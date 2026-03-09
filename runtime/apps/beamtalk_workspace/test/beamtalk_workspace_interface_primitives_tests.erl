@@ -402,3 +402,23 @@ get_session_bindings_includes_user_bindings_test() ->
         cleanup_ets_for(self()),
         catch unregister(beamtalk_workspace_meta)
     end.
+
+root_supervisor_returns_nil_when_not_registered_test() ->
+    %% rootSupervisor/0 returns nil when no root supervisor has been registered.
+    catch ets:delete(beamtalk_root_supervisor),
+    Self = fake_self(self()),
+    ?assertEqual(nil, beamtalk_workspace_interface_primitives:dispatch(rootSupervisor, [], Self)),
+    ?assertEqual(nil, beamtalk_workspace_interface_primitives:rootSupervisor()).
+
+root_supervisor_returns_registered_value_test() ->
+    %% rootSupervisor/0 returns the tuple registered via beamtalk_supervisor:register_root/1.
+    catch ets:delete(beamtalk_root_supervisor),
+    FakePid = self(),
+    SupTuple = {beamtalk_supervisor, 'AppSup', 'bt@my_app@app_sup', FakePid},
+    beamtalk_supervisor:register_root(SupTuple),
+    Self = fake_self(self()),
+    ?assertEqual(
+        SupTuple, beamtalk_workspace_interface_primitives:dispatch(rootSupervisor, [], Self)
+    ),
+    ?assertEqual(SupTuple, beamtalk_workspace_interface_primitives:rootSupervisor()),
+    catch ets:delete(beamtalk_root_supervisor).

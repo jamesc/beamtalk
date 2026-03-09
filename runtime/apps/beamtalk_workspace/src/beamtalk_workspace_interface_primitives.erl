@@ -53,7 +53,7 @@
 %% long-lived process (prevents table from being deleted when eval workers exit)
 -export([create_bindings_table/0]).
 %% Direct exports for Erlang FFI calls from sealed Object WorkspaceInterface
--export([actors/0, actorAt/1, classes/0, load/1, globals/0, bind/2, unbind/1]).
+-export([actors/0, actorAt/1, classes/0, load/1, globals/0, bind/2, unbind/1, rootSupervisor/0]).
 
 %% ETS table name for user workspace bindings
 -define(WI_BINDINGS_TABLE, beamtalk_wi_user_bindings).
@@ -81,6 +81,8 @@ dispatch('bind:as:', [Value, Name], _Self) ->
     bind(Value, Name);
 dispatch('unbind:', [Name], _Self) ->
     unbind(Name);
+dispatch(rootSupervisor, [], _Self) ->
+    rootSupervisor();
 dispatch(Selector, _Args, _Self) ->
     Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
@@ -175,6 +177,19 @@ unbind(Name) ->
                     nil
             end
     end.
+
+%% @doc Return the OTP application root supervisor, or nil (BT-1191).
+%%
+%% Called via `(Erlang beamtalk_workspace_interface_primitives) rootSupervisor`.
+%% Delegates to `beamtalk_supervisor:get_root/0` which reads from the ETS
+%% registry populated by the generated `beamtalk_{appname}_app:start/2`.
+%%
+%% Returns the `{beamtalk_supervisor, ClassName, Module, Pid}` tuple when an
+%% OTP application with `[application] supervisor` has started, or the atom
+%% `nil` if no root has been registered.
+-spec rootSupervisor() -> tuple() | nil.
+rootSupervisor() ->
+    beamtalk_supervisor:get_root().
 
 %%% ============================================================================
 %%% Stable external API
