@@ -46,6 +46,7 @@ just test-learn
 | [14](14-pattern-matching.md) | Pattern Matching | Array destructuring, binary patterns |
 | [15](15-type-annotations.md) | Type Annotations | `::` syntax, gradual typing |
 | [16](16-beam-interop.md) | BEAM Interop | Erlang FFI, atoms, calling `:module function` |
+| [17](17-otp-supervisors.md) | OTP Supervisors | `Supervisor subclass:`, restart strategies, dynamic supervisors |
 
 ---
 

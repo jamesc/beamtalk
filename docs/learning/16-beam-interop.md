@@ -224,5 +224,4 @@ Beamtalk actors are gen_servers — callable from any BEAM language with
 
 Erlang exceptions → Beamtalk `RuntimeError` (catchable with `on:do:`).
 
-That's the end of the Learning Beamtalk guide!
-See `docs/beamtalk-language-features.md` for the full language reference.
+Next: Chapter 17 — OTP Supervisors
