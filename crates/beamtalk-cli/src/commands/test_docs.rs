@@ -136,6 +136,40 @@ fn find_md_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 // Main entry point
 // ──────────────────────────────────────────────────────────────────────────
 
+/// Extract beamtalk code blocks from `.md` files and write synthetic `.btscript` files.
+///
+/// Returns `(md_path, btscript_path)` pairs. Files with no blocks are silently skipped.
+fn extract_to_btscript_files(
+    md_files: &[Utf8PathBuf],
+    btscript_dir: &Utf8Path,
+) -> Result<Vec<(Utf8PathBuf, Utf8PathBuf)>> {
+    let mut pairs: Vec<(Utf8PathBuf, Utf8PathBuf)> = Vec::new();
+    for md_file in md_files {
+        let content = fs::read_to_string(md_file)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to read '{md_file}'"))?;
+        let extracted = extract_btscript_from_markdown(&content);
+        if extracted.trim().is_empty() {
+            continue;
+        }
+        let normalised = normalize_inline_assertions(&extracted);
+        let stem = md_file
+            .file_stem()
+            .ok_or_else(|| miette::miette!("Markdown file has no stem: {md_file}"))?;
+        // Sanitise stem for use as an Erlang module fragment.
+        let safe_stem: String = stem
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+            .collect();
+        let btscript_path = btscript_dir.join(format!("{safe_stem}.btscript"));
+        fs::write(&btscript_path, &normalised)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to write btscript for '{md_file}'"))?;
+        pairs.push((md_file.clone(), btscript_path));
+    }
+    Ok(pairs)
+}
+
 /// Run doctests extracted from Markdown files.
 ///
 /// For each `.md` file found in `path`:
@@ -173,49 +207,7 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
         .into_diagnostic()
         .wrap_err("Failed to create btscript staging directory")?;
 
-    // Phase 0: Extract code blocks and write synthetic .btscript files.
-    //
-    // We write each file's extracted content to a `.btscript` file named after the
-    // markdown file stem (e.g. `getting-started.md` → `getting-started.btscript`).
-    // Files with no beamtalk blocks are skipped.
-    let mut btscript_files: Vec<(Utf8PathBuf, Utf8PathBuf)> = Vec::new(); // (md_path, btscript_path)
-
-    for md_file in &md_files {
-        let content = fs::read_to_string(md_file)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to read '{md_file}'"))?;
-
-        let extracted = extract_btscript_from_markdown(&content);
-        if extracted.trim().is_empty() {
-            // No beamtalk blocks — skip silently
-            continue;
-        }
-
-        let normalised = normalize_inline_assertions(&extracted);
-
-        let stem = md_file
-            .file_stem()
-            .ok_or_else(|| miette::miette!("Markdown file has no stem: {md_file}"))?;
-
-        // Sanitise stem for use as an Erlang module fragment
-        let safe_stem: String = stem
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-
-        let btscript_path = btscript_dir.join(format!("{safe_stem}.btscript"));
-        fs::write(&btscript_path, &normalised)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to write btscript for '{md_file}'"))?;
-
-        btscript_files.push((md_file.clone(), btscript_path));
-    }
+    let btscript_files = extract_to_btscript_files(&md_files, &btscript_dir)?;
 
     if btscript_files.is_empty() {
         println!("No ```beamtalk code blocks found in '{test_path}'");
