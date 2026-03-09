@@ -691,6 +691,25 @@ mod tests {
     }
 
     #[test]
+    fn test_bt1290_field_mutation_then_general_last_expr() {
+        // BT-1290: same fix also applies when has_mutations=true (field write before general last expr).
+        // Before the fix: `let StateAcc1 = maps:put(...) in <external_call> in StateAcc1` — invalid.
+        // After the fix: `let StateAcc1 = maps:put(...) in let _ = <external_call> in StateAcc1`.
+        let src = concat!(
+            "Actor subclass: Ctr\n",
+            "  state: n = 0\n",
+            "  run: items =>\n",
+            "    items do: [:item | self.n := self.n + item. Timer after: 0 do: [item printString]]\n"
+        );
+        let code = codegen(src);
+        // The last expr (Timer send) must be wrapped with `let _ =`
+        assert!(
+            code.contains("let _ = case call 'beamtalk_class_registry'"),
+            "Last expr after field mutation must use let _ = binding. Got:\n{code}"
+        );
+    }
+
+    #[test]
     fn test_list_do_multi_stmt_first_is_pure_generates_let_underscore() {
         // Multi-statement do: body where the first statement is a pure expression
         // must emit `let _ = <expr> in ...` (not bare `<expr> in ...`) — Core Erlang requires
