@@ -1447,7 +1447,7 @@ impl CoreErlangGenerator {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Unsupported destructuring pattern kind".to_string(),
                     location: format!("{:?}", pattern.span()),
-                })
+                });
             }
         };
         let rhs_var = self.fresh_temp_var(rhs_prefix);
@@ -1628,7 +1628,7 @@ impl CoreErlangGenerator {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Unsupported destructuring pattern kind".to_string(),
                     location: format!("{:?}", pattern.span()),
-                })
+                });
             }
         }
 
