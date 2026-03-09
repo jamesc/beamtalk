@@ -4211,6 +4211,43 @@ Actor subclass: Rectangle
     }
 
     #[test]
+    fn parse_list_keyword_element_with_map_literal_arg() {
+        // Regression test for BT-1287: the exact reported failing syntax
+        let module = parse_ok("#(Counter supervisionSpec withArgs: #{#value => 42})");
+        match &module.expressions[0].expression {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(tail.is_none());
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, arguments, .. }
+                        if selector.name() == "withArgs:"
+                            && matches!(&arguments[0], Expression::MapLiteral { .. })),
+                    "Expected keyword send with map arg as list element"
+                );
+            }
+            other => panic!("Expected list literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_array_keyword_element_with_map_literal_arg() {
+        // Same regression but for #[...] array literals
+        let module = parse_ok("#[Counter supervisionSpec withArgs: #{#value => 42}]");
+        match &module.expressions[0].expression {
+            Expression::ArrayLiteral { elements, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, arguments, .. }
+                        if selector.name() == "withArgs:"
+                            && matches!(&arguments[0], Expression::MapLiteral { .. })),
+                    "Expected keyword send with map arg as array element"
+                );
+            }
+            other => panic!("Expected array literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_doc_comment_on_class() {
         let module = parse_ok(
             "/// A simple counter actor.
