@@ -159,7 +159,13 @@ fn extract_to_btscript_files(
         // Sanitise stem for use as an Erlang module fragment.
         let safe_stem: String = stem
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         let btscript_path = btscript_dir.join(format!("{safe_stem}.btscript"));
         fs::write(&btscript_path, &normalised)
