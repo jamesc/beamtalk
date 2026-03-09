@@ -28,6 +28,7 @@ pub(super) fn generate_prose_docs(
     site_root: &Utf8Path,
     prose_pages: &[(&str, &str, &str)],
     extra_links: &[(String, String)],
+    learning_available: bool,
 ) -> Result<()> {
     let docs_output = site_root.join("docs");
     fs::create_dir_all(&docs_output)
@@ -48,7 +49,7 @@ pub(super) fn generate_prose_docs(
         );
     }
 
-    render_docs_index(prose_pages, &docs_output)?;
+    render_docs_index(prose_pages, &docs_output, learning_available)?;
 
     let mut rendered_count = 0;
     for &(source_file, output_file, title) in prose_pages {
@@ -66,7 +67,7 @@ pub(super) fn generate_prose_docs(
         html.push_str(&page_header(&page_title, "../style.css", "../"));
         html.push_str("<div class=\"page-wrapper\">\n");
         html.push_str(SIDEBAR_TOGGLE);
-        html.push_str(&prose_nav(output_file, prose_pages));
+        html.push_str(&prose_nav(output_file, prose_pages, learning_available));
         html.push_str("<main class=\"main-content prose-content\">\n");
         html.push_str("<div class=\"breadcrumb\">");
         html.push_str("<a href=\"../\">Home</a> &rsaquo; ");
@@ -90,7 +91,11 @@ pub(super) fn generate_prose_docs(
 }
 
 /// Render the docs index page listing all prose documentation pages.
-fn render_docs_index(prose_pages: &[(&str, &str, &str)], docs_output: &Utf8Path) -> Result<()> {
+fn render_docs_index(
+    prose_pages: &[(&str, &str, &str)],
+    docs_output: &Utf8Path,
+    learning_available: bool,
+) -> Result<()> {
     let mut html = String::new();
     html.push_str(&page_header(
         "Documentation — Beamtalk",
@@ -99,7 +104,7 @@ fn render_docs_index(prose_pages: &[(&str, &str, &str)], docs_output: &Utf8Path)
     ));
     html.push_str("<div class=\"page-wrapper\">\n");
     html.push_str(SIDEBAR_TOGGLE);
-    html.push_str(&prose_nav("index.html", prose_pages));
+    html.push_str(&prose_nav("index.html", prose_pages, learning_available));
     html.push_str("<main class=\"main-content prose-content\">\n");
     html.push_str("<div class=\"breadcrumb\">");
     html.push_str("<a href=\"../\">Home</a> &rsaquo; ");
@@ -128,7 +133,11 @@ fn render_docs_index(prose_pages: &[(&str, &str, &str)], docs_output: &Utf8Path)
 }
 
 /// Build navigation sidebar for prose documentation pages.
-fn prose_nav(active_file: &str, prose_pages: &[(&str, &str, &str)]) -> String {
+fn prose_nav(
+    active_file: &str,
+    prose_pages: &[(&str, &str, &str)],
+    learning_available: bool,
+) -> String {
     let mut html = String::new();
     html.push_str("<nav class=\"sidebar\">\n");
 
@@ -138,6 +147,9 @@ fn prose_nav(active_file: &str, prose_pages: &[(&str, &str, &str)]) -> String {
     html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
     html.push_str("<li><a href=\"../docs/\">Documentation</a></li>\n");
     html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
+    if learning_available {
+        html.push_str("<li><a href=\"../learning/\">Learn Beamtalk</a></li>\n");
+    }
     html.push_str("</ul>\n");
 
     html.push_str("<div class=\"sidebar-section-label\">Documentation</div>\n");
@@ -272,6 +284,7 @@ struct AdrInfo {
 pub(super) fn generate_adr_docs(
     docs_source: &Utf8Path,
     site_root: &Utf8Path,
+    learning_available: bool,
 ) -> Result<Vec<(String, String)>> {
     let adr_source = docs_source.join("ADR");
     if !adr_source.exists() {
@@ -311,11 +324,11 @@ pub(super) fn generate_adr_docs(
         for (source, dest) in &intra_links {
             content = rewrite_outside_code_fences(&content, source, dest);
         }
-        render_adr_page(adr, &adrs, &content, &adr_output)?;
+        render_adr_page(adr, &adrs, &content, &adr_output, learning_available)?;
     }
 
     // Render ADR index
-    render_adr_index(&adrs, &adr_output)?;
+    render_adr_index(&adrs, &adr_output, learning_available)?;
 
     println!("Generated {} ADR page(s)", adrs.len());
 
@@ -432,13 +445,14 @@ fn render_adr_page(
     all_adrs: &[AdrInfo],
     content: &str,
     adr_output: &Utf8Path,
+    learning_available: bool,
 ) -> Result<()> {
     let page_title = format!("ADR {} — Beamtalk", adr.number);
     let mut html = String::new();
     html.push_str(&page_header(&page_title, "../style.css", "../"));
     html.push_str("<div class=\"page-wrapper\">\n");
     html.push_str(SIDEBAR_TOGGLE);
-    html.push_str(&adr_nav(&adr.output_file, all_adrs));
+    html.push_str(&adr_nav(&adr.output_file, all_adrs, learning_available));
     html.push_str("<main class=\"main-content prose-content\">\n");
     html.push_str("<div class=\"breadcrumb\">");
     html.push_str("<a href=\"../\">Home</a> &rsaquo; ");
@@ -458,7 +472,11 @@ fn render_adr_page(
 }
 
 /// Render the ADR index page listing all decisions.
-fn render_adr_index(adrs: &[AdrInfo], adr_output: &Utf8Path) -> Result<()> {
+fn render_adr_index(
+    adrs: &[AdrInfo],
+    adr_output: &Utf8Path,
+    learning_available: bool,
+) -> Result<()> {
     let mut html = String::new();
     html.push_str(&page_header(
         "Architecture Decisions — Beamtalk",
@@ -467,7 +485,7 @@ fn render_adr_index(adrs: &[AdrInfo], adr_output: &Utf8Path) -> Result<()> {
     ));
     html.push_str("<div class=\"page-wrapper\">\n");
     html.push_str(SIDEBAR_TOGGLE);
-    html.push_str(&adr_nav("index.html", adrs));
+    html.push_str(&adr_nav("index.html", adrs, learning_available));
     html.push_str("<main class=\"main-content prose-content\">\n");
     html.push_str("<div class=\"breadcrumb\">");
     html.push_str("<a href=\"../\">Home</a> &rsaquo; ");
@@ -510,7 +528,7 @@ fn render_adr_index(adrs: &[AdrInfo], adr_output: &Utf8Path) -> Result<()> {
 }
 
 /// Build the sidebar navigation for ADR pages.
-fn adr_nav(active_file: &str, adrs: &[AdrInfo]) -> String {
+fn adr_nav(active_file: &str, adrs: &[AdrInfo], learning_available: bool) -> String {
     let mut html = String::new();
     html.push_str("<nav class=\"sidebar\">\n");
 
@@ -520,6 +538,9 @@ fn adr_nav(active_file: &str, adrs: &[AdrInfo]) -> String {
     html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
     html.push_str("<li><a href=\"../docs/\">Documentation</a></li>\n");
     html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
+    if learning_available {
+        html.push_str("<li><a href=\"../learning/\">Learn Beamtalk</a></li>\n");
+    }
     html.push_str("</ul>\n");
 
     html.push_str("<div class=\"sidebar-section-label\">Architecture Decisions</div>\n");
@@ -533,6 +554,7 @@ fn adr_nav(active_file: &str, adrs: &[AdrInfo]) -> String {
         html,
         "<li><a href=\"index.html\"{index_active}>All ADRs</a></li>"
     );
+
     for adr in adrs {
         let active = if adr.output_file == active_file {
             " class=\"active\""
@@ -545,6 +567,236 @@ fn adr_nav(active_file: &str, adrs: &[AdrInfo]) -> String {
             file = adr.output_file,
             num = html_escape(&adr.number),
             title = html_escape(&adr.title),
+        );
+    }
+    html.push_str("</ul>\n</nav>\n");
+    html
+}
+
+// ---------------------------------------------------------------------------
+// Learning guide
+// ---------------------------------------------------------------------------
+
+/// Metadata for a single learning guide chapter.
+struct ChapterInfo {
+    /// Chapter number string, e.g. `"01"`.
+    number: String,
+    /// Full stem of the source file, e.g. `"01-getting-started"`.
+    slug: String,
+    /// Human title extracted from the H1, e.g. `"Getting Started"`.
+    title: String,
+    /// Output HTML filename, e.g. `"01-getting-started.html"`.
+    output_file: String,
+}
+
+/// Generate learning guide pages from `docs/learning/*.md` files.
+///
+/// Returns immediately (no-op) if `docs/learning/` does not exist.
+/// Returns `true` if any chapters were generated, `false` otherwise.
+pub(super) fn generate_learning_guide(
+    docs_source: &Utf8Path,
+    site_root: &Utf8Path,
+) -> Result<bool> {
+    let learning_source = docs_source.join("learning");
+    if !learning_source.exists() {
+        return Ok(false);
+    }
+
+    let learning_output = site_root.join("learning");
+    fs::create_dir_all(&learning_output)
+        .into_diagnostic()
+        .wrap_err("Failed to create learning/ output directory")?;
+
+    let chapters = discover_chapters(&learning_source)?;
+    if chapters.is_empty() {
+        return Ok(false);
+    }
+
+    // Render each chapter page
+    for chapter in &chapters {
+        let source_path = learning_source.join(format!("{}.md", chapter.slug));
+        let content = fs::read_to_string(&source_path)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to read chapter '{}'", chapter.slug))?;
+        // Rewrite sibling chapter links (.md → .html, same directory)
+        let content = rewrite_chapter_internal_links(&content, &chapters);
+        render_chapter_page(chapter, &chapters, &content, &learning_output)?;
+    }
+
+    // Render chapter index
+    render_learning_index(&chapters, &learning_output)?;
+
+    println!("Generated {} learning guide chapter(s)", chapters.len());
+    Ok(true)
+}
+
+/// Discover and sort chapter files from the learning directory.
+fn discover_chapters(learning_source: &Utf8Path) -> Result<Vec<ChapterInfo>> {
+    let mut chapters = Vec::new();
+    for entry in fs::read_dir(learning_source)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read learning directory '{learning_source}'"))?
+    {
+        let entry = entry.into_diagnostic()?;
+        let path = Utf8PathBuf::from_path_buf(entry.path()).map_err(|p| {
+            miette::miette!("Non-UTF-8 path in learning directory: {}", p.display())
+        })?;
+        if path.extension() != Some("md") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().map(ToString::to_string) else {
+            continue;
+        };
+        // Skip README and files not starting with digits (NN-)
+        let number: String = stem.chars().take_while(char::is_ascii_digit).collect();
+        if number.is_empty() {
+            continue;
+        }
+        let content = fs::read_to_string(&path)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to read chapter '{path}'"))?;
+        chapters.push(ChapterInfo {
+            number,
+            slug: stem.clone(),
+            title: extract_chapter_title(&content),
+            output_file: format!("{stem}.html"),
+        });
+    }
+    chapters.sort_by(|a, b| a.slug.cmp(&b.slug));
+    Ok(chapters)
+}
+
+/// Extract the human title from a chapter's first heading (any level: `#`, `##`, …).
+fn extract_chapter_title(content: &str) -> String {
+    for line in content.lines() {
+        let stripped = line.trim_start_matches('#');
+        if stripped.len() < line.len() && stripped.starts_with(' ') {
+            return stripped.trim().to_string();
+        }
+    }
+    String::from("Untitled Chapter")
+}
+
+/// Rewrite sibling chapter links within a chapter page (.md → .html, same dir).
+fn rewrite_chapter_internal_links(content: &str, chapters: &[ChapterInfo]) -> String {
+    let mut result = content.to_string();
+    for chapter in chapters {
+        let md = format!("{}.md", chapter.slug);
+        result = result.replace(&md, &chapter.output_file);
+    }
+    result
+}
+
+/// Render the learning guide index page listing all chapters.
+fn render_learning_index(chapters: &[ChapterInfo], learning_output: &Utf8Path) -> Result<()> {
+    let mut html = String::new();
+    html.push_str(&page_header(
+        "Learn Beamtalk — Beamtalk",
+        "../style.css",
+        "../",
+    ));
+    html.push_str("<div class=\"page-wrapper\">\n");
+    html.push_str(SIDEBAR_TOGGLE);
+    html.push_str(&learning_nav("index.html", chapters));
+    html.push_str("<main class=\"main-content prose-content\">\n");
+    html.push_str("<div class=\"breadcrumb\">");
+    html.push_str("<a href=\"../\">Home</a> &rsaquo; ");
+    html.push_str("Learn Beamtalk");
+    html.push_str("</div>\n");
+    html.push_str("<h1>Learn Beamtalk</h1>\n");
+    html.push_str(
+        "<p>A progressive guide to the Beamtalk language. \
+         Read linearly — each chapter builds on the last.</p>\n",
+    );
+    html.push_str("<ol>\n");
+    for chapter in chapters {
+        let _ = writeln!(
+            html,
+            "<li><a href=\"{file}\">{title}</a></li>",
+            file = chapter.output_file,
+            title = html_escape(&chapter.title),
+        );
+    }
+    html.push_str("</ol>\n");
+    html.push_str("</main>\n");
+    html.push_str(&page_footer_simple());
+
+    let index_path = learning_output.join("index.html");
+    fs::write(&index_path, html)
+        .into_diagnostic()
+        .wrap_err("Failed to write learning/index.html")?;
+    debug!("Generated {index_path}");
+    Ok(())
+}
+
+/// Render a single chapter page.
+fn render_chapter_page(
+    chapter: &ChapterInfo,
+    all_chapters: &[ChapterInfo],
+    content: &str,
+    learning_output: &Utf8Path,
+) -> Result<()> {
+    let page_title = format!("{} — Beamtalk", chapter.title);
+    let mut html = String::new();
+    html.push_str(&page_header(&page_title, "../style.css", "../"));
+    html.push_str("<div class=\"page-wrapper\">\n");
+    html.push_str(SIDEBAR_TOGGLE);
+    html.push_str(&learning_nav(&chapter.output_file, all_chapters));
+    html.push_str("<main class=\"main-content prose-content\">\n");
+    html.push_str("<div class=\"breadcrumb\">");
+    html.push_str("<a href=\"../\">Home</a> &rsaquo; ");
+    html.push_str("<a href=\"index.html\">Learn Beamtalk</a> &rsaquo; ");
+    html.push_str(&html_escape(&chapter.title));
+    html.push_str("</div>\n");
+    html.push_str(&render_doc(content));
+    html.push_str("</main>\n");
+    html.push_str(&page_footer_simple());
+
+    let out_path = learning_output.join(&chapter.output_file);
+    fs::write(&out_path, html)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to write {}", chapter.output_file))?;
+    debug!("Generated {out_path}");
+    Ok(())
+}
+
+/// Build the sidebar navigation for learning guide pages.
+fn learning_nav(active_file: &str, chapters: &[ChapterInfo]) -> String {
+    let mut html = String::new();
+    html.push_str("<nav class=\"sidebar\">\n");
+
+    html.push_str("<div class=\"sidebar-section-label\">Navigate</div>\n");
+    html.push_str("<ul class=\"sidebar-nav\">\n");
+    html.push_str("<li><a href=\"../\">Home</a></li>\n");
+    html.push_str("<li><a href=\"../apidocs/\">API Reference</a></li>\n");
+    html.push_str("<li><a href=\"../docs/\">Documentation</a></li>\n");
+    html.push_str("<li><a href=\"../adr/\">Architecture Decisions</a></li>\n");
+    html.push_str("<li><a href=\"../learning/\">Learn Beamtalk</a></li>\n");
+    html.push_str("</ul>\n");
+
+    html.push_str("<div class=\"sidebar-section-label\">Learn Beamtalk</div>\n");
+    html.push_str("<ul class=\"sidebar-nav\">\n");
+    let index_active = if active_file == "index.html" {
+        " class=\"active\""
+    } else {
+        ""
+    };
+    let _ = writeln!(
+        html,
+        "<li><a href=\"index.html\"{index_active}>All Chapters</a></li>"
+    );
+    for chapter in chapters {
+        let active = if chapter.output_file == active_file {
+            " class=\"active\""
+        } else {
+            ""
+        };
+        let _ = writeln!(
+            html,
+            "<li><a href=\"{file}\"{active}>{num} — {title}</a></li>",
+            file = chapter.output_file,
+            num = html_escape(&chapter.number),
+            title = html_escape(&chapter.title),
         );
     }
     html.push_str("</ul>\n</nav>\n");
@@ -613,6 +865,14 @@ fn landing_card_meta(output_file: &str) -> (&'static str, &'static str) {
     }
 }
 
+/// Return the learning guide landing card description.
+fn learning_card_desc() -> (&'static str, &'static str) {
+    (
+        "📚",
+        "A progressive, chapter-by-chapter guide to learning Beamtalk from first principles.",
+    )
+}
+
 /// Beamtalk code snippet shown on the landing page.
 const LANDING_CODE_SNIPPET: &str = "Actor subclass: Counter
   state: value = 0
@@ -626,9 +886,13 @@ c increment
 c value // => 2";
 
 /// Generate the site landing page at the root.
+///
+/// `learning_available` controls whether a "Learn Beamtalk" card is emitted
+/// (only true when `generate_learning_guide` successfully produced chapters).
 pub(super) fn write_site_landing_page(
     output_path: &Utf8Path,
     prose_pages: &[(&str, &str, &str)],
+    learning_available: bool,
 ) -> Result<()> {
     let highlighted_code = highlight_beamtalk(LANDING_CODE_SNIPPET);
 
@@ -679,6 +943,18 @@ pub(super) fn write_site_landing_page(
     // Navigation cards
     html.push_str("<div class=\"landing-section-label\">Explore the docs</div>\n");
     html.push_str("<div class=\"landing-cards\">\n");
+
+    // Learning guide card (shown first when available)
+    if learning_available {
+        let (emoji, desc) = learning_card_desc();
+        let _ = writeln!(
+            html,
+            "<a href=\"learning/\" class=\"landing-card\">\n\
+             <h2>{emoji} Learn Beamtalk</h2>\n\
+             <p>{desc}</p>\n\
+             </a>"
+        );
+    }
 
     // Prose docs cards
     for &(_, file, title) in prose_pages {

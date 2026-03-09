@@ -17,6 +17,7 @@ pub mod protocol;
 pub mod repl;
 pub mod run;
 pub mod test;
+pub mod test_docs;
 pub mod test_stdlib;
 pub mod tls;
 pub mod transcript;

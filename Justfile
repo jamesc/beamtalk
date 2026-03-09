@@ -389,7 +389,7 @@ test-install: build-release build-stdlib
         exit 1
     fi
 
-# Run compiled stdlib tests (ADR 0014 Phase 1, ~20s)
+# Run .btscript expression tests (ADR 0014 Phase 1, ~20s) (also available as `beamtalk test-script`)
 # Accepts optional path to run a single file: just test-stdlib bootstrap-test/arithmetic.btscript
 # Output: summary only (--quiet suppresses per-file lines)
 [working-directory: 'stdlib']
@@ -405,6 +405,13 @@ test-bunit *ARGS: build-stdlib
     @echo "🧪 Running BUnit tests..."
     @cargo run --bin beamtalk --quiet -- test --warnings-as-errors {{ ARGS }}
     @echo "✅ BUnit tests complete"
+
+# Run learning guide doctests (docs/learning/ — separate from stdlib tests)
+# Extracts ```beamtalk blocks from Markdown chapters and runs them via test-docs
+test-learn: build-stdlib
+    @echo "📚 Running learning guide doctests..."
+    @cargo run --bin beamtalk --quiet -- test-docs --no-warnings --quiet docs/learning/
+    @echo "✅ Learning guide tests complete"
 
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.
 # Run Erlang runtime unit tests
