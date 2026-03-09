@@ -117,3 +117,57 @@ q
 
 first + second
 // => 7
+
+// ===========================================================================
+// MUTATION-THREADED RHS (BT-1283)
+//
+// When the RHS of a destructuring assignment is a mutation-threaded expression
+// (a loop or control-flow construct that mutates REPL-bound variables and
+// therefore returns {Result, StateAcc} internally), the generated code must
+// unwrap the tuple with element/2 before extracting pattern variables.
+// ===========================================================================
+
+// inject:into: with block-body mutation — single-expression turn.
+// Block mutates `count`; final accumulator is #(item, count) from last iteration.
+// With #(10, 20): iter1: count=1 -> #(10,1); iter2: count=2 -> #(20,2)
+count := 0
+// => 0
+
+#(a, b) := #(10, 20) inject: #(0, 0) into: [:_ :item | count := count + 1. #(item, count)]
+// => [20,2]
+
+a
+// => 20
+
+b
+// => 2
+
+count
+// => 2
+
+:clear
+// => ok
+
+// inject:into: with mutation in intermediate position — bound vars usable in last expr.
+// inject mutates `n`; final acc from #(5,15) is #(15,2): x=15, y=2, x+y=17.
+n := 0. #(x, y) := #(5, 15) inject: #(0, 0) into: [:_ :item | n := n + 1. #(item, n)]. x + y
+// => 17
+
+:clear
+// => ok
+
+// inject:into: with mutation in last position — binds and persists across turns.
+m := 0
+// => 0
+
+m := 0. #(p, q) := #(3, 7) inject: #(0, 0) into: [:_ :item | m := m + 1. #(item, m)]
+// => [7,2]
+
+p
+// => 7
+
+q
+// => 2
+
+m
+// => 2
