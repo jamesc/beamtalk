@@ -5,8 +5,9 @@
 // supervisionPolicy #transient: the supervisor restarts it only if it exits
 // abnormally (crash).  A clean shutdown is not restarted.
 //
-// Intentional crash: sending `process: 0` raises an error, which lets the
-// REPL walkthrough demonstrate a crash-and-restart cycle.
+// Error demo: sending `process: 0` raises a user_error back to the caller via
+// self error:.  The actor process itself stays alive (the gen_server is not
+// killed); the REPL walkthrough uses this to demonstrate fault isolation.
 
 Actor subclass: TaskWorker
   state: jobCount = 0

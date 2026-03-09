@@ -46,8 +46,10 @@ All source files in `src/` load automatically when you start the REPL.
 - **`current`** — returns the running supervisor instance looked up by class
   name. Available on `Supervisor` and `DynamicSupervisor` subclasses. Regular
   actors do not have `current`; reach them via the supervisor using `which:`.
-- **Fault isolation** — a crash in `TaskWorker` does not affect `EventLogger`
-  or the `WorkerPool` supervisor itself; only the crashed worker is restarted.
+- **Fault isolation** — an error raised by `TaskWorker` propagates to the
+  caller only; `EventLogger` and `WorkerPool` are completely unaffected.
+  If a `TaskWorker` process truly crashes (abnormal exit), `WorkerPool` will
+  restart it automatically because `#transient` workers are restarted on crash.
 
 ## Live Workspace (MCP)
 
