@@ -691,6 +691,28 @@ mod tests {
     }
 
     #[test]
+    fn test_bt1291_destructure_then_on_do_last_expr() {
+        // BT-1291: #[...] list destructuring (has_plain_lets=true) followed by
+        // `on:Exception do:` as the last expression produced the same invalid
+        // `<bindings> in <on_do_expr> in StateAcc` pattern fixed by BT-1290.
+        let src = concat!(
+            "Actor subclass: BugDemo\n",
+            "  tick =>\n",
+            "    #() do: [:te |\n",
+            "      #[a, b] := te\n",
+            "      [a printString] on: Exception do: [:e | nil]\n",
+            "    ]\n"
+        );
+        // Must compile without panic (before the fix this generated invalid Core Erlang)
+        let code = codegen(src);
+        // The last expr must be wrapped with `let _ =` to be valid Core Erlang
+        assert!(
+            code.contains("let _ = "),
+            "Last expr after destructure must use let _ = binding. Got:\n{code}"
+        );
+    }
+
+    #[test]
     fn test_bt1290_field_mutation_then_general_last_expr() {
         // BT-1290: same fix also applies when has_mutations=true (field write before general last expr).
         // Before the fix: `let StateAcc1 = maps:put(...) in <external_call> in StateAcc1` — invalid.
