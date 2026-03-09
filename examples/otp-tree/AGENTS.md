@@ -5,7 +5,7 @@ fault isolation between actors.
 
 ## Workspace Structure
 
-```
+```text
 otp-tree/
 ├── beamtalk.toml        # Package manifest — [application] supervisor = "AppSupervisor"
 ├── src/

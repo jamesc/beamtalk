@@ -17,7 +17,7 @@ policies — and how the tree keeps a service running when individual actors cra
 
 ## Supervision Tree
 
-```
+```text
 AppSupervisor  (one_for_one)
 ├── EventLogger   (permanent)   — accumulates log entries
 └── WorkerPool    (permanent)   — DynamicSupervisor
@@ -114,7 +114,7 @@ actor itself stays alive; the error propagates to whoever called `process: 0`:
 
 ```text
 > w1 process: 0
-ERROR: TaskWorker: refusing zero — crashing now
+ERROR: TaskWorker: refusing zero input
 ```
 
 The error is isolated to the caller.  `w1` is still running, and the rest of

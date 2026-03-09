@@ -15,7 +15,7 @@ Actor subclass: TaskWorker
   class supervisionPolicy -> Symbol => #transient
 
   process: value =>
-    value =:= 0 ifTrue: [self error: "TaskWorker: refusing zero — crashing now"]
+    value =:= 0 ifTrue: [self error: "TaskWorker: refusing zero input"]
     self.jobCount := self.jobCount + 1
     value * 2
 
