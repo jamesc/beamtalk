@@ -22,7 +22,7 @@
 /// ## Examples
 /// ```beamtalk
 /// (Json parse: "42") unwrap                 // => 42
-/// (Json parse: "[1, 2, 3]") unwrap          // => [1,2,3]
+/// (Json parse: "[1, 2, 3]") unwrap          // => #(1, 2, 3)
 /// Json generate: #{"name" => "Ada"}
 /// // => _
 /// Json prettyPrint: #{"name" => "Ada"}
@@ -38,7 +38,7 @@ sealed Object subclass: Json
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (Json parse: "[1, 2, 3]") unwrap   // => [1,2,3]
+  /// (Json parse: "[1, 2, 3]") unwrap   // => #(1, 2, 3)
   /// (Json parse: "42") unwrap          // => 42
   /// (Json parse: "null") unwrap        // => nil
   /// ```
