@@ -1425,7 +1425,7 @@ impl CoreErlangGenerator {
     /// the RHS before extracting individual elements.
     ///
     /// Returns `(binding_doc, var_name)` where:
-    /// - `binding_doc` is the `let var = <value> terminator` document
+    /// - `binding_doc` is the `<indent><var> = <value><terminator>` document
     /// - `var_name` is the temp variable holding the evaluated RHS
     pub(super) fn eval_rhs_to_temp_var(
         &mut self,
