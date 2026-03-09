@@ -43,7 +43,7 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new(self, body, None);
+        let plan = ThreadingPlan::new_for_letrec(self, body, None);
 
         let n_var = self.fresh_temp_var("temp");
         let receiver_code = self.expression_doc(receiver)?;
@@ -70,7 +70,7 @@ impl CoreErlangGenerator {
         limit: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new(self, body, None);
+        let plan = ThreadingPlan::new_for_letrec(self, body, None);
 
         let start_var = self.fresh_temp_var("temp");
         let receiver_code = self.expression_doc(receiver)?;
@@ -109,7 +109,7 @@ impl CoreErlangGenerator {
         step: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new(self, body, None);
+        let plan = ThreadingPlan::new_for_letrec(self, body, None);
 
         let start_var = self.fresh_temp_var("temp");
         let receiver_code = self.expression_doc(receiver)?;
@@ -215,6 +215,93 @@ mod tests {
         assert!(
             code.contains("maps':'put'('sum'"),
             "to:do: body should update 'sum' via maps:put. Got:\n{code}"
+        );
+    }
+
+    // ── BT-1275: direct-params optimisation ──────────────────────────────────
+
+    #[test]
+    fn test_to_do_local_var_only_uses_direct_params() {
+        // to:do: with only local-var mutations must use direct fun params, not StateAcc map.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i]\n    self.n := sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("letrec"),
+            "to:do: with local mutation should generate a letrec. Got:\n{code}"
+        );
+        // Fun signature must be (I, Sum), not (I, StateAcc).
+        assert!(
+            code.contains("fun (I, Sum)"),
+            "direct-params: letrec fun should have Sum as a direct parameter. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("fun (I, StateAcc)"),
+            "direct-params: letrec fun must not use StateAcc signature. Got:\n{code}"
+        );
+        // At most one maps:put for the local variable (the exit StateAcc rebuild).
+        // Per-iteration maps:put is eliminated.
+        assert!(
+            code.match_indices("maps':'put'('__local__sum'").count() == 1,
+            "direct-params: exactly one maps:put for local sum (exit rebuild). Got:\n{code}"
+        );
+        // Rebuild at exit must be present.
+        assert!(
+            code.contains("ExitSA"),
+            "direct-params: exit StateAcc must be rebuilt before returning. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_times_repeat_local_var_only_uses_direct_params() {
+        // timesRepeat: with local-var-only mutation uses direct params.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    3 timesRepeat: [sum := sum + 1]\n    self.n := sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("fun (I, Sum)"),
+            "timesRepeat: direct-params: letrec fun should have Sum as param. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("fun (I, StateAcc)"),
+            "timesRepeat: direct-params: must not use StateAcc signature. Got:\n{code}"
+        );
+        assert!(
+            code.contains("ExitSA"),
+            "timesRepeat: direct-params: exit StateAcc rebuild expected. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_to_by_do_local_var_only_uses_direct_params() {
+        // to:by:do: with local-var-only mutation uses direct params.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i]\n    self.n := sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("fun (I, Sum)"),
+            "to:by:do: direct-params: letrec fun should have Sum as param. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("fun (I, StateAcc)"),
+            "to:by:do: direct-params: must not use StateAcc signature. Got:\n{code}"
+        );
+        assert!(
+            code.contains("ExitSA"),
+            "to:by:do: direct-params: exit StateAcc rebuild expected. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_to_do_field_plus_local_mutation_keeps_stateacc() {
+        // When both field AND local vars are mutated, must keep StateAcc (field mutations
+        // require it for actor state threading across iterations).
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("fun (I, StateAcc)"),
+            "mixed mutations: letrec fun must use StateAcc. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'get'('__local__sum'"),
+            "mixed mutations: must unpack local sum from StateAcc. Got:\n{code}"
         );
     }
 }

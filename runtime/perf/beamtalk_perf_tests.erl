@@ -527,20 +527,33 @@ bench_block_threading() ->
         bench_block_threading:sum_procdict(N)
     end, ?ITERATIONS, ?WARMUP),
 
+    DirectParamsTimings = run_benchmark(fun() ->
+        bench_block_threading:sum_direct_params(N)
+    end, ?ITERATIONS, ?WARMUP),
+    DirectParamsAwaitTimings = run_benchmark(fun() ->
+        bench_block_threading:sum_direct_params_maybe_await(N)
+    end, ?ITERATIONS, ?WARMUP),
+
     NativeStats = stats(NativeTimings),
     StateAccStats = stats(StateAccTimings),
     StateAccAwaitStats = stats(StateAccAwaitTimings),
     ProcDictStats = stats(ProcDictTimings),
+    DirectParamsStats = stats(DirectParamsTimings),
+    DirectParamsAwaitStats = stats(DirectParamsAwaitTimings),
 
     report("block/sum_native", NativeStats, ?ITERATIONS),
     report("block/sum_stateacc", StateAccStats, ?ITERATIONS),
     report("block/sum_stateacc_maybe_await", StateAccAwaitStats, ?ITERATIONS),
     report("block/sum_procdict", ProcDictStats, ?ITERATIONS),
+    report("block/sum_direct_params", DirectParamsStats, ?ITERATIONS),
+    report("block/sum_direct_params_maybe_await", DirectParamsAwaitStats, ?ITERATIONS),
 
     NativeMedian = maps:get(median, NativeStats),
     StateAccMedian = maps:get(median, StateAccStats),
     StateAccAwaitMedian = maps:get(median, StateAccAwaitStats),
     ProcDictMedian = maps:get(median, ProcDictStats),
+    DirectParamsMedian = maps:get(median, DirectParamsStats),
+    DirectParamsAwaitMedian = maps:get(median, DirectParamsAwaitStats),
     io:format(standard_error,
         "PERF: block/stateacc_overhead ~.2fx vs native~n",
         [StateAccMedian / max(NativeMedian, 1)]),
@@ -553,6 +566,16 @@ bench_block_threading() ->
     io:format(standard_error,
         "PERF: block/procdict_vs_stateacc ~.2fx~n",
         [ProcDictMedian / max(StateAccMedian, 1)]),
+    %% BT-1275: Direct-params overhead should be ≤ 3x native (vs ~26-30x for StateAcc).
+    DirectParamsOverhead = DirectParamsMedian / max(NativeMedian, 1),
+    DirectParamsAwaitOverhead = DirectParamsAwaitMedian / max(NativeMedian, 1),
+    io:format(standard_error,
+        "PERF: block/direct_params_overhead ~.2fx vs native~n",
+        [DirectParamsOverhead]),
+    io:format(standard_error,
+        "PERF: block/direct_params_await_overhead ~.2fx vs native~n",
+        [DirectParamsAwaitOverhead]),
+    ?assert(DirectParamsOverhead =< 3.0),
 
     %% --- collect: / lists:map ---
     CollectNativeTimings = run_benchmark(fun() ->

@@ -30,7 +30,7 @@ mod while_loops;
 
 use std::fmt::Write as FmtWrite;
 
-use super::document::Document;
+use super::document::{Document, join};
 use super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::Expression;
 use crate::docvec;
@@ -59,16 +59,48 @@ pub(super) struct ThreadingPlan {
     pub key_style: KeyStyle,
     /// The code-generation context (Actor, `ValueType`, or `Repl`).
     pub context: CodeGenContext,
+    /// When `true`, thread locals as direct fun parameters instead of a `StateAcc` map.
+    ///
+    /// Set when the loop body has no field mutations or self-sends (BT-1275).
+    /// Eliminates per-iteration `maps:get` / `maps:put` overhead; the `StateAcc`
+    /// map is only rebuilt once at loop exit (in the false arm).
+    pub use_direct_params: bool,
 }
 
 impl ThreadingPlan {
-    /// Creates a `ThreadingPlan` for the given loop body.
+    /// Creates a `ThreadingPlan` for a foldl-based loop body (`do:`, `collect:`, etc.).
+    ///
+    /// Always sets `use_direct_params = false` — foldl loops carry state in a `StateAcc`
+    /// accumulator map, so direct-parameter threading is not applicable.
     ///
     /// Also sets `repl_loop_mutated` on the generator when in REPL mode.
     pub fn new(
         generator: &mut CoreErlangGenerator,
         body: &crate::ast::Block,
         condition: Option<&Expression>,
+    ) -> Self {
+        Self::new_impl(generator, body, condition, false)
+    }
+
+    /// Creates a `ThreadingPlan` for a letrec-based loop body (whileTrue:, timesRepeat:, etc.).
+    ///
+    /// BT-1275: Sets `use_direct_params = true` when the body has no field mutations or
+    /// self-sends, eliminating per-iteration `maps:get`/`maps:put` overhead.
+    ///
+    /// Only valid for letrec loops where each variable can be passed as a fun parameter.
+    pub fn new_for_letrec(
+        generator: &mut CoreErlangGenerator,
+        body: &crate::ast::Block,
+        condition: Option<&Expression>,
+    ) -> Self {
+        Self::new_impl(generator, body, condition, true)
+    }
+
+    fn new_impl(
+        generator: &mut CoreErlangGenerator,
+        body: &crate::ast::Block,
+        condition: Option<&Expression>,
+        allow_direct_params: bool,
     ) -> Self {
         if generator.is_repl_mode {
             generator.repl_loop_mutated = true;
@@ -81,11 +113,49 @@ impl ThreadingPlan {
         let context = generator.context;
         let threaded_locals = generator.compute_threaded_locals_for_loop(body, condition);
         let initial_state_var = generator.current_state_var();
+
+        // BT-1275: Use direct fun parameters only for letrec loops when:
+        // - caller opts in via `allow_direct_params`
+        // - there are local vars to thread
+        // - the body has no field mutations or self-sends
+        // - the body has no Tier-2 block calls on threaded locals (those return {Result, StateAcc}
+        //   and require the StateAcc extraction that `generate_local_var_assignment_in_loop` does)
+        // Field mutations require StateAcc to persist actor state across iterations.
+        let use_direct_params = if !allow_direct_params || threaded_locals.is_empty() {
+            false
+        } else {
+            let body_analysis = block_analysis::analyze_block(body);
+            let cond_has_state_effects = condition.is_some_and(|c| {
+                if let Expression::Block(cb) = c {
+                    block_analysis::analyze_block(cb).has_state_effects()
+                } else {
+                    false
+                }
+            });
+            // Guard: if any threaded-local assignment's RHS is a Tier-2 block call,
+            // fall back to StateAcc mode so `generate_local_var_assignment_in_loop`
+            // can properly unpack the {Result, NewStateAcc} tuple.
+            let body_has_tier2_threaded_assign = body.body.iter().any(|s| {
+                if let Expression::Assignment { target, value, .. } = &s.expression {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        if threaded_locals.contains(&id.name.to_string()) {
+                            return generator.is_tier2_value_call(value);
+                        }
+                    }
+                }
+                false
+            });
+            !body_analysis.has_state_effects()
+                && !cond_has_state_effects
+                && !body_has_tier2_threaded_assign
+        };
+
         Self {
             threaded_locals,
             initial_state_var,
             key_style,
             context,
+            use_direct_params,
         }
     }
 
@@ -104,11 +174,14 @@ impl ThreadingPlan {
     ///
     /// For value-type methods (BT-1053), starts from a fresh `maps:new()` instead
     /// of the actor State (which does not exist in value-type context).
+    ///
+    /// In direct-params mode (BT-1275) this is a no-op — returns `(Nil, initial_state_var)` since
+    /// variables are passed as separate fun arguments instead.
     pub fn generate_pack_prefix(
         &self,
         generator: &mut CoreErlangGenerator,
     ) -> (Document<'static>, String) {
-        if self.threaded_locals.is_empty() {
+        if self.threaded_locals.is_empty() || self.use_direct_params {
             return (Document::Nil, self.initial_state_var.clone());
         }
         let mut pack_str = String::new();
@@ -140,6 +213,9 @@ impl ThreadingPlan {
     /// and registers each binding in the generator's current scope.
     ///
     /// Returns the binding documents to prepend to the loop body.
+    ///
+    /// In direct-params mode (BT-1275) the variables are already fun parameters,
+    /// so this only registers the bindings and returns no documents.
     pub fn generate_unpack_at_iteration_start(
         &self,
         generator: &mut CoreErlangGenerator,
@@ -147,13 +223,90 @@ impl ThreadingPlan {
         let mut docs = Vec::new();
         for var_name in &self.threaded_locals {
             let core_var = CoreErlangGenerator::to_core_erlang_var(var_name);
-            let key = self.state_key(var_name);
             generator.bind_var(var_name, &core_var);
-            docs.push(Document::String(format!(
-                "let {core_var} = call 'maps':'get'('{key}', StateAcc) in "
-            )));
+            if !self.use_direct_params {
+                let key = self.state_key(var_name);
+                docs.push(docvec![
+                    "let ",
+                    Document::String(core_var),
+                    " = call 'maps':'get'('",
+                    Document::String(key),
+                    "', StateAcc) in ",
+                ]);
+            }
         }
         docs
+    }
+
+    /// Returns the initial argument values for a direct-params loop call (BT-1275).
+    ///
+    /// These are the current bindings of each threaded local in the generator's
+    /// outer scope (before `push_scope` has been called for the loop).
+    pub fn initial_direct_args(&self, generator: &CoreErlangGenerator) -> Vec<String> {
+        self.threaded_locals
+            .iter()
+            .map(|v| {
+                generator
+                    .lookup_var(v)
+                    .cloned()
+                    .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v))
+            })
+            .collect()
+    }
+
+    /// Generates the exit `{'nil', StateAcc}` expression for the false arm of a
+    /// direct-params loop (BT-1275).
+    ///
+    /// Because variables are carried as fun parameters, not in a map, the
+    /// `StateAcc` must be rebuilt once at loop exit so that the caller can extract
+    /// updated values using the same `maps:get` protocol as before.
+    ///
+    /// `param_names` are the Core Erlang names of each threaded local IN THE CURRENT
+    /// ITERATION (i.e. the fun parameter names at the point of the false arm).
+    /// For the false-arm case these are the initial parameter names, not updated ones.
+    pub fn generate_exit_stateacc(
+        &self,
+        param_names: &[String],
+        generator: &mut CoreErlangGenerator,
+    ) -> Document<'static> {
+        if self.threaded_locals.is_empty() {
+            return docvec![
+                "{'nil', ",
+                Document::String(self.initial_state_var.clone()),
+                "}",
+            ];
+        }
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        // BT-1053: Value-type methods have no actor State — start from a fresh empty map.
+        let mut current = if matches!(self.context, CodeGenContext::ValueType) {
+            let exit_var = generator.fresh_temp_var("ExitSA");
+            docs.push(docvec![
+                "let ",
+                Document::String(exit_var.clone()),
+                " = call 'maps':'new'() in ",
+            ]);
+            exit_var
+        } else {
+            self.initial_state_var.clone()
+        };
+        for (var_name, param) in self.threaded_locals.iter().zip(param_names.iter()) {
+            let key = self.state_key(var_name);
+            let next_var = generator.fresh_temp_var("ExitSA");
+            docs.push(docvec![
+                "let ",
+                Document::String(next_var.clone()),
+                " = call 'maps':'put'('",
+                Document::String(key),
+                "', ",
+                Document::String(param.clone()),
+                ", ",
+                Document::String(current),
+                ") in ",
+            ]);
+            current = next_var;
+        }
+        docs.push(docvec!["{'nil', ", Document::String(current), "}",]);
+        Document::Vec(docs)
     }
 
     /// Generates `let X = maps:get(key, FinalState) in` for each threaded local
@@ -319,6 +472,16 @@ impl CoreErlangGenerator {
                 {
                     has_plain_lets = true;
                     docs.push(doc);
+                } else if plan.use_direct_params {
+                    // BT-1275: Direct-params mode — emit `let NewVar = value in` without
+                    // a StateAcc map. The var binding is updated so the recursive apply
+                    // can reference the latest version.
+                    has_mutations = true;
+                    let assign_doc = self.generate_direct_var_update_in_loop(expr)?;
+                    docs.push(assign_doc);
+                    if is_last {
+                        self.emit_local_assign_last_expr(&mut docs, kind, pred_var.as_ref());
+                    }
                 } else {
                     has_mutations = true;
                     let assign_doc = self.generate_local_var_assignment_in_loop(expr)?;
@@ -671,16 +834,24 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Generates a stateful counted loop using a `letrec` with a `(I, StateAcc)` signature.
+    /// Generates a stateful counted loop using a `letrec`.
     ///
     /// Handles `timesRepeat:`, `to:do:`, and `to:by:do:` by accepting a `CountedLoopFrame`
     /// that captures the loop-type-specific preamble, condition, and step expression.
+    ///
+    /// In standard mode the fun signature is `(I, StateAcc)`.
+    /// In direct-params mode (BT-1275, no field mutations) it is `(I, Var1, ..., VarN)`
+    /// eliminating per-iteration `maps:get` / `maps:put` calls.
     pub(super) fn generate_counted_stateful_loop(
         &mut self,
         frame: &CountedLoopFrame,
         body: &crate::ast::Block,
         plan: &ThreadingPlan,
     ) -> Result<Document<'static>> {
+        if plan.use_direct_params {
+            return self.generate_counted_stateful_loop_direct(frame, body, plan);
+        }
+
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
 
         let mut docs: Vec<Document<'static>> = Vec::new();
@@ -731,6 +902,117 @@ impl CoreErlangGenerator {
                 fn_name = frame.fn_name,
                 init_ctr = frame.initial_counter,
             )),
+        ]);
+
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-1275: Direct-params variant of `generate_counted_stateful_loop`.
+    ///
+    /// Uses `fun (I, Var1, ..., VarN)` instead of `fun (I, StateAcc)`.
+    /// The `StateAcc` map is rebuilt only once in the false (exit) arm.
+    fn generate_counted_stateful_loop_direct(
+        &mut self,
+        frame: &CountedLoopFrame,
+        body: &crate::ast::Block,
+        plan: &ThreadingPlan,
+    ) -> Result<Document<'static>> {
+        // Collect initial arg values from the outer scope (before push_scope overwrites them).
+        let initial_direct_args = plan.initial_direct_args(self);
+
+        // Build the fun parameter list: (I, Var1, ..., VarN)
+        let param_names: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
+            .collect();
+        let arity = 1 + param_names.len();
+        let param_list_doc = join(
+            std::iter::once(Document::Str("I"))
+                .chain(param_names.iter().map(|v| Document::String(v.clone()))),
+            &Document::Str(", "),
+        );
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.push(frame.preamble.clone());
+        docs.push(docvec![
+            " letrec '",
+            Document::String(frame.fn_name.clone()),
+            "'/",
+            Document::String(arity.to_string()),
+            " = fun (",
+            param_list_doc,
+            ") -> ",
+        ]);
+
+        self.push_scope();
+
+        // Bind the block counter param if any (e.g. to:do: [:i | ...] → bind "i" → "I")
+        if let Some(ref bt_name) = frame.body_param {
+            self.bind_var(bt_name, "I");
+        }
+
+        // Register var → param bindings (no unpack docs emitted in direct-params mode).
+        let unpack_docs = plan.generate_unpack_at_iteration_start(self);
+        debug_assert!(
+            unpack_docs.is_empty(),
+            "direct params: unpack should emit no code"
+        );
+
+        // Condition + true arm
+        docs.push(frame.continue_header.clone());
+
+        // Body
+        let (body_doc, _) = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
+        docs.push(body_doc);
+
+        // Collect final var names after body execution (updated bindings inside scope).
+        let final_args: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| {
+                self.lookup_var(v)
+                    .cloned()
+                    .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v))
+            })
+            .collect();
+
+        // Build exit StateAcc using the INITIAL param names (current iteration values).
+        let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);
+
+        self.pop_scope();
+
+        // Build Document arg lists for the recursive call and the initial apply.
+        let recursive_args_doc = join(
+            std::iter::once(Document::String(frame.next_counter.clone()))
+                .chain(final_args.into_iter().map(Document::String)),
+            &Document::Str(", "),
+        );
+        let initial_args_doc = join(
+            std::iter::once(Document::String(frame.initial_counter.clone()))
+                .chain(initial_direct_args.into_iter().map(Document::String)),
+            &Document::Str(", "),
+        );
+
+        // Recursive call + false arm (with rebuilt StateAcc) + initial apply.
+        docs.push(docvec![
+            " apply '",
+            Document::String(frame.fn_name.clone()),
+            "'/",
+            Document::String(arity.to_string()),
+            " (",
+            recursive_args_doc,
+            ") ",
+            "<'false'> when 'true' -> ",
+            exit_stateacc,
+            " end ",
+            "in apply '",
+            Document::String(frame.fn_name.clone()),
+            "'/",
+            Document::String(arity.to_string()),
+            " (",
+            initial_args_doc,
+            ")",
         ]);
 
         Ok(Document::Vec(docs))
@@ -883,6 +1165,42 @@ impl CoreErlangGenerator {
             val_doc,
             " in ",
         ]))
+    }
+
+    /// BT-1275: Generate a local variable assignment in a direct-params loop body.
+    ///
+    /// In direct-params mode, threaded locals are fun parameters — no `StateAcc` map needed.
+    /// Generates `let NewVar = <value> in` and updates the binding so subsequent
+    /// uses and the recursive `apply` pick up the latest version.
+    ///
+    /// ```erlang
+    /// %% Old StateAcc pattern:
+    /// let _Val5 = Sum + I in let StateAcc1 = maps:put('__local__sum', _Val5, StateAcc) in
+    ///
+    /// %% Direct params pattern (this function):
+    /// let Sum1 = Sum + I in
+    /// ```
+    pub(super) fn generate_direct_var_update_in_loop(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        if let Expression::Assignment { target, value, .. } = expr {
+            if let Expression::Identifier(id) = target.as_ref() {
+                let value_code = self.expression_doc(value)?;
+                // Allocate a fresh versioned name (e.g. Sum1, Sum2 ...) and rebind.
+                let new_var =
+                    self.fresh_temp_var(&CoreErlangGenerator::to_core_erlang_var(&id.name));
+                self.bind_var(&id.name, &new_var);
+                return Ok(docvec![
+                    "let ",
+                    Document::String(new_var),
+                    " = ",
+                    value_code,
+                    " in ",
+                ]);
+            }
+        }
+        Ok(Document::Nil)
     }
 
     /// BT-153: Generate a local variable assignment inside a loop body with state threading.

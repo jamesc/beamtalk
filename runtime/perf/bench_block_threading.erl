@@ -22,6 +22,8 @@
     sum_stateacc/1,
     sum_stateacc_maybe_await/1,
     sum_procdict/1,
+    sum_direct_params/1,
+    sum_direct_params_maybe_await/1,
     %% collect: / lists:map equivalents
     double_native/1,
     double_stateacc_block/1,
@@ -120,6 +122,50 @@ sum_procdict_loop(0) -> ok;
 sum_procdict_loop(I) ->
     put('__local__sum', get('__local__sum') + 1),
     sum_procdict_loop(I - 1).
+
+%% @doc Simulates what Beamtalk's timesRepeat: codegen produces after BT-1275.
+%%
+%% Direct-params pattern (no per-iteration maps:get/put):
+%%
+%%   letrec 'repeat'/2 = fun (I, Sum) ->
+%%       case I > 0 of
+%%           true ->
+%%               let Sum1 = Sum + 1 in
+%%               apply 'repeat'/2 (I - 1, Sum1)
+%%           false ->
+%%               let ExitSA = maps:put('__local__sum', Sum, State) in
+%%               {nil, ExitSA}
+%%       end
+%%   in
+%%   let {_, FinalState} = apply 'repeat'/2 (N, 0) in
+%%   maps:get('__local__sum', FinalState)
+%%
+%% One maps:put at loop exit; zero per iteration.
+-spec sum_direct_params(non_neg_integer()) -> integer().
+sum_direct_params(N) ->
+    {_, FinalState} = sum_direct_params_loop(N, 0),
+    maps:get('__local__sum', FinalState).
+
+sum_direct_params_loop(0, Sum) ->
+    ExitSA = maps:put('__local__sum', Sum, maps:new()),
+    {nil, ExitSA};
+sum_direct_params_loop(I, Sum) ->
+    Sum1 = Sum + 1,
+    sum_direct_params_loop(I - 1, Sum1).
+
+%% @doc Like sum_direct_params but also wraps arithmetic in maybe_await,
+%% simulating the full generated output (BT-1275 + maybe_await guards).
+-spec sum_direct_params_maybe_await(non_neg_integer()) -> integer().
+sum_direct_params_maybe_await(N) ->
+    {_, FinalState} = sum_direct_params_await_loop(N, 0),
+    maps:get('__local__sum', FinalState).
+
+sum_direct_params_await_loop(0, Sum) ->
+    ExitSA = maps:put('__local__sum', Sum, maps:new()),
+    {nil, ExitSA};
+sum_direct_params_await_loop(I, Sum) ->
+    Sum1 = beamtalk_future:maybe_await(Sum) + beamtalk_future:maybe_await(1),
+    sum_direct_params_await_loop(beamtalk_future:maybe_await(I) - 1, Sum1).
 
 %%====================================================================
 %% collect: / lists:map pattern
