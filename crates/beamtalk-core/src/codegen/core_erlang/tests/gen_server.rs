@@ -2504,3 +2504,100 @@ fn test_class_method_local_var_after_class_var_mutation() {
         "Should not contain doubled `in` keyword. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
+    // BT-1283: When the RHS of a REPL destructuring assignment is a mutation-threaded
+    // expression (i.e. a loop containing a REPL variable mutation), the generated code
+    // must unwrap the {Result, StateAcc} tuple with element/2 before extracting pattern
+    // variables. Without the unwrap, the pattern extraction would attempt to destructure
+    // the {Result, StateAcc} wrapper instead of the actual value.
+    //
+    // Expression: #(a, b) := 5 timesRepeat: [x := x + 1]
+    //
+    // Expected generated structure:
+    //   let Rhs = <timesRepeat expression>   -> returns {nil, StateAcc}
+    //   let RhsVal = element(1, Rhs)          -> unwrap the actual value
+    //   let StateN = element(2, Rhs)          -> advance REPL state
+    //   let _Ext1 = ... extract a ...
+    //   let _Ext2 = ... extract b ...
+    //   let StateM = maps:put('a', _Ext1, StateN)
+    //   let StateP = maps:put('b', _Ext2, StateM)
+
+    let span = Span::new(0, 1);
+
+    // Build: 5 timesRepeat: [x := x + 1]
+    let x_id = Expression::Identifier(Identifier::new("x", span));
+    let one = Expression::Literal(Literal::Integer(1), span);
+    let add = Expression::MessageSend {
+        receiver: Box::new(x_id.clone()),
+        selector: MessageSelector::Binary("+".into()),
+        arguments: vec![one],
+        is_cast: false,
+        span,
+    };
+    let loop_assign = Expression::Assignment {
+        target: Box::new(x_id),
+        value: Box::new(add),
+        span,
+    };
+    let loop_body = Expression::Block(Block {
+        parameters: vec![],
+        body: vec![bare(loop_assign)],
+        span,
+    });
+    let five = Expression::Literal(Literal::Integer(5), span);
+    let times_repeat = Expression::MessageSend {
+        receiver: Box::new(five),
+        selector: MessageSelector::Keyword(vec![KeywordPart {
+            keyword: "timesRepeat:".into(),
+            span,
+        }]),
+        arguments: vec![loop_body],
+        is_cast: false,
+        span,
+    };
+
+    // Build: #(a, b) := <times_repeat>
+    let pattern = Pattern::Array {
+        elements: vec![
+            Pattern::Variable(Identifier::new("a", span)),
+            Pattern::Variable(Identifier::new("b", span)),
+        ],
+        list_syntax: true,
+        span,
+    };
+    let destructure = Expression::DestructureAssignment {
+        pattern,
+        value: Box::new(times_repeat),
+        span,
+    };
+
+    let code = generate_repl_expression(&destructure, "bt1283_mutation_threaded_test")
+        .expect("codegen should succeed");
+
+    eprintln!("BT-1283: Generated code for #(a, b) := 5 timesRepeat: [x := x + 1]:");
+    eprintln!("{code}");
+
+    // The RHS is mutation-threaded, so it returns {Result, StateAcc}.
+    // The generated code must unwrap element(1, Rhs) for the actual value
+    // and element(2, Rhs) to advance the REPL state.
+    assert!(
+        code.contains("call 'erlang':'element'(1,"),
+        "Must unwrap element(1,) from mutation-threaded RHS. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'element'(2,"),
+        "Must extract StateAcc via element(2,) from mutation-threaded RHS. Got:\n{code}"
+    );
+
+    // The pattern variables must be persisted to the REPL state map.
+    assert!(
+        code.contains("call 'maps':'put'('a'"),
+        "Must persist 'a' to REPL state map. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'maps':'put'('b'"),
+        "Must persist 'b' to REPL state map. Got:\n{code}"
+    );
+}
