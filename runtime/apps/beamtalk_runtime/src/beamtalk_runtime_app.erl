@@ -23,6 +23,10 @@ start(_StartType, _StartArgs) ->
     %% by the application master (survives individual class process crashes).
     beamtalk_class_registry:ensure_hierarchy_table(),
 
+    %% BT-1285: Create class module ETS table at app startup for the same
+    %% reason — owned by the application master, not a transient class process.
+    beamtalk_class_registry:ensure_module_table(),
+
     %% BT-737: Create collision warnings ETS table at app startup.
     beamtalk_class_registry:ensure_class_warnings_table(),
 
