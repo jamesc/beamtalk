@@ -125,13 +125,20 @@ fn test_static_supervisor_init_uses_class_dispatch() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
+    // init/1 delegates to beamtalk_supervisor:static_init/2 to avoid the gen_server
+    // deadlock that would occur if init/1 called class_send directly (the class gen_server
+    // is blocked waiting for supervisor:start_link to return).
     assert!(
-        code.contains("beamtalk_class_registry':'whereis_class'('WebApp')"),
-        "init/1 must look up class pid via class registry. Got:\n{code}"
+        code.contains("beamtalk_supervisor':'static_init'"),
+        "init/1 must delegate to beamtalk_supervisor:static_init/2. Got:\n{code}"
     );
     assert!(
-        code.contains("beamtalk_object_class':'class_send'"),
-        "init/1 must invoke methods via class dispatch. Got:\n{code}"
+        code.contains("'bt@webapp'"),
+        "init/1 must pass module name to static_init. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'WebApp'"),
+        "init/1 must pass class name to static_init. Got:\n{code}"
     );
 }
 
@@ -140,21 +147,11 @@ fn test_static_supervisor_init_fetches_children_strategy_restarts() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
+    // Class method calls (children, strategy, etc.) are made inside static_init/2 in the
+    // runtime, not in the generated init/1. Verify the delegation is correct.
     assert!(
-        code.contains("'children'"),
-        "init/1 must call 'children'. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'strategy'"),
-        "init/1 must call 'strategy'. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'maxRestarts'"),
-        "init/1 must call 'maxRestarts'. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'restartWindow'"),
-        "init/1 must call 'restartWindow'. Got:\n{code}"
+        code.contains("beamtalk_supervisor':'static_init'"),
+        "init/1 must delegate class method calls to beamtalk_supervisor:static_init/2. Got:\n{code}"
     );
 }
 
@@ -163,9 +160,11 @@ fn test_static_supervisor_init_builds_sup_flags_map() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
+    // SupFlags map construction happens inside beamtalk_supervisor:static_init/2 (runtime),
+    // not in the generated init/1. Verify the delegation is correct.
     assert!(
-        code.contains("'strategy'") && code.contains("'intensity'") && code.contains("'period'"),
-        "init/1 must build SupFlags map with strategy/intensity/period. Got:\n{code}"
+        code.contains("beamtalk_supervisor':'static_init'"),
+        "init/1 must delegate SupFlags construction to beamtalk_supervisor:static_init/2. Got:\n{code}"
     );
 }
 
@@ -174,9 +173,11 @@ fn test_static_supervisor_init_delegates_to_build_child_specs() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
+    // build_child_specs is called inside beamtalk_supervisor:static_init/2 (runtime),
+    // not directly in the generated init/1. Verify the delegation is correct.
     assert!(
-        code.contains("beamtalk_supervisor':'build_child_specs'"),
-        "init/1 must delegate to beamtalk_supervisor:build_child_specs/1. Got:\n{code}"
+        code.contains("beamtalk_supervisor':'static_init'"),
+        "init/1 must delegate to beamtalk_supervisor:static_init/2 which calls build_child_specs. Got:\n{code}"
     );
 }
 
@@ -185,9 +186,10 @@ fn test_static_supervisor_init_returns_ok_tuple() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
+    // {ok, ...} is returned by beamtalk_supervisor:static_init/2 (runtime), not inline.
     assert!(
-        code.contains("{'ok',"),
-        "init/1 must return {{ok, ...}}. Got:\n{code}"
+        code.contains("beamtalk_supervisor':'static_init'"),
+        "init/1 must delegate to beamtalk_supervisor:static_init/2 which returns {{ok, ...}}. Got:\n{code}"
     );
 }
 
@@ -244,9 +246,11 @@ fn test_dynamic_supervisor_init_uses_simple_one_for_one() {
     let module = make_dynamic_supervisor_module();
     let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
         .expect("codegen should succeed");
+    // simple_one_for_one is set inside beamtalk_supervisor:dynamic_init/2 (runtime),
+    // not in the generated init/1. Verify the delegation is correct.
     assert!(
-        code.contains("'simple_one_for_one'"),
-        "Dynamic supervisor init/1 must use simple_one_for_one strategy. Got:\n{code}"
+        code.contains("beamtalk_supervisor':'dynamic_init'"),
+        "Dynamic supervisor init/1 must delegate to beamtalk_supervisor:dynamic_init/2. Got:\n{code}"
     );
 }
 

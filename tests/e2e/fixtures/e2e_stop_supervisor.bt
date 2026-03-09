@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: empty Supervisor subclass used to test stop/current lifecycle.
+// No children keeps the test focused on supervisor lifecycle, not child management.
+// Used by supervisor.btscript (BT-1223).
+
+Supervisor subclass: E2EStopSupervisor
+
+  class children -> List => #()
