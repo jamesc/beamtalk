@@ -742,6 +742,8 @@ Beamtalk provides declarative OTP supervision trees via `Supervisor subclass:` a
 
 Subclass `Supervisor` and override `class children` to return a list of actor classes (or `SupervisionSpec` values for per-child configuration). The supervisor starts all children at startup using OTP `one_for_one` strategy by default.
 
+> **Important:** `class children`, `class strategy`, `class maxRestarts`, and `class restartWindow` are called during supervisor startup from the OTP `init/1` callback — before the class gen_server is available. These methods must be **pure** (return literal values only). Do not send messages to `self`, call other class methods via dispatch, or read class variables from within these methods.
+
 ```beamtalk
 Supervisor subclass: WebApp
   class children => #(DatabasePool HTTPRouter MetricsCollector)

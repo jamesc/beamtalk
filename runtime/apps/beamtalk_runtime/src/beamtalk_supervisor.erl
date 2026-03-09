@@ -7,8 +7,9 @@
 %%%
 %%% This module provides the BEAM interop entry points called from the
 %%% Supervisor and DynamicSupervisor stdlib methods via Erlang FFI.
-%%% It also exposes `build_child_specs/1` for the generated `init/1` callbacks
-%%% (Phase 3 codegen) and `is_supervisor/1` for compile-time routing.
+%%% Generated `init/1` callbacks delegate to `static_init/2` and `dynamic_init/2`
+%%% (Phase 3 codegen) to avoid gen_server deadlocks. `is_supervisor/1` is used
+%%% for compile-time routing and child spec construction.
 %%%
 %%% ## Design (ADR 0059 Phase 2)
 %%%
@@ -403,13 +404,21 @@ call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, Dep
                     %% module_name/1 uses process dict for self-calls; gen_server:call
                     %% for ancestors (which are not blocked, so this is safe).
                     SuperModule = beamtalk_object_class:module_name(SuperPid),
-                    case erlang:function_exported(SuperModule, FunName, 2) of
-                        true ->
-                            erlang:apply(SuperModule, FunName, [ClassSelf, ClassVars]);
-                        false ->
+                    case SuperModule of
+                        undefined ->
+                            %% Module not yet set (class still initialising) — skip upward.
                             call_inherited_class_method_direct(
                                 SuperclassName, FunName, ClassSelf, ClassVars, Depth + 1
-                            )
+                            );
+                        _ ->
+                            case erlang:function_exported(SuperModule, FunName, 2) of
+                                true ->
+                                    erlang:apply(SuperModule, FunName, [ClassSelf, ClassVars]);
+                                false ->
+                                    call_inherited_class_method_direct(
+                                        SuperclassName, FunName, ClassSelf, ClassVars, Depth + 1
+                                    )
+                            end
                     end
             end
     end.
@@ -450,6 +459,18 @@ build_child_spec(Spec) when is_map(Spec) ->
     spec_to_otp(beamtalk_message_dispatch:send(Spec, 'childSpec', [])).
 
 %% @private
+%% Translate Beamtalk strategy symbol to OTP supervisor strategy atom.
+%%
+%% OTP expects snake_case atoms (one_for_one), while Beamtalk uses camelCase
+%% symbols (#oneForOne). Unknown strategies pass through unchanged so OTP
+%% can report the error with context.
+-spec to_otp_strategy(atom()) -> atom().
+to_otp_strategy(oneForOne) -> one_for_one;
+to_otp_strategy(oneForAll) -> one_for_all;
+to_otp_strategy(restForOne) -> rest_for_one;
+to_otp_strategy(S) -> S.
+
+%% @private
 %% Convert a Beamtalk child spec dict to an OTP-compatible child spec map.
 %%
 %% The Beamtalk dict from `SupervisionSpec childSpec` has keys:
@@ -465,14 +486,6 @@ build_child_spec(Spec) when is_map(Spec) ->
 %% OTP supervisor does not accept (it expects {ok, Pid}). The generated
 %% start_link/1 returns {ok, Pid} directly from gen_server:start_link, so
 %% worker children use start_link/1 with an init-args map instead of spawn/0.
-%% @private
-%% Translate Beamtalk strategy symbol to OTP supervisor strategy atom.
--spec to_otp_strategy(atom()) -> atom().
-to_otp_strategy(oneForOne) -> one_for_one;
-to_otp_strategy(oneForAll) -> one_for_all;
-to_otp_strategy(restForOne) -> rest_for_one;
-to_otp_strategy(S) -> S.
-
 -spec spec_to_otp(map()) -> map().
 spec_to_otp(BtSpec) ->
     %% `start` is a Beamtalk Array #[ClassObj, StartFn, StartArgs].
@@ -502,7 +515,21 @@ spec_to_otp(BtSpec) ->
                             %% startArgs is a Beamtalk Array #(ArgsMap) — unwrap and extract.
                             StartArgsBtArray = array:get(2, StartErlArray),
                             StartArgsErlArray = maps:get(data, StartArgsBtArray),
-                            [array:get(0, StartArgsErlArray)]
+                            [array:get(0, StartArgsErlArray)];
+                        Other ->
+                            %% Unknown start function — raise structured error rather than crashing.
+                            Error = beamtalk_error:new(
+                                runtime_error,
+                                ChildClass,
+                                supervise,
+                                iolist_to_binary(
+                                    io_lib:format(
+                                        "unsupported child start function: ~p (expected spawn or spawnWith:)",
+                                        [Other]
+                                    )
+                                )
+                            ),
+                            error(beamtalk_exception_handler:ensure_wrapped(Error))
                     end,
                 {ChildModule, start_link, InitArgs}
         end,

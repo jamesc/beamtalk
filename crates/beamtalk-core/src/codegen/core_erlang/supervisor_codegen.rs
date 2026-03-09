@@ -165,7 +165,7 @@ impl CoreErlangGenerator {
 
         // Module header
         // BT-1220: childClass/0 is called directly by beamtalk_supervisor:startChild/1,2
-        // (SupMod:'childClass'() at `beamtalk_supervisor.erl:217`)
+        // (SupMod:'childClass'() at `beamtalk_supervisor.erl (startChild/1,2)`)
         docs.push(docvec![
             "module '",
             Document::String(module_name.clone()),
@@ -275,7 +275,7 @@ impl CoreErlangGenerator {
     /// Generates `childClass/0` for dynamic supervisors.
     ///
     /// Called directly by `beamtalk_supervisor:startChild/1,2` as `SupMod:'childClass'()`
-    /// to resolve the child class object at runtime (see `beamtalk_supervisor.erl:217`).
+    /// to resolve the child class object at runtime (see `beamtalk_supervisor.erl (startChild/1,2)`).
     ///
     /// ```erlang
     /// childClass() ->

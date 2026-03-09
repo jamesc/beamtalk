@@ -121,75 +121,31 @@ fn test_static_supervisor_start_link_calls_supervisor_start_link() {
 }
 
 #[test]
-fn test_static_supervisor_init_uses_class_dispatch() {
+fn test_static_supervisor_init_delegates_to_static_init() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    // init/1 delegates to beamtalk_supervisor:static_init/2 to avoid the gen_server
-    // deadlock that would occur if init/1 called class_send directly (the class gen_server
-    // is blocked waiting for supervisor:start_link to return).
+    // init/1 must delegate to beamtalk_supervisor:static_init/2 to avoid a gen_server
+    // deadlock: the class gen_server is blocked waiting for supervisor:start_link to return,
+    // so calling class_send from init/1 would deadlock.
+    // The call must pass both the module atom and the class name atom so the runtime
+    // can call class module functions directly (bypassing the gen_server) via ETS hierarchy walk.
     assert!(
         code.contains("beamtalk_supervisor':'static_init'"),
         "init/1 must delegate to beamtalk_supervisor:static_init/2. Got:\n{code}"
     );
     assert!(
         code.contains("'bt@webapp'"),
-        "init/1 must pass module name to static_init. Got:\n{code}"
+        "init/1 must pass module atom to static_init. Got:\n{code}"
     );
     assert!(
         code.contains("'WebApp'"),
-        "init/1 must pass class name to static_init. Got:\n{code}"
+        "init/1 must pass class name atom to static_init. Got:\n{code}"
     );
-}
-
-#[test]
-fn test_static_supervisor_init_fetches_children_strategy_restarts() {
-    let module = make_static_supervisor_module();
-    let code =
-        generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    // Class method calls (children, strategy, etc.) are made inside static_init/2 in the
-    // runtime, not in the generated init/1. Verify the delegation is correct.
+    // Must NOT contain direct class_send calls — those would deadlock.
     assert!(
-        code.contains("beamtalk_supervisor':'static_init'"),
-        "init/1 must delegate class method calls to beamtalk_supervisor:static_init/2. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_static_supervisor_init_builds_sup_flags_map() {
-    let module = make_static_supervisor_module();
-    let code =
-        generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    // SupFlags map construction happens inside beamtalk_supervisor:static_init/2 (runtime),
-    // not in the generated init/1. Verify the delegation is correct.
-    assert!(
-        code.contains("beamtalk_supervisor':'static_init'"),
-        "init/1 must delegate SupFlags construction to beamtalk_supervisor:static_init/2. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_static_supervisor_init_delegates_to_build_child_specs() {
-    let module = make_static_supervisor_module();
-    let code =
-        generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    // build_child_specs is called inside beamtalk_supervisor:static_init/2 (runtime),
-    // not directly in the generated init/1. Verify the delegation is correct.
-    assert!(
-        code.contains("beamtalk_supervisor':'static_init'"),
-        "init/1 must delegate to beamtalk_supervisor:static_init/2 which calls build_child_specs. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_static_supervisor_init_returns_ok_tuple() {
-    let module = make_static_supervisor_module();
-    let code =
-        generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    // {ok, ...} is returned by beamtalk_supervisor:static_init/2 (runtime), not inline.
-    assert!(
-        code.contains("beamtalk_supervisor':'static_init'"),
-        "init/1 must delegate to beamtalk_supervisor:static_init/2 which returns {{ok, ...}}. Got:\n{code}"
+        !code.contains("beamtalk_object_class':'class_send'"),
+        "init/1 must NOT call class_send directly (causes deadlock). Got:\n{code}"
     );
 }
 
