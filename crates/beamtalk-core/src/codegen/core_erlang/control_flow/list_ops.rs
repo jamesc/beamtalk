@@ -663,6 +663,75 @@ mod tests {
     }
 
     #[test]
+    fn test_bt1290_local_var_captured_by_nested_timer_block() {
+        // BT-1290: local var `y` assigned in do: block must be capturable by a nested block.
+        // Before the fix, `let Y = ... in <Timer_case_expr> in StateAcc` was generated,
+        // which is invalid Core Erlang (orphaned `in StateAcc` after a closed expression).
+        // After the fix, `let Y = ... in let _ = <Timer_case_expr> in StateAcc` is generated.
+        let src = concat!(
+            "Actor subclass: BugDemo\n",
+            "  tick =>\n",
+            "    #(1, 2, 3) do: [:x |\n",
+            "      y := x + 1\n",
+            "      Timer after: 0 do: [self use: y]\n",
+            "    ]\n",
+            "  use: n => nil\n"
+        );
+        let code = codegen(src);
+        // Y (CoreErlang name for y) must appear inside the nested fun's argument list
+        assert!(
+            code.contains("'use:', [Y]"),
+            "Y should be captured by nested block. Got:\n{code}"
+        );
+        // The foldl lambda must use `let _ = <Timer_expr> in StateAcc`, not bare `<Timer_expr> in StateAcc`
+        assert!(
+            code.contains("let _ = case call 'beamtalk_class_registry'"),
+            "Last expr in do: body with plain lets must use let _ = binding. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_bt1291_destructure_then_on_do_last_expr() {
+        // BT-1291: #[...] list destructuring (has_plain_lets=true) followed by
+        // `on:Exception do:` as the last expression produced the same invalid
+        // `<bindings> in <on_do_expr> in StateAcc` pattern fixed by BT-1290.
+        let src = concat!(
+            "Actor subclass: BugDemo\n",
+            "  tick =>\n",
+            "    #() do: [:te |\n",
+            "      #[a, b] := te\n",
+            "      [a printString] on: Exception do: [:e | nil]\n",
+            "    ]\n"
+        );
+        // Must compile without panic (before the fix this generated invalid Core Erlang)
+        let code = codegen(src);
+        // The last expr must be wrapped with `let _ =` to be valid Core Erlang
+        assert!(
+            code.contains("let _ = "),
+            "Last expr after destructure must use let _ = binding. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_bt1290_field_mutation_then_general_last_expr() {
+        // BT-1290: same fix also applies when has_mutations=true (field write before general last expr).
+        // Before the fix: `let StateAcc1 = maps:put(...) in <external_call> in StateAcc1` — invalid.
+        // After the fix: `let StateAcc1 = maps:put(...) in let _ = <external_call> in StateAcc1`.
+        let src = concat!(
+            "Actor subclass: Ctr\n",
+            "  state: n = 0\n",
+            "  run: items =>\n",
+            "    items do: [:item | self.n := self.n + item. Timer after: 0 do: [item printString]]\n"
+        );
+        let code = codegen(src);
+        // The last expr (Timer send) must be wrapped with `let _ =`
+        assert!(
+            code.contains("let _ = case call 'beamtalk_class_registry'"),
+            "Last expr after field mutation must use let _ = binding. Got:\n{code}"
+        );
+    }
+
+    #[test]
     fn test_list_do_multi_stmt_first_is_pure_generates_let_underscore() {
         // Multi-statement do: body where the first statement is a pure expression
         // must emit `let _ = <expr> in ...` (not bare `<expr> in ...`) — Core Erlang requires

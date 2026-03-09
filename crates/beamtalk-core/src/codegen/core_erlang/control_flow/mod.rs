@@ -755,7 +755,11 @@ impl CoreErlangGenerator {
                 }
             }
             BodyKind::FoldlDo => {
-                if !is_last {
+                // BT-1290: When preceding let-bindings exist (has_mutations/has_plain_lets),
+                // the last expression must also be bound with `let _ =` before `in StateAcc`.
+                // Without this, `let Y = ... in <expr> in StateAcc` is invalid Core Erlang
+                // (the `in StateAcc` has no corresponding `let`).
+                if !is_last || (has_mutations || has_plain_lets) {
                     docs.push(Document::Str("let _ = "));
                 }
                 let doc = self.generate_expression(expr)?;
