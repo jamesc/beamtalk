@@ -1,0 +1,34 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1222: Tests for Supervisor class-side defaults and subclass override.
+//
+// Fixtures: stdlib/test/fixtures/test_supervisor_custom.bt
+
+TestCase subclass: SupervisorDefaultsTest
+
+  // === Supervisor class-side defaults ===
+  testSupervisorStrategyDefault =>
+    self assert: Supervisor strategy equals: #oneForOne
+
+  testSupervisorMaxRestartsDefault =>
+    self assert: Supervisor maxRestarts equals: 10
+
+  testSupervisorRestartWindowDefault =>
+    self assert: Supervisor restartWindow equals: 60
+
+  testSupervisorIsSupervisorTrue =>
+    self assert: Supervisor isSupervisor equals: true
+
+  // === Supervisor subclass can override defaults ===
+  testSupervisorSubclassOverridesStrategy =>
+    self assert: TestSupervisorCustom strategy equals: #oneForAll
+
+  testSupervisorSubclassOverridesMaxRestarts =>
+    self assert: TestSupervisorCustom maxRestarts equals: 3
+
+  testSupervisorSubclassOverridesRestartWindow =>
+    self assert: TestSupervisorCustom restartWindow equals: 30
+
+  testSupervisorSubclassIsSupervisorTrue =>
+    self assert: TestSupervisorCustom isSupervisor equals: true
