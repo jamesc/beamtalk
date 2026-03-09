@@ -18,6 +18,7 @@
 //! Note: Message sending is handled by [`super::dispatch_codegen`].
 
 use super::document::Document;
+use super::selector_mangler::escape_atom_chars;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, CascadeMessage,
@@ -1302,6 +1303,20 @@ impl CoreErlangGenerator {
                             docs.push(Document::Str("'nil'"));
                         }
                     }
+                    Pattern::Map { .. } => {
+                        // Map destructuring: generate flat `let` bindings using erlang:map_get/2.
+                        //
+                        // Example: `#{#sid => sid} := expr` →
+                        //   let _Map1 = <expr> in
+                        //   let Sid = call 'erlang':'map_get'('sid', _Map1) in
+                        let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                        for d in binding_docs {
+                            docs.push(d);
+                        }
+                        if is_last {
+                            docs.push(Document::Str("'nil'"));
+                        }
+                    }
                     _ => {
                         return Err(CodeGenError::UnsupportedFeature {
                             feature: "Unsupported destructuring pattern kind".to_string(),
@@ -1522,6 +1537,42 @@ impl CoreErlangGenerator {
                     }
                 }
             }
+            Pattern::Map { pairs, .. } => {
+                let map_var = self.fresh_temp_var("Map");
+                let val_doc = self.expression_doc(value)?;
+                docs.push(docvec![
+                    "let ",
+                    Document::String(map_var.clone()),
+                    " = ",
+                    val_doc,
+                    " in "
+                ]);
+                for pair in pairs {
+                    match &pair.value {
+                        Pattern::Variable(id) => {
+                            let core_var = Self::to_core_erlang_var(&id.name);
+                            self.bind_var(&id.name, &core_var);
+                            let key_atom = Document::String(escape_atom_chars(pair.key.as_str()));
+                            docs.push(docvec![
+                                "let ",
+                                Document::String(core_var),
+                                " = call 'erlang':'map_get'('",
+                                key_atom,
+                                "', ",
+                                Document::String(map_var.clone()),
+                                ") in "
+                            ]);
+                        }
+                        Pattern::Wildcard(_) => {}
+                        _ => {
+                            return Err(CodeGenError::UnsupportedFeature {
+                                feature: "Nested patterns in map destructuring".to_string(),
+                                location: format!("{:?}", pair.value.span()),
+                            });
+                        }
+                    }
+                }
+            }
             _ => {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Unsupported destructuring pattern kind".to_string(),
@@ -1680,6 +1731,14 @@ impl CoreErlangGenerator {
                 }
                 parts.push(Document::Str("}#"));
                 Ok(Document::Vec(parts))
+            }
+            Pattern::Map { .. } => {
+                // Map patterns are only valid in destructuring assignments,
+                // not in match arms. Use `#{#k => v} := expr` instead.
+                Err(CodeGenError::UnsupportedFeature {
+                    feature: "Map pattern in match arm — use destructuring assignment `#{#k => v} := expr` instead".to_string(),
+                    location: format!("{:?}", pattern.span()),
+                })
             }
         }
     }
@@ -1845,6 +1904,11 @@ impl CoreErlangGenerator {
             Pattern::Binary { segments, .. } => {
                 for seg in segments {
                     Self::collect_pattern_variables_inner(&seg.value, bind);
+                }
+            }
+            Pattern::Map { pairs, .. } => {
+                for pair in pairs {
+                    Self::collect_pattern_variables_inner(&pair.value, bind);
                 }
             }
             Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}

@@ -142,6 +142,11 @@ fn define_pattern_vars_in_scope(pattern: &crate::ast::Pattern, scope: &mut LintS
                 define_pattern_vars_in_scope(t, scope);
             }
         }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                define_pattern_vars_in_scope(&pair.value, scope);
+            }
+        }
         Pattern::Binary { .. } | Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
     }
 }

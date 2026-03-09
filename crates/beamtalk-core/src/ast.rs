@@ -1471,6 +1471,16 @@ pub enum Pattern {
         /// Source location.
         span: Span,
     },
+
+    /// Map destructuring pattern.
+    ///
+    /// Example: `#{#sid => sid, #runner => runner}`
+    Map {
+        /// Key-value binding pairs.
+        pairs: Vec<MapPatternPair>,
+        /// Source location.
+        span: Span,
+    },
 }
 
 impl Pattern {
@@ -1484,9 +1494,23 @@ impl Pattern {
             | Self::Tuple { span, .. }
             | Self::Array { span, .. }
             | Self::List { span, .. }
-            | Self::Binary { span, .. } => *span,
+            | Self::Binary { span, .. }
+            | Self::Map { span, .. } => *span,
         }
     }
+}
+
+/// A key-value binding pair in a map destructuring pattern.
+///
+/// Example: in `#{#sid => sid}`, the pair has key `sid` and value `Pattern::Variable("sid")`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapPatternPair {
+    /// The map key (always a symbol atom).
+    pub key: EcoString,
+    /// The pattern to bind the value to.
+    pub value: Pattern,
+    /// Source location.
+    pub span: Span,
 }
 
 /// A segment in a binary pattern.
