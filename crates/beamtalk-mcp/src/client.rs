@@ -523,6 +523,11 @@ impl ReplClient {
             // Receive phase: the request is now in-flight.
             // Do NOT reconnect on failure here — the server may have already processed
             // the request; a retry would cause double-execution.
+            //
+            // On any receive failure (timeout or I/O error), quarantine the socket by
+            // closing it before returning the error. Without this, a late server response
+            // for this timed-out request could be consumed by the *next* request, returning
+            // the wrong result for a different operation.
             let receive_future = async {
                 loop {
                     let response_text = read_text_message(&mut inner.ws).await?;
@@ -540,14 +545,23 @@ impl ReplClient {
                 }
             };
 
-            return tokio::time::timeout(REPL_IO_TIMEOUT, receive_future)
-                .await
-                .map_err(|_| {
-                    format!(
-                        "REPL I/O timed out after {}s — the REPL may be unresponsive",
-                        REPL_IO_TIMEOUT.as_secs()
-                    )
-                })?;
+            let receive_result = match tokio::time::timeout(REPL_IO_TIMEOUT, receive_future).await {
+                Ok(result) => result,
+                Err(_) => Err(format!(
+                    "REPL I/O timed out after {}s — the REPL may be unresponsive",
+                    REPL_IO_TIMEOUT.as_secs()
+                )),
+            };
+
+            if let Err(ref err) = receive_result {
+                // Quarantine the socket so the next call reconnects cleanly rather than
+                // risking consumption of this request's late-arriving server response.
+                tracing::warn!("send_once receive phase failed; closing socket: {err}");
+                let mut inner = self.inner.lock().await;
+                let _ = tokio::time::timeout(Duration::from_secs(1), inner.ws.close(None)).await;
+            }
+
+            return receive_result;
         }
 
         unreachable!("send_once loop always returns on attempt 1")
