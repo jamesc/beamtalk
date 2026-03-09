@@ -7,8 +7,9 @@
 %%%
 %%% This module provides the BEAM interop entry points called from the
 %%% Supervisor and DynamicSupervisor stdlib methods via Erlang FFI.
-%%% It also exposes `build_child_specs/1` for the generated `init/1` callbacks
-%%% (Phase 3 codegen) and `is_supervisor/1` for compile-time routing.
+%%% Generated `init/1` callbacks delegate to `static_init/2` and `dynamic_init/2`
+%%% (Phase 3 codegen) to avoid gen_server deadlocks. `is_supervisor/1` is used
+%%% for compile-time routing and child spec construction.
 %%%
 %%% ## Design (ADR 0059 Phase 2)
 %%%
@@ -34,6 +35,8 @@
 -export([
     startLink/1,
     current/1,
+    static_init/2,
+    dynamic_init/2,
     whichChildren/1,
     whichChild/2,
     terminateChild/2,
@@ -85,6 +88,47 @@ startLink(Self) ->
             ),
             error(beamtalk_exception_handler:ensure_wrapped(Error))
     end.
+
+%% @doc Initialize a static supervisor without calling through the class gen_server.
+%%
+%% Called from the generated `init/1` callback of Supervisor subclasses.
+%%
+%% The problem with calling `beamtalk_object_class:class_send/3` from `init/1`:
+%% OTP spawns a new process and calls `Module:init([])`. Inside `init/1`, calling
+%% `class_send(ClassPid, ...)` sends a `gen_server:call` to ClassPid — which is
+%% blocked inside `startLink/1` waiting for `supervisor:start_link` to return.
+%% This is a deadlock.
+%%
+%% Solution: call class module functions directly (bypassing the gen_server).
+%% We use ETS for the class hierarchy walk (no gen_server needed for lookup).
+-spec static_init(module(), atom()) -> {ok, {map(), [map()]}}.
+static_init(Module, ClassName) ->
+    ClassSelf = make_init_class_self(ClassName, Module),
+    ClassVars = #{},
+    Children = call_class_method_direct(ClassName, Module, class_children, ClassSelf, ClassVars),
+    BtStrategy = call_class_method_direct(ClassName, Module, class_strategy, ClassSelf, ClassVars),
+    MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf, ClassVars),
+    MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf, ClassVars),
+    SupFlags = #{strategy => to_otp_strategy(BtStrategy), intensity => MaxR, period => MaxT},
+    Specs = build_child_specs(Children),
+    {ok, {SupFlags, Specs}}.
+
+%% @doc Initialize a dynamic supervisor without calling through the class gen_server.
+%%
+%% Called from the generated `init/1` callback of DynamicSupervisor subclasses.
+%% Same deadlock avoidance rationale as `static_init/2`.
+-spec dynamic_init(module(), atom()) -> {ok, {map(), [map()]}}.
+dynamic_init(Module, ClassName) ->
+    ClassSelf = make_init_class_self(ClassName, Module),
+    ClassVars = #{},
+    ChildClass = call_class_method_direct(
+        ClassName, Module, class_childClass, ClassSelf, ClassVars
+    ),
+    MaxR = call_class_method_direct(ClassName, Module, class_maxRestarts, ClassSelf, ClassVars),
+    MaxT = call_class_method_direct(ClassName, Module, class_restartWindow, ClassSelf, ClassVars),
+    SupFlags = #{strategy => simple_one_for_one, intensity => MaxR, period => MaxT},
+    Specs = build_child_specs([ChildClass]),
+    {ok, {SupFlags, Specs}}.
 
 %% @doc Return the running supervisor instance, or nil if not started.
 %%
@@ -352,15 +396,93 @@ get_root() ->
 %%% ============================================================================
 
 %% @private
+%% Build a ClassSelf tuple for use in direct class method calls during supervisor init.
+%% The pid field is set to the class gen_server pid (may be blocked, but ClassSelf is
+%% used only as a value object — pure class methods do not send messages to self).
+-spec make_init_class_self(atom(), module()) -> tuple().
+make_init_class_self(ClassName, Module) ->
+    ClassPid = beamtalk_class_registry:whereis_class(ClassName),
+    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+    {beamtalk_object, ClassTag, Module, ClassPid}.
+
+%% @private
+%% Call a class method directly by invoking the module function, bypassing the class
+%% gen_server. Tries the subclass module first, then walks the class hierarchy via
+%% ETS until the method is found in an ancestor's module.
+-spec call_class_method_direct(atom(), module(), atom(), tuple(), map()) -> term().
+call_class_method_direct(ClassName, Module, FunName, ClassSelf, ClassVars) ->
+    case erlang:function_exported(Module, FunName, 2) of
+        true ->
+            erlang:apply(Module, FunName, [ClassSelf, ClassVars]);
+        false ->
+            call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, 0)
+    end.
+
+-spec call_inherited_class_method_direct(atom(), atom(), tuple(), map(), non_neg_integer()) ->
+    term().
+call_inherited_class_method_direct(_ClassName, FunName, _ClassSelf, _ClassVars, Depth) when
+    Depth > 30
+->
+    error({supervisor_init_method_not_found, FunName});
+call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ClassVars, Depth) ->
+    case beamtalk_class_hierarchy_table:lookup(ClassName) of
+        not_found ->
+            error({supervisor_init_method_not_found, FunName});
+        {ok, SuperclassName} ->
+            SuperPid = beamtalk_class_registry:whereis_class(SuperclassName),
+            case SuperPid of
+                undefined ->
+                    error({supervisor_init_class_not_found, SuperclassName});
+                _ ->
+                    %% module_name/1 uses process dict for self-calls; gen_server:call
+                    %% for ancestors (which are not blocked, so this is safe).
+                    SuperModule = beamtalk_object_class:module_name(SuperPid),
+                    case SuperModule of
+                        undefined ->
+                            %% Module not yet set (class still initialising) — skip upward.
+                            call_inherited_class_method_direct(
+                                SuperclassName, FunName, ClassSelf, ClassVars, Depth + 1
+                            );
+                        _ ->
+                            case erlang:function_exported(SuperModule, FunName, 2) of
+                                true ->
+                                    erlang:apply(SuperModule, FunName, [ClassSelf, ClassVars]);
+                                false ->
+                                    call_inherited_class_method_direct(
+                                        SuperclassName, FunName, ClassSelf, ClassVars, Depth + 1
+                                    )
+                            end
+                    end
+            end
+    end.
+
+%% @private
 %% Build a single OTP child spec from a class object or SupervisionSpec map.
 -spec build_child_spec(term()) -> map().
 build_child_spec(ClassObj) when is_tuple(ClassObj), element(1, ClassObj) =:= beamtalk_object ->
     case beamtalk_class_registry:is_class_object(ClassObj) of
         true ->
-            %% Bare class reference: call supervisionSpec to get a SupervisionSpec
-            ClassPid = element(4, ClassObj),
-            BtSpec = beamtalk_object_class:class_send(ClassPid, 'supervisionSpec', []),
-            spec_to_otp(beamtalk_message_dispatch:send(BtSpec, 'childSpec', []));
+            ChildClassPid = element(4, ClassObj),
+            ChildClass = beamtalk_object_class:class_name(ChildClassPid),
+            ChildModule = element(3, ClassObj),
+            case is_supervisor(ChildClass) of
+                true ->
+                    %% Nested supervisor child — build OTP spec directly.
+                    %% Supervisor subclasses don't have supervisionSpec (that is on Actor).
+                    %% OTP requires supervisor children to use start_link/0.
+                    #{
+                        id => ChildClass,
+                        start => {ChildModule, start_link, []},
+                        restart => permanent,
+                        shutdown => infinity,
+                        type => supervisor,
+                        modules => [ChildModule]
+                    };
+                false ->
+                    %% Worker child: call supervisionSpec then childSpec.
+                    BtSpec = beamtalk_object_class:class_send(ChildClassPid, 'supervisionSpec', []),
+                    spec_to_otp(beamtalk_message_dispatch:send(BtSpec, 'childSpec', []))
+            end;
         false ->
             %% Actor instance passed as spec — treat as SupervisionSpec-like value
             spec_to_otp(beamtalk_message_dispatch:send(ClassObj, 'childSpec', []))
@@ -368,6 +490,18 @@ build_child_spec(ClassObj) when is_tuple(ClassObj), element(1, ClassObj) =:= bea
 build_child_spec(Spec) when is_map(Spec) ->
     %% SupervisionSpec value (tagged map): call childSpec directly
     spec_to_otp(beamtalk_message_dispatch:send(Spec, 'childSpec', [])).
+
+%% @private
+%% Translate Beamtalk strategy symbol to OTP supervisor strategy atom.
+%%
+%% OTP expects snake_case atoms (one_for_one), while Beamtalk uses camelCase
+%% symbols (#oneForOne). Unknown strategies pass through unchanged so OTP
+%% can report the error with context.
+-spec to_otp_strategy(atom()) -> atom().
+to_otp_strategy(oneForOne) -> one_for_one;
+to_otp_strategy(oneForAll) -> one_for_all;
+to_otp_strategy(restForOne) -> rest_for_one;
+to_otp_strategy(S) -> S.
 
 %% @private
 %% Convert a Beamtalk child spec dict to an OTP-compatible child spec map.
@@ -380,9 +514,19 @@ build_child_spec(Spec) when is_map(Spec) ->
 %% For nested supervisor children (Supervisor/DynamicSupervisor subclasses), the
 %% Beamtalk IR uses #spawn as the start function, but OTP requires start_link/0
 %% so the supervisor process is linked into the tree. This is translated here.
+%%
+%% For worker children, Beamtalk's spawn/0 returns {beamtalk_object,...} which
+%% OTP supervisor does not accept (it expects {ok, Pid}). The generated
+%% start_link/1 returns {ok, Pid} directly from gen_server:start_link, so
+%% worker children use start_link/1 with an init-args map instead of spawn/0.
 -spec spec_to_otp(map()) -> map().
 spec_to_otp(BtSpec) ->
-    [ClassObj, _StartFn, _StartArgs] = maps:get(start, BtSpec),
+    %% `start` is a Beamtalk Array #[ClassObj, StartFn, StartArgs].
+    %% Beamtalk Arrays are tagged maps: #{'$beamtalk_class' => 'Array', 'data' => ErlangArray}.
+    %% Use array:get/2 (0-based) to access elements.
+    StartBtArray = maps:get(start, BtSpec),
+    StartErlArray = maps:get(data, StartBtArray),
+    ClassObj = array:get(0, StartErlArray),
     ChildModule = element(3, ClassObj),
     ChildClassPid = element(4, ClassObj),
     ChildClass = beamtalk_object_class:class_name(ChildClassPid),
@@ -392,9 +536,36 @@ spec_to_otp(BtSpec) ->
                 %% Nested supervisor: OTP expects start_link/0 to link the child supervisor.
                 {ChildModule, start_link, []};
             false ->
-                %% Worker: use the Beamtalk IR start function (spawn or spawnWith:).
-                [_ClassObj2, StartFn, StartArgs] = maps:get(start, BtSpec),
-                {ChildModule, StartFn, StartArgs}
+                %% Worker: use start_link/1 (returns {ok, Pid}) for OTP compatibility.
+                %% spawn/0 wraps the pid in {beamtalk_object,...} which OTP rejects.
+                StartFn = array:get(1, StartErlArray),
+                InitArgs =
+                    case StartFn of
+                        spawn ->
+                            %% No init args — start with empty state map.
+                            [#{}];
+                        'spawnWith:' ->
+                            %% #(self args) uses list syntax (#(...)) so it compiles to an
+                            %% Erlang list [ArgsMap] — use it directly as the start_link arg.
+                            array:get(2, StartErlArray);
+                        Other ->
+                            %% Unknown start function — raise structured error rather than crashing.
+                            %% Tag as 'SupervisionSpec'/'childSpec' to reflect where the spec
+                            %% originated (SupervisionSpec>>childSpec), not the supervisor itself.
+                            Error = beamtalk_error:new(
+                                runtime_error,
+                                'SupervisionSpec',
+                                childSpec,
+                                iolist_to_binary(
+                                    io_lib:format(
+                                        "unsupported child start function: ~p (expected spawn or spawnWith:)",
+                                        [Other]
+                                    )
+                                )
+                            ),
+                            error(beamtalk_exception_handler:ensure_wrapped(Error))
+                    end,
+                {ChildModule, start_link, InitArgs}
         end,
     #{
         id => maps:get(id, BtSpec),

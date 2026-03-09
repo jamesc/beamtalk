@@ -14,6 +14,7 @@ Planned language features for beamtalk. See [beamtalk-principles.md](beamtalk-pr
 - [Core Syntax](#core-syntax)
 - [Gradual Typing (ADR 0025)](#gradual-typing-adr-0025)
 - [Actor Message Passing](#actor-message-passing)
+- [Supervision Trees (ADR 0059)](#supervision-trees-adr-0059)
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
@@ -730,6 +731,152 @@ bus notify: "hello".    // bus sends subscriber ! receive: "hello" internally
 col events.             // barrier: ensures col processed the cast message
 col eventCount          // => 1 (now correctly reflects the event)
 ```
+
+---
+
+## Supervision Trees (ADR 0059)
+
+Beamtalk provides declarative OTP supervision trees via `Supervisor subclass:` and `DynamicSupervisor subclass:`. This is the Beamtalk idiom for "let it crash" fault tolerance — define which actors should be restarted automatically, and how.
+
+### Static Supervisor
+
+Subclass `Supervisor` and override `class children` to return a list of actor classes (or `SupervisionSpec` values for per-child configuration). The supervisor starts all children at startup using OTP `one_for_one` strategy by default.
+
+> **Important:** `class children`, `class strategy`, `class maxRestarts`, and `class restartWindow` are called during supervisor startup from the OTP `init/1` callback — before the class gen_server is available. These methods must be **pure** (return literal values only). Do not send messages to `self`, call other class methods via dispatch, or read class variables from within these methods.
+
+```beamtalk
+Supervisor subclass: WebApp
+  class children => #(DatabasePool HTTPRouter MetricsCollector)
+```
+
+Start the supervisor with `supervise`. It registers under its class name so it can be found from anywhere:
+
+```beamtalk
+app := WebApp supervise
+// => #Supervisor<WebApp,_>
+
+// Idempotent — returns the already-running instance if called again
+app2 := WebApp supervise
+// => #Supervisor<WebApp,_>
+
+// Find the running instance by class name (no reference needed)
+WebApp current
+// => #Supervisor<WebApp,_>
+```
+
+Inspect and manage children:
+
+```beamtalk
+app count                  // => 3  (number of running children)
+app children               // => ["DatabasePool","HTTPRouter","MetricsCollector"]  (child ids)
+app which: DatabasePool    // => #Actor<DatabasePool,_>  (running child instance)
+app terminate: HTTPRouter  // gracefully stop a single child
+app stop                   // stop the supervisor and all children
+
+// After stop:
+WebApp current             // => nil
+```
+
+### Class-Side Configuration Defaults
+
+Override these class methods in your subclass to customise restart behaviour:
+
+| Method | Default | Description |
+|--------|---------|-------------|
+| `class strategy` | `#oneForOne` | OTP restart strategy (`#oneForOne`, `#oneForAll`, `#restForOne`) |
+| `class maxRestarts` | `10` | Max restarts before supervisor gives up |
+| `class restartWindow` | `60` | Time window (seconds) for `maxRestarts` |
+
+```beamtalk
+Supervisor subclass: CriticalApp
+  class children => #(Database Cache)
+  class strategy => #oneForAll       // restart all if any child crashes
+  class maxRestarts => 3             // give up after 3 crashes in 60 seconds
+```
+
+### Actor Supervision Policy
+
+Each actor class declares its OTP restart policy via `class supervisionPolicy`:
+
+```beamtalk
+Actor subclass: DatabasePool
+  class supervisionPolicy => #permanent   // always restart on crash
+
+Actor subclass: RequestHandler
+  class supervisionPolicy => #transient   // restart only on abnormal exit
+
+Actor subclass: BackgroundJob
+  class supervisionPolicy => #temporary   // never restart (default)
+```
+
+### SupervisionSpec — Per-Child Overrides
+
+Use `SupervisionSpec` when you need to override a child's restart policy or provide startup arguments:
+
+```beamtalk
+Supervisor subclass: WebApp
+  class children =>
+    #(DatabasePool
+      HTTPRouter supervisionSpec withRestart: #transient
+      (MetricsCollector supervisionSpec withId: #metrics withArgs: #{#port => 9090}))
+```
+
+### Dynamic Supervisor
+
+Subclass `DynamicSupervisor` to manage pools of actors started at runtime. Override `class childClass` to declare which actor class the pool manages.
+
+```beamtalk
+DynamicSupervisor subclass: WorkerPool
+  class childClass => Worker
+```
+
+```beamtalk
+pool := WorkerPool supervise
+// => #DynamicSupervisor<WorkerPool,_>
+
+// Start children dynamically
+w1 := pool startChild          // => #Actor<Worker,_>
+w2 := pool startChild          // => #Actor<Worker,_>
+pool count                     // => 2
+
+// Terminate a specific child
+pool terminateChild: w1        // => nil
+pool count                     // => 1
+
+// Stop the whole pool
+pool stop
+WorkerPool current             // => nil
+```
+
+### Nested Supervisors
+
+Supervisors can be nested — include another supervisor class in `children`:
+
+```beamtalk
+Supervisor subclass: AppRoot
+  class children => #(DatabaseSupervisor WebTierSupervisor MetricsSupervisor)
+```
+
+Nested supervisor children are identified by `isSupervisor => true` and started via OTP `start_link/0`, ensuring they are correctly linked into the supervision tree. The outer supervisor shuts down inner supervisors (and all their children) gracefully on `stop`.
+
+```beamtalk
+root := AppRoot supervise
+root count                          // => 3
+root which: DatabaseSupervisor      // => #Supervisor<DatabaseSupervisor,_>
+```
+
+### BEAM Mapping
+
+| Beamtalk | BEAM |
+|----------|------|
+| `Supervisor subclass:` | `-behaviour(supervisor)` with `one_for_one` |
+| `DynamicSupervisor subclass:` | `-behaviour(supervisor)` with `simple_one_for_one` |
+| `supervise` | `supervisor:start_link({local, Module}, Module, [])` |
+| `current` | `whereis(Module)` |
+| `count` | `supervisor:count_children/1` (active count) |
+| `children` | `supervisor:which_children/1` (running child ids) |
+| `which: Class` | find child by module in `which_children` result |
+| `stop` | `gen_server:stop/1` |
 
 ---
 

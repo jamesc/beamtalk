@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: inner Supervisor for nested supervisor tests.
+// Manages Counter workers as children.
+// Used by supervisor.btscript (BT-1223).
+
+Supervisor subclass: E2EInnerSupervisor
+
+  class children -> List => #(Counter)

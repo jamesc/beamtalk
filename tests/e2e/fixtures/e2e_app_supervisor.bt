@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: static Supervisor subclass with one Counter child.
+// Used by supervisor.btscript (BT-1223).
+
+Supervisor subclass: E2EAppSupervisor
+
+  class children -> List => #(Counter)

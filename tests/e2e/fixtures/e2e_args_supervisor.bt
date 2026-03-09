@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E fixture: static Supervisor subclass that starts a Counter with initial args.
+// Used to exercise the SupervisionSpec withArgs: / spawnWith: code path (BT-1223).
+
+Supervisor subclass: E2EArgsSupervisor
+
+  class children -> List =>
+    spec := Counter supervisionSpec withArgs: #{#value => 42}
+    #(spec)

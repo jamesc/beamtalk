@@ -109,7 +109,7 @@ impl CoreErlangGenerator {
         docs.push(Document::Str("\n\n"));
 
         // init/1 for static supervisor
-        docs.push(Self::generate_static_sup_init(&class_name));
+        docs.push(Self::generate_static_sup_init(&class_name, &module_name));
         docs.push(Document::Str("\n"));
 
         // User-defined class-side method functions
@@ -165,7 +165,7 @@ impl CoreErlangGenerator {
 
         // Module header
         // BT-1220: childClass/0 is called directly by beamtalk_supervisor:startChild/1,2
-        // (SupMod:'childClass'() at `beamtalk_supervisor.erl:217`)
+        // (SupMod:'childClass'() at `beamtalk_supervisor.erl (startChild/1,2)`)
         docs.push(docvec![
             "module '",
             Document::String(module_name.clone()),
@@ -186,7 +186,7 @@ impl CoreErlangGenerator {
         docs.push(Document::Str("\n\n"));
 
         // init/1 for dynamic supervisor
-        docs.push(Self::generate_dynamic_sup_init(&class_name));
+        docs.push(Self::generate_dynamic_sup_init(&class_name, &module_name));
         docs.push(Document::Str("\n\n"));
 
         // childClass/0 — called by beamtalk_supervisor:startChild to resolve the child module
@@ -231,72 +231,51 @@ impl CoreErlangGenerator {
 
     /// Generates `init/1` for a static supervisor (`Supervisor subclass:`).
     ///
-    /// Calls `children`, `strategy`, `maxRestarts`, `restartWindow` via the
-    /// class dispatch system (so inherited defaults from `Supervisor` are used
-    /// automatically) and delegates child spec construction to
-    /// `beamtalk_supervisor:build_child_specs/1`.
+    /// Delegates to `beamtalk_supervisor:static_init/2` which calls class module
+    /// functions directly (bypassing the class `gen_server`) to avoid the deadlock
+    /// that would occur if `init/1` used `class_send` — the class `gen_server` is
+    /// blocked waiting for `supervisor:start_link` to return.
     ///
     /// ```erlang
     /// init([]) ->
-    ///     SupCp = beamtalk_class_registry:whereis_class('WebApp'),
-    ///     Children = beamtalk_object_class:class_send(SupCp, children, []),
-    ///     Strategy = beamtalk_object_class:class_send(SupCp, strategy, []),
-    ///     MaxR = beamtalk_object_class:class_send(SupCp, maxRestarts, []),
-    ///     MaxT = beamtalk_object_class:class_send(SupCp, restartWindow, []),
-    ///     SupFlags = #{strategy => Strategy, intensity => MaxR, period => MaxT},
-    ///     Specs = beamtalk_supervisor:build_child_specs(Children),
-    ///     {ok, {SupFlags, Specs}}.
+    ///     beamtalk_supervisor:static_init('bt@webapp', 'WebApp').
     /// ```
-    fn generate_static_sup_init(class_name: &str) -> Document<'static> {
+    fn generate_static_sup_init(class_name: &str, module_name: &str) -> Document<'static> {
         docvec![
             "'init'/1 = fun (_Args) ->",
-            "\n    let SupCp = call 'beamtalk_class_registry':'whereis_class'('",
+            "\n    call 'beamtalk_supervisor':'static_init'('",
+            Document::String(module_name.to_string()),
+            "', '",
             Document::String(class_name.to_string()),
-            "') in",
-            "\n    let SupChildren = call 'beamtalk_object_class':'class_send'(SupCp, 'children', []) in",
-            "\n    let SupStrategy = call 'beamtalk_object_class':'class_send'(SupCp, 'strategy', []) in",
-            "\n    let SupMaxR = call 'beamtalk_object_class':'class_send'(SupCp, 'maxRestarts', []) in",
-            "\n    let SupMaxT = call 'beamtalk_object_class':'class_send'(SupCp, 'restartWindow', []) in",
-            "\n    let SupFlags = ~{'strategy' => SupStrategy, 'intensity' => SupMaxR, 'period' => SupMaxT}~ in",
-            "\n    let SupSpecs = call 'beamtalk_supervisor':'build_child_specs'(SupChildren) in",
-            "\n    {'ok', {SupFlags, SupSpecs}}",
+            "')",
         ]
     }
 
     /// Generates `init/1` for a dynamic supervisor (`DynamicSupervisor subclass:`).
     ///
-    /// Uses `simple_one_for_one` strategy with a single child spec template
-    /// built from `childClass` via `beamtalk_supervisor:build_child_specs/1`.
+    /// Delegates to `beamtalk_supervisor:dynamic_init/2` which calls class module
+    /// functions directly (bypassing the class `gen_server`) to avoid the deadlock
+    /// that would occur if `init/1` used `class_send`.
     ///
     /// ```erlang
     /// init([]) ->
-    ///     SupCp = beamtalk_class_registry:whereis_class('WorkerPool'),
-    ///     ChildClass = beamtalk_object_class:class_send(SupCp, childClass, []),
-    ///     MaxR = beamtalk_object_class:class_send(SupCp, maxRestarts, []),
-    ///     MaxT = beamtalk_object_class:class_send(SupCp, restartWindow, []),
-    ///     SupFlags = #{strategy => simple_one_for_one, intensity => MaxR, period => MaxT},
-    ///     [Spec] = beamtalk_supervisor:build_child_specs([ChildClass]),
-    ///     {ok, {SupFlags, [Spec]}}.
+    ///     beamtalk_supervisor:dynamic_init('bt@workerpool', 'WorkerPool').
     /// ```
-    fn generate_dynamic_sup_init(class_name: &str) -> Document<'static> {
+    fn generate_dynamic_sup_init(class_name: &str, module_name: &str) -> Document<'static> {
         docvec![
             "'init'/1 = fun (_Args) ->",
-            "\n    let SupCp = call 'beamtalk_class_registry':'whereis_class'('",
+            "\n    call 'beamtalk_supervisor':'dynamic_init'('",
+            Document::String(module_name.to_string()),
+            "', '",
             Document::String(class_name.to_string()),
-            "') in",
-            "\n    let SupChildClass = call 'beamtalk_object_class':'class_send'(SupCp, 'childClass', []) in",
-            "\n    let SupMaxR = call 'beamtalk_object_class':'class_send'(SupCp, 'maxRestarts', []) in",
-            "\n    let SupMaxT = call 'beamtalk_object_class':'class_send'(SupCp, 'restartWindow', []) in",
-            "\n    let SupFlags = ~{'strategy' => 'simple_one_for_one', 'intensity' => SupMaxR, 'period' => SupMaxT}~ in",
-            "\n    let SupSpecs = call 'beamtalk_supervisor':'build_child_specs'([SupChildClass]) in",
-            "\n    {'ok', {SupFlags, SupSpecs}}",
+            "')",
         ]
     }
 
     /// Generates `childClass/0` for dynamic supervisors.
     ///
     /// Called directly by `beamtalk_supervisor:startChild/1,2` as `SupMod:'childClass'()`
-    /// to resolve the child class object at runtime (see `beamtalk_supervisor.erl:217`).
+    /// to resolve the child class object at runtime (see `beamtalk_supervisor.erl (startChild/1,2)`).
     ///
     /// ```erlang
     /// childClass() ->

@@ -121,73 +121,22 @@ fn test_static_supervisor_start_link_calls_supervisor_start_link() {
 }
 
 #[test]
-fn test_static_supervisor_init_uses_class_dispatch() {
+fn test_static_supervisor_init_delegates_to_static_init() {
     let module = make_static_supervisor_module();
     let code =
         generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
+    // init/1 must delegate to beamtalk_supervisor:static_init/2 to avoid a gen_server
+    // deadlock: the class gen_server is blocked waiting for supervisor:start_link to return,
+    // so calling class_send from init/1 would deadlock.
+    // Match the exact call shape to verify argument order (module atom first, class atom second).
     assert!(
-        code.contains("beamtalk_class_registry':'whereis_class'('WebApp')"),
-        "init/1 must look up class pid via class registry. Got:\n{code}"
+        code.contains("call 'beamtalk_supervisor':'static_init'('bt@webapp', 'WebApp')"),
+        "init/1 must delegate to beamtalk_supervisor:static_init/2 with module and class atoms. Got:\n{code}"
     );
+    // Must NOT contain direct class_send calls — those would deadlock.
     assert!(
-        code.contains("beamtalk_object_class':'class_send'"),
-        "init/1 must invoke methods via class dispatch. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_static_supervisor_init_fetches_children_strategy_restarts() {
-    let module = make_static_supervisor_module();
-    let code =
-        generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("'children'"),
-        "init/1 must call 'children'. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'strategy'"),
-        "init/1 must call 'strategy'. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'maxRestarts'"),
-        "init/1 must call 'maxRestarts'. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'restartWindow'"),
-        "init/1 must call 'restartWindow'. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_static_supervisor_init_builds_sup_flags_map() {
-    let module = make_static_supervisor_module();
-    let code =
-        generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("'strategy'") && code.contains("'intensity'") && code.contains("'period'"),
-        "init/1 must build SupFlags map with strategy/intensity/period. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_static_supervisor_init_delegates_to_build_child_specs() {
-    let module = make_static_supervisor_module();
-    let code =
-        generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("beamtalk_supervisor':'build_child_specs'"),
-        "init/1 must delegate to beamtalk_supervisor:build_child_specs/1. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_static_supervisor_init_returns_ok_tuple() {
-    let module = make_static_supervisor_module();
-    let code =
-        generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
-    assert!(
-        code.contains("{'ok',"),
-        "init/1 must return {{ok, ...}}. Got:\n{code}"
+        !code.contains("beamtalk_object_class':'class_send'"),
+        "init/1 must NOT call class_send directly (causes deadlock). Got:\n{code}"
     );
 }
 
@@ -240,13 +189,15 @@ fn test_dynamic_supervisor_has_supervisor_behaviour() {
 }
 
 #[test]
-fn test_dynamic_supervisor_init_uses_simple_one_for_one() {
+fn test_dynamic_supervisor_init_delegates_to_dynamic_init() {
     let module = make_dynamic_supervisor_module();
     let code = generate_module(&module, CodegenOptions::new("bt@workerpool"))
         .expect("codegen should succeed");
+    // simple_one_for_one is set inside beamtalk_supervisor:dynamic_init/2 (runtime),
+    // not in the generated init/1. Verify the delegation with correct argument order.
     assert!(
-        code.contains("'simple_one_for_one'"),
-        "Dynamic supervisor init/1 must use simple_one_for_one strategy. Got:\n{code}"
+        code.contains("call 'beamtalk_supervisor':'dynamic_init'('bt@workerpool', 'WorkerPool')"),
+        "Dynamic supervisor init/1 must delegate to beamtalk_supervisor:dynamic_init/2 with module and class atoms. Got:\n{code}"
     );
 }
 
