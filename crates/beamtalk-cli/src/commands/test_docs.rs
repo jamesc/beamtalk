@@ -155,12 +155,16 @@ fn find_md_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 
 /// Extract beamtalk code blocks from `.md` files and write synthetic `.btscript` files.
 ///
-/// Returns `(md_path, btscript_path)` pairs. Files with no blocks are silently skipped.
+/// Returns `(pairs, skipped_with_blocks)`:
+/// - `pairs` — `(md_path, btscript_path)` for files that had runnable assertions.
+/// - `skipped_with_blocks` — count of files that had beamtalk fences but all
+///   lacked `// =>` markers (so were silently excluded from the run).
 fn extract_to_btscript_files(
     md_files: &[Utf8PathBuf],
     btscript_dir: &Utf8Path,
-) -> Result<Vec<(Utf8PathBuf, Utf8PathBuf)>> {
+) -> Result<(Vec<(Utf8PathBuf, Utf8PathBuf)>, usize)> {
     let mut pairs: Vec<(Utf8PathBuf, Utf8PathBuf)> = Vec::new();
+    let mut skipped_with_blocks = 0usize;
     for md_file in md_files {
         let content = fs::read_to_string(md_file)
             .into_diagnostic()
@@ -171,6 +175,7 @@ fn extract_to_btscript_files(
                 warn!(
                     "'{md_file}' has beamtalk code blocks but none contain `// =>` assertions — skipped"
                 );
+                skipped_with_blocks += 1;
             }
             continue;
         }
@@ -195,7 +200,7 @@ fn extract_to_btscript_files(
             .wrap_err_with(|| format!("Failed to write btscript for '{md_file}'"))?;
         pairs.push((md_file.clone(), btscript_path));
     }
-    Ok(pairs)
+    Ok((pairs, skipped_with_blocks))
 }
 
 /// Run doctests extracted from Markdown files.
@@ -235,9 +240,17 @@ pub fn run_tests(path: &str, no_warnings: bool, quiet: bool, verbose: bool) -> R
         .into_diagnostic()
         .wrap_err("Failed to create btscript staging directory")?;
 
-    let btscript_files = extract_to_btscript_files(&md_files, &btscript_dir)?;
+    let (btscript_files, skipped_with_blocks) =
+        extract_to_btscript_files(&md_files, &btscript_dir)?;
 
     if btscript_files.is_empty() {
+        if skipped_with_blocks > 0 {
+            miette::bail!(
+                "No runnable doctests found in '{test_path}': {skipped_with_blocks} file(s) had \
+                 beamtalk code blocks but none contained `// =>` assertions. \
+                 Add `// => value` to expression lines or use `beamtalk test` for BUnit tests."
+            );
+        }
         println!("No ```beamtalk code blocks found in '{test_path}'");
         return Ok(());
     }
