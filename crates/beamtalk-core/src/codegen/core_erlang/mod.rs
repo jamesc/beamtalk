@@ -2022,12 +2022,10 @@ impl CoreErlangGenerator {
         // These list-ops pack updated locals into the StateAcc map returned as
         // element(2, ...) of the result tuple, so the outer method body can extract them
         // via maps:get — same pattern as do:/inject:into:.
-        if matches!(
-            selector_name.as_str(),
-            "collect:" | "select:" | "reject:"
-        ) && arguments
-            .first()
-            .is_some_and(|a| matches!(a, Expression::Block(_)))
+        if matches!(selector_name.as_str(), "collect:" | "select:" | "reject:")
+            && arguments
+                .first()
+                .is_some_and(|a| matches!(a, Expression::Block(_)))
         {
             let Some(Expression::Block(body_block)) = arguments.first() else {
                 return None;
