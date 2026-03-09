@@ -784,7 +784,7 @@ mod tests {
         // Two learning chapters
         fs::write(
             learning_dir.join("01-getting-started.md"),
-            "# Getting Started\n\nHello world.\n\n```beamtalk\n'hello' // => 'hello'\n```\n",
+            "# Getting Started\n\nHello world.\n\n```beamtalk\n\"hello\" size // => 5\n```\n",
         )
         .unwrap();
         fs::write(

@@ -52,9 +52,7 @@ just test-learn
 ## Running the tests
 
 ```bash
-just test-learn           # run all learning guide examples
-just test-learn-script    # run only .btscript chapters
-just test-learn-bunit     # run only .bt chapters (need class definitions)
+just test-learn           # run all learning guide doctests
 ```
 
 ---

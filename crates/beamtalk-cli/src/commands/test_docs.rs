@@ -23,25 +23,34 @@ use tracing::{info, instrument};
 // Markdown extraction
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Extract all ` ```beamtalk ` code blocks from markdown content, concatenating them in order.
+/// Extract ` ```beamtalk ` code blocks that contain `// =>` assertions.
 ///
-/// Blocks are separated by a blank line so the parser treats them as independent top-level
-/// expressions while still sharing variable scope (state is threaded through the single
-/// `eval` call per expression).
+/// Only blocks that contain at least one `// =>` marker are included — blocks
+/// without assertions (e.g. BUnit `TestCase subclass:` examples) are silently
+/// skipped. Qualifying blocks are concatenated in document order, separated by
+/// a blank line so the parser treats them as independent top-level expressions
+/// while still sharing variable scope.
 pub(crate) fn extract_btscript_from_markdown(content: &str) -> String {
     let mut result = String::new();
     let mut in_block = false;
+    let mut current_block = String::new();
 
     for line in content.lines() {
         let trimmed = line.trim();
         if !in_block && (trimmed == "```beamtalk" || trimmed == "``` beamtalk") {
             in_block = true;
+            current_block.clear();
         } else if in_block && trimmed.starts_with("```") {
             in_block = false;
-            result.push('\n'); // blank line between blocks
+            // Only keep blocks that contain at least one assertion.
+            if current_block.contains("// =>") {
+                result.push_str(&current_block);
+                result.push('\n'); // blank line between blocks
+            }
+            current_block.clear();
         } else if in_block {
-            result.push_str(line);
-            result.push('\n');
+            current_block.push_str(line);
+            current_block.push('\n');
         }
     }
 
@@ -338,6 +347,18 @@ mod tests {
         let result = extract_btscript_from_markdown(md);
         assert!(!result.contains("-module(foo)"));
         assert!(result.contains("1 + 1"));
+    }
+
+    #[test]
+    fn test_extract_skips_blocks_without_assertions() {
+        // BUnit-style blocks (no // =>) are silently skipped
+        let md = "```beamtalk\nTestCase subclass: Foo\n  testBar => self assert: 1 equals: 1\n```\n\n```beamtalk\n3 + 4  // => 7\n```\n";
+        let result = extract_btscript_from_markdown(md);
+        assert!(
+            !result.contains("TestCase subclass"),
+            "BUnit block should be skipped"
+        );
+        assert!(result.contains("3 + 4"), "doctest block should be kept");
     }
 
     // ── normalize_inline_assertions ────────────────────────────────────────

@@ -643,11 +643,12 @@ fn discover_chapters(learning_source: &Utf8Path) -> Result<Vec<ChapterInfo>> {
     Ok(chapters)
 }
 
-/// Extract the human title from a chapter's first H1 heading.
+/// Extract the human title from a chapter's first heading (any level: `#`, `##`, …).
 fn extract_chapter_title(content: &str) -> String {
     for line in content.lines() {
-        if let Some(rest) = line.strip_prefix("# ") {
-            return rest.trim().to_string();
+        let stripped = line.trim_start_matches('#');
+        if stripped.len() < line.len() && stripped.starts_with(' ') {
+            return stripped.trim().to_string();
         }
     }
     String::from("Untitled Chapter")
