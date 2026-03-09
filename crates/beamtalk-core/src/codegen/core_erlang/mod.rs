@@ -102,6 +102,7 @@ mod repl_codegen;
 pub mod selector_mangler;
 mod spec_codegen;
 mod state_codegen;
+mod supervisor_codegen;
 mod util;
 mod value_type_codegen;
 mod variable_context;
@@ -1430,6 +1431,12 @@ impl CoreErlangGenerator {
         hierarchy: &crate::semantic_analysis::class_hierarchy::ClassHierarchy,
     ) -> bool {
         if let Some(class) = module.classes.first() {
+            // BT-1220: Concrete Supervisor/DynamicSupervisor subclasses use supervisor codegen,
+            // routed through generate_actor_module which delegates to supervisor_codegen.
+            // Abstract base classes (Supervisor, DynamicSupervisor themselves) remain value types.
+            if class.supervisor_kind.is_some() && !class.is_abstract {
+                return true;
+            }
             let name = class.name.name.as_str();
             if name == "Actor" {
                 return true;
