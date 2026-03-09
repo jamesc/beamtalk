@@ -23,7 +23,7 @@
 
 use super::document::Document;
 use super::util::ClassIdentity;
-use super::{spec_codegen, CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, spec_codegen};
 use crate::ast::{MethodKind, Module, SupervisorKind};
 use crate::docvec;
 
