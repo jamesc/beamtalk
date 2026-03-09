@@ -343,12 +343,16 @@ impl CoreErlangGenerator {
         if negate {
             docs.push(docvec![
                 format!(" apply 'while'/{arity} ({final_args_str}) "),
-                Document::String(format!("<'true'> when 'true' -> {exit_stateacc} end ")),
+                "<'true'> when 'true' -> ",
+                exit_stateacc,
+                " end ",
             ]);
         } else {
             docs.push(docvec![
                 format!(" apply 'while'/{arity} ({final_args_str}) "),
-                Document::String(format!("<'false'> when 'true' -> {exit_stateacc} end ")),
+                "<'false'> when 'true' -> ",
+                exit_stateacc,
+                " end ",
             ]);
         }
 

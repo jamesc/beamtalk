@@ -147,7 +147,7 @@ sum_direct_params(N) ->
     maps:get('__local__sum', FinalState).
 
 sum_direct_params_loop(0, Sum) ->
-    ExitSA = #{'__local__sum' => Sum},
+    ExitSA = maps:put('__local__sum', Sum, maps:new()),
     {nil, ExitSA};
 sum_direct_params_loop(I, Sum) ->
     Sum1 = Sum + 1,
@@ -161,7 +161,7 @@ sum_direct_params_maybe_await(N) ->
     maps:get('__local__sum', FinalState).
 
 sum_direct_params_await_loop(0, Sum) ->
-    ExitSA = #{'__local__sum' => Sum},
+    ExitSA = maps:put('__local__sum', Sum, maps:new()),
     {nil, ExitSA};
 sum_direct_params_await_loop(I, Sum) ->
     Sum1 = beamtalk_future:maybe_await(Sum) + beamtalk_future:maybe_await(1),

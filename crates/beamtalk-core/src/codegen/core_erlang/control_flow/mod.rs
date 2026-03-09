@@ -118,6 +118,8 @@ impl ThreadingPlan {
         // - caller opts in via `allow_direct_params`
         // - there are local vars to thread
         // - the body has no field mutations or self-sends
+        // - the body has no Tier-2 block calls on threaded locals (those return {Result, StateAcc}
+        //   and require the StateAcc extraction that `generate_local_var_assignment_in_loop` does)
         // Field mutations require StateAcc to persist actor state across iterations.
         let use_direct_params = if !allow_direct_params || threaded_locals.is_empty() {
             false
@@ -130,7 +132,22 @@ impl ThreadingPlan {
                     false
                 }
             });
-            !body_analysis.has_state_effects() && !cond_has_state_effects
+            // Guard: if any threaded-local assignment's RHS is a Tier-2 block call,
+            // fall back to StateAcc mode so `generate_local_var_assignment_in_loop`
+            // can properly unpack the {Result, NewStateAcc} tuple.
+            let body_has_tier2_threaded_assign = body.body.iter().any(|s| {
+                if let Expression::Assignment { target, value, .. } = &s.expression {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        if threaded_locals.contains(&id.name.to_string()) {
+                            return generator.is_tier2_value_call(value);
+                        }
+                    }
+                }
+                false
+            });
+            !body_analysis.has_state_effects()
+                && !cond_has_state_effects
+                && !body_has_tier2_threaded_assign
         };
 
         Self {
@@ -247,15 +264,23 @@ impl ThreadingPlan {
         &self,
         param_names: &[String],
         generator: &mut CoreErlangGenerator,
-    ) -> String {
+    ) -> Document<'static> {
         if self.threaded_locals.is_empty() {
-            return format!("{{'nil', {}}}", self.initial_state_var);
+            return docvec![
+                "{'nil', ",
+                Document::String(self.initial_state_var.clone()),
+                "}",
+            ];
         }
-        let mut s = String::new();
+        let mut docs: Vec<Document<'static>> = Vec::new();
         // BT-1053: Value-type methods have no actor State — start from a fresh empty map.
         let mut current = if matches!(self.context, CodeGenContext::ValueType) {
             let exit_var = generator.fresh_temp_var("ExitSA");
-            let _ = write!(s, "let {exit_var} = call 'maps':'new'() in ");
+            docs.push(docvec![
+                "let ",
+                Document::String(exit_var.clone()),
+                " = call 'maps':'new'() in ",
+            ]);
             exit_var
         } else {
             self.initial_state_var.clone()
@@ -263,14 +288,21 @@ impl ThreadingPlan {
         for (var_name, param) in self.threaded_locals.iter().zip(param_names.iter()) {
             let key = self.state_key(var_name);
             let next_var = generator.fresh_temp_var("ExitSA");
-            let _ = write!(
-                s,
-                "let {next_var} = call 'maps':'put'('{key}', {param}, {current}) in "
-            );
+            docs.push(docvec![
+                "let ",
+                Document::String(next_var.clone()),
+                " = call 'maps':'put'('",
+                Document::String(key),
+                "', ",
+                Document::String(param.clone()),
+                ", ",
+                Document::String(current),
+                ") in ",
+            ]);
             current = next_var;
         }
-        let _ = write!(s, "{{'nil', {current}}}");
-        s
+        docs.push(docvec!["{'nil', ", Document::String(current), "}",]);
+        Document::Vec(docs)
     }
 
     /// Generates `let X = maps:get(key, FinalState) in` for each threaded local
@@ -956,7 +988,9 @@ impl CoreErlangGenerator {
                 " apply '{fn_name}'/{arity} ({recursive_args}) ",
                 fn_name = frame.fn_name
             ),
-            Document::String(format!("<'false'> when 'true' -> {exit_stateacc} end ")),
+            "<'false'> when 'true' -> ",
+            exit_stateacc,
+            " end ",
             Document::String(format!(
                 "in apply '{fn_name}'/{arity} ({initial_args})",
                 fn_name = frame.fn_name
