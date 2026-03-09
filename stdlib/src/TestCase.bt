@@ -131,7 +131,7 @@ Object subclass: TestCase
   /// self assertOk: (Result ok: 42)       // => 42
   /// self assertOk: (Result error: #nope) // fails: "Expected Result ok: but got Result error: #nope"
   /// ```
-  assertOk: result -> Object =>
+  assertOk: result :: Result -> Object =>
     result ok ifFalse: [
       self fail: "Expected Result ok: but got {result printString}"
     ]
@@ -148,7 +148,7 @@ Object subclass: TestCase
   /// self assertError: (Result ok: 42) equals: #not_found              // fails: "Expected Result error:..."
   /// self assertError: (Result error: #wrong) equals: #not_found       // fails: "Expected error #not_found, got #wrong"
   /// ```
-  assertError: result equals: expected -> Nil =>
+  assertError: result :: Result equals: expected -> Nil =>
     result isError ifFalse: [
       self fail: "Expected Result error: but got {result printString}"
     ]
