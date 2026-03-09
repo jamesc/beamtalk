@@ -1801,7 +1801,9 @@ impl CoreErlangGenerator {
             // BT-410: For on:do: and ensure:, the receiver (try body) is also
             // a block that may contain field mutations
             let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-            if matches!(sel.as_str(), "on:do:" | "ensure:") {
+            if crate::codegen::core_erlang::state_threading_selectors::is_exception_selector(
+                sel.as_str(),
+            ) {
                 if let Expression::Block(block) = receiver.as_ref() {
                     let analysis = block_analysis::analyze_block(block);
                     if self.needs_mutation_threading(&analysis) {
@@ -1814,9 +1816,8 @@ impl CoreErlangGenerator {
             // Check all block arguments (not just the last) since ifTrue:ifFalse: has
             // mutations in the first block but not necessarily in the second.
             // BT-1226: ifNotNil: also needs per-block mutation detection.
-            if matches!(
+            if crate::codegen::core_erlang::state_threading_selectors::is_conditional_selector(
                 sel.as_str(),
-                "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNotNil:"
             ) {
                 for arg in arguments {
                     if let Expression::Block(block) = arg {
