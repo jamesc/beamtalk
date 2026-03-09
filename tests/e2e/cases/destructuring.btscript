@@ -1,0 +1,117 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for destructuring assignment in the REPL (BT-1252).
+//
+// Destructuring persists all bound variables to the workspace State map,
+// just like simple assignment. The display value is the original RHS.
+
+// ===========================================================================
+// LIST DESTRUCTURING — SINGLE EXPRESSION
+// ===========================================================================
+
+// #(a, b) := #(1, 2) — list pattern on a list; display is the raw list [1,2]
+#(a, b) := #(1, 2)
+// => [1,2]
+
+// Variables persist across turns
+a
+// => 1
+
+b
+// => 2
+
+:clear
+// => ok
+
+// Three-element list destructuring
+#(x, y, z) := #(10, 20, 30)
+// => [10,20,30]
+
+x
+// => 10
+
+y
+// => 20
+
+z
+// => 30
+
+:clear
+// => ok
+
+// ===========================================================================
+// ARRAY DESTRUCTURING — SINGLE EXPRESSION
+// ===========================================================================
+
+// #[x, y] := #[10, 20] — binds x and y; display is the original array
+#[x, y] := #[10, 20]
+// => _
+
+x
+// => 10
+
+y
+// => 20
+
+:clear
+// => ok
+
+// ===========================================================================
+// TAGGED TUPLE DESTRUCTURING
+// ===========================================================================
+
+// {#ok, val} := (tuple from FFI) — binds val; display is the original tuple
+{#ok, val} := Erlang erlang list_to_tuple: #(#ok, 42)
+// => _
+
+val
+// => 42
+
+:clear
+// => ok
+
+// ===========================================================================
+// MULTI-STATEMENT: DESTRUCTURING IN INTERMEDIATE POSITION
+// ===========================================================================
+
+// Destructuring in intermediate position, then use bound vars in last expr
+#(a, b) := #(3, 4). a + b
+// => 7
+
+:clear
+// => ok
+
+// Array destructuring in intermediate position
+#[p, q] := #[5, 6]. p + q
+// => 11
+
+:clear
+// => ok
+
+// ===========================================================================
+// MULTI-STATEMENT: DESTRUCTURING IN LAST POSITION
+// ===========================================================================
+
+// Destructuring as last expression — binds vars, display is the RHS
+x := 5. #(p, q) := #(x, x + 1)
+// => [5,6]
+
+p
+// => 5
+
+q
+// => 6
+
+:clear
+// => ok
+
+// ===========================================================================
+// VARIABLE PERSISTENCE: DESTRUCTURED VARS USABLE IN SUBSEQUENT TURNS
+// ===========================================================================
+
+#(first, second) := #(3, 4)
+// => [3,4]
+
+first + second
+// => 7

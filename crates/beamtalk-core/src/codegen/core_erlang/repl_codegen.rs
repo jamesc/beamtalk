@@ -11,25 +11,10 @@
 
 use super::document::Document;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
-use crate::ast::Expression;
+use crate::ast::{Expression, Pattern};
 use crate::docvec;
 
 impl CoreErlangGenerator {
-    /// Rejects destructuring assignments in REPL context (BT-1264).
-    ///
-    /// Destructuring works in compiled class methods and test-eval modules,
-    /// but the REPL's state-map threading model requires dedicated codegen
-    /// that hasn't been implemented yet.
-    fn reject_repl_destructure(expr: &Expression) -> Result<()> {
-        if matches!(expr, Expression::DestructureAssignment { .. }) {
-            return Err(CodeGenError::UnsupportedFeature {
-                feature: "Destructuring assignment is not yet supported in the REPL".to_string(),
-                location: format!("{:?}", expr.span()),
-            });
-        }
-        Ok(())
-    }
-
     /// Generates a REPL evaluation module (with workspace bindings).
     ///
     /// Creates a module with a single `eval/1` function that evaluates
@@ -54,8 +39,6 @@ impl CoreErlangGenerator {
         &mut self,
         expression: &Expression,
     ) -> Result<Document<'static>> {
-        Self::reject_repl_destructure(expression)?;
-
         let previous_is_repl_mode = self.is_repl_mode;
         self.context = CodeGenContext::Repl;
         self.is_repl_mode = true;
@@ -99,10 +82,39 @@ impl CoreErlangGenerator {
         expression: &Expression,
         source_text: &str,
     ) -> Result<Document<'static>> {
-        Self::reject_repl_destructure(expression)?;
-
         self.push_scope();
         self.bind_var("__bindings__", "Bindings");
+
+        // DestructureAssignment: generate binding chain + state updates, then build module.
+        if let Expression::DestructureAssignment { pattern, value, .. } = expression {
+            let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
+            let final_state = self.current_state_var();
+            let src_bin = Self::binary_string_literal(source_text);
+            let module_name = self.module_name.clone();
+            let mut parts: Vec<Document<'static>> = vec![
+                docvec!["module '", module_name, "' ['eval'/1]\n"],
+                Document::Str("  attributes []\n"),
+                Document::Str("\n"),
+                Document::Str("'eval'/1 = fun (Bindings) ->\n"),
+                Document::Str("    let State = Bindings in\n"),
+            ];
+            parts.extend(binding_docs);
+            parts.push(docvec![
+                "    let Result = ",
+                Document::String(rhs_var),
+                " in\n",
+            ]);
+            parts.push(docvec![
+                "    {[{",
+                src_bin,
+                ", Result}], ",
+                Document::String(final_state),
+                "}\n",
+            ]);
+            parts.push(Document::Str("end\n"));
+            self.pop_scope();
+            return Ok(Document::Vec(parts));
+        }
 
         let expr_code = self.expression_doc(expression)?;
         let final_state = self.current_state_var();
@@ -177,7 +189,7 @@ impl CoreErlangGenerator {
 
         self.repl_loop_mutated = false;
         let last_expr = &expressions[n - 1];
-        let (last_val_doc, trace_return) =
+        let (pre_bindings, last_val_doc, trace_return) =
             self.generate_trace_last_expr(last_expr, &source_texts[n - 1], step_pairs)?;
 
         let module_name = self.module_name.clone();
@@ -189,6 +201,7 @@ impl CoreErlangGenerator {
             Document::Str("    let State = Bindings in\n"),
         ];
         all_parts.extend(body_parts);
+        all_parts.extend(pre_bindings);
         all_parts.push(Document::Str("    let Result = "));
         all_parts.push(last_val_doc);
         all_parts.push(Document::Str(" in\n    "));
@@ -203,13 +216,24 @@ impl CoreErlangGenerator {
     ///
     /// Mirrors `generate_repl_last_expr` but returns `{StepsList, FinalState}` instead of
     /// `{Result, FinalState}`.
+    ///
+    /// Returns `(pre_binding_docs, val_doc, trace_return)`.
     fn generate_trace_last_expr(
         &mut self,
         expr: &Expression,
         source_text: &str,
         prev_steps: Vec<(String, Document<'static>)>,
-    ) -> Result<(Document<'static>, Document<'static>)> {
-        Self::reject_repl_destructure(expr)?;
+    ) -> Result<(Vec<Document<'static>>, Document<'static>, Document<'static>)> {
+        // DestructureAssignment: generate binding chain + state updates.
+        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+            let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
+            let final_state = self.current_state_var();
+            let mut all_steps = prev_steps;
+            all_steps.push((source_text.to_string(), Document::Str("Result")));
+            let steps_doc = Self::build_steps_list_doc(all_steps);
+            let trace_return = docvec!["{", steps_doc, ", ", Document::String(final_state), "}"];
+            return Ok((binding_docs, Document::String(rhs_var), trace_return));
+        }
 
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
@@ -233,7 +257,7 @@ impl CoreErlangGenerator {
                     new_state,
                     "}",
                 ];
-                return Ok((val_doc, trace_return));
+                return Ok((Vec::new(), val_doc, trace_return));
             }
         }
 
@@ -266,7 +290,7 @@ impl CoreErlangGenerator {
             docvec!["{", steps_doc, ", State}"]
         };
 
-        Ok((val_doc, trace_return))
+        Ok((Vec::new(), val_doc, trace_return))
     }
 
     /// Builds a Core Erlang list literal from (`source_text`, `value_doc`) pairs.
@@ -334,6 +358,34 @@ impl CoreErlangGenerator {
         // Register Bindings in scope for variable lookups
         self.push_scope();
         self.bind_var("__bindings__", "Bindings");
+
+        // DestructureAssignment: generate binding chain + state updates, then build module.
+        if let Expression::DestructureAssignment { pattern, value, .. } = expression {
+            let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
+            let final_state = self.current_state_var();
+            let module_name = self.module_name.clone();
+            let mut parts: Vec<Document<'static>> = vec![
+                docvec!["module '", module_name, "' ['eval'/1]\n"],
+                Document::Str("  attributes []\n"),
+                Document::Str("\n"),
+                Document::Str("'eval'/1 = fun (Bindings) ->\n"),
+                Document::Str("    let State = Bindings in\n"),
+            ];
+            parts.extend(binding_docs);
+            parts.push(docvec![
+                "    let Result = ",
+                Document::String(rhs_var),
+                " in\n",
+            ]);
+            parts.push(docvec![
+                "    {Result, ",
+                Document::String(final_state),
+                "}\n",
+            ]);
+            parts.push(Document::Str("end\n"));
+            self.pop_scope();
+            return Ok(Document::Vec(parts));
+        }
 
         // Capture the expression output (ADR 0018 bridge)
         let expr_code = self.expression_doc(expression)?;
@@ -423,7 +475,7 @@ impl CoreErlangGenerator {
         // position doesn't incorrectly trigger element/2 unwrapping on the final return tuple.
         self.repl_loop_mutated = false;
         let last_expr = &expressions[n - 1];
-        let (last_val_doc, return_tuple) = self.generate_repl_last_expr(last_expr)?;
+        let (pre_bindings, last_val_doc, return_tuple) = self.generate_repl_last_expr(last_expr)?;
 
         let module_name = self.module_name.clone();
         let mut all_parts: Vec<Document<'static>> = vec![
@@ -434,6 +486,7 @@ impl CoreErlangGenerator {
             Document::Str("    let State = Bindings in\n"),
         ];
         all_parts.extend(body_parts);
+        all_parts.extend(pre_bindings);
         all_parts.push(Document::Str("    let Result = "));
         all_parts.push(last_val_doc);
         all_parts.push(Document::Str(" in\n    "));
@@ -452,6 +505,9 @@ impl CoreErlangGenerator {
     /// let _Rx = <value> in let StateN = call 'maps':'put'('x', _Rx, StateN-1) in
     /// ```
     ///
+    /// For destructuring assignments (`{a, b} := expr`), generates flat let-bindings
+    /// with `maps:put` calls to persist each bound variable to the REPL State.
+    ///
     /// For other expressions, generates:
     /// ```erlang
     /// let _Rx = <expr> in
@@ -461,7 +517,19 @@ impl CoreErlangGenerator {
         expr: &Expression,
         result_var: &str,
     ) -> Result<Document<'static>> {
-        Self::reject_repl_destructure(expr)?;
+        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+            let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
+            let mut result: Vec<Document<'static>> = binding_docs;
+            // Store rhs_var as result_var (discarded in intermediate position).
+            result.push(docvec![
+                "    let ",
+                result_var.to_string(),
+                " = ",
+                Document::String(rhs_var),
+                " in\n",
+            ]);
+            return Ok(Document::Vec(result));
+        }
 
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
@@ -520,13 +588,22 @@ impl CoreErlangGenerator {
     /// multi-statement REPL sequence.
     ///
     /// For identifier assignments, also adds the binding to State before returning.
+    /// For destructuring assignments, generates flat let-bindings with `maps:put` calls
+    /// and returns the original RHS as the display value.
     /// For other expressions, uses the same mutation-detection logic as the
     /// single-expression path.
+    ///
+    /// Returns `(pre_binding_docs, val_doc, return_tuple)`.
     fn generate_repl_last_expr(
         &mut self,
         expr: &Expression,
-    ) -> Result<(Document<'static>, Document<'static>)> {
-        Self::reject_repl_destructure(expr)?;
+    ) -> Result<(Vec<Document<'static>>, Document<'static>, Document<'static>)> {
+        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+            let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
+            let final_state = self.current_state_var();
+            let return_tuple = docvec!["{Result, ", Document::String(final_state), "}"];
+            return Ok((binding_docs, Document::String(rhs_var), return_tuple));
+        }
 
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
@@ -545,7 +622,7 @@ impl CoreErlangGenerator {
                     new_state,
                     "}",
                 ];
-                return Ok((val_doc, return_tuple));
+                return Ok((Vec::new(), val_doc, return_tuple));
             }
         }
         // Non-assignment: same logic as single-expression path
@@ -562,6 +639,180 @@ impl CoreErlangGenerator {
         } else {
             Document::Str("{Result, State}")
         };
-        Ok((val_doc, return_tuple))
+        Ok((Vec::new(), val_doc, return_tuple))
+    }
+
+    /// Generates REPL state-threading let-bindings for a destructuring assignment.
+    ///
+    /// Like the destructure-binding helpers in `expressions.rs`, but also emits
+    /// `maps:put` calls to persist each bound variable into the REPL State map.
+    ///
+    /// Returns `(binding_docs, rhs_var)` where:
+    /// - `binding_docs` is the flat chain of `let X = ... in\n` and
+    ///   `let StateN = maps:put('x', X, StateN-1) in\n` documents
+    /// - `rhs_var` is the temp variable name holding the original RHS value
+    ///   (used as the display result for the REPL)
+    #[allow(clippy::too_many_lines)]
+    fn generate_repl_destructure(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expression,
+    ) -> Result<(Vec<Document<'static>>, String)> {
+        let mut docs: Vec<Document<'static>> = Vec::new();
+
+        match pattern {
+            Pattern::Array { elements, .. } => {
+                let arr_var = self.fresh_temp_var("Arr");
+                let val_doc = self.expression_doc(value)?;
+                docs.push(docvec![
+                    "    let ",
+                    Document::String(arr_var.clone()),
+                    " = ",
+                    val_doc,
+                    " in\n",
+                ]);
+                for (idx, elem) in elements.iter().enumerate() {
+                    let one_based = Document::String((idx + 1).to_string());
+                    match elem {
+                        Pattern::Variable(id) => {
+                            let var_name = id.name.to_string();
+                            let core_var = Self::to_core_erlang_var(&id.name);
+                            self.bind_var(&id.name, &core_var);
+                            docs.push(docvec![
+                                "    let ",
+                                Document::String(core_var.clone()),
+                                " = call 'beamtalk_message_dispatch':'send'(",
+                                Document::String(arr_var.clone()),
+                                ", 'at:', [",
+                                one_based,
+                                "]) in\n",
+                            ]);
+                            let current_state = self.current_state_var();
+                            let new_state = self.next_state_var();
+                            docs.push(docvec![
+                                "    let ",
+                                Document::String(new_state),
+                                " = call 'maps':'put'('",
+                                Document::String(var_name),
+                                "', ",
+                                Document::String(core_var),
+                                ", ",
+                                Document::String(current_state),
+                                ") in\n",
+                            ]);
+                        }
+                        Pattern::Wildcard(_) => {}
+                        _ => {
+                            return Err(CodeGenError::UnsupportedFeature {
+                                feature: "Nested patterns in array destructuring".to_string(),
+                                location: format!("{:?}", elem.span()),
+                            });
+                        }
+                    }
+                }
+                Ok((docs, arr_var))
+            }
+            Pattern::Tuple { elements, .. } => {
+                let tup_var = self.fresh_temp_var("Tup");
+                let val_doc = self.expression_doc(value)?;
+                docs.push(docvec![
+                    "    let ",
+                    Document::String(tup_var.clone()),
+                    " = ",
+                    val_doc,
+                    " in\n",
+                ]);
+                // Arity check: verify the tuple has the expected number of elements.
+                let expected_arity = Document::String(elements.len().to_string());
+                let size_ok_var = self.fresh_temp_var("SizeOk");
+                let bad_arity_var = self.fresh_temp_var("BadArity");
+                docs.push(docvec![
+                    "    let ",
+                    Document::String(size_ok_var),
+                    " = case call 'erlang':'tuple_size'(",
+                    Document::String(tup_var.clone()),
+                    ") of <",
+                    expected_arity,
+                    "> when 'true' -> 'ok' <",
+                    Document::String(bad_arity_var),
+                    "> when 'true' -> call 'erlang':'error'({'badmatch', ",
+                    Document::String(tup_var.clone()),
+                    "}) end in\n",
+                ]);
+                for (idx, elem) in elements.iter().enumerate() {
+                    let one_based = Document::String((idx + 1).to_string());
+                    match elem {
+                        Pattern::Variable(id) => {
+                            let var_name = id.name.to_string();
+                            let core_var = Self::to_core_erlang_var(&id.name);
+                            self.bind_var(&id.name, &core_var);
+                            docs.push(docvec![
+                                "    let ",
+                                Document::String(core_var.clone()),
+                                " = call 'erlang':'element'(",
+                                one_based,
+                                ", ",
+                                Document::String(tup_var.clone()),
+                                ") in\n",
+                            ]);
+                            let current_state = self.current_state_var();
+                            let new_state = self.next_state_var();
+                            docs.push(docvec![
+                                "    let ",
+                                Document::String(new_state),
+                                " = call 'maps':'put'('",
+                                Document::String(var_name),
+                                "', ",
+                                Document::String(core_var),
+                                ", ",
+                                Document::String(current_state),
+                                ") in\n",
+                            ]);
+                        }
+                        Pattern::Literal(lit, _span) => {
+                            // Guard-check: extract the element and assert it equals the literal.
+                            let elem_var = self.fresh_temp_var("Elem");
+                            let guard_ok_var = self.fresh_temp_var("GuardOk");
+                            let mismatch_var = self.fresh_temp_var("Mismatch");
+                            let lit_doc = self.generate_literal(lit)?;
+                            docs.push(docvec![
+                                "    let ",
+                                Document::String(elem_var.clone()),
+                                " = call 'erlang':'element'(",
+                                one_based,
+                                ", ",
+                                Document::String(tup_var.clone()),
+                                ") in\n",
+                            ]);
+                            docs.push(docvec![
+                                "    let ",
+                                Document::String(guard_ok_var),
+                                " = case ",
+                                Document::String(elem_var),
+                                " of <",
+                                lit_doc,
+                                "> when 'true' -> 'ok' <",
+                                Document::String(mismatch_var),
+                                "> when 'true' -> call 'erlang':'error'({'badmatch', ",
+                                Document::String(tup_var.clone()),
+                                "}) end in\n",
+                            ]);
+                        }
+                        Pattern::Wildcard(_) => {}
+                        _ => {
+                            return Err(CodeGenError::UnsupportedFeature {
+                                feature: "Nested patterns in tuple destructuring".to_string(),
+                                location: format!("{:?}", elem.span()),
+                            });
+                        }
+                    }
+                }
+                Ok((docs, tup_var))
+            }
+            _ => Err(CodeGenError::UnsupportedFeature {
+                feature: "Unsupported destructuring pattern kind in REPL".to_string(),
+                location: "generate_repl_destructure".to_string(),
+            }),
+        }
     }
 }
