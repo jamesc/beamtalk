@@ -197,7 +197,7 @@ fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> R
 /// Run a package as a proper OTP application (BT-1191).
 ///
 /// Compiles the package (which generates the OTP app callback module), then
-/// starts a BEAM node that calls `application:ensure_all_started/{app_name}`
+/// starts a BEAM node that calls `application:ensure_all_started(AppName)`
 /// to bring up the root supervisor as an OTP application. The node stays alive
 /// until the application terminates.
 fn run_package_as_otp_application(

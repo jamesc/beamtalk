@@ -456,9 +456,15 @@ with_live_supervisor(ClassName, Selector, Fun) ->
 %% can both read/write without process ownership constraints.
 -spec ensure_root_table() -> ok.
 ensure_root_table() ->
-    case ets:whereis(?ROOT_SUPERVISOR_TABLE) of
+    case ets:info(?ROOT_SUPERVISOR_TABLE, id) of
         undefined ->
-            ets:new(?ROOT_SUPERVISOR_TABLE, [named_table, public, set]),
+            try
+                ets:new(?ROOT_SUPERVISOR_TABLE, [named_table, public, set])
+            catch
+                error:badarg ->
+                    %% Another process created the table concurrently — that's fine
+                    ok
+            end,
             ok;
         _ ->
             ok
