@@ -28,7 +28,7 @@
 ///     Transcript show: "done: " ++ code printString
 ///
 /// delegate := MyDelegate spawn
-/// proc := ReactiveSubprocess open: "echo" args: #("hello") notify: delegate
+/// proc := (ReactiveSubprocess open: "echo" args: #("hello") notify: delegate) unwrap
 /// ```
 ///
 /// ## With environment and working directory
@@ -50,7 +50,7 @@ Actor subclass: ReactiveSubprocess
   ///
   /// ## Examples
   /// ```beamtalk
-  /// proc := ReactiveSubprocess open: "echo" args: #("hello") notify: delegate
+  /// proc := (ReactiveSubprocess open: "echo" args: #("hello") notify: delegate) unwrap
   /// ```
   class open: command args: args notify: notify -> Result =>
     @primitive "open:args:notify:"
@@ -59,10 +59,10 @@ Actor subclass: ReactiveSubprocess
   ///
   /// ## Examples
   /// ```beamtalk
-  /// proc := ReactiveSubprocess
+  /// proc := (ReactiveSubprocess
   ///   open: "make" args: #("test")
   ///   env: #{#"CI" => #"true"} dir: #"/tmp"
-  ///   notify: delegate
+  ///   notify: delegate) unwrap
   /// ```
   class open: command args: args env: env dir: dir notify: notify -> Result =>
     @primitive "open:args:env:dir:notify:"

@@ -15,7 +15,7 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// resp := HTTPClient get: "https://httpbin.org/get"
+/// resp := (HTTPClient get: "https://httpbin.org/get") unwrap
 /// resp status      // => 200
 /// resp headers     // => #(#("content-type", "application/json"), ...)
 /// resp body        // => "{...}"

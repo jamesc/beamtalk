@@ -6,11 +6,11 @@
 /// ## One-shot convenience methods (class-side)
 ///
 /// ```beamtalk
-/// resp := HTTPClient get: "https://httpbin.org/get"
+/// resp := (HTTPClient get: "https://httpbin.org/get") unwrap
 /// resp status     // => 200
 ///
-/// resp := HTTPClient post: "https://httpbin.org/post" body: "{}"
-/// resp := HTTPClient delete: "https://httpbin.org/delete"
+/// resp := (HTTPClient post: "https://httpbin.org/post" body: "{}") unwrap
+/// resp := (HTTPClient delete: "https://httpbin.org/delete") unwrap
 /// ```
 ///
 /// ## Persistent client (actor instance)
@@ -24,8 +24,8 @@
 ///   #headers => #(#("X-Custom", "value")),
 ///   #timeout => 10000
 /// }
-/// resp := client get: "/get"
-/// resp := client post: "/post" body: "{}"
+/// resp := (client get: "/get") unwrap
+/// resp := (client post: "/post" body: "{}") unwrap
 /// client stop
 /// ```
 Actor subclass: HTTPClient
@@ -39,7 +39,7 @@ Actor subclass: HTTPClient
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := HTTPClient get: "https://httpbin.org/get"
+  /// resp := (HTTPClient get: "https://httpbin.org/get") unwrap
   /// resp status   // => 200
   /// ```
   class get: url :: String -> Result => (Erlang beamtalk_http) get: url
@@ -48,7 +48,7 @@ Actor subclass: HTTPClient
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := HTTPClient post: "https://httpbin.org/post" body: "{}"
+  /// resp := (HTTPClient post: "https://httpbin.org/post" body: "{}") unwrap
   /// resp ok   // => true
   /// ```
   class post: url :: String body: body :: String -> Result =>
@@ -58,7 +58,7 @@ Actor subclass: HTTPClient
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := HTTPClient put: "https://httpbin.org/put" body: "{}"
+  /// resp := (HTTPClient put: "https://httpbin.org/put" body: "{}") unwrap
   /// resp ok   // => true
   /// ```
   class put: url :: String body: body :: String -> Result =>
@@ -68,7 +68,7 @@ Actor subclass: HTTPClient
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := HTTPClient delete: "https://httpbin.org/delete"
+  /// resp := (HTTPClient delete: "https://httpbin.org/delete") unwrap
   /// resp ok   // => true
   /// ```
   class delete: url :: String -> Result => (Erlang beamtalk_http) delete: url
@@ -98,7 +98,7 @@ Actor subclass: HTTPClient
   /// ## Examples
   /// ```beamtalk
   /// client := HTTPClient spawnWith: #{#baseUrl => "https://httpbin.org"}
-  /// resp := client get: "/get"
+  /// resp := (client get: "/get") unwrap
   /// resp ok   // => true
   /// ```
   get: path :: String -> Result =>
@@ -112,7 +112,7 @@ Actor subclass: HTTPClient
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := client post: "/post" body: "{}"
+  /// resp := (client post: "/post" body: "{}") unwrap
   /// resp ok   // => true
   /// ```
   post: path :: String body: body :: String -> Result =>
@@ -124,7 +124,7 @@ Actor subclass: HTTPClient
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := client put: "/put" body: "{}"
+  /// resp := (client put: "/put" body: "{}") unwrap
   /// resp ok   // => true
   /// ```
   put: path :: String body: body :: String -> Result =>
@@ -136,7 +136,7 @@ Actor subclass: HTTPClient
   ///
   /// ## Examples
   /// ```beamtalk
-  /// resp := client delete: "/delete"
+  /// resp := (client delete: "/delete") unwrap
   /// resp ok   // => true
   /// ```
   delete: path :: String -> Result =>

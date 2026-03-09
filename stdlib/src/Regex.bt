@@ -8,7 +8,7 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// pattern := Regex from: "[0-9]+"
+/// pattern := (Regex from: "[0-9]+") unwrap
 /// pattern source                              // => "[0-9]+"
 /// pattern printString                         // => "Regex([0-9]+)"
 /// "hello123" matchesRegex: pattern            // => true
@@ -28,7 +28,7 @@ sealed Value subclass: Regex
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Regex from: "[0-9]+"                       // => Regex([0-9]+)
+  /// (Regex from: "[0-9]+") unwrap              // => Regex([0-9]+)
   /// ```
   class sealed from: pattern :: String -> Result =>
     (Erlang beamtalk_regex) from: pattern
