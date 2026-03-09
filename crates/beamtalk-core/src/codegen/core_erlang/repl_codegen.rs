@@ -644,22 +644,66 @@ impl CoreErlangGenerator {
 
     /// Generates REPL state-threading let-bindings for a destructuring assignment.
     ///
-    /// Delegates extraction to the shared `generate_destructure_extractions` helper
-    /// (which handles Array, Tuple, and Map patterns), then appends `maps:put` calls
-    /// to persist each bound variable into the REPL State map.
+    /// Pre-evaluates the RHS expression so that mutation-threaded results
+    /// (`{Result, StateAcc}` from loops) can be detected and unwrapped before extraction.
+    /// Then delegates element extraction to [`CoreErlangGenerator::generate_pattern_extractions_from_var`]
+    /// and appends `maps:put` calls to persist each bound variable into the REPL State map.
     ///
     /// Returns `(binding_docs, rhs_var)` where:
-    /// - `binding_docs` is the flat chain of `let X = ... in\n` extraction docs
-    ///   followed by `let StateN = maps:put('x', X, StateN-1) in\n` state updates
-    /// - `rhs_var` is the temp variable name holding the original RHS value
-    ///   (used as the display result for the REPL)
+    /// - `binding_docs` is the flat chain of let-bindings for the RHS eval, optional
+    ///   mutation unwrap, element extractions, and state updates
+    /// - `rhs_var` is the temp variable holding the plain RHS value (used as display result)
     fn generate_repl_destructure(
         &mut self,
         pattern: &Pattern,
         value: &Expression,
     ) -> Result<(Vec<Document<'static>>, String)> {
-        let (mut docs, rhs_var, bound_pairs) =
-            self.generate_destructure_extractions(pattern, value, "    let ", " in\n")?;
+        let mut docs: Vec<Document<'static>> = Vec::new();
+
+        // Pre-evaluate the RHS into a temp var so we can detect and unwrap
+        // mutation-threaded results ({Result, StateAcc}) before extraction.
+        let raw_var = self.fresh_temp_var("Rhs");
+        let val_doc = self.expression_doc(value)?;
+        docs.push(docvec![
+            "    let ",
+            Document::String(raw_var.clone()),
+            " = ",
+            val_doc,
+            " in\n",
+        ]);
+
+        // If the RHS was a mutation-threaded expression (e.g. a loop), it returned
+        // {Result, StateAcc}. Hoist the unwrapped value and advance REPL state so
+        // the correct current_state_var() is used for subsequent maps:put calls.
+        let rhs_var = if self.repl_loop_mutated {
+            self.repl_loop_mutated = false;
+            let value_var = self.fresh_temp_var("RhsVal");
+            let new_state = self.next_state_var();
+            docs.push(docvec![
+                "    let ",
+                Document::String(value_var.clone()),
+                " = call 'erlang':'element'(1, ",
+                Document::String(raw_var.clone()),
+                ") in\n",
+            ]);
+            docs.push(docvec![
+                "    let ",
+                Document::String(new_state),
+                " = call 'erlang':'element'(2, ",
+                Document::String(raw_var),
+                ") in\n",
+            ]);
+            value_var
+        } else {
+            raw_var
+        };
+
+        // Generate element extractions using the (possibly unwrapped) RHS value.
+        let (extraction_docs, bound_pairs) =
+            self.generate_pattern_extractions_from_var(pattern, &rhs_var, "    let ", " in\n")?;
+        docs.extend(extraction_docs);
+
+        // Persist each bound variable to the REPL State map.
         for (name, core_var) in bound_pairs {
             let current_state = self.current_state_var();
             let new_state = self.next_state_var();
@@ -675,6 +719,7 @@ impl CoreErlangGenerator {
                 ") in\n",
             ]);
         }
+
         Ok((docs, rhs_var))
     }
 }
