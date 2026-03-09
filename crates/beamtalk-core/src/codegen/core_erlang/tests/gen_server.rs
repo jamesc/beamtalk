@@ -2506,59 +2506,98 @@ fn test_class_method_local_var_after_class_var_mutation() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
     // BT-1283: When the RHS of a REPL destructuring assignment is a mutation-threaded
-    // expression (i.e. a loop containing a REPL variable mutation), the generated code
-    // must unwrap the {Result, StateAcc} tuple with element/2 before extracting pattern
-    // variables. Without the unwrap, the pattern extraction would attempt to destructure
-    // the {Result, StateAcc} wrapper instead of the actual value.
+    // expression (a loop containing a REPL variable mutation), the generated code must
+    // unwrap the {Result, StateAcc} tuple with element/2 before extracting pattern
+    // variables. Without the unwrap, pattern extraction would operate on the
+    // {Result, StateAcc} wrapper instead of the actual value.
     //
-    // Expression: #(a, b) := 5 timesRepeat: [x := x + 1]
+    // Expression: #(a, b) := #(10, 20) inject: #(0, 0) into: [:acc :item | x := x + 1. #(item, x)]
+    //
+    // The inject:into: block mutates `x` (a REPL-bound variable), which triggers
+    // repl_loop_mutated = true and causes the expression to return {FinalAcc, StateAcc}.
     //
     // Expected generated structure:
-    //   let Rhs = <timesRepeat expression>   -> returns {nil, StateAcc}
-    //   let RhsVal = element(1, Rhs)          -> unwrap the actual value
-    //   let StateN = element(2, Rhs)          -> advance REPL state
-    //   let _Ext1 = ... extract a ...
-    //   let _Ext2 = ... extract b ...
-    //   let StateM = maps:put('a', _Ext1, StateN)
-    //   let StateP = maps:put('b', _Ext2, StateM)
+    //   let Rhs1 = <inject:into: expression>     -> returns {FinalAcc, StateAcc}
+    //   let RhsVal1 = element(1, Rhs1)            -> FinalAcc = #(20, 2)
+    //   let State1 = element(2, Rhs1)             -> StateAcc with x=2
+    //   let A1 = send(RhsVal1, 'at:', [1])        -> extract a from FinalAcc (not from Rhs1!)
+    //   let B1 = send(RhsVal1, 'at:', [2])        -> extract b from FinalAcc (not from Rhs1!)
+    //   let State2 = maps:put('a', A1, State1)
+    //   let State3 = maps:put('b', B1, State2)
 
     let span = Span::new(0, 1);
 
-    // Build: 5 timesRepeat: [x := x + 1]
-    let x_id = Expression::Identifier(Identifier::new("x", span));
-    let one = Expression::Literal(Literal::Integer(1), span);
-    let add = Expression::MessageSend {
-        receiver: Box::new(x_id.clone()),
-        selector: MessageSelector::Binary("+".into()),
-        arguments: vec![one],
-        is_cast: false,
+    // Build: x := x + 1. #(item, x)  (block body with mutation + list return value)
+    let x_mut = {
+        let x_id = Expression::Identifier(Identifier::new("x", span));
+        let one = Expression::Literal(Literal::Integer(1), span);
+        let add = Expression::MessageSend {
+            receiver: Box::new(x_id.clone()),
+            selector: MessageSelector::Binary("+".into()),
+            arguments: vec![one],
+            is_cast: false,
+            span,
+        };
+        Expression::Assignment {
+            target: Box::new(x_id),
+            value: Box::new(add),
+            span,
+        }
+    };
+    let item_id = Expression::Identifier(Identifier::new("item", span));
+    let x_id2 = Expression::Identifier(Identifier::new("x", span));
+    let list_result = Expression::ListLiteral {
+        elements: vec![item_id, x_id2],
+        tail: None,
         span,
     };
-    let loop_assign = Expression::Assignment {
-        target: Box::new(x_id),
-        value: Box::new(add),
-        span,
-    };
-    let loop_body = Expression::Block(Block {
-        parameters: vec![],
-        body: vec![bare(loop_assign)],
+    let inject_block = Expression::Block(Block {
+        parameters: vec![
+            BlockParameter::new("acc", span),
+            BlockParameter::new("item", span),
+        ],
+        body: vec![bare(x_mut), bare(list_result)],
         span,
     });
-    let five = Expression::Literal(Literal::Integer(5), span);
-    let times_repeat = Expression::MessageSend {
-        receiver: Box::new(five),
-        selector: MessageSelector::Keyword(vec![KeywordPart {
-            keyword: "timesRepeat:".into(),
-            span,
-        }]),
-        arguments: vec![loop_body],
+
+    // Build: #(10, 20) inject: #(0, 0) into: <inject_block>
+    let receiver = Expression::ListLiteral {
+        elements: vec![
+            Expression::Literal(Literal::Integer(10), span),
+            Expression::Literal(Literal::Integer(20), span),
+        ],
+        tail: None,
+        span,
+    };
+    let initial_acc = Expression::ListLiteral {
+        elements: vec![
+            Expression::Literal(Literal::Integer(0), span),
+            Expression::Literal(Literal::Integer(0), span),
+        ],
+        tail: None,
+        span,
+    };
+    let inject_into = Expression::MessageSend {
+        receiver: Box::new(receiver),
+        selector: MessageSelector::Keyword(vec![
+            KeywordPart {
+                keyword: "inject:".into(),
+                span,
+            },
+            KeywordPart {
+                keyword: "into:".into(),
+                span,
+            },
+        ]),
+        arguments: vec![initial_acc, inject_block],
         is_cast: false,
         span,
     };
 
-    // Build: #(a, b) := <times_repeat>
+    // Build: #(a, b) := <inject_into>
     let pattern = Pattern::Array {
         elements: vec![
             Pattern::Variable(Identifier::new("a", span)),
@@ -2569,19 +2608,18 @@ fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
     };
     let destructure = Expression::DestructureAssignment {
         pattern,
-        value: Box::new(times_repeat),
+        value: Box::new(inject_into),
         span,
     };
 
     let code = generate_repl_expression(&destructure, "bt1283_mutation_threaded_test")
         .expect("codegen should succeed");
 
-    eprintln!("BT-1283: Generated code for #(a, b) := 5 timesRepeat: [x := x + 1]:");
+    eprintln!("BT-1283: Generated code for #(a, b) := #(10,20) inject: #(0,0) into: [...]:");
     eprintln!("{code}");
 
-    // The RHS is mutation-threaded, so it returns {Result, StateAcc}.
-    // The generated code must unwrap element(1, Rhs) for the actual value
-    // and element(2, Rhs) to advance the REPL state.
+    // The RHS is mutation-threaded, so it returns {FinalAcc, StateAcc}.
+    // element(1, Rhs) extracts FinalAcc; element(2, Rhs) advances REPL state.
     assert!(
         code.contains("call 'erlang':'element'(1,"),
         "Must unwrap element(1,) from mutation-threaded RHS. Got:\n{code}"
@@ -2589,6 +2627,14 @@ fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
     assert!(
         code.contains("call 'erlang':'element'(2,"),
         "Must extract StateAcc via element(2,) from mutation-threaded RHS. Got:\n{code}"
+    );
+
+    // Pattern extraction must use the unwrapped _RhsVal (not the raw {Acc,State} _Rhs).
+    // The 'at:' dispatch must receive the _RhsVal variable (fresh_temp_var("RhsVal") prefix),
+    // not _Rhs (the raw mutation-threaded result holding {FinalAcc, StateAcc}).
+    assert!(
+        code.contains("'send'(_RhsVal"),
+        "Pattern extraction must use the unwrapped _RhsVal, not the raw _Rhs tuple. Got:\n{code}"
     );
 
     // The pattern variables must be persisted to the REPL state map.
