@@ -46,6 +46,7 @@ pub(super) fn is_conditional_selector(sel: &str) -> bool {
 }
 
 /// Returns `true` if `sel` is a loop/iteration keyword selector.
+#[must_use]
 fn is_loop_selector(sel: &str) -> bool {
     matches!(
         sel,
