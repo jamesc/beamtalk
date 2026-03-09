@@ -310,8 +310,7 @@ fn collect_pattern_bindings(
     // Delegate variable name collection to the canonical semantic analysis function.
     // Diagnostics (duplicate bindings) are discarded — they are surfaced in the
     // semantic analysis pass and need not be re-emitted during block mutation analysis.
-    let (identifiers, _diagnostics) =
-        crate::semantic_analysis::extract_pattern_bindings(pattern);
+    let (identifiers, _diagnostics) = crate::semantic_analysis::extract_pattern_bindings(pattern);
     for id in identifiers {
         let name = id.name.to_string();
         ctx.local_bindings.insert(name.clone());
