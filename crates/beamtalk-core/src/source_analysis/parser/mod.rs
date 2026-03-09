@@ -4118,6 +4118,170 @@ Actor subclass: Rectangle
         );
     }
 
+    // ========================================================================
+    // List Literal: keyword message elements (BT-1287)
+    // ========================================================================
+
+    #[test]
+    fn parse_list_single_keyword_element() {
+        // #(obj kw: arg) → single-element list containing the keyword send
+        let module = parse_ok("#(obj kw: 42)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0].expression {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(tail.is_none());
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, .. } if selector.name() == "kw:"),
+                    "Expected keyword send as list element"
+                );
+            }
+            other => panic!("Expected list literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_keyword_element_with_more_elements() {
+        // #(obj kw: arg, other) → two-element list
+        let module = parse_ok("#(obj kw: 42, other)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0].expression {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 2);
+                assert!(tail.is_none());
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, .. } if selector.name() == "kw:"),
+                    "First element should be keyword send"
+                );
+            }
+            other => panic!("Expected list literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_multi_keyword_element() {
+        // #(obj kw1: a kw2: b) → single-element list containing multi-keyword send
+        let module = parse_ok("#(obj kw1: 1 kw2: 2)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0].expression {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(tail.is_none());
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, .. } if selector.name() == "kw1:kw2:"),
+                    "Expected multi-keyword send as list element"
+                );
+            }
+            other => panic!("Expected list literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_keyword_element_with_cons_tail() {
+        // #(obj kw: 42 | rest) → one-element list with keyword send head and cons tail
+        let module = parse_ok("#(obj kw: 42 | rest)");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0].expression {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(tail.is_some(), "Expected cons tail");
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, .. } if selector.name() == "kw:"),
+                    "Expected keyword send as head element"
+                );
+            }
+            other => panic!("Expected list literal with cons, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_array_single_keyword_element() {
+        // #[obj kw: arg] → single-element array containing the keyword send
+        let module = parse_ok("#[obj kw: 42]");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0].expression {
+            Expression::ArrayLiteral { elements, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, .. } if selector.name() == "kw:"),
+                    "Expected keyword send as array element"
+                );
+            }
+            other => panic!("Expected array literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_array_keyword_element_with_more_elements() {
+        // #[obj kw: arg, other] → two-element array
+        let module = parse_ok("#[obj kw: 42, other]");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0].expression {
+            Expression::ArrayLiteral { elements, .. } => {
+                assert_eq!(elements.len(), 2);
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, .. } if selector.name() == "kw:"),
+                    "First element should be keyword send"
+                );
+            }
+            other => panic!("Expected array literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_array_multi_keyword_element() {
+        // #[obj kw1: 1 kw2: 2] → single-element array containing multi-keyword send
+        let module = parse_ok("#[obj kw1: 1 kw2: 2]");
+        assert_eq!(module.expressions.len(), 1);
+        match &module.expressions[0].expression {
+            Expression::ArrayLiteral { elements, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, .. } if selector.name() == "kw1:kw2:"),
+                    "Expected multi-keyword send as array element"
+                );
+            }
+            other => panic!("Expected array literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_keyword_element_with_map_literal_arg() {
+        // Regression test for BT-1287: the exact reported failing syntax
+        let module = parse_ok("#(Counter supervisionSpec withArgs: #{#value => 42})");
+        match &module.expressions[0].expression {
+            Expression::ListLiteral { elements, tail, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(tail.is_none());
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, arguments, .. }
+                        if selector.name() == "withArgs:"
+                            && matches!(&arguments[0], Expression::MapLiteral { .. })),
+                    "Expected keyword send with map arg as list element"
+                );
+            }
+            other => panic!("Expected list literal, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_array_keyword_element_with_map_literal_arg() {
+        // Same regression but for #[...] array literals
+        let module = parse_ok("#[Counter supervisionSpec withArgs: #{#value => 42}]");
+        match &module.expressions[0].expression {
+            Expression::ArrayLiteral { elements, .. } => {
+                assert_eq!(elements.len(), 1);
+                assert!(
+                    matches!(&elements[0], Expression::MessageSend { selector, arguments, .. }
+                        if selector.name() == "withArgs:"
+                            && matches!(&arguments[0], Expression::MapLiteral { .. })),
+                    "Expected keyword send with map arg as array element"
+                );
+            }
+            other => panic!("Expected array literal, got: {other:?}"),
+        }
+    }
+
     #[test]
     fn parse_doc_comment_on_class() {
         let module = parse_ok(
