@@ -923,6 +923,10 @@ impl CoreErlangGenerator {
                                 let needs_threading = self.needs_mutation_threading(&analysis)
                                     || (self.in_loop_body && !analysis.local_writes.is_empty());
                                 if needs_threading {
+                                    // Validate arity before generating mutation-threaded code.
+                                    // This ensures a block with >1 params still raises
+                                    // BlockArityMismatch rather than producing invalid Core Erlang.
+                                    validate_if_not_nil_block(&arguments[0], "ifNotNil:")?;
                                     let doc =
                                         self.generate_if_not_nil_with_mutations(receiver, block)?;
                                     return Ok(Some(doc));
