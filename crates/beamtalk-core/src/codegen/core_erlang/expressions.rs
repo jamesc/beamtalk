@@ -1436,7 +1436,13 @@ impl CoreErlangGenerator {
     ) -> Result<(Document<'static>, String)> {
         let var = self.fresh_temp_var(prefix);
         let val_doc = self.expression_doc(value)?;
-        let binding_doc = docvec![indent, Document::String(var.clone()), " = ", val_doc, terminator];
+        let binding_doc = docvec![
+            indent,
+            Document::String(var.clone()),
+            " = ",
+            val_doc,
+            terminator
+        ];
         Ok((binding_doc, var))
     }
 
@@ -1472,7 +1478,8 @@ impl CoreErlangGenerator {
                 });
             }
         };
-        let (rhs_doc, rhs_var) = self.eval_rhs_to_temp_var(value, rhs_prefix, indent, terminator)?;
+        let (rhs_doc, rhs_var) =
+            self.eval_rhs_to_temp_var(value, rhs_prefix, indent, terminator)?;
         let mut docs = vec![rhs_doc];
         let (extraction_docs, bound_pairs) =
             self.generate_pattern_extractions_from_var(pattern, &rhs_var, indent, terminator)?;
