@@ -125,10 +125,10 @@ Object subclass: TestCase
   ///
   /// ## Examples
   /// ```beamtalk
-  /// def := self assertOk: (WorkflowLoader parse: src)
-  /// self assert: def name equals: "hello"
+  /// value := self assertOk: (Result ok: 42)
+  /// self assert: value equals: 42
   ///
-  /// self assertOk: (Result ok: 42)       // => 42
+  /// self assertOk: (Result ok: "hello")   // => "hello"
   /// self assertOk: (Result error: #nope) // fails: "Expected Result ok: but got Result error: #nope"
   /// ```
   assertOk: result :: Result -> Object =>
@@ -145,8 +145,8 @@ Object subclass: TestCase
   /// ## Examples
   /// ```beamtalk
   /// self assertError: (Result error: #not_found) equals: #not_found   // passes
-  /// self assertError: (Result ok: 42) equals: #not_found              // fails: "Expected Result error:..."
-  /// self assertError: (Result error: #wrong) equals: #not_found       // fails: "Expected error #not_found, got #wrong"
+  /// self assertError: (Result ok: 42) equals: #not_found              // fails: "Expected Result error: but got Result ok: 42"
+  /// self assertError: (Result error: #wrong) equals: #not_found       // fails: "Expected Result error: #not_found, got Result error: #wrong"
   /// ```
   assertError: result :: Result equals: expected -> Nil =>
     result isError ifFalse: [
