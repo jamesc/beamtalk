@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1226: Actor fixture for ifNotNil: with state mutation threading.
+// Exercises the exact issue pattern: ifNotNil: [:v | self.field := ...] in actor method.
+
+Actor subclass: IfNotNilMutActor
+  state: running = #{}
+
+  addEntry: key withValue: val => self.running := self.running at: key put: val
+
+  // Exact issue pattern: receiver reads state, block mutates state
+  update: id =>
+    (self.running at: id ifAbsent: [
+      nil
+    ]) ifNotNil: [:entry | self.running := self.running at: id put: (entry + 1)]
+    self.running
+
+  // 0-arg ifNotNil: block with state mutation
+  touch: id =>
+    (self.running at: id ifAbsent: [
+      nil
+    ]) ifNotNil: [self.running := self.running at: id put: 99]
+    self.running
+
+  // Returns the ifNotNil: expression result (entry + 1) as the branch value,
+  // AND mutates state. Tests that both {Result, State} elements are correct.
+  incrementAndReturnNewValue: id =>
+    (self.running at: id ifAbsent: [nil])
+      ifNotNil: [:entry |
+        self.running := self.running at: id put: (entry + 1)
+        entry + 1
+      ]

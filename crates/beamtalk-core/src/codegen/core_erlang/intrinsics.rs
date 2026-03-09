@@ -912,6 +912,27 @@ impl CoreErlangGenerator {
                         Ok(Some(doc))
                     }
                     "ifNotNil:" if arguments.len() == 1 => {
+                        // BT-1226: When in actor context or loop body, check if the block
+                        // contains field mutations. If so, generate inline state-threaded code
+                        // instead of a closure to ensure mutations persist correctly.
+                        use super::CodeGenContext;
+                        use super::block_analysis;
+                        if self.context == CodeGenContext::Actor || self.in_loop_body {
+                            if let Expression::Block(block) = &arguments[0] {
+                                let analysis = block_analysis::analyze_block(block);
+                                let needs_threading = self.needs_mutation_threading(&analysis)
+                                    || (self.in_loop_body && !analysis.local_writes.is_empty());
+                                if needs_threading {
+                                    // Validate arity before generating mutation-threaded code.
+                                    // This ensures a block with >1 params still raises
+                                    // BlockArityMismatch rather than producing invalid Core Erlang.
+                                    validate_if_not_nil_block(&arguments[0], "ifNotNil:")?;
+                                    let doc =
+                                        self.generate_if_not_nil_with_mutations(receiver, block)?;
+                                    return Ok(Some(doc));
+                                }
+                            }
+                        }
                         // If the block has 0 parameters, don't pass the receiver (avoids badarity)
                         let recv_var = self.fresh_temp_var("Obj");
                         let block_var = self.fresh_temp_var("NotNilBlk");

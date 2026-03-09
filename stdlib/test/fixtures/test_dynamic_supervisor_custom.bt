@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1222: Concrete DynamicSupervisor subclass with overridden config — fixture for dynamic_supervisor_defaults_test.bt
+
+DynamicSupervisor subclass: TestDynamicSupervisorCustom
+
+  class childClass => Counter
+
+  class maxRestarts -> Integer => 5
+
+  class restartWindow -> Integer => 120

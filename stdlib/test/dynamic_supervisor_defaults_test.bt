@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-1222: Tests for DynamicSupervisor class-side defaults and subclass override.
+//
+// Fixtures: stdlib/test/fixtures/test_dynamic_supervisor_custom.bt
+
+TestCase subclass: DynamicSupervisorDefaultsTest
+
+  // === DynamicSupervisor class-side defaults ===
+  testDynamicSupervisorMaxRestartsDefault =>
+    self assert: DynamicSupervisor maxRestarts equals: 10
+
+  testDynamicSupervisorRestartWindowDefault =>
+    self assert: DynamicSupervisor restartWindow equals: 60
+
+  testDynamicSupervisorIsSupervisorTrue =>
+    self assert: DynamicSupervisor isSupervisor equals: true
+
+  // === DynamicSupervisor subclass can override defaults ===
+  testDynamicSupervisorSubclassOverridesMaxRestarts =>
+    self assert: TestDynamicSupervisorCustom maxRestarts equals: 5
+
+  testDynamicSupervisorSubclassOverridesRestartWindow =>
+    self assert: TestDynamicSupervisorCustom restartWindow equals: 120
+
+  testDynamicSupervisorSubclassIsSupervisorTrue =>
+    self assert: TestDynamicSupervisorCustom isSupervisor equals: true
