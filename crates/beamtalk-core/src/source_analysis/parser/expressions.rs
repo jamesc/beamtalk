@@ -1747,9 +1747,10 @@ impl Parser {
 
     /// Parses a list literal: `#(expr, expr, ...)` or `#(head | tail)` (cons)
     ///
-    /// List elements are parsed as binary expressions to support operators like `+`
-    /// and `->`. The `,` and `|` delimiters terminate parsing naturally since they
-    /// are not valid binary selectors in element context.
+    /// List elements are parsed as keyword messages (the lowest message precedence),
+    /// so `#(obj kw: arg)` is a single-element list containing the keyword send.
+    /// The `,`, `|`, and `)` delimiters terminate parsing naturally since they are
+    /// not valid keyword selectors or binary selectors in element context.
     fn parse_list_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::ListOpen, "Expected '#('");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
@@ -1769,8 +1770,10 @@ impl Parser {
 
         // Parse elements
         loop {
-            // Parse element expression (binary to support operators like `->` in elements)
-            let elem = self.parse_binary_message();
+            // Parse element as a full keyword message (lowest message precedence), so
+            // `#(obj kw: arg)` is a single-element list containing the keyword send.
+            // `,`, `|`, and `)` are not keyword or binary selectors so they terminate naturally.
+            let elem = self.parse_keyword_message();
             elements.push(elem);
 
             // Check for cons operator `|`
@@ -1838,7 +1841,8 @@ impl Parser {
 
     /// Parses an array literal: `#[expr, expr, ...]`
     ///
-    /// Array elements are parsed as binary expressions. Closed by `]`.
+    /// Array elements are parsed as keyword messages (the lowest message precedence).
+    /// Closed by `]`.
     fn parse_array_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::ArrayOpen, "Expected '#['");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
@@ -1854,7 +1858,8 @@ impl Parser {
 
         // Parse elements
         loop {
-            let elem = self.parse_binary_message();
+            // Parse element as a full keyword message so `#[obj kw: arg]` works.
+            let elem = self.parse_keyword_message();
             elements.push(elem);
 
             // Check for comma (continue) or closing bracket (end)
