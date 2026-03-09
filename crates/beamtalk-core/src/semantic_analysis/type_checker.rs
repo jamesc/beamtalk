@@ -4389,6 +4389,14 @@ Object subclass: Foo
         }
     }
 
+    fn list_pattern(names: &[&str]) -> Pattern {
+        Pattern::Array {
+            elements: names.iter().map(|n| Pattern::Variable(ident(n))).collect(),
+            list_syntax: true,
+            span: span(),
+        }
+    }
+
     #[test]
     fn test_tuple_destructure_binds_vars_in_env() {
         // {x, y} := someValue
@@ -4457,6 +4465,34 @@ Object subclass: Foo
         assert!(
             checker.diagnostics().is_empty(),
             "array-destructured vars should be Dynamic — no warnings: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_list_destructure_binds_vars_in_env() {
+        // #(first, second) := someValue  (list syntax, BT-1279)
+        // first + 1 — first is Dynamic, no warnings expected
+        // Verifies list_syntax: true takes the same type-checking path as list_syntax: false.
+        let method = make_method(
+            "doWork",
+            vec![
+                destructure_assign(list_pattern(&["first", "second"]), int_lit(0)),
+                msg_send(
+                    var("first"),
+                    MessageSelector::Binary("+".into()),
+                    vec![int_lit(1)],
+                ),
+            ],
+        );
+        let class = make_class_with_methods("Thing", vec![method]);
+        let module = make_module_with_classes(vec![], vec![class]);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "list-destructured vars should be Dynamic — no warnings: {:?}",
             checker.diagnostics()
         );
     }

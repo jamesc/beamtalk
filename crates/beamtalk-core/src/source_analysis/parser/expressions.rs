@@ -134,6 +134,27 @@ impl Parser {
             // Both use the same Pattern::Array node and at:-based codegen.
             // The `list_syntax` flag preserves the original delimiter for
             // round-trip formatting and future type checking.
+
+            // Reject cons-style list syntax on the LHS: `#(a | rest) := expr`.
+            // Provide a specific error rather than falling through to the generic
+            // "must be identifier" message.
+            if let Expression::ListLiteral {
+                tail: Some(_),
+                span: lhs_span,
+                ..
+            } = &expr
+            {
+                let span = *lhs_span;
+                self.diagnostics.push(Diagnostic::error(
+                    "Cons syntax `#(head | tail)` is not supported in destructuring patterns; use `#(a, b, c) := expr` instead",
+                    span,
+                ));
+                return Expression::Error {
+                    message: "Invalid destructuring pattern".into(),
+                    span,
+                };
+            }
+
             let list_syntax = matches!(&expr, Expression::ListLiteral { tail: None, .. });
             if let Expression::ArrayLiteral {
                 elements,
@@ -161,11 +182,11 @@ impl Parser {
                     }
                     Err(bad_span) => {
                         self.diagnostics.push(Diagnostic::error(
-                            "Array destructuring patterns may only contain identifiers, '_', or literals",
+                            "Destructuring patterns may only contain identifiers, '_', or literals",
                             bad_span,
                         ));
                         return Expression::Error {
-                            message: "Invalid array destructuring pattern".into(),
+                            message: "Invalid destructuring pattern".into(),
                             span: *lhs_span,
                         };
                     }
