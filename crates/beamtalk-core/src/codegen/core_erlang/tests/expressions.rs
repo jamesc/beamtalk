@@ -59,7 +59,57 @@ fn test_generate_binary_op_addition() {
     let right = vec![Expression::Literal(Literal::Integer(4), Span::new(4, 5))];
     let doc = generator.generate_binary_op("+", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(output.contains("call 'erlang':'+'(call 'beamtalk_future':'maybe_await'(3), call 'beamtalk_future':'maybe_await'(4))"));
+    // Literal operands are provably non-future: no maybe_await wrapping needed.
+    assert_eq!(output, "call 'erlang':'+'(3, 4)");
+}
+
+#[test]
+fn test_generate_binary_op_no_wrap_for_literals() {
+    // Literals (integer, float, symbol, string) are never futures:
+    // is_definitely_sync should suppress maybe_await for all literal types.
+    let mut generator = CoreErlangGenerator::new("test");
+    for (op, l, r) in [
+        (
+            "+",
+            Expression::Literal(Literal::Integer(1), Span::new(0, 1)),
+            Expression::Literal(Literal::Integer(2), Span::new(2, 3)),
+        ),
+        (
+            "<",
+            Expression::Literal(Literal::Integer(0), Span::new(0, 1)),
+            Expression::Literal(Literal::Float(1.0), Span::new(2, 4)),
+        ),
+    ] {
+        let doc = generator.generate_binary_op(op, &l, &[r]).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            !output.contains("maybe_await"),
+            "literal operands should not be wrapped in maybe_await; got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_generate_binary_op_wraps_non_literals() {
+    use crate::ast::Identifier;
+    // Identifiers (other than self) may be futures: must still be wrapped.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Identifier(Identifier {
+        name: "x".into(),
+        span: Span::new(0, 1),
+    });
+    let right = vec![Expression::Literal(Literal::Integer(1), Span::new(4, 5))];
+    let doc = generator.generate_binary_op("+", &left, &right).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("maybe_await"),
+        "non-literal left operand must be wrapped; got: {output}"
+    );
+    // Right operand is a literal: should NOT be wrapped.
+    assert!(
+        !output.ends_with("maybe_await'(1))"),
+        "literal right operand should not be wrapped; got: {output}"
+    );
 }
 
 #[test]
@@ -119,10 +169,8 @@ fn test_generate_loose_equality_operator() {
         output.contains("call 'erlang':'=='"),
         "Should use loose equality ==. Got: {output}",
     );
-    assert_eq!(
-        output,
-        "call 'erlang':'=='(call 'beamtalk_future':'maybe_await'(5), call 'beamtalk_future':'maybe_await'(5))"
-    );
+    // Literal operands are provably non-future: no maybe_await wrapping needed.
+    assert_eq!(output, "call 'erlang':'=='(5, 5)");
 }
 
 #[test]
