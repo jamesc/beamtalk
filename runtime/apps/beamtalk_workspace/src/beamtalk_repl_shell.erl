@@ -156,6 +156,13 @@ init(SessionId) ->
         end,
     State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0c),
 
+    %% BT-1242: Join class-removed notification group so this session is notified
+    %% when a class is removed via Beamtalk code (ClassName removeFromSystem).
+    %% ensure_pg_started/0 mirrors beamtalk_object_class.erl — guarantees pg is
+    %% running before join so failures are real errors, not startup-race artefacts.
+    beamtalk_class_registry:ensure_pg_started(),
+    pg:join(beamtalk_repl_shells, self()),
+
     {ok, {SessionId, State1, undefined}}.
 
 %% @private
@@ -197,7 +204,11 @@ handle_call(interrupt, _From, {SessionId, State, {WorkerPid, MonRef, EvalFrom}})
     Err0 = beamtalk_error:new(interrupted, 'REPL'),
     Err1 = beamtalk_error:with_message(Err0, <<"Interrupted">>),
     reply_eval(EvalFrom, {eval_error, Err1, <<>>, []}),
-    {reply, ok, {SessionId, State, undefined}};
+    %% BT-1242: Apply any pending module removals that accumulated while the
+    %% worker was running.  No WorkerState is returned on interrupt, so we
+    %% drain directly from ShellState.
+    CleanState = drain_pending_removals(State),
+    {reply, ok, {SessionId, CleanState, undefined}};
 handle_call(interrupt, _From, {_SessionId, _State, undefined} = FullState) ->
     %% No eval in progress — nothing to interrupt
     {reply, ok, FullState};
@@ -308,19 +319,26 @@ handle_cast(_Msg, State) ->
 
 %% @private
 %% Worker completed eval successfully (BT-666)
-handle_info({eval_result, WorkerPid, Result}, {SessionId, _State, {WorkerPid, MonRef, From}}) ->
+%%
+%% BT-1242: Use ShellState (gen_server state) instead of discarding it: it
+%% carries pending_module_removals collected while the worker ran.  Apply them
+%% to the worker's returned WorkerState so modules removed inside the expression
+%% being executed are not reinstated when the worker snapshot is merged back.
+handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid, MonRef, From}}) ->
     erlang:demonitor(MonRef, [flush]),
     case Result of
-        {ok, Value, Output, Warnings, NewState} ->
+        {ok, Value, Output, Warnings, WorkerState} ->
             reply_eval(From, {eval_done, Value, Output, Warnings}),
+            MergedState = apply_pending_removals(ShellState, WorkerState),
             %% Refresh session workspace bindings to reflect any bind:as:/unbind: changes
-            %% made during this eval. Keeps session-local vars, replaces ws-injected keys.
-            FinalState = refresh_ws_bindings(NewState),
+            %% made during this expression. Keeps session-local vars, replaces ws-injected keys.
+            FinalState = refresh_ws_bindings(MergedState),
             beamtalk_bindings_events:on_bindings_changed(SessionId),
             {noreply, {SessionId, FinalState, undefined}};
-        {error, Reason, Output, Warnings, NewState} ->
+        {error, Reason, Output, Warnings, WorkerState} ->
             reply_eval(From, {eval_error, Reason, Output, Warnings}),
-            {noreply, {SessionId, NewState, undefined}}
+            MergedState = apply_pending_removals(ShellState, WorkerState),
+            {noreply, {SessionId, MergedState, undefined}}
     end;
 %% Worker process crashed (BT-666)
 handle_info(
@@ -333,7 +351,26 @@ handle_info(
         iolist_to_binary(io_lib:format("Evaluation crashed: ~p", [Reason]))
     ),
     reply_eval(From, {eval_error, Err1, <<>>, []}),
-    {noreply, {SessionId, State, undefined}};
+    %% BT-1242: Apply any pending module removals that arrived while the
+    %% worker was running.  No WorkerState is returned on crash.
+    CleanState = drain_pending_removals(State),
+    {noreply, {SessionId, CleanState, undefined}};
+%% BT-1242: Class removed via Beamtalk code path — clean up session tracker.
+%% Only updates tracker when no eval worker is active: if a worker is running it
+%% holds a snapshot of State that would overwrite our edit on eval_result arrival.
+%% The code:is_loaded filter in the modules op covers the stale-entry window.
+handle_info({class_removed, _ClassName, Module}, {SessionId, State, undefined}) ->
+    Tracker = beamtalk_repl_state:get_module_tracker(State),
+    NewTracker = beamtalk_repl_modules:remove_module(Module, Tracker),
+    NewState = beamtalk_repl_state:set_module_tracker(NewTracker, State),
+    {noreply, {SessionId, NewState, undefined}};
+handle_info({class_removed, _ClassName, Module}, {SessionId, State, Worker}) ->
+    %% Eval worker is active — defer removal: add to pending_module_removals in
+    %% the gen_server State so eval_result can apply it to the worker snapshot.
+    %% (If we edited the tracker here the worker's returned NewState would
+    %% overwrite our change when eval_result is processed.)
+    NewState = beamtalk_repl_state:add_pending_module_removal(Module, State),
+    {noreply, {SessionId, NewState, Worker}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -377,6 +414,52 @@ refresh_ws_bindings(State) ->
     FreshBindings = maps:merge(FreshWs, WithoutStaleWs),
     State1 = beamtalk_repl_state:set_bindings(FreshBindings, State),
     beamtalk_repl_state:set_injected_ws_keys(maps:keys(FreshWs), State1).
+
+%% @private BT-1242: Apply pending module removals from ShellState to WorkerState.
+%%
+%% ShellState is the gen_server state at eval_result time (may have accumulated
+%% pending_module_removals while the worker ran).  WorkerState is the worker's
+%% returned snapshot, based on the pre-expression state so it still has those
+%% modules in its tracker.  We remove them here so the tracker stays consistent.
+%%
+%% The pending_module_removals field in WorkerState is always [] (the worker
+%% never sets it), so the returned state has a clean pending list.
+-spec apply_pending_removals(beamtalk_repl_state:state(), beamtalk_repl_state:state()) ->
+    beamtalk_repl_state:state().
+apply_pending_removals(ShellState, WorkerState) ->
+    case beamtalk_repl_state:get_pending_module_removals(ShellState) of
+        [] ->
+            WorkerState;
+        Pending ->
+            Tracker = beamtalk_repl_state:get_module_tracker(WorkerState),
+            NewTracker = lists:foldl(
+                fun(M, T) -> beamtalk_repl_modules:remove_module(M, T) end,
+                Tracker,
+                Pending
+            ),
+            beamtalk_repl_state:set_module_tracker(NewTracker, WorkerState)
+    end.
+
+%% @private BT-1242: Apply pending module removals directly to State and clear the list.
+%%
+%% Used when the worker exits via interrupt or crash (no WorkerState is returned).
+%% In those paths the shell resumes using its own ShellState, so we fold the
+%% pending list over that state's tracker and reset the list to [].
+-spec drain_pending_removals(beamtalk_repl_state:state()) -> beamtalk_repl_state:state().
+drain_pending_removals(State) ->
+    case beamtalk_repl_state:get_pending_module_removals(State) of
+        [] ->
+            State;
+        Pending ->
+            Tracker = beamtalk_repl_state:get_module_tracker(State),
+            NewTracker = lists:foldl(
+                fun(M, T) -> beamtalk_repl_modules:remove_module(M, T) end,
+                Tracker,
+                Pending
+            ),
+            State1 = beamtalk_repl_state:set_module_tracker(NewTracker, State),
+            beamtalk_repl_state:clear_pending_module_removals(State1)
+    end.
 
 %% @private BT-696: Dispatch eval result to sync caller or async subscriber.
 reply_eval({async, Subscriber}, Msg) ->

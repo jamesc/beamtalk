@@ -520,6 +520,7 @@ classRemoveFromSystemByName(ClassName) ->
                                 soft_purge_after_delete,
                                 code:soft_purge(Module)
                             ),
+                            publish_class_removed(ClassName, Module),
                             nil;
                         Subclasses ->
                             NameBins = [atom_to_binary(S, utf8) || S <- Subclasses],
@@ -820,6 +821,28 @@ atom_to_class_object(ClassName) ->
             Tag = beamtalk_class_registry:class_object_tag(ClassName),
             #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid}
     end.
+
+%% @private
+%% @doc Notify workspace layer that a class was successfully removed.
+%%
+%% BT-1242: Cleans up stale entries in workspace_meta and REPL session trackers.
+%% Uses registered-name tricks to avoid a hard DDD dep from beamtalk_runtime →
+%% beamtalk_workspace (same pattern as stop_class_actors/1 and classReload/1).
+%%
+%%   - beamtalk_workspace_meta has a known registered name — cast directly.
+%%   - beamtalk_repl_shells pg group — broadcast to all active REPL sessions.
+-spec publish_class_removed(atom(), atom()) -> ok.
+publish_class_removed(ClassName, Module) ->
+    %% Workspace metadata cleanup.
+    gen_server:cast(beamtalk_workspace_meta, {unregister_module, Module}),
+    %% REPL session tracker cleanup — broadcast to all joined session shells.
+    Shells =
+        try
+            pg:get_members(beamtalk_repl_shells)
+        catch
+            _:_ -> []
+        end,
+    lists:foreach(fun(Pid) -> Pid ! {class_removed, ClassName, Module} end, Shells).
 
 %% @private
 %% @doc Assert that a code-server step succeeded; raise a structured error if not.
