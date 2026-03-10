@@ -201,45 +201,6 @@ pub(crate) struct SessionInfo {
     created_at: Option<i64>,
 }
 
-/// Auto-run the `[run]` entry expression from `beamtalk.toml`, if present.
-///
-/// Evaluates the configured entry expression after auto-loading compiled classes.
-/// Prints the expression and its result to stdout. On failure, prints a warning
-/// but does not abort — the REPL remains interactive.
-fn auto_run_entry(client: &mut client::ReplClient, project_root: &Path) {
-    let Some(project_root_utf8) = camino::Utf8Path::from_path(project_root) else {
-        eprintln!("Warning: project path is not valid UTF-8, skipping [run] entry");
-        return;
-    };
-
-    let run_config = match crate::commands::manifest::find_run_config(project_root_utf8) {
-        Ok(Some(cfg)) => cfg,
-        Ok(None) => return,
-        Err(e) => {
-            eprintln!("Warning: failed to read [run] config: {e}");
-            return;
-        }
-    };
-
-    println!("> {}", run_config.entry);
-    match client.eval(&run_config.entry) {
-        Ok(response) => {
-            let is_error = response.is_error();
-            display_eval_response(&response);
-            if is_error {
-                if response.error_message().is_none() {
-                    eprintln!("Warning: [run] entry failed (no error details).");
-                }
-                eprintln!("The REPL is still available.");
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: [run] entry failed: {e}");
-            eprintln!("The REPL is still available.");
-        }
-    }
-}
-
 /// Auto-compile a package if `beamtalk.toml` is present in the project root.
 ///
 /// Returns a list of extra code paths to add to the workspace node.
@@ -605,9 +566,6 @@ pub fn run(
             }
         }
     }
-
-    // Auto-run entry expression from [run] section of beamtalk.toml (BT-740)
-    auto_run_entry(&mut client, &project_root);
 
     println!();
 

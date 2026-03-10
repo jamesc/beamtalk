@@ -65,10 +65,19 @@ enum Command {
     },
 
     /// Compile and run a Beamtalk program
+    ///
+    /// Script mode: `beamtalk run ClassName selector` — starts a workspace in run mode
+    /// (no REPL server), calls ClassName>>selector, exits when it returns.
+    ///
+    /// Service mode: `beamtalk run .` — starts a persistent workspace with the
+    /// package's `[application]` supervisor and returns the shell (service keeps running).
     Run {
-        /// Source file or directory to compile and run
+        /// Class name for script mode (e.g. `Main`), or `.` for service mode
         #[arg(default_value = ".")]
-        path: String,
+        class_or_dot: String,
+
+        /// Selector to call in script mode (e.g. `run`)
+        selector: Option<String>,
     },
 
     /// Create a new Beamtalk project
@@ -402,7 +411,10 @@ fn run() -> Result<()> {
             commands::build::build(&path, &options)
         }
         Command::BuildStdlib { quiet } => commands::build_stdlib::build_stdlib(quiet),
-        Command::Run { path } => commands::run::run(&path),
+        Command::Run {
+            class_or_dot,
+            selector,
+        } => commands::run::run(&class_or_dot, selector.as_deref()),
         Command::New { name } => commands::new::new_project(&name),
         Command::Repl {
             port,
