@@ -417,7 +417,7 @@ variables, runtime-added docs. All structural queries read from
 `__beamtalk_meta/0` directly. Dynamic classes (no compiled module) populate a
 thin ETS cache at `register_class` time from `ClassInfo`.
 
-**Implemented in BT-1272 — actor instance state (`__methods__`):** Remove
+**Implemented in BT-1272 — compiled actor/value-object instance state (`__methods__`):** Remove
 `__methods__` from every compiled actor/value-object state map. `$beamtalk_class`
 and `__class_mod__` are retained.
 
@@ -444,7 +444,7 @@ Phase 5 does not block Phases 1-4.
 
 ## References
 
-- Related issues: BT-1169 (immediate trigger — `Counter class allMethods` bug), BT-1272 (Phase 5 partial: `__methods__` removal from actor instance state)
+- Related issues: BT-1169 (immediate trigger — `Counter class allMethods` bug), BT-1272 (Phase 5 partial: `__methods__` removal from compiled actor/value-object instance state)
 - Related ADRs:
   - ADR 0007: Compilable Standard Library with Primitive Injection
   - ADR 0032: Early Class Protocol (introduced `apply_class_info`)

@@ -296,6 +296,7 @@ fn test_generate_spawn_function() {
     // Check that init/1 creates the default state with fields and merges with InitArgs
     assert!(code.contains("'init'/1 = fun (InitArgs) ->"));
     assert!(code.contains("let DefaultState = ~{"));
+    assert!(code.contains("'$beamtalk_class' => 'Counter'"));
     assert!(code.contains("'__class_mod__' => 'counter'"));
     assert!(code.contains("'value' => 0"));
     // Check that InitArgs is merged into DefaultState
