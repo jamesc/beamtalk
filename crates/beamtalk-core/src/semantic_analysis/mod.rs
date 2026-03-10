@@ -665,6 +665,11 @@ impl Analyser {
                     self.define_pattern_variables_in_scope(&pair.value);
                 }
             }
+            Pattern::Constructor { keywords, .. } => {
+                for (_, binding) in keywords {
+                    self.define_pattern_variables_in_scope(binding);
+                }
+            }
             Pattern::Binary { .. } | Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
         }
     }

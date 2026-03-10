@@ -1034,6 +1034,15 @@ impl Parser {
                 Pattern::Wildcard(span)
             }
 
+            // Constructor pattern: UpperCaseIdent followed by keyword(s)
+            // e.g. `Result ok: v`, `Result error: _`
+            TokenKind::Identifier(name)
+                if name.chars().next().is_some_and(char::is_uppercase)
+                    && matches!(self.peek_kind(), Some(TokenKind::Keyword(_))) =>
+            {
+                self.parse_constructor_pattern()
+            }
+
             // Variable binding
             TokenKind::Identifier(name) => {
                 let name = name.clone();
@@ -1283,6 +1292,81 @@ impl Parser {
         Pattern::Map {
             pairs,
             span: start.merge(end),
+        }
+    }
+
+    /// Parses a constructor pattern: `UpperCaseIdent keyword: binding ...`
+    ///
+    /// Example: `Result ok: v`, `Result error: _`, `Result ok: 42`
+    ///
+    /// The class identifier must start with an uppercase letter. Each `keyword: binding`
+    /// pair names one constructor argument. The binding is a simple variable, wildcard,
+    /// or literal — not an arbitrary expression.
+    fn parse_constructor_pattern(&mut self) -> Pattern {
+        let class_token = self.advance(); // consume uppercase class identifier
+        let start = class_token.span();
+        let TokenKind::Identifier(class_name) = class_token.into_kind() else {
+            unreachable!("parse_constructor_pattern called on non-identifier token")
+        };
+        let class = Identifier::new(class_name, start);
+
+        let mut keywords: Vec<(EcoString, Pattern)> = Vec::new();
+        let mut end_span = start;
+
+        while let TokenKind::Keyword(kw) = self.current_kind() {
+            let kw = kw.clone();
+            self.advance(); // consume keyword
+            let binding = self.parse_constructor_binding();
+            end_span = binding.span();
+            keywords.push((kw, binding));
+        }
+
+        if keywords.is_empty() {
+            // Shouldn't happen (we only enter this function when peek is Keyword),
+            // but produce a sensible error rather than panicking.
+            self.diagnostics.push(Diagnostic::error(
+                "Constructor pattern requires at least one keyword argument (e.g. `Result ok: v`)"
+                    .to_string(),
+                start,
+            ));
+        }
+
+        Pattern::Constructor {
+            class,
+            keywords,
+            span: start.merge(end_span),
+        }
+    }
+
+    /// Parses the binding position of a constructor pattern argument.
+    ///
+    /// Accepts: wildcard `_`, variable identifier, or a literal (integer, float, string, symbol).
+    fn parse_constructor_binding(&mut self) -> Pattern {
+        match self.current_kind() {
+            TokenKind::Identifier(name) if name.as_str() == "_" => {
+                Pattern::Wildcard(self.advance().span())
+            }
+            TokenKind::Identifier(_) => {
+                let token = self.advance();
+                let span = token.span();
+                let TokenKind::Identifier(name) = token.into_kind() else {
+                    unreachable!()
+                };
+                Pattern::Variable(Identifier::new(name, span))
+            }
+            TokenKind::Integer(_)
+            | TokenKind::Float(_)
+            | TokenKind::String(_)
+            | TokenKind::Character(_)
+            | TokenKind::Symbol(_) => self.parse_pattern(),
+            _ => {
+                let span = self.current_token().span();
+                self.diagnostics.push(Diagnostic::error(
+                    "Expected variable, '_', or literal after constructor keyword".to_string(),
+                    span,
+                ));
+                Pattern::Wildcard(span)
+            }
         }
     }
 

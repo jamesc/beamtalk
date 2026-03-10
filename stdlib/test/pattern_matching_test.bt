@@ -78,3 +78,38 @@ TestCase subclass: PatternMatchingTest
       0 -> "zero";
       _ -> "other"
     ]) equals: "zero"
+
+  // BT-1297: Constructor patterns for sealed types (Result ok: / Result error:)
+  testConstructorPatternOkArm =>
+    // ok arm matched — variable captures the wrapped value
+    self assert: ((Result ok: 42) match: [
+      Result ok: v -> v;
+      Result error: _ -> 0
+    ]) equals: 42
+
+  testConstructorPatternErrorArm =>
+    // error arm matched — variable captures the error reason
+    self assert: ((Result error: #oops) match: [
+      Result ok: _ -> #none;
+      Result error: e -> e
+    ]) equals: #oops
+
+  testConstructorPatternWildcardBinding =>
+    // Wildcard in value position: arm matches but nothing is bound
+    self assert: ((Result ok: 99) match: [
+      Result ok: _ -> "any ok";
+      Result error: _ -> "any error"
+    ]) equals: "any ok"
+
+  testConstructorPatternLiteralBinding =>
+    // Literal in binding position: arm only matches when value equals literal
+    self assert: ((Result ok: 0) match: [
+      Result ok: 0 -> "zero";
+      Result ok: _ -> "other";
+      Result error: _ -> "err"
+    ]) equals: "zero"
+    self assert: ((Result ok: 1) match: [
+      Result ok: 0 -> "zero";
+      Result ok: _ -> "other";
+      Result error: _ -> "err"
+    ]) equals: "other"
