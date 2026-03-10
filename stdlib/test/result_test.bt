@@ -137,6 +137,36 @@ TestCase subclass: ResultTest
     self assert: r value equals: 42
 
   // =========================================================================
+  // TERMINAL HANDLER — ifError:
+  // =========================================================================
+  testIfErrorOnOkReturnsSelf =>
+    r := Result ok: 42
+    result := r ifError: [:e | 0]
+    self assert: result ok
+    self assert: result value equals: 42
+
+  testIfErrorOnErrorEvaluatesBlock =>
+    result := (Result error: #oops) ifError: [:e | -1]
+    self assert: result equals: -1
+
+  testIfErrorPassesReasonToBlock =>
+    result := (Result error: #my_error) ifError: [:e | e printString]
+    self assert: result equals: "#my_error"
+
+  testIfErrorComposesWithAndThen =>
+    // Error in an andThen: chain short-circuits to ifError:
+    chain := (Result ok: 1) andThen: [:v | Result error: #chain_fail]
+    result := chain ifError: [:_ | "caught"]
+    self assert: result equals: "caught"
+
+  testIfErrorOkChainPassesThrough =>
+    // All steps succeed — ifError: block is never called
+    chain := (Result ok: 10) andThen: [:v | Result ok: v * 2]
+    result := chain ifError: [:_ | -1]
+    self assert: result ok
+    self assert: result value equals: 20
+
+  // =========================================================================
   // PATTERN MATCHING — ifOk:ifError:
   // =========================================================================
   testIfOkIfErrorWithOkEvaluatesOkBlock =>
