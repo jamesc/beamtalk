@@ -97,6 +97,7 @@ pub mod test_support {
             class_variables: Vec::new(),
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span,
         }
     }

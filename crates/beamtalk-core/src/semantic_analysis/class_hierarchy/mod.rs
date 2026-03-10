@@ -1565,6 +1565,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         }
     }
@@ -1843,6 +1844,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         }
     }
@@ -1877,6 +1879,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         }
     }
@@ -2102,6 +2105,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
         let derived = ClassDefinition {
@@ -2128,6 +2132,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
 
@@ -2221,6 +2226,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
 
@@ -2281,6 +2287,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
 
@@ -2338,6 +2345,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
 
@@ -2502,6 +2510,7 @@ mod tests {
             supervisor_kind: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
 
@@ -2552,6 +2561,7 @@ mod tests {
             supervisor_kind: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
 
@@ -2595,6 +2605,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         }
     }
@@ -2673,6 +2684,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
 
@@ -2732,6 +2744,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
 
@@ -2903,6 +2916,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
         let module = Module::new(vec![], test_span());
@@ -2935,6 +2949,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
         let module = Module {
@@ -3003,6 +3018,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
         let module = Module {
@@ -3091,6 +3107,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
         let module = Module {
@@ -3167,6 +3184,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
 
@@ -3196,6 +3214,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: test_span(),
         };
 

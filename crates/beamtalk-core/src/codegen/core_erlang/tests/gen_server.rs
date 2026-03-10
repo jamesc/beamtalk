@@ -949,6 +949,7 @@ fn test_class_registration_generation() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 50),
     };
 
@@ -1106,6 +1107,7 @@ fn test_multiple_classes_registration() {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: Span::new(0, span_end),
         }
     }
@@ -1233,6 +1235,7 @@ fn test_multi_class_early_error_short_circuits() {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: Span::new(0, span_end),
         }
     }
@@ -1306,6 +1309,7 @@ fn test_three_class_short_circuit_nesting() {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: Span::new(0, 20),
         }
     }
@@ -1447,6 +1451,7 @@ fn test_is_actor_class_direct_actor_subclass() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -1479,6 +1484,7 @@ fn test_is_actor_class_object_subclass_is_value_type() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -1513,6 +1519,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let logging_counter = ClassDefinition {
@@ -1529,6 +1536,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     // Module with both classes; first class is LoggingCounter
@@ -1584,6 +1592,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -1617,6 +1626,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -1654,6 +1664,7 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -1690,6 +1701,7 @@ fn test_is_actor_class_root_class_is_value_type() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -1986,6 +1998,7 @@ fn test_object_subclass_no_auto_getters() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -2048,6 +2061,7 @@ fn test_value_subclass_user_defined_overrides_auto() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -2085,6 +2099,7 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -2175,6 +2190,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -2392,6 +2408,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
         class_variables: vec![],
         comments: CommentAttachment::default(),
         doc_comment: None,
+        backing_module: None,
         span: Span::new(0, 0),
     };
     let module = Module {

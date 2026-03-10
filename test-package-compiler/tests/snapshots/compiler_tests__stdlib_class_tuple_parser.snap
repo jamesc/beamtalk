@@ -468,6 +468,7 @@ Module {
                 trailing: None,
             },
             doc_comment: None,
+            backing_module: None,
             span: Span {
                 start: 240,
                 end: 664,

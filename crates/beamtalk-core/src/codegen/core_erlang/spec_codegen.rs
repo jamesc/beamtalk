@@ -786,6 +786,7 @@ mod tests {
             class_variables: vec![],
             comments: CommentAttachment::default(),
             doc_comment: None,
+            backing_module: None,
             span: span(),
         }
     }
