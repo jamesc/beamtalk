@@ -745,7 +745,7 @@ fn test_nested_if_true_with_field_mutation_threads_state() {
 #[test]
 fn test_match_array_pattern_arm_generates_is_map_guard_chain() {
     // BT-1296: `arr match: [#[h, t] -> h + t; _ -> 0]` should compile to a
-    // conditional chain using is_map + map_get('$beamtalk_class') + size check.
+    // conditional chain using is_map + maps:get('$beamtalk_class', ..., 'undefined') + size check.
     let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[h, t] -> h + t;\n      _ -> 0\n    ]\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
@@ -844,5 +844,26 @@ fn test_match_nested_array_pattern_arm() {
     assert!(
         size_count >= 2,
         "Should emit at least 2 size checks for nested array. Found {size_count}. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_array_pattern_uses_maps_get_with_default_not_map_get() {
+    // BT-1296: The class-tag lookup must use maps:get/3 with a default value so
+    // that a plain Erlang map (Beamtalk Dictionary) as the match subject does not
+    // crash with {badkey, '$beamtalk_class'} — it should fall through instead.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #[a, b] -> a + b;\n      _ -> 0\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    assert!(
+        code.contains("call 'maps':'get'('$beamtalk_class',"),
+        "Should use maps:get/3 (safe, with default) not erlang:map_get/2 (crashes on missing key). Got:\n{code}"
+    );
+    assert!(
+        !code.contains("call 'erlang':'map_get'("),
+        "Must NOT use erlang:map_get/2 — throws badkey when '$beamtalk_class' absent. Got:\n{code}"
     );
 }

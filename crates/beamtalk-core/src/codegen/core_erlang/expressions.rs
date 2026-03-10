@@ -1775,7 +1775,7 @@ impl CoreErlangGenerator {
     /// ```text
     /// case is_map(_Match) of
     ///   <'true'> when 'true' ->
-    ///     case map_get('$beamtalk_class', _Match) of
+    ///     case maps:get('$beamtalk_class', _Match, 'undefined') of
     ///       <'Array'> when 'true' ->
     ///         case beamtalk_array:size(_Match) of
     ///           <N> when 'true' ->
@@ -1905,9 +1905,9 @@ impl CoreErlangGenerator {
             Document::String(match_var.to_string()),
             ") of ",
             "<'true'> when 'true' -> ",
-            "case call 'erlang':'map_get'('$beamtalk_class', ",
+            "case call 'maps':'get'('$beamtalk_class', ",
             Document::String(match_var.to_string()),
-            ") of ",
+            ", 'undefined') of ",
             "<'Array'> when 'true' -> ",
             "case call 'beamtalk_array':'size'(",
             Document::String(match_var.to_string()),
@@ -2018,9 +2018,9 @@ impl CoreErlangGenerator {
                     Document::String(nested_var.clone()),
                     ") of ",
                     "<'true'> when 'true' -> ",
-                    "case call 'erlang':'map_get'('$beamtalk_class', ",
+                    "case call 'maps':'get'('$beamtalk_class', ",
                     Document::String(nested_var.clone()),
-                    ") of ",
+                    ", 'undefined') of ",
                     "<'Array'> when 'true' -> ",
                     "case call 'beamtalk_array':'size'(",
                     Document::String(nested_var.clone()),
@@ -2072,10 +2072,12 @@ impl CoreErlangGenerator {
                 Ok(Document::Vec(parts))
             }
             Pattern::Array { .. } => {
-                // Array patterns are only valid in destructuring assignments,
-                // not in match arms (arrays are opaque tagged maps, not Core Erlang lists).
+                // Beamtalk arrays are opaque tagged maps — they cannot appear as a
+                // native Core Erlang sub-pattern (inside tuples, lists, binary segments, etc.).
+                // Top-level array patterns in `match:` arms are handled by
+                // `generate_array_match_arm` and never reach this path.
                 Err(CodeGenError::UnsupportedFeature {
-                    feature: "Array pattern in match arm — use destructuring assignment `#[a, b] := expr` instead".to_string(),
+                    feature: "Array pattern nested inside a composite native pattern (tuple/list) is not supported".to_string(),
                     location: format!("{:?}", pattern.span()),
                 })
             }

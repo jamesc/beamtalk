@@ -91,6 +91,11 @@ TestCase subclass: PatternMatchingTest
       #[a, b] -> a + b;
       _ -> 0
     ]) equals: 0
+    // Array arm fallthrough: subject is a dict (plain map — must not crash on missing key)
+    self assert: (#{#x => 1} match: [
+      #[a, b] -> a + b;
+      _ -> 0
+    ]) equals: 0
     // Array arm fallthrough: wrong size
     self assert: (#[1, 2, 3] match: [
       #[a, b] -> a + b;
