@@ -278,15 +278,12 @@ beamtalk run Main start
 
 **`[run] entry = "Main run"`:**
 ```bash
-# Before: beamtalk run . (read [run] entry; supported arbitrary expressions
-#   including keyword selectors, e.g. entry = "App start: 'production'")
-# After: pass the class and selector explicitly on the CLI
+# Before: beamtalk.toml had [run] entry = "Main run"
+# After:
 beamtalk run Main run
-# Keyword-selector example:
-beamtalk run App "start: 'production'"
 ```
 
-Note: `[run] entry` was treated as an arbitrary Beamtalk expression (matching `beamtalk repl` eval semantics) and therefore supported keyword selectors and arguments. This capability is preserved at the CLI level — the decision removes the *config* mechanism, not expressive power. Any entry expression that was valid in `[run] entry` can be passed as CLI args to `beamtalk run`. **This is a breaking change** for projects using `[run] entry`; update `beamtalk.toml` and any CI scripts accordingly.
+**This is a breaking change.** The new CLI contract is `beamtalk run <ClassName> <selector>` — two positional arguments only. The old `[run] entry` field accepted arbitrary Beamtalk expressions (including keyword selectors with arguments, e.g. `entry = "App start: 'production'"`); the new CLI does not. Keyword-selector and multi-argument entry expressions must be refactored into a unary entry point or wrapped behind a named script (see planned `[scripts]` table). Update `beamtalk.toml` and all CI scripts to use the positional form.
 
 **`beamtalk repl` auto-eval of `[run] entry`:** Remove `[run]` from toml. If the auto-eval was used to warm up the REPL, start the service with `beamtalk run .` first and connect with `beamtalk repl`.
 
