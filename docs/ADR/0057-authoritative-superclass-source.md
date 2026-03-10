@@ -401,25 +401,45 @@ the stale gen_server superclass; after Phase 1, its raison d'etre is gone. The
 method-collection logic can use the same `walk_hierarchy` + `gen_server:call` pattern
 as `metaclassClassMethods` and other intrinsics.
 
-### Phase 5 (follow-up ADR) — Migrate Static Metadata out of gen_server
+### Phase 5 — Migrate Static Metadata out of gen_server (BT-1272, In Progress)
 
-Once Phases 1-4 land and correctness is established, a follow-up ADR covers Option C:
+Design accepted in BT-1272. No separate ADR — the reasoning is captured here.
 
-- Define the gen_server's role as **mutable runtime state only**: live method table
-  (with hot-patch deltas), class variables, runtime-added docs.
-- Remove static fields from `#class_state{}`: `superclass`, `is_sealed`,
-  `is_abstract`, `fields`, `method_return_types`, `class_method_return_types`,
-  `method_signatures`, `class_method_signatures`, `doc` (~9 fields of 17).
-- All structural queries read from `__beamtalk_meta/0` directly (or a thin ETS
-  cache over it for dynamic classes).
-- Dynamic classes (no compiled module) populate the ETS cache at `register_class`
-  time from `ClassInfo` — same data, different source.
+**Class gen_server (`#class_state{}`):** Remove ~9 static fields (`superclass`,
+`is_sealed`, `is_abstract`, `fields`, `method_return_types`,
+`class_method_return_types`, `method_signatures`, `class_method_signatures`,
+`doc`). The gen_server becomes responsible only for **mutable runtime state**:
+live method table (with hot-patch deltas), class variables, runtime-added docs.
+All structural queries read from `__beamtalk_meta/0` directly. Dynamic classes
+(no compiled module) populate a thin ETS cache at `register_class` time from
+`ClassInfo`.
 
-Phase 5 is tracked separately. It does not block Phases 1-4.
+**Actor instance state (`__methods__`):** Remove `__methods__` from every
+compiled actor/value-object state map. `$beamtalk_class` and `__class_mod__`
+are retained.
+
+- `$beamtalk_class` is kept: it is a single atom with negligible overhead, and
+  is read by the entire runtime stack for display, inspect, printString, and
+  reflection via `beamtalk_tagged_map:class_of/1` (103+ call sites). Removing
+  it would require a cross-cutting runtime change beyond this migration's scope.
+- `__methods__` is removed: generated `dispatch/4` replaces
+  `maps:get('__methods__', State)` with a direct call to `module:method_table()`.
+  Hot-reload correctness is automatic — the new module's `method_table/0` is
+  live immediately, no cache invalidation needed.
+- Dynamic actors (no compiled module): retain `__methods__`-as-functions in
+  state unchanged. `beamtalk_actor:dispatch` continues to read from state for
+  this path.
+
+ETS was considered for the method table but rejected for the compiled-actor path:
+`method_table/0` is a constant module function (no allocation, no locking,
+automatically correct after hot-reload). ETS is idiomatic for shared mutable
+state, not for immutable module-level constants.
+
+Phase 5 does not block Phases 1-4.
 
 ## References
 
-- Related issues: BT-1169 (immediate trigger — `Counter class allMethods` bug)
+- Related issues: BT-1169 (immediate trigger — `Counter class allMethods` bug), BT-1272 (Phase 5 implementation)
 - Related ADRs:
   - ADR 0007: Compilable Standard Library with Primitive Injection
   - ADR 0032: Early Class Protocol (introduced `apply_class_info`)

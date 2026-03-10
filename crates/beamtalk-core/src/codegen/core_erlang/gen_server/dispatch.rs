@@ -422,7 +422,11 @@ impl CoreErlangGenerator {
                                                     line(),
                                                     "let DnuSelector = 'doesNotUnderstand:args:' in",
                                                     line(),
-                                                    "let Methods = call 'maps':'get'('__methods__', State) in",
+                                                    docvec![
+                                                        "let Methods = call '",
+                                                        Document::String(module_name.clone()),
+                                                        "':'method_table'() in",
+                                                    ],
                                                     line(),
                                                     "case call 'maps':'is_key'(DnuSelector, Methods) of",
                                                     nest(
@@ -451,7 +455,13 @@ impl CoreErlangGenerator {
                                                                     line(),
                                                                     "%% No DNU handler - return #beamtalk_error{} record",
                                                                     line(),
-                                                                    "let ClassName = call 'maps':'get'('$beamtalk_class', State) in",
+                                                                    docvec![
+                                                                        "let ClassName = '",
+                                                                        Document::String(
+                                                                            class_name.clone()
+                                                                        ),
+                                                                        "' in",
+                                                                    ],
                                                                     line(),
                                                                     "let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in",
                                                                     line(),

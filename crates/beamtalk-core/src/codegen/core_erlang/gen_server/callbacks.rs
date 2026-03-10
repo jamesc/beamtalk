@@ -35,7 +35,7 @@ impl CoreErlangGenerator {
     ///         <{'ok', ParentState}> when 'true' ->
     ///             let ChildFields = ~{
     ///                 '$beamtalk_class' => 'LoggingCounter',
-    ///                 '__methods__' => call 'logging_counter':'method_table'(),
+    ///                 '__class_mod__' => 'logging_counter',
     ///                 'logCount' => 0
     ///             }~
     ///             in let MergedState = call 'maps':'merge'(ParentState, ChildFields)
@@ -53,7 +53,7 @@ impl CoreErlangGenerator {
     /// 'init'/1 = fun (InitArgs) ->
     ///     let DefaultState = ~{
     ///         '$beamtalk_class' => 'Counter',
-    ///         '__methods__' => call 'counter':'method_table'(),
+    ///         '__class_mod__' => 'counter',
     ///         'value' => 0
     ///     }~
     ///     in let FinalState = call 'maps':'merge'(DefaultState, InitArgs)
@@ -139,13 +139,7 @@ impl CoreErlangGenerator {
                                                 docvec![
                                                     "'__class_mod__' => '",
                                                     Document::String(module_name.clone()),
-                                                    "',"
-                                                ],
-                                                line(),
-                                                docvec![
-                                                    "'__methods__' => call '",
-                                                    Document::String(module_name.clone()),
-                                                    "':'method_table'()"
+                                                    "'"
                                                 ],
                                                 Document::Vec(own_state_fields),
                                             ]
@@ -207,13 +201,7 @@ impl CoreErlangGenerator {
                                 docvec![
                                     "'__class_mod__' => '",
                                     Document::String(module_name.clone()),
-                                    "',"
-                                ],
-                                line(),
-                                docvec![
-                                    "'__methods__' => call '",
-                                    Document::String(module_name.clone()),
-                                    "':'method_table'()"
+                                    "'"
                                 ],
                                 Document::Vec(initial_state_fields),
                             ]
