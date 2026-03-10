@@ -129,10 +129,18 @@ fn run_script(
     // Validate selector: unary selectors are simple identifiers (keyword selectors
     // with ':' are not supported in the CLI form — wrap them in a unary entry point).
     // Full validation required: selector is injected into an Erlang -eval string.
-    if selector.is_empty() || selector.contains(|c: char| !c.is_alphanumeric() && c != '_') {
+    // Erlang unquoted atoms must start with a lowercase letter; an uppercase first
+    // character would be parsed as a variable reference, causing a confusing error.
+    if selector.is_empty()
+        || !selector
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase())
+        || selector.chars().any(|c| !c.is_alphanumeric() && c != '_')
+    {
         miette::bail!(
-            "Invalid selector '{selector}': selectors must contain only alphanumeric characters \
-             and underscores.\n\
+            "Invalid selector '{selector}': selectors must start with a lowercase letter \
+             and contain only alphanumeric characters and underscores.\n\
              Keyword selectors (e.g. `start: 'prod'`) are not supported in the CLI form — \
              wrap them in a unary entry method."
         );
@@ -564,9 +572,40 @@ mod tests {
     }
 
     #[test]
-    fn test_run_with_invalid_path() {
-        let result = run("/nonexistent/path", None);
+    #[serial(cwd)]
+    fn test_run_path_like_string_requires_selector() {
+        // Path-like strings are treated as class names (not paths); a missing selector
+        // triggers a clear "Missing selector" error rather than a path-not-found error.
+        let temp = TempDir::new().unwrap();
+        create_test_project_with_manifest(
+            &temp,
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+        let result = with_project_dir(temp.path(), || run("/looks/like/path", None));
         assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Missing selector"),
+            "Path-like class name should require selector: {err}"
+        );
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_run_invalid_selector_uppercase() {
+        let temp = TempDir::new().unwrap();
+        create_test_project_with_manifest(
+            &temp,
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+
+        let result = with_project_dir(temp.path(), || run("Main", Some("Run")));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Invalid selector"),
+            "Uppercase selector should be rejected: {err}"
+        );
     }
 
     #[test]
