@@ -423,10 +423,7 @@ impl CoreErlangGenerator {
             all_params.push("State".to_string());
 
             // BT-761: Detect NLR in sealed method body
-            let needs_nlr = method
-                .body
-                .iter()
-                .any(|stmt| Self::expr_has_block_nlr(&stmt.expression, false));
+            let needs_nlr = self.semantic_facts.has_block_nlr(&method.span);
 
             let nlr_token_var = if needs_nlr {
                 let token_var = self.fresh_temp_var("NlrToken");

@@ -9,7 +9,9 @@
 //! Codegen consumes it via hash-map lookup instead of re-deriving facts
 //! inline at every call site (BT-1288).
 
-use crate::ast::{Expression, MessageSelector, MethodKind, Module};
+use crate::ast::{
+    Block, CascadeMessage, Expression, MessageSelector, MethodKind, Module, StringSegment,
+};
 use crate::semantic_analysis::block_facts::{BlockMutationAnalysis, analyze_block};
 use crate::source_analysis::Span;
 use std::collections::{HashMap, HashSet};
@@ -93,6 +95,11 @@ pub struct SemanticFacts {
     pub sync_envs: HashMap<Span, SyncEnv>,
     /// Per-class method index, keyed by class name.
     pub class_facts: HashMap<String, ClassFacts>,
+    /// Set of method (or legacy block) spans whose body contains a `^` inside a block.
+    ///
+    /// Populated by [`compute_semantic_facts`]. Codegen uses this for O(1) NLR detection
+    /// instead of re-walking the AST at every call site.
+    pub methods_with_block_nlr: HashSet<Span>,
 }
 
 impl SemanticFacts {
@@ -113,6 +120,91 @@ impl SemanticFacts {
             .copied()
             .unwrap_or(DispatchKind::Unknown)
     }
+
+    /// Returns `true` if the method or block identified by `span` contains a `^` inside a block.
+    pub fn has_block_nlr(&self, span: &Span) -> bool {
+        self.methods_with_block_nlr.contains(span)
+    }
+}
+
+/// Returns `true` if `expr` (or any sub-expression) contains a `^` (Return) inside a block.
+///
+/// `inside_block` is `true` when the caller is already within a block body. A `^` at method
+/// level is a normal early return handled elsewhere; only `^` *inside* a block is an NLR.
+fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
+    match expr {
+        Expression::Return { value, .. } => inside_block || expr_has_block_nlr(value, inside_block),
+        Expression::Block(block) => block_has_nlr(block),
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            expr_has_block_nlr(receiver, inside_block)
+                || arguments
+                    .iter()
+                    .any(|a| expr_has_block_nlr(a, inside_block))
+        }
+        Expression::Assignment { target, value, .. } => {
+            expr_has_block_nlr(target, inside_block) || expr_has_block_nlr(value, inside_block)
+        }
+        Expression::Parenthesized { expression, .. } => {
+            expr_has_block_nlr(expression, inside_block)
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            expr_has_block_nlr(receiver, inside_block)
+                || messages.iter().any(|m: &CascadeMessage| {
+                    m.arguments
+                        .iter()
+                        .any(|a| expr_has_block_nlr(a, inside_block))
+                })
+        }
+        Expression::FieldAccess { receiver, .. } => expr_has_block_nlr(receiver, inside_block),
+        Expression::Match { value, arms, .. } => {
+            expr_has_block_nlr(value, inside_block)
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .is_some_and(|g| expr_has_block_nlr(g, inside_block))
+                        || expr_has_block_nlr(&arm.body, inside_block)
+                })
+        }
+        Expression::MapLiteral { pairs, .. } => pairs.iter().any(|pair| {
+            expr_has_block_nlr(&pair.key, inside_block)
+                || expr_has_block_nlr(&pair.value, inside_block)
+        }),
+        Expression::ListLiteral { elements, tail, .. } => {
+            elements.iter().any(|e| expr_has_block_nlr(e, inside_block))
+                || tail
+                    .as_ref()
+                    .is_some_and(|t| expr_has_block_nlr(t, inside_block))
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            elements.iter().any(|e| expr_has_block_nlr(e, inside_block))
+        }
+        Expression::StringInterpolation { segments, .. } => segments.iter().any(|s| match s {
+            StringSegment::Literal(_) => false,
+            StringSegment::Interpolation(e) => expr_has_block_nlr(e, inside_block),
+        }),
+        Expression::DestructureAssignment { value, .. } => expr_has_block_nlr(value, inside_block),
+        Expression::Literal(..)
+        | Expression::Identifier(..)
+        | Expression::ClassReference { .. }
+        | Expression::Super(..)
+        | Expression::Primitive { .. }
+        | Expression::Error { .. }
+        | Expression::ExpectDirective { .. } => false,
+    }
+}
+
+/// Returns `true` if the block body contains a `^` (Return) expression anywhere inside it.
+fn block_has_nlr(block: &Block) -> bool {
+    block
+        .body
+        .iter()
+        .any(|s| expr_has_block_nlr(&s.expression, true))
 }
 
 /// Compute semantic facts for all nodes in a module.
@@ -121,11 +213,27 @@ impl SemanticFacts {
 /// - Populates `block_profiles` by calling [`analyze_block`] for every [`Block`] node.
 /// - Populates `dispatch_kinds` for every [`Expression::MessageSend`] node.
 /// - Populates `sync_envs` for every method definition (method parameters are always sync).
+/// - Populates `methods_with_block_nlr` for methods whose body contains `^` inside a block.
 pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
     let mut facts = SemanticFacts::default();
 
     // Process module-level expressions
     for stmt in &module.expressions {
+        // Detect legacy expression-based method blocks (used by gen_server dispatch legacy path).
+        // These are top-level assignments of the form `methodName := [:param | body]`.
+        // The block body is treated as method-level (inside_block=false): a ^ directly in the
+        // block is a normal early return, not an NLR — only ^ inside a *nested* block is NLR.
+        if let Expression::Assignment { value, .. } = &stmt.expression {
+            if let Expression::Block(block) = value.as_ref() {
+                if block
+                    .body
+                    .iter()
+                    .any(|s| expr_has_block_nlr(&s.expression, false))
+                {
+                    facts.methods_with_block_nlr.insert(block.span);
+                }
+            }
+        }
         collect_expression_facts(&stmt.expression, &mut facts);
     }
 
@@ -170,6 +278,15 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
                 facts.sync_envs.insert(method.span, SyncEnv { sync_vars });
             }
 
+            // Detect block NLR: ^ inside a block requires the NLR throw/catch mechanism.
+            if method
+                .body
+                .iter()
+                .any(|stmt| expr_has_block_nlr(&stmt.expression, false))
+            {
+                facts.methods_with_block_nlr.insert(method.span);
+            }
+
             for stmt in &method.body {
                 collect_expression_facts(&stmt.expression, &mut facts);
             }
@@ -187,6 +304,16 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
         if !sync_vars.is_empty() {
             facts.sync_envs.insert(method.span, SyncEnv { sync_vars });
         }
+
+        // Detect block NLR for standalone methods.
+        if method
+            .body
+            .iter()
+            .any(|stmt| expr_has_block_nlr(&stmt.expression, false))
+        {
+            facts.methods_with_block_nlr.insert(method.span);
+        }
+
         for stmt in &method.body {
             collect_expression_facts(&stmt.expression, &mut facts);
         }
