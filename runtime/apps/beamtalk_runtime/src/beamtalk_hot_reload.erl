@@ -126,7 +126,7 @@ maybe_migrate_class_key(State) ->
 %% - Preserves all existing field values from old state
 %% - Adds new fields with their default values
 %% - Drops removed fields (with log warning)
-%% - Preserves internal keys ($beamtalk_class, __methods__, __class_mod__)
+%% - Preserves internal keys present in new init defaults (e.g. __class_mod__)
 %% @private
 -spec migrate_fields(map(), [atom()], atom()) -> map().
 migrate_fields(OldState, NewInstanceVars, Module) ->
@@ -175,7 +175,7 @@ migrate_fields(OldState, NewInstanceVars, Module) ->
                 [] ->
                     ok;
                 _ ->
-                    ClassName = maps:get('$beamtalk_class', OldState, unknown),
+                    ClassName = beamtalk_tagged_map:class_of(OldState, unknown),
                     ?LOG_WARNING(
                         "Hot reload dropped fields",
                         #{class => ClassName, fields => Dropped}

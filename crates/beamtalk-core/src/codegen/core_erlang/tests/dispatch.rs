@@ -293,11 +293,19 @@ fn test_generate_spawn_function() {
     assert!(code.contains("<{'error', Reason}> when 'true' ->"));
     assert!(code.contains("call 'beamtalk_error':'raise'(SpawnErr1)"));
 
+    // class_name/0 replaces $beamtalk_class in init state: correct after hot-reload
+    assert!(
+        code.contains("'class_name'/0 = fun () -> 'Counter'"),
+        "class_name/0 must return the class atom. Got:\n{code}"
+    );
     // Check that init/1 creates the default state with fields and merges with InitArgs
     assert!(code.contains("'init'/1 = fun (InitArgs) ->"));
     assert!(code.contains("let DefaultState = ~{"));
-    assert!(code.contains("'$beamtalk_class' => 'Counter'"));
-    assert!(code.contains("'__methods__' => call 'counter':'method_table'()"));
+    assert!(
+        !code.contains("'$beamtalk_class' => 'Counter'"),
+        "$beamtalk_class must not appear in compiled actor init state. Got:\n{code}"
+    );
+    assert!(code.contains("'__class_mod__' => 'counter'"));
     assert!(code.contains("'value' => 0"));
     // Check that InitArgs is merged into DefaultState
     assert!(code.contains("call 'maps':'merge'(DefaultState, InitArgs)"));

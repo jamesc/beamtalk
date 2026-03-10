@@ -86,7 +86,8 @@ impl CoreErlangGenerator {
              'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4",
             dispatch_3_export,
             ", 'safe_dispatch'/3, \
-             'method_table'/0, 'has_method'/1, 'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
+             'method_table'/0, 'has_method'/1, 'class_name'/0, \
+             'spawn'/0, 'spawn'/1, 'new'/0, 'new'/1, \
              'superclass'/0",
             meta_export,
         ];
@@ -172,6 +173,7 @@ impl CoreErlangGenerator {
         push_fn(self.generate_actor_new_error_method()?)?;
         push_fn(self.generate_actor_new_with_args_error_method()?)?;
         push_fn(self.generate_superclass_function(module)?)?;
+        push_fn(self.generate_class_name_function(module)?)?;
         push_fn(self.generate_init_function(module)?)?;
 
         // BT-403: Abstract classes skip gen_server callback scaffolding.
