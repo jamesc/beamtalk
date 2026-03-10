@@ -90,6 +90,11 @@ const LIVENESS_CHECK_INTERVAL: usize = 25;
 
 /// Start a detached BEAM node for a workspace.
 /// Returns the `NodeInfo` for the started node.
+///
+/// If `otp_app_name` is `Some(name)`, `application:ensure_all_started(name)` is
+/// inserted into the eval sequence after the workspace supervisor starts but before
+/// the REPL port is queried. This guarantees all project classes are registered
+/// before the OTP supervisor tree is brought up (BT-1319).
 #[allow(clippy::too_many_arguments)] // workspace node startup requires many independent parameters
 #[allow(clippy::too_many_lines)] // eval command construction is necessarily verbose
 pub fn start_detached_node(
@@ -102,6 +107,7 @@ pub fn start_detached_node(
     bind_addr: Option<Ipv4Addr>,
     ssl_dist_optfile: Option<&Path>,
     web_port: Option<u16>,
+    otp_app_name: Option<&str>,
 ) -> Result<NodeInfo> {
     // Generate node name
     let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
@@ -165,6 +171,13 @@ pub fn start_detached_node(
         None => "undefined".to_string(),
     };
 
+    // If an OTP app name is provided, start it after workspace bootstrap so that
+    // all project classes are registered before the OTP supervisor's init/1 runs (BT-1319).
+    let otp_app_start = match otp_app_name {
+        Some(name) => format!("{{ok, _}} = application:ensure_all_started({name}), "),
+        None => String::new(),
+    };
+
     let eval_cmd = format!(
         "ok = file:write_file(\"{pid_file_path_str}\", os:getpid()), \
          application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
@@ -179,6 +192,7 @@ pub fn start_detached_node(
                                                           web_port => {web_port_erl}, \
                                                           auto_cleanup => {auto_cleanup}, \
                                                           max_idle_seconds => {idle_timeout}}}), \
+         {otp_app_start}\
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"Workspace {workspace_id} started on port ~B~n\", [ActualPort]), \
          receive stop -> ok end."

@@ -10,6 +10,7 @@
 //! method returns so that supervised actors remain alive.
 
 use std::ffi::OsString;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use camino::Utf8PathBuf;
@@ -19,6 +20,7 @@ use tracing::{info, instrument};
 use beamtalk_cli::repl_startup;
 
 use super::manifest;
+use super::workspace;
 
 /// Compile and run a beamtalk package.
 ///
@@ -194,28 +196,31 @@ fn run_package(project_root: &Utf8PathBuf, pkg: &manifest::PackageManifest) -> R
     Ok(())
 }
 
-/// Run a package as a proper OTP application (BT-1191).
+/// Run a package as a persistent OTP service (BT-1191, BT-1319).
 ///
-/// Compiles the package (which generates the OTP app callback module), then
-/// starts a BEAM node that calls `application:ensure_all_started(AppName)`
-/// to bring up the root supervisor as an OTP application. The node stays alive
-/// until the application terminates.
+/// Starts a persistent workspace (with REPL server) so that all project classes
+/// are registered via the workspace bootstrap before the OTP application's root
+/// supervisor `init/1` runs. The workspace node is detached — the CLI returns
+/// once the service is up, printing the REPL port for later connection.
+///
+/// If a workspace for this project is already running, prints the existing port
+/// and exits 0 (idempotent, matching `systemctl start` conventions).
 fn run_package_as_otp_application(
     project_root: &Utf8PathBuf,
     pkg: &manifest::PackageManifest,
 ) -> Result<()> {
-    info!(name = %pkg.name, "Running as OTP application");
+    info!(name = %pkg.name, "Running as OTP service (workspace-first)");
+
+    // Fetch supervisor name for display (already validated by run_package caller)
+    let app_config = manifest::find_application_config(project_root)?.ok_or_else(|| {
+        miette!("No [application] section in beamtalk.toml — cannot start as OTP service")
+    })?;
 
     println!("Building...");
     super::build::build(
         project_root.as_str(),
         &beamtalk_core::CompilerOptions::default(),
     )?;
-
-    println!(
-        "\nStarting {} v{} (OTP application)...",
-        pkg.name, pkg.version
-    );
 
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
     let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
@@ -233,69 +238,47 @@ fn run_package_as_otp_application(
         }
     }
 
-    let mut args = repl_startup::beam_pa_args(&paths);
+    // Include the package ebin on the workspace code path so bootstrap can load
+    // all bt@*.beam project classes before the OTP supervisor starts.
+    let ebin_dir: PathBuf = project_root
+        .join("_build")
+        .join("dev")
+        .join("ebin")
+        .into_std_path_buf();
+    let extra_code_paths = vec![ebin_dir];
 
-    let ebin_dir = project_root.join("_build").join("dev").join("ebin");
-    args.push(OsString::from("-pa"));
-    #[cfg(windows)]
-    {
-        let ebin_path = ebin_dir.as_str().replace('\\', "/");
-        args.push(OsString::from(ebin_path));
-    }
-    #[cfg(not(windows))]
-    {
-        args.push(OsString::from(ebin_dir.as_str()));
+    // Start or reconnect to a persistent workspace for this project.
+    // otp_app_name causes application:ensure_all_started(app_name) to be
+    // injected into the workspace eval after class bootstrap completes (BT-1319).
+    let (node_info, is_new, _workspace_id) = workspace::get_or_start_workspace(
+        project_root.as_std_path(),
+        None,
+        0, // ephemeral port: OS assigns
+        &paths,
+        &extra_code_paths,
+        false, // persistent (not auto_cleanup)
+        None,  // max_idle_seconds: use workspace default
+        None,  // bind_addr: loopback default
+        None,  // ssl_dist_optfile
+        None,  // web_port
+        Some(&pkg.name),
+    )?;
+
+    if !is_new {
+        // Workspace already running — OTP app is already up.
+        println!(
+            "{} v{} is already running (REPL port {})\nConnect with: beamtalk repl",
+            pkg.name, pkg.version, node_info.port
+        );
+        return Ok(());
     }
 
-    // Start the OTP application. The generated beamtalk_{appname}_app module's
-    // start/2 will bring up the root supervisor rooted in the OTP tree.
-    // Monitor the root supervisor PID so the eval process exits when the
-    // application terminates (rather than waiting for an unsent 'stop' message).
-    let app_name = &pkg.name;
-    let eval_cmd = format!(
-        "{{ok, _}} = application:ensure_all_started(beamtalk_runtime), \
-         {{ok, _}} = application:ensure_all_started({app_name}), \
-         SupTuple = beamtalk_supervisor:get_root(), \
-         Pid = element(4, SupTuple), \
-         Ref = erlang:monitor(process, Pid), \
-         receive {{'DOWN', Ref, process, _, _}} -> ok end."
+    println!(
+        "\nStarted {} v{}\n  Supervisor : {}\n  REPL port  : {}   (connect with: beamtalk repl)",
+        pkg.name, pkg.version, app_config.supervisor, node_info.port
     );
 
-    args.push(OsString::from("-eval"));
-    args.push(OsString::from(&eval_cmd));
-
-    let mut cmd = Command::new("erl");
-    cmd.arg("-noshell")
-        .args(&args)
-        .current_dir(project_root.as_std_path())
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(bin_dir) = exe.parent() {
-            let compiler_port = bin_dir.join("beamtalk-compiler-port");
-            if compiler_port.exists() {
-                cmd.env("BEAMTALK_COMPILER_PORT_BIN", &compiler_port);
-            }
-        }
-    }
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| miette!("Failed to start BEAM node: {e}\nIs Erlang/OTP installed?"))?;
-
-    let status = child
-        .wait()
-        .map_err(|e| miette!("Failed to wait for BEAM node: {e}"))?;
-
-    if !status.success() {
-        if let Some(code) = status.code() {
-            miette::bail!("Program exited with code {code}");
-        }
-    }
-
-    info!("OTP application run completed");
+    info!("OTP service started");
     Ok(())
 }
 

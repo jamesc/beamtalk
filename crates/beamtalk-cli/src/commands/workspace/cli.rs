@@ -307,6 +307,7 @@ fn run_create_background(
         Some(bind_addr),
         ssl_dist_conf.as_deref(),
         web_port,
+        None,
     )?;
 
     println!("Workspace '{workspace_id}' started");
