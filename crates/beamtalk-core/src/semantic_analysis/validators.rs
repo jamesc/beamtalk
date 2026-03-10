@@ -1511,18 +1511,25 @@ fn visit_match_exhaustiveness(expr: &Expression, diagnostics: &mut Vec<Diagnosti
         return;
     };
 
-    // A wildcard arm suppresses exhaustiveness checking.
+    // An unguarded wildcard arm suppresses exhaustiveness checking.
+    // A guarded wildcard (`_ when: [cond] -> body`) is conditional and does
+    // NOT guarantee coverage of all remaining cases.
     if arms
         .iter()
-        .any(|arm| matches!(arm.pattern, Pattern::Wildcard(_)))
+        .any(|arm| arm.guard.is_none() && matches!(arm.pattern, Pattern::Wildcard(_)))
     {
         return;
     }
 
     // Collect covered constructor selectors by class name.
+    // Only unguarded arms count: a guarded constructor arm (`Result ok: v when: [v > 0] -> ...`)
+    // is conditional and does not guarantee coverage of that variant.
     let mut covered: std::collections::HashMap<&str, Vec<String>> =
         std::collections::HashMap::new();
     for arm in arms {
+        if arm.guard.is_some() {
+            continue;
+        }
         if let Pattern::Constructor {
             class, keywords, ..
         } = &arm.pattern
@@ -3213,5 +3220,83 @@ mod tests {
             "Expected 1 error inside method, got: {diagnostics:?}"
         );
         assert_eq!(diagnostics[0].severity, Severity::Error);
+    }
+
+    /// Guarded wildcard does NOT suppress exhaustiveness — the guard means it
+    /// won't always match, so missing variants are still uncovered.
+    #[test]
+    fn match_exhaustiveness_guarded_wildcard_does_not_suppress() {
+        let src = "r match: [Result ok: v -> [v]; _ when: [true] -> [0]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error: guarded wildcard should not suppress exhaustiveness, \
+             got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(
+            diagnostics[0].message.contains("error:"),
+            "Expected 'error:' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// Guarded constructor arm does NOT count as coverage — the guard means
+    /// it won't match when the guard is false.
+    #[test]
+    fn match_exhaustiveness_guarded_constructor_arm_not_counted() {
+        let src = "r match: [Result ok: v when: [v > 0] -> [v]; Result error: e -> [0]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error: guarded ok: arm should not count as full ok: coverage, \
+             got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(
+            diagnostics[0].message.contains("ok:"),
+            "Expected 'ok:' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// Unguarded wildcard still suppresses exhaustiveness.
+    #[test]
+    fn match_exhaustiveness_unguarded_wildcard_still_suppresses() {
+        let src = "r match: [Result ok: v -> [v]; _ -> [0]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error: unguarded wildcard should suppress check, got: {diagnostics:?}"
+        );
+    }
+
+    /// Unguarded constructor arm still counts as coverage.
+    #[test]
+    fn match_exhaustiveness_unguarded_constructor_arm_counts() {
+        let src = "r match: [Result ok: v -> [v]; Result error: _ -> [0]]";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no error: both unguarded arms present, got: {diagnostics:?}"
+        );
     }
 }
