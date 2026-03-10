@@ -274,7 +274,7 @@ fn run_package_as_otp_application(
     if !is_new {
         // Workspace already exists but the app was not yet running (the early probe
         // above would have returned if it was). Ensure the app is running via RPC.
-        ensure_otp_app_in_workspace(
+        let already_running = ensure_otp_app_in_workspace(
             &node_info.node_name,
             &workspace_id,
             &pkg.name,
@@ -283,10 +283,17 @@ fn run_package_as_otp_application(
             project_root.as_std_path(),
         )?;
 
-        println!(
-            "\nStarted {} v{} in existing workspace\n  Supervisor : {}\n  REPL port  : {}   (connect with: beamtalk repl)",
-            pkg.name, pkg.version, app_config.supervisor, node_info.port
-        );
+        if already_running {
+            println!(
+                "{} v{} is already running (REPL port {})\nConnect with: beamtalk repl",
+                pkg.name, pkg.version, node_info.port
+            );
+        } else {
+            println!(
+                "\nStarted {} v{} in existing workspace\n  Supervisor : {}\n  REPL port  : {}   (connect with: beamtalk repl)",
+                pkg.name, pkg.version, app_config.supervisor, node_info.port
+            );
+        }
         return Ok(());
     }
 
@@ -331,7 +338,7 @@ fn probe_running_workspace_app(project_root: &std::path::Path, app_name: &str) -
              {{badrpc, _}} -> []; \
              L when is_list(L) -> [element(1, A) || A <- L] \
          end, \
-         case lists:member({app_name}, Names) of \
+         case lists:member('{app_name}', Names) of \
              true -> io:format(\"running~n\"), halt(0); \
              false -> io:format(\"not_running~n\"), halt(0) \
          end.",
@@ -394,12 +401,24 @@ fn ensure_otp_app_in_workspace(
     #[cfg(not(windows))]
     let ebin_escaped = crate::beam_compiler::escape_erlang_string(&ebin_dir.to_string_lossy());
 
-    // RPC into the workspace: add package ebin then ensure_all_started.
+    #[cfg(windows)]
+    let project_path_escaped = crate::beam_compiler::escape_erlang_string(
+        &project_root.to_string_lossy().replace('\\', "/"),
+    );
+    #[cfg(not(windows))]
+    let project_path_escaped =
+        crate::beam_compiler::escape_erlang_string(&project_root.to_string_lossy());
+
+    // RPC into the workspace: add package ebin, rescan project classes so that
+    // any bt@*.beam compiled after the workspace started are registered before
+    // ensure_all_started is called (BT-1319: class_not_found during init/1).
     // {ok, []} = app already running; {ok, [_|_]} = freshly started.
     // rpc:call/5 with 30 s timeout prevents hanging if startup blocks.
+    // app_name is single-quoted so hyphenated names (e.g. my-app) are valid atoms.
     let eval_cmd = format!(
         "rpc:call('{workspace_node}', code, add_path, [\"{ebin_escaped}\"]), \
-         Result = rpc:call('{workspace_node}', application, ensure_all_started, [{app_name}], 30000), \
+         rpc:call('{workspace_node}', beamtalk_workspace_bootstrap, activate_project_modules, [<<\"{project_path_escaped}\">>], 30000), \
+         Result = rpc:call('{workspace_node}', application, ensure_all_started, ['{app_name}'], 30000), \
          case Result of \
              {{ok, []}} -> io:format(\"already~n\"), halt(0); \
              {{ok, _}} -> io:format(\"started~n\"), halt(0); \
