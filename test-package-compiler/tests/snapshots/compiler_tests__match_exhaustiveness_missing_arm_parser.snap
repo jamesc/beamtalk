@@ -1,0 +1,242 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+assertion_line: 70
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "ExhaustivenessTest",
+                span: Span {
+                    start: 201,
+                    end: 219,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 184,
+                        end: 190,
+                    },
+                },
+            ),
+            class_kind: Object,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            supervisor_kind: None,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "run:",
+                                span: Span {
+                                    start: 222,
+                                    end: 226,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "r",
+                                span: Span {
+                                    start: 227,
+                                    end: 228,
+                                },
+                            },
+                            type_annotation: None,
+                        },
+                    ],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Match {
+                                value: Identifier(
+                                    Identifier {
+                                        name: "r",
+                                        span: Span {
+                                            start: 232,
+                                            end: 233,
+                                        },
+                                    },
+                                ),
+                                arms: [
+                                    MatchArm {
+                                        pattern: Constructor {
+                                            class: Identifier {
+                                                name: "Result",
+                                                span: Span {
+                                                    start: 242,
+                                                    end: 248,
+                                                },
+                                            },
+                                            keywords: [
+                                                (
+                                                    "ok:",
+                                                    Variable(
+                                                        Identifier {
+                                                            name: "v",
+                                                            span: Span {
+                                                                start: 253,
+                                                                end: 254,
+                                                            },
+                                                        },
+                                                    ),
+                                                ),
+                                            ],
+                                            span: Span {
+                                                start: 242,
+                                                end: 254,
+                                            },
+                                        },
+                                        guard: None,
+                                        body: Block(
+                                            Block {
+                                                parameters: [],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "v",
+                                                                    span: Span {
+                                                                        start: 259,
+                                                                        end: 260,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                "+",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        1,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 263,
+                                                                        end: 264,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 259,
+                                                                end: 264,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 258,
+                                                    end: 265,
+                                                },
+                                            },
+                                        ),
+                                        comments: CommentAttachment {
+                                            leading: [],
+                                            trailing: None,
+                                        },
+                                        span: Span {
+                                            start: 242,
+                                            end: 265,
+                                        },
+                                    },
+                                ],
+                                span: Span {
+                                    start: 232,
+                                    end: 266,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    kind: Primary,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 222,
+                        end: 266,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 184,
+                            end: 190,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 184,
+                            end: 190,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-1299: Non-exhaustive match on sealed type Result — missing error: arm",
+                        span: Span {
+                            start: 184,
+                            end: 190,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "should produce a compile error.",
+                        span: Span {
+                            start: 184,
+                            end: 190,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+            },
+            doc_comment: None,
+            backing_module: None,
+            span: Span {
+                start: 184,
+                end: 266,
+            },
+        },
+    ],
+    method_definitions: [],
+    expressions: [],
+    span: Span {
+        start: 184,
+        end: 266,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}
