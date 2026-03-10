@@ -508,7 +508,14 @@ impl CoreErlangGenerator {
         self.in_hybrid_loop = prev_hybrid;
         self.set_state_version(prev_state_version);
 
-        docs.push(cond_result?);
+        let cond_doc = match cond_result {
+            Ok(doc) => doc,
+            Err(e) => {
+                self.hybrid_readonly_field_params = prev_readonly_field_params;
+                return Err(e);
+            }
+        };
+        docs.push(cond_doc);
 
         let case_arm = if negate {
             "<'false'> when 'true' -> "
@@ -525,7 +532,7 @@ impl CoreErlangGenerator {
         ]);
 
         self.in_hybrid_loop = true;
-        // Re-set readonly params (condition section restored them to prev_hybrid state).
+        // Re-set readonly params for body generation (they were modified during condition codegen).
         self.hybrid_readonly_field_params = readonly_params.iter().cloned().collect();
         let body_result = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec);
         self.hybrid_readonly_field_params = prev_readonly_field_params;
