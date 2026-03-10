@@ -25,7 +25,7 @@ impl CoreErlangGenerator {
     ///
     /// Conservative: only handles cases where the type is known statically from
     /// the AST shape alone, without any scope tracking.
-    fn is_definitely_sync(&self, expr: &Expression) -> bool {
+    pub(in crate::codegen::core_erlang) fn is_definitely_sync(&self, expr: &Expression) -> bool {
         match expr {
             // All AST literals and list literals are immediate (non-future) values.
             Expression::Literal(_, _) | Expression::ListLiteral { .. } => true,
