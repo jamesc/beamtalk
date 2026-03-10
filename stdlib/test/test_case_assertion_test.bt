@@ -80,3 +80,40 @@ TestCase subclass: TestCaseAssertionTest
     self assert: result failed equals: 0
     // hasPassed is true because there are no failures (only skips)
     self assert: result hasPassed
+
+  testAssertOkPassReturnsValue =>
+    // assertOk: on a successful Result returns the unwrapped value
+    value := self assertOk: (Result ok: 42)
+    self assert: value equals: 42
+
+  testAssertOkPassWithStringValue =>
+    // assertOk: works with any value type
+    value := self assertOk: (Result ok: "hello")
+    self assert: value equals: "hello"
+
+  testAssertOkPassWithNilValue =>
+    // assertOk: works when the ok value is nil
+    value := self assertOk: (Result ok: nil)
+    self assert: value equals: nil
+
+  testAssertOkFailOnError =>
+    // assertOk: raises assertion_failed when given an error Result
+    self should: [
+      TestCase new assertOk: (Result error: #nope)
+    ] raise: #assertion_failed
+
+  testAssertErrorEqualsPass =>
+    // assertError:equals: passes when error reason matches
+    self assert: (TestCase new assertError: (Result error: #not_found) equals: #not_found) equals: nil
+
+  testAssertErrorEqualsFailOnOkResult =>
+    // assertError:equals: raises when given an ok Result
+    self should: [
+      TestCase new assertError: (Result ok: 42) equals: #not_found
+    ] raise: #assertion_failed
+
+  testAssertErrorEqualsFailOnWrongReason =>
+    // assertError:equals: raises when error reason does not match expected
+    self should: [
+      TestCase new assertError: (Result error: #wrong_error) equals: #not_found
+    ] raise: #assertion_failed
