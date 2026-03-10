@@ -490,20 +490,25 @@ impl CoreErlangGenerator {
         let prev_in_loop_body = self.in_loop_body;
         let prev_hybrid = self.in_hybrid_loop;
         let prev_state_version = self.state_version();
+        let prev_readonly_field_params = std::mem::replace(
+            &mut self.hybrid_readonly_field_params,
+            readonly_params.iter().cloned().collect(),
+        );
         self.in_loop_body = true;
         self.in_hybrid_loop = true;
-        self.hybrid_readonly_field_params = readonly_params.iter().cloned().collect();
         self.set_state_version(0);
 
-        if let Expression::Block(cond_block) = condition {
-            docs.push(self.generate_block_body(cond_block)?);
+        let cond_result = if let Expression::Block(cond_block) = condition {
+            self.generate_block_body(cond_block)
         } else {
-            docs.push(self.generate_expression(condition)?);
-        }
+            self.generate_expression(condition)
+        };
 
         self.in_loop_body = prev_in_loop_body;
         self.in_hybrid_loop = prev_hybrid;
         self.set_state_version(prev_state_version);
+
+        docs.push(cond_result?);
 
         let case_arm = if negate {
             "<'false'> when 'true' -> "
@@ -522,16 +527,19 @@ impl CoreErlangGenerator {
         self.in_hybrid_loop = true;
         // Re-set readonly params (condition section restored them to prev_hybrid state).
         self.hybrid_readonly_field_params = readonly_params.iter().cloned().collect();
-        let (body_doc, final_state_version) =
-            self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
-        self.hybrid_readonly_field_params.clear();
+        let body_result = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec);
+        self.hybrid_readonly_field_params = prev_readonly_field_params;
         self.in_hybrid_loop = prev_hybrid;
+        let (body_doc, final_state_version) = body_result?;
         docs.push(body_doc);
 
         let final_state_var = if final_state_version == 0 {
-            state_param_name.clone()
+            Document::String(state_param_name.clone())
         } else {
-            format!("{state_param_name}{final_state_version}")
+            docvec![
+                Document::String(state_param_name.clone()),
+                Document::String(final_state_version.to_string()),
+            ]
         };
 
         let final_local_args: Vec<String> = plan
@@ -557,7 +565,7 @@ impl CoreErlangGenerator {
                         .iter()
                         .map(|v| Document::String(v.clone())),
                 )
-                .chain(std::iter::once(Document::String(final_state_var))),
+                .chain(std::iter::once(final_state_var)),
             &Document::Str(", "),
         );
         let exit_arm = if negate {

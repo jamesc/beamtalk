@@ -199,6 +199,15 @@ impl CoreErlangGenerator {
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
                     Ok(docvec![var_name])
                 } else {
+                    // BT-1326: In hybrid mode, check if this is a read-only field
+                    // accessed implicitly (bare name without self. prefix).
+                    if self.in_hybrid_loop {
+                        if let Some(param_var) =
+                            self.hybrid_readonly_field_params.get(id.name.as_str())
+                        {
+                            return Ok(Document::String(param_var.clone()));
+                        }
+                    }
                     // Field access from state/self
                     // BT-213: Context determines which variable to use
                     let state_var = match self.context {
@@ -206,23 +215,12 @@ impl CoreErlangGenerator {
                             // BT-833: Value types use the latest Self{N} snapshot
                             self.current_self_var()
                         }
-                        super::CodeGenContext::Actor => {
-                            // Actors use State with threading
+                        super::CodeGenContext::Actor | super::CodeGenContext::Repl => {
                             // BT-153: Use StateAcc when inside loop body
-                            if self.in_loop_body {
-                                if self.state_version() == 0 {
-                                    "StateAcc".to_string()
-                                } else {
-                                    format!("StateAcc{}", self.state_version())
-                                }
-                            } else {
+                            // BT-1326: Hybrid loops use State* naming, not StateAcc*
+                            if self.in_hybrid_loop {
                                 self.current_state_var()
-                            }
-                        }
-                        super::CodeGenContext::Repl => {
-                            // REPL uses State from bindings, but StateAcc in loops
-                            // BT-153: Use StateAcc when inside loop body
-                            if self.in_loop_body {
+                            } else if self.in_loop_body {
                                 if self.state_version() == 0 {
                                     "StateAcc".to_string()
                                 } else {

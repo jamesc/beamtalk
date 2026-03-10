@@ -289,6 +289,17 @@ impl ThreadingPlan {
                 .body
                 .iter()
                 .any(|s| generator.control_flow_has_mutations(&s.expression));
+            // Guard: inline conditionals that write threaded locals (e.g.
+            // `each > max ifTrue: [max := each]`). `control_flow_has_mutations` only
+            // catches field writes; this catches the pure-overwrite-local pattern that
+            // `emit_non_assign_expr` would thread via StateAcc naming.
+            let body_has_conditional_threaded_writes_hybrid = body.body.iter().any(|s| {
+                CoreErlangGenerator::inline_conditional_writes_threaded(
+                    &s.expression,
+                    &threaded_locals,
+                    &generator.semantic_facts,
+                )
+            });
             // Eligible when body has field mutations but no self-sends:
             // - self-sends require async gen_server dispatch; hybrid mode only handles
             //   direct field-map mutations which produce simple maps:put code.
@@ -297,6 +308,7 @@ impl ThreadingPlan {
                 && !cond_has_state_effects_for_hybrid
                 && !body_has_tier2_threaded_assign_hybrid
                 && !body_has_cf_mutations_hybrid
+                && !body_has_conditional_threaded_writes_hybrid
         };
 
         // BT-1326: In hybrid mode, collect fields that are read but never written.
@@ -1668,19 +1680,31 @@ impl CoreErlangGenerator {
         // Run body with in_hybrid_loop = true so field mutations use State* naming
         // and read-only fields resolve to direct parameters.
         let prev_hybrid = self.in_hybrid_loop;
+        let prev_readonly_field_params = std::mem::replace(
+            &mut self.hybrid_readonly_field_params,
+            readonly_params.iter().cloned().collect(),
+        );
         self.in_hybrid_loop = true;
-        self.hybrid_readonly_field_params = readonly_params.iter().cloned().collect();
-        let (body_doc, final_state_version) =
-            self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
-        self.hybrid_readonly_field_params.clear();
+        let body_result = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec);
+        self.hybrid_readonly_field_params = prev_readonly_field_params;
         self.in_hybrid_loop = prev_hybrid;
+        let (body_doc, final_state_version) = match body_result {
+            Ok(result) => result,
+            Err(err) => {
+                self.pop_scope();
+                return Err(err);
+            }
+        };
         docs.push(body_doc);
 
         // Final state variable name: "State" if no mutations, "State1" etc. after mutations.
         let final_state_var = if final_state_version == 0 {
-            state_param_name.clone()
+            Document::String(state_param_name.clone())
         } else {
-            format!("{state_param_name}{final_state_version}")
+            docvec![
+                Document::String(state_param_name.clone()),
+                Document::String(final_state_version.to_string()),
+            ]
         };
 
         // Final local var args after body (updated bindings from scope).
@@ -1710,7 +1734,7 @@ impl CoreErlangGenerator {
                         .iter()
                         .map(|v| Document::String(v.clone())),
                 )
-                .chain(std::iter::once(Document::String(final_state_var))),
+                .chain(std::iter::once(final_state_var)),
             &Document::Str(", "),
         );
 
