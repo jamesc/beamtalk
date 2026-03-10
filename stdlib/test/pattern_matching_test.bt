@@ -251,3 +251,10 @@ TestCase subclass: PatternMatchingTest
       #{"status" => status, "data" => data} -> data;
       _ -> 0
     ]) equals: 99
+    // Negative integer literal value equality check
+    neg := #{"score" => -1}
+    self assert: (neg match: [
+      #{"score" => -1} -> "neg one";
+      #{"score" => _} -> "other";
+      _ -> "no score"
+    ]) equals: "neg one"

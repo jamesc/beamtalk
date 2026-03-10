@@ -1128,9 +1128,7 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
                 .map(|p| {
                     let key_doc = match &p.key {
                         MapPatternKey::Symbol(s) => unparse_literal(&Literal::Symbol(s.clone())),
-                        MapPatternKey::StringLit(s) => {
-                            docvec!["\"", Document::String(s.to_string()), "\""]
-                        }
+                        MapPatternKey::StringLit(s) => unparse_literal(&Literal::String(s.clone())),
                     };
                     docvec![key_doc, " => ", unparse_pattern(&p.value)]
                 })

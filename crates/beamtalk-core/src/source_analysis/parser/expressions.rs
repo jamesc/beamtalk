@@ -1110,7 +1110,7 @@ impl Parser {
             // Array pattern: #[p1, p2, ...]
             TokenKind::ArrayOpen => self.parse_array_pattern(),
 
-            // Map destructuring pattern: #{#key => var, ...}
+            // Map pattern: #{#key => var, "key" => var, ...}
             TokenKind::MapOpen => self.parse_map_pattern(),
 
             // Binary pattern: <<seg, seg, ...>>
@@ -1187,10 +1187,6 @@ impl Parser {
         }
     }
 
-    /// Parses a map destructuring pattern: `#{#key => var, ...}`
-    ///
-    /// Keys must be symbol literals (`#key`) or bare lowercase identifiers treated as symbols.
-    /// Values must be variable identifiers or `_` wildcards.
     /// Parses the key in a map pattern pair.
     ///
     /// Accepts a symbol (`#key`), a string literal (`"key"`), or a bare lowercase
@@ -1257,6 +1253,33 @@ impl Parser {
                     Pattern::Wildcard(span)
                 }
             }
+            // Negative numeric literals: `-1`, `-3.14`
+            TokenKind::BinarySelector(op) if op.as_str() == "-" => {
+                let start = self.advance().span();
+                match self.current_kind() {
+                    TokenKind::Integer(_) | TokenKind::Float(_) => {
+                        let expr = self.parse_literal();
+                        let span = start.merge(expr.span());
+                        if let Expression::Literal(lit, _) = expr {
+                            let neg_lit = match lit {
+                                Literal::Integer(n) => Literal::Integer(-n),
+                                Literal::Float(f) => Literal::Float(-f),
+                                other => other,
+                            };
+                            Pattern::Literal(neg_lit, span)
+                        } else {
+                            Pattern::Wildcard(span)
+                        }
+                    }
+                    _ => {
+                        self.diagnostics.push(Diagnostic::error(
+                            "Expected integer or float after '-' in map pattern value",
+                            start,
+                        ));
+                        Pattern::Wildcard(start)
+                    }
+                }
+            }
             _ => {
                 let bad = self.advance();
                 self.diagnostics.push(Diagnostic::error(
@@ -1268,6 +1291,11 @@ impl Parser {
         }
     }
 
+    /// Parses a map destructuring pattern: `#{key => value, ...}`
+    ///
+    /// Keys may be symbol literals (`#key`), string literals (`"key"`), or bare
+    /// lowercase identifiers (treated as symbol keys). Values may be variable
+    /// identifiers, `_` wildcards, or literals (for equality matching in `match:` arms).
     fn parse_map_pattern(&mut self) -> Pattern {
         let start = self
             .expect(&TokenKind::MapOpen, "Expected '#{'")

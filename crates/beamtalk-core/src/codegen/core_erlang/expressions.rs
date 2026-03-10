@@ -2151,7 +2151,7 @@ impl CoreErlangGenerator {
             Pattern::Map { pairs, .. } => {
                 // Beamtalk Dictionaries are plain Erlang maps — emit a Core Erlang map pattern.
                 // `#{#k => v}` compiles to `~{ 'k' := V }~`   (symbol key → atom)
-                // `#{"k" => v}` compiles to `~{ #{"k"...}# := V }~` (string key → binary)
+                // `#{"k" => v}` compiles to `~{ <binary literal for "k"> := V }~` (string key → binary)
                 // `:=` is the Core Erlang match-binding form.
                 if pairs.is_empty() {
                     return Ok(Document::Str("~{}~"));
