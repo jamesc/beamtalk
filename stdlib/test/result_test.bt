@@ -142,8 +142,9 @@ TestCase subclass: ResultTest
   testIfErrorOnOkReturnsSelf =>
     r := Result ok: 42
     result := r ifError: [:e | 0]
-    self assert: result ok
-    self assert: result value equals: 42
+    self assert: result equals: r
+    // Verify we can still extract the value by creating a known Result and comparing
+    self assert: result equals: (Result ok: 42)
 
   testIfErrorOnErrorEvaluatesBlock =>
     result := (Result error: #oops) ifError: [:e | -1]
@@ -163,8 +164,7 @@ TestCase subclass: ResultTest
     // All steps succeed — ifError: block is never called
     chain := (Result ok: 10) andThen: [:v | Result ok: v * 2]
     result := chain ifError: [:_ | -1]
-    self assert: result ok
-    self assert: result value equals: 20
+    self assert: result equals: (Result ok: 20)
 
   // =========================================================================
   // PATTERN MATCHING — ifOk:ifError:
