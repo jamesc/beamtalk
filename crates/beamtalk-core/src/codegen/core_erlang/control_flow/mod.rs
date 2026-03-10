@@ -1570,6 +1570,7 @@ impl CoreErlangGenerator {
     /// an explicit `State` parameter. Field mutations use `State*` naming (not `StateAcc*`).
     /// At loop exit (false arm), packs local params back into the State map before returning
     /// `{'nil', ExitSA}`.
+    #[allow(clippy::too_many_lines)]
     fn generate_counted_stateful_loop_hybrid(
         &mut self,
         frame: &CountedLoopFrame,
