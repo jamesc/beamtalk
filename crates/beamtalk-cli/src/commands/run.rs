@@ -10,8 +10,6 @@
 //! **Script mode** (`beamtalk run ClassName selector`): starts a run-mode workspace
 //! (no REPL server, not registered in `~/.beamtalk/workspaces/`), calls
 //! `ClassName>>selector` via the class registry, and exits when the method returns.
-//! If a workspace for the project is already running, connects to it instead and
-//! evaluates there.
 //!
 //! **Service mode** (`beamtalk run .`): starts a persistent workspace (with REPL
 //! server), starts the `[application]` supervisor, prints the REPL port, and
@@ -84,29 +82,61 @@ pub fn run(class_or_dot: &str, selector: Option<&str>) -> Result<()> {
     }
 }
 
+/// Auto-build the Beamtalk runtime in dev mode if its ebin directory is missing.
+fn ensure_runtime_built(
+    runtime_dir: &std::path::Path,
+    layout: repl_startup::RuntimeLayout,
+    paths: &repl_startup::BeamPaths,
+) -> Result<()> {
+    if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
+        info!("Building Beamtalk runtime...");
+        let status = Command::new("rebar3")
+            .arg("compile")
+            .current_dir(runtime_dir)
+            .status()
+            .map_err(|e| miette!("Failed to build runtime: {e}"))?;
+
+        if !status.success() {
+            return Err(miette!("Failed to build Beamtalk runtime"));
+        }
+    }
+    Ok(())
+}
+
 /// Run a package script: start a run-mode workspace and call `ClassName>>selector`.
 ///
-/// If a persistent workspace is already running for this project, connects to it
-/// and evaluates the call there (so scripts run against live services naturally).
-/// Otherwise, starts a fresh run-mode workspace (no REPL server), executes the
-/// method, and exits when it returns.
+/// Starts a fresh run-mode workspace (no REPL server, not registered in
+/// `~/.beamtalk/workspaces/`), bootstraps all project classes, dispatches the
+/// class message, and exits when it returns.
 fn run_script(
     project_root: &Utf8PathBuf,
     _pkg: &manifest::PackageManifest,
     class_name: &str,
     selector: &str,
 ) -> Result<()> {
-    // Validate class name: must start with uppercase letter (Beamtalk convention)
-    if class_name.is_empty() || !class_name.chars().next().is_some_and(char::is_uppercase) {
+    // Validate class name: Beamtalk class names are UpperCamelCase identifiers.
+    // Full validation is required because the name is injected into an Erlang -eval string.
+    if class_name.is_empty()
+        || !class_name.chars().next().is_some_and(char::is_uppercase)
+        || class_name
+            .chars()
+            .any(|c| !c.is_alphanumeric() && c != '_')
+    {
         miette::bail!(
-            "Invalid class name '{class_name}': class names must start with an uppercase letter"
+            "Invalid class name '{class_name}': class names must start with an uppercase letter \
+             and contain only alphanumeric characters and underscores"
         );
     }
 
-    // Validate selector: must be a valid Erlang atom (simple identifier or keyword form)
+    // Validate selector: unary selectors are simple identifiers (keyword selectors
+    // with ':' are not supported in the CLI form — wrap them in a unary entry point).
+    // Full validation required: selector is injected into an Erlang -eval string.
     if selector.is_empty() || selector.contains(|c: char| !c.is_alphanumeric() && c != '_') {
         miette::bail!(
-            "Invalid selector '{selector}': selectors must contain only alphanumeric characters and underscores"
+            "Invalid selector '{selector}': selectors must contain only alphanumeric characters \
+             and underscores.\n\
+             Keyword selectors (e.g. `start: 'prod'`) are not supported in the CLI form — \
+             wrap them in a unary entry method."
         );
     }
 
@@ -121,19 +151,7 @@ fn run_script(
 
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
     let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
-
-    if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
-        info!("Building Beamtalk runtime...");
-        let status = Command::new("rebar3")
-            .arg("compile")
-            .current_dir(&runtime_dir)
-            .status()
-            .map_err(|e| miette!("Failed to build runtime: {e}"))?;
-
-        if !status.success() {
-            return Err(miette!("Failed to build Beamtalk runtime"));
-        }
-    }
+    ensure_runtime_built(&runtime_dir, layout, &paths)?;
 
     let ebin_dir = project_root.join("_build").join("dev").join("ebin");
 
@@ -150,9 +168,15 @@ fn run_script(
             |p| p.to_string_lossy().into_owned(),
         ));
 
+    // Use PID-scoped workspace ID so that if the workspace metadata or bootstrap
+    // produce any per-id artifacts, concurrent invocations don't collide.
+    // (Run-mode workspaces are not distributed nodes, so EPMD is not involved.)
+    let pid = std::process::id();
+    let workspace_id = format!("run_{pid}");
+
     let eval_cmd = format!(
         "{{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
-         {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"run_mode\">>, \
+         {{ok, _}} = beamtalk_workspace_sup:start_link(#{{workspace_id => <<\"{workspace_id}\">>, \
                                                           project_path => <<\"{project_path_escaped}\">>, \
                                                           repl => false}}), \
          ClassPid = beamtalk_class_registry:whereis_class('{class_name}'), \
@@ -161,6 +185,8 @@ fn run_script(
                  io:format(standard_error, \"Error: class '{class_name}' not found~n\", []), \
                  halt(1); \
              _ -> \
+                 %% class_send uses gen_server:call (synchronous) so halt(0) \
+                 %% only runs after the method returns. \
                  beamtalk_class_dispatch:class_send(ClassPid, {selector}, []), \
                  halt(0) \
          end."
@@ -252,19 +278,7 @@ fn run_package_as_otp_application(
 
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
     let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
-
-    if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
-        info!("Building Beamtalk runtime...");
-        let status = Command::new("rebar3")
-            .arg("compile")
-            .current_dir(&runtime_dir)
-            .status()
-            .map_err(|e| miette!("Failed to build runtime: {e}"))?;
-
-        if !status.success() {
-            return Err(miette!("Failed to build Beamtalk runtime"));
-        }
-    }
+    ensure_runtime_built(&runtime_dir, layout, &paths)?;
 
     let ebin_dir: PathBuf = project_root
         .join("_build")
