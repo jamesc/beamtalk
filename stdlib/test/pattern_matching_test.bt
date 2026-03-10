@@ -106,83 +106,111 @@ TestCase subclass: PatternMatchingTest
   testArrayPatternInMatchArm =>
     // BT-1296: Array pattern arms — basic 2-element match
     arr := #[10, 20]
-    self assert: (arr match: [
-      #[h, t] -> h + t;
-      _ -> 0
-    ]) equals: 30
+    self
+      assert: (arr match: [
+        #[h, t] -> h + t;
+        _ -> 0
+      ])
+      equals: 30
     // Array arm fallthrough: subject is not an array
-    self assert: (42 match: [
-      #[a, b] -> a + b;
-      _ -> 0
-    ]) equals: 0
+    self
+      assert: (42 match: [
+        #[a, b] -> a + b;
+        _ -> 0
+      ])
+      equals: 0
     // Array arm fallthrough: subject is a dict (plain map — must not crash on missing key)
-    self assert: (#{#x => 1} match: [
-      #[a, b] -> a + b;
-      _ -> 0
-    ]) equals: 0
+    self
+      assert: (#{#x => 1} match: [
+        #[a, b] -> a + b;
+        _ -> 0
+      ])
+      equals: 0
     // Array arm fallthrough: wrong size
-    self assert: (#[1, 2, 3] match: [
-      #[a, b] -> a + b;
-      _ -> 0
-    ]) equals: 0
+    self
+      assert: (#[1, 2, 3] match: [
+        #[a, b] -> a + b;
+        _ -> 0
+      ])
+      equals: 0
     // Wildcard elements in array pattern
-    self assert: (#[1, 2, 3] match: [
-      #[_, v, _] -> v;
-      _ -> 0
-    ]) equals: 2
+    self
+      assert: (#[1, 2, 3] match: [
+        #[_, v, _] -> v;
+        _ -> 0
+      ])
+      equals: 2
     // Multiple array arms with different sizes
-    self assert: (#[1, 2, 3] match: [
-      #[x] -> "one";
-      #[x, y] -> "two";
-      #[x, y, z] -> "three";
-      _ -> "other"
-    ]) equals: "three"
+    self
+      assert: (#[1, 2, 3] match: [
+        #[x] -> "one";
+        #[x, y] -> "two";
+        #[x, y, z] -> "three";
+        _ -> "other"
+      ])
+      equals: "three"
     // Array arm with guard — positive (exercises guard-success branch)
-    self assert: (#[1, 2] match: [
-      #[x, y] when: [x < y] -> "ascending";
-      _ -> "other"
-    ]) equals: "ascending"
+    self
+      assert: (#[1, 2] match: [
+        #[x, y] when: [x < y] -> "ascending";
+        _ -> "other"
+      ])
+      equals: "ascending"
     // Array arm with guard — negative (exercises guard-fail fallthrough)
-    self assert: (#[2, 1] match: [
-      #[x, y] when: [x < y] -> "ascending";
-      _ -> "other"
-    ]) equals: "other"
+    self
+      assert: (#[2, 1] match: [
+        #[x, y] when: [x < y] -> "ascending";
+        _ -> "other"
+      ])
+      equals: "other"
 
   testMapPatternInMatchArm =>
     // BT-1296: Map/Dict pattern arms
     d := #{#event => "click", #x => 5}
-    self assert: (d match: [
-      #{#event => evName} -> evName;
-      _ -> "unknown"
-    ]) equals: "click"
+    self
+      assert: (d match: [
+        #{#event => evName} -> evName;
+        _ -> "unknown"
+      ])
+      equals: "click"
     // Dict arm fallthrough: key missing
-    self assert: (#{#kind => "x"} match: [
-      #{#event => evName} -> evName;
-      _ -> "unknown"
-    ]) equals: "unknown"
+    self
+      assert: (#{#kind => "x"} match: [
+        #{#event => evName} -> evName;
+        _ -> "unknown"
+      ])
+      equals: "unknown"
     // Dict arm fallthrough: subject is not a map
-    self assert: (42 match: [
-      #{#event => evName} -> evName;
-      _ -> "unknown"
-    ]) equals: "unknown"
+    self
+      assert: (42 match: [
+        #{#event => evName} -> evName;
+        _ -> "unknown"
+      ])
+      equals: "unknown"
     // Multiple key bindings
-    self assert: (#{#a => 1, #b => 2} match: [
-      #{#a => x, #b => y} -> x + y;
-      _ -> 0
-    ]) equals: 3
+    self
+      assert: (#{#a => 1, #b => 2} match: [
+        #{#a => x, #b => y} -> x + y;
+        _ -> 0
+      ])
+      equals: 3
 
   testNestedArrayPatternInMatchArm =>
     // BT-1296: Nested array pattern: #[#[a, b], c] -> ...
     nested := #[#[1, 2], 3]
-    self assert: (nested match: [
-      #[#[a, b], c] -> a + b + c;
-      _ -> 0
-    ]) equals: 6
+    self
+      assert: (nested match: [
+        #[#[a, b], c] -> a + b + c;
+        _ -> 0
+      ])
+      equals: 6
     // Nested array fallthrough: inner wrong size
-    self assert: (#[#[1, 2, 3], 4] match: [
-      #[#[a, b], c] -> a + b + c;
-      _ -> 0
-    ]) equals: 0
+    self
+      assert: (#[#[1, 2, 3], 4] match: [
+        #[#[a, b], c] -> a + b + c;
+        _ -> 0
+      ])
+      equals: 0
 
   // BT-1297: Constructor patterns for sealed types (Result ok: / Result error:)
   testConstructorPatternOkArm =>
