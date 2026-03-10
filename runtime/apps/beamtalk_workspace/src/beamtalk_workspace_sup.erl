@@ -38,6 +38,7 @@
 -type workspace_config() :: #{
     workspace_id => binary(),
     project_path => binary() | undefined,
+    repl => boolean(),
     tcp_port => inet:port_number(),
     bind_addr => inet:ip4_address(),
     auto_cleanup => boolean(),
@@ -62,7 +63,8 @@ init(Config) ->
     %% Extract configuration
     WorkspaceId = maps:get(workspace_id, Config),
     ProjectPath = maps:get(project_path, Config, undefined),
-    TcpPort = maps:get(tcp_port, Config),
+    Repl = maps:get(repl, Config, true),
+    TcpPort = maps:get(tcp_port, Config, undefined),
     BindAddr = maps:get(bind_addr, Config, {127, 0, 0, 1}),
     WebPort = maps:get(web_port, Config, undefined),
     AutoCleanup = maps:get(auto_cleanup, Config, true),
@@ -91,7 +93,8 @@ init(Config) ->
                             workspace_id => WorkspaceId,
                             project_path => ProjectPath,
                             created_at => erlang:system_time(second),
-                            repl_port => TcpPort
+                            repl_port => TcpPort,
+                            repl => Repl
                         }
                     ]},
                 restart => permanent,
@@ -144,40 +147,6 @@ init(Config) ->
                     modules => [beamtalk_workspace_bootstrap]
                 },
 
-                %% REPL TCP server (session-per-connection architecture)
-                #{
-                    id => beamtalk_repl_server,
-                    start =>
-                        {beamtalk_repl_server, start_link, [
-                            #{
-                                port => TcpPort,
-                                workspace_id => WorkspaceId,
-                                bind_addr => BindAddr,
-                                web_port => WebPort
-                            }
-                        ]},
-                    restart => permanent,
-                    shutdown => 5000,
-                    type => worker,
-                    modules => [beamtalk_repl_server]
-                },
-
-                %% Idle monitor for auto-cleanup (only if enabled)
-                #{
-                    id => beamtalk_idle_monitor,
-                    start =>
-                        {beamtalk_idle_monitor, start_link, [
-                            #{
-                                enabled => AutoCleanup,
-                                max_idle_seconds => MaxIdleSeconds
-                            }
-                        ]},
-                    restart => permanent,
-                    shutdown => 5000,
-                    type => worker,
-                    modules => [beamtalk_idle_monitor]
-                },
-
                 %% Actor supervisor (shared across all sessions)
                 #{
                     id => beamtalk_actor_sup,
@@ -187,20 +156,67 @@ init(Config) ->
                     shutdown => infinity,
                     type => supervisor,
                     modules => [beamtalk_actor_sup]
-                },
-
-                %% Session supervisor (one child per REPL connection)
-                #{
-                    id => beamtalk_session_sup,
-                    start => {beamtalk_session_sup, start_link, []},
-                    restart => permanent,
-                    shutdown => infinity,
-                    type => supervisor,
-                    modules => [beamtalk_session_sup]
                 }
-            ],
+            ] ++
+            repl_child_specs(
+                Repl, TcpPort, WorkspaceId, BindAddr, WebPort, AutoCleanup, MaxIdleSeconds
+            ),
 
     {ok, {SupFlags, ChildSpecs}}.
+
+%%% REPL Child Specs
+
+%% @private Return child specs for REPL-mode children.
+%% When repl=false (run mode), these are omitted: no TCP listener, no idle monitor,
+%% no per-connection session supervisor.
+repl_child_specs(false, _TcpPort, _WorkspaceId, _BindAddr, _WebPort, _AutoCleanup, _MaxIdleSeconds) ->
+    [];
+repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, WebPort, AutoCleanup, MaxIdleSeconds) ->
+    [
+        %% REPL TCP server (session-per-connection architecture)
+        #{
+            id => beamtalk_repl_server,
+            start =>
+                {beamtalk_repl_server, start_link, [
+                    #{
+                        port => TcpPort,
+                        workspace_id => WorkspaceId,
+                        bind_addr => BindAddr,
+                        web_port => WebPort
+                    }
+                ]},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_repl_server]
+        },
+
+        %% Idle monitor for auto-cleanup (only if enabled)
+        #{
+            id => beamtalk_idle_monitor,
+            start =>
+                {beamtalk_idle_monitor, start_link, [
+                    #{
+                        enabled => AutoCleanup,
+                        max_idle_seconds => MaxIdleSeconds
+                    }
+                ]},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_idle_monitor]
+        },
+
+        %% Session supervisor (one child per REPL connection)
+        #{
+            id => beamtalk_session_sup,
+            start => {beamtalk_session_sup, start_link, []},
+            restart => permanent,
+            shutdown => infinity,
+            type => supervisor,
+            modules => [beamtalk_session_sup]
+        }
+    ].
 
 %%% Singleton Child Specs
 

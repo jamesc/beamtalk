@@ -452,3 +452,74 @@ workspace_meta_config_test() ->
     ?assertEqual(<<"/home/test/project">>, maps:get(project_path, MetaConfig)),
     ?assertEqual(5555, maps:get(repl_port, MetaConfig)),
     ?assert(is_integer(maps:get(created_at, MetaConfig))).
+
+%%% Run mode tests (repl=false, BT-1317)
+
+run_mode_config() ->
+    #{
+        workspace_id => <<"run-mode-test">>,
+        project_path => <<"/tmp/run-test">>,
+        repl => false
+        %% tcp_port intentionally omitted — not required in run mode
+    }.
+
+run_mode_children_count_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+
+    %% Run mode: 7 children (no repl_server, idle_monitor, session_sup).
+    %% workspace_meta, transcript_stream, actor_registry, class_events,
+    %% bindings_events, workspace_bootstrap, actor_sup.
+    ?assertEqual(7, length(ChildSpecs)).
+
+run_mode_no_repl_server_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+
+    Ids = [maps:get(id, S) || S <- ChildSpecs],
+    ?assertNot(lists:member(beamtalk_repl_server, Ids)).
+
+run_mode_no_idle_monitor_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+
+    Ids = [maps:get(id, S) || S <- ChildSpecs],
+    ?assertNot(lists:member(beamtalk_idle_monitor, Ids)).
+
+run_mode_no_session_sup_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+
+    Ids = [maps:get(id, S) || S <- ChildSpecs],
+    ?assertNot(lists:member(beamtalk_session_sup, Ids)).
+
+run_mode_required_children_present_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+
+    Ids = [maps:get(id, S) || S <- ChildSpecs],
+    ?assert(lists:member(beamtalk_workspace_meta, Ids)),
+    ?assert(lists:member(beamtalk_class_events, Ids)),
+    ?assert(lists:member(beamtalk_workspace_bootstrap, Ids)),
+    ?assert(lists:member(beamtalk_actor_sup, Ids)),
+    ?assert(lists:member(beamtalk_actor_registry, Ids)).
+
+run_mode_meta_gets_repl_false_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+
+    [MetaSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_meta],
+    {beamtalk_workspace_meta, start_link, [MetaConfig]} = maps:get(start, MetaSpec),
+    ?assertEqual(false, maps:get(repl, MetaConfig)).
+
+run_mode_no_tcp_port_required_test() ->
+    %% Starting with repl=false and no tcp_port should succeed (return child specs without error)
+    Config = #{
+        workspace_id => <<"no-port-test">>,
+        project_path => <<"/tmp/no-port">>,
+        repl => false
+    },
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(Config),
+    ?assert(length(ChildSpecs) > 0).
+
+full_mode_meta_gets_repl_true_test() ->
+    %% Default (no repl key) should pass repl=true to workspace_meta
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+
+    [MetaSpec] = [S || S <- ChildSpecs, maps:get(id, S) == beamtalk_workspace_meta],
+    {beamtalk_workspace_meta, start_link, [MetaConfig]} = maps:get(start, MetaSpec),
+    ?assertEqual(true, maps:get(repl, MetaConfig)).
