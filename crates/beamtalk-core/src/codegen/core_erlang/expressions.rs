@@ -17,6 +17,8 @@
 //!
 //! Note: Message sending is handled by [`super::dispatch_codegen`].
 
+use std::collections::HashSet;
+
 use super::document::Document;
 use super::selector_mangler::escape_atom_chars;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
@@ -1666,7 +1668,7 @@ impl CoreErlangGenerator {
     ///
     /// BT-884: This is a helper to avoid duplicating the hoisting logic across the
     /// `MessageSend` and fallback branches of `generate_cascade`.
-    fn generate_cascade_args(
+    pub(super) fn generate_cascade_args(
         &mut self,
         arguments: &[Expression],
         docs: &mut Vec<Document<'static>>,
@@ -1924,8 +1926,15 @@ impl CoreErlangGenerator {
         };
 
         // Recursively build element extraction + nested array checks
-        let inner_body =
-            self.build_array_arm_body(match_var, elements, 0, success_doc, &rest_doc)?;
+        let mut bound_vars: HashSet<String> = HashSet::new();
+        let inner_body = self.build_array_arm_body(
+            match_var,
+            elements,
+            0,
+            success_doc,
+            &rest_doc,
+            &mut bound_vars,
+        )?;
 
         let no_match_size = self.fresh_temp_var("NoMatch");
         let no_match_class = self.fresh_temp_var("NoMatch");
@@ -1962,6 +1971,119 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// Handles a `Pattern::Array` element inside an outer array match arm.
+    ///
+    /// Extracts the element, verifies it is an `Array` of the right size, then
+    /// recurses into its sub-elements before continuing with the outer arm.
+    #[allow(clippy::too_many_arguments)]
+    fn build_nested_array_element(
+        &mut self,
+        outer_array_var: &str,
+        outer_elements: &[Pattern],
+        start: usize,
+        one_based: usize,
+        inner_elems: &[Pattern],
+        continuation: Document<'static>,
+        failure_doc: &Document<'static>,
+        already_bound: &mut HashSet<String>,
+    ) -> Result<Document<'static>> {
+        let nested_var = self.fresh_temp_var("ArrElem");
+        let n_inner = inner_elems.len();
+
+        let after_nested = self.build_array_arm_body(
+            outer_array_var,
+            outer_elements,
+            start + 1,
+            continuation,
+            failure_doc,
+            already_bound,
+        )?;
+        let inner_body = self.build_array_arm_body(
+            &nested_var,
+            inner_elems,
+            0,
+            after_nested,
+            failure_doc,
+            already_bound,
+        )?;
+
+        let no_match_size_n = self.fresh_temp_var("NoMatch");
+        let no_match_class_n = self.fresh_temp_var("NoMatch");
+
+        Ok(docvec![
+            "let ",
+            Document::String(nested_var.clone()),
+            " = call 'beamtalk_message_dispatch':'send'(",
+            Document::String(outer_array_var.to_string()),
+            ", 'at:', [",
+            Document::String(one_based.to_string()),
+            "]) in ",
+            "case call 'erlang':'is_map'(",
+            Document::String(nested_var.clone()),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'maps':'get'('$beamtalk_class', ",
+            Document::String(nested_var.clone()),
+            ", 'undefined') of ",
+            "<'Array'> when 'true' -> ",
+            "case call 'beamtalk_array':'size'(",
+            Document::String(nested_var.clone()),
+            ") of ",
+            "<",
+            Document::String(n_inner.to_string()),
+            "> when 'true' -> ",
+            inner_body,
+            " <",
+            Document::String(no_match_size_n),
+            "> when 'true' -> ",
+            failure_doc.clone(),
+            " end ",
+            "<",
+            Document::String(no_match_class_n),
+            "> when 'true' -> ",
+            failure_doc.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            failure_doc.clone(),
+            " end"
+        ])
+    }
+
+    /// Emits the equality-check extraction for a duplicate `Pattern::Variable` in an
+    /// array match arm: `let VarDup = at:[N] in case erlang:=:=(Var, VarDup) of ...`
+    fn build_array_variable_element(
+        &mut self,
+        array_var: &str,
+        core_var: String,
+        one_based: usize,
+        next: Document<'static>,
+        failure_doc: &Document<'static>,
+    ) -> Document<'static> {
+        let dup_var = self.fresh_temp_var(&format!("{core_var}Dup"));
+        let mismatch_var = self.fresh_temp_var("Mismatch");
+        docvec![
+            "let ",
+            Document::String(dup_var.clone()),
+            " = call 'beamtalk_message_dispatch':'send'(",
+            Document::String(array_var.to_string()),
+            ", 'at:', [",
+            Document::String(one_based.to_string()),
+            "]) in ",
+            "case call 'erlang':'=:='(",
+            Document::String(core_var),
+            ", ",
+            Document::String(dup_var),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            next,
+            " <",
+            Document::String(mismatch_var),
+            "> when 'true' -> ",
+            failure_doc.clone(),
+            " end"
+        ]
+    }
+
     /// Recursively builds element-extraction `let`-bindings for an array pattern arm.
     ///
     /// Handles nested `Pattern::Array` elements by wrapping the continuation in a
@@ -1970,6 +2092,8 @@ impl CoreErlangGenerator {
     ///
     /// `continuation` is what to execute after all elements are extracted.
     /// `failure_doc` is what to execute if any nested array check fails.
+    /// `already_bound` tracks variable names already extracted in this arm; a second
+    /// occurrence emits an `erlang:=:=` equality check rather than a new binding.
     fn build_array_arm_body(
         &mut self,
         array_var: &str,
@@ -1977,6 +2101,7 @@ impl CoreErlangGenerator {
         start: usize,
         continuation: Document<'static>,
         failure_doc: &Document<'static>,
+        already_bound: &mut HashSet<String>,
     ) -> Result<Document<'static>> {
         if start >= elements.len() {
             return Ok(continuation);
@@ -1986,93 +2111,70 @@ impl CoreErlangGenerator {
         match &elements[start] {
             Pattern::Variable(id) => {
                 let core_var = Self::to_core_erlang_var(&id.name);
-                let next = self.build_array_arm_body(
-                    array_var,
-                    elements,
-                    start + 1,
-                    continuation,
-                    failure_doc,
-                )?;
-                Ok(docvec![
-                    "let ",
-                    Document::String(core_var),
-                    " = call 'beamtalk_message_dispatch':'send'(",
-                    Document::String(array_var.to_string()),
-                    ", 'at:', [",
-                    Document::String(one_based.to_string()),
-                    "]) in ",
-                    next
-                ])
+                if already_bound.contains(id.name.as_str()) {
+                    // Duplicate: build rest first, then wrap with equality check.
+                    let next = self.build_array_arm_body(
+                        array_var,
+                        elements,
+                        start + 1,
+                        continuation,
+                        failure_doc,
+                        already_bound,
+                    )?;
+                    Ok(self.build_array_variable_element(
+                        array_var,
+                        core_var,
+                        one_based,
+                        next,
+                        failure_doc,
+                    ))
+                } else {
+                    // First occurrence: register BEFORE recursing so later positions
+                    // with the same name are recognised as duplicates.
+                    already_bound.insert(id.name.to_string());
+                    let next = self.build_array_arm_body(
+                        array_var,
+                        elements,
+                        start + 1,
+                        continuation,
+                        failure_doc,
+                        already_bound,
+                    )?;
+                    Ok(docvec![
+                        "let ",
+                        Document::String(core_var),
+                        " = call 'beamtalk_message_dispatch':'send'(",
+                        Document::String(array_var.to_string()),
+                        ", 'at:', [",
+                        Document::String(one_based.to_string()),
+                        "]) in ",
+                        next
+                    ])
+                }
             }
-            Pattern::Wildcard(_) => {
-                self.build_array_arm_body(array_var, elements, start + 1, continuation, failure_doc)
-            }
+            Pattern::Wildcard(_) => self.build_array_arm_body(
+                array_var,
+                elements,
+                start + 1,
+                continuation,
+                failure_doc,
+                already_bound,
+            ),
             Pattern::Array {
                 elements: inner_elems,
                 ..
             } => {
-                let nested_var = self.fresh_temp_var("ArrElem");
-                let n_inner = inner_elems.len();
-
-                // Build continuation for elements after this nested array
-                let after_nested = self.build_array_arm_body(
+                let inner_elems_clone: Vec<Pattern> = inner_elems.clone();
+                self.build_nested_array_element(
                     array_var,
                     elements,
-                    start + 1,
+                    start,
+                    one_based,
+                    &inner_elems_clone,
                     continuation,
                     failure_doc,
-                )?;
-
-                // Build inner element extractions from the nested array variable
-                let inner_elems_clone: Vec<Pattern> = inner_elems.clone();
-                let inner_body = self.build_array_arm_body(
-                    &nested_var,
-                    &inner_elems_clone,
-                    0,
-                    after_nested,
-                    failure_doc,
-                )?;
-
-                let no_match_size_n = self.fresh_temp_var("NoMatch");
-                let no_match_class_n = self.fresh_temp_var("NoMatch");
-
-                Ok(docvec![
-                    "let ",
-                    Document::String(nested_var.clone()),
-                    " = call 'beamtalk_message_dispatch':'send'(",
-                    Document::String(array_var.to_string()),
-                    ", 'at:', [",
-                    Document::String(one_based.to_string()),
-                    "]) in ",
-                    "case call 'erlang':'is_map'(",
-                    Document::String(nested_var.clone()),
-                    ") of ",
-                    "<'true'> when 'true' -> ",
-                    "case call 'maps':'get'('$beamtalk_class', ",
-                    Document::String(nested_var.clone()),
-                    ", 'undefined') of ",
-                    "<'Array'> when 'true' -> ",
-                    "case call 'beamtalk_array':'size'(",
-                    Document::String(nested_var.clone()),
-                    ") of ",
-                    "<",
-                    Document::String(n_inner.to_string()),
-                    "> when 'true' -> ",
-                    inner_body,
-                    " <",
-                    Document::String(no_match_size_n),
-                    "> when 'true' -> ",
-                    failure_doc.clone(),
-                    " end ",
-                    "<",
-                    Document::String(no_match_class_n),
-                    "> when 'true' -> ",
-                    failure_doc.clone(),
-                    " end ",
-                    "<'false'> when 'true' -> ",
-                    failure_doc.clone(),
-                    " end"
-                ])
+                    already_bound,
+                )
             }
             elem => Err(CodeGenError::UnsupportedFeature {
                 feature: "Unsupported pattern in Array match arm element".to_string(),
