@@ -453,18 +453,24 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         let fun_var = self.fresh_temp_var("Fun");
+
+        // Hoist any field-assignment arguments before the apply binding (BT-1270).
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        let arg_docs = self.generate_cascade_args(arguments, &mut parts)?;
+
         let recv_code = self.expression_doc(receiver)?;
-
-        let mut arg_parts: Vec<Document<'static>> = Vec::new();
-        for (i, arg) in arguments.iter().enumerate() {
-            if i > 0 {
-                arg_parts.push(Document::Str(", "));
+        let args_doc = {
+            let mut a: Vec<Document<'static>> = Vec::new();
+            for (i, d) in arg_docs.into_iter().enumerate() {
+                if i > 0 {
+                    a.push(Document::Str(", "));
+                }
+                a.push(d);
             }
-            arg_parts.push(self.expression_doc(arg)?);
-        }
-        let args_doc = Document::Vec(arg_parts);
+            Document::Vec(a)
+        };
 
-        let doc = docvec![
+        parts.push(docvec![
             "let ",
             Document::String(fun_var.clone()),
             " = ",
@@ -474,8 +480,8 @@ impl CoreErlangGenerator {
             " (",
             args_doc,
             ")",
-        ];
-        Ok(doc)
+        ]);
+        Ok(Document::Vec(parts))
     }
 
     /// BT-1260: Returns true if `expr` is a compile-time Erlang FFI proxy expression.
@@ -536,10 +542,6 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         selector_name: &str,
     ) -> Result<Document<'static>> {
-        // TODO(BT-1270): If receiver or any argument is a field-assignment expression,
-        // its StateN binding will be scoped inside the RHS let and lost before the
-        // guard/apply runs. Apply the generate_cascade_args hoisting pattern here
-        // (same issue exists in generate_block_value_call).
         let recv_var = self.fresh_temp_var("ValRecv");
         let recv_code = self.expression_doc(receiver)?;
 
@@ -554,16 +556,35 @@ impl CoreErlangGenerator {
             " in ",
         ]);
 
+        // BT-1270: Hoist field-assignment arguments before their _ValArgN bindings so
+        // the StateN binding is in scope after the let-chain, not nested inside it.
         for arg in arguments {
             let arg_var = self.fresh_temp_var("ValArg");
-            let arg_code = self.expression_doc(arg)?;
-            parts.push(docvec![
-                "let ",
-                Document::String(arg_var.clone()),
-                " = ",
-                arg_code,
-                " in ",
-            ]);
+            if Self::is_field_assignment(arg) {
+                parts.push(self.generate_field_assignment_open(arg)?);
+                let val_var = self.last_open_scope_result.take().ok_or_else(|| {
+                    CodeGenError::Internal(
+                        "generate_field_assignment_open did not set last_open_scope_result"
+                            .to_string(),
+                    )
+                })?;
+                parts.push(docvec![
+                    "let ",
+                    Document::String(arg_var.clone()),
+                    " = ",
+                    Document::String(val_var),
+                    " in ",
+                ]);
+            } else {
+                let arg_code = self.expression_doc(arg)?;
+                parts.push(docvec![
+                    "let ",
+                    Document::String(arg_var.clone()),
+                    " = ",
+                    arg_code,
+                    " in ",
+                ]);
+            }
             arg_vars.push(arg_var);
         }
 

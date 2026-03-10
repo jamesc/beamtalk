@@ -1668,7 +1668,7 @@ impl CoreErlangGenerator {
     ///
     /// BT-884: This is a helper to avoid duplicating the hoisting logic across the
     /// `MessageSend` and fallback branches of `generate_cascade`.
-    fn generate_cascade_args(
+    pub(super) fn generate_cascade_args(
         &mut self,
         arguments: &[Expression],
         docs: &mut Vec<Document<'static>>,
