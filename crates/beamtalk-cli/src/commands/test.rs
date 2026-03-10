@@ -34,26 +34,26 @@ type PkgClassIndexes = HashMap<Utf8PathBuf, (HashMap<String, String>, HashMap<St
 
 /// Metadata about a `TestCase` subclass discovered in a `.bt` file.
 #[derive(Debug)]
-struct TestCaseClass {
+pub(crate) struct TestCaseClass {
     /// Class name (e.g., `CounterTest`).
-    class_name: String,
+    pub(crate) class_name: String,
     /// Superclass name (e.g., `TestCase`).
     #[allow(dead_code)] // populated during discovery for future diagnostic use
-    superclass_name: String,
+    pub(crate) superclass_name: String,
     /// Module name for the compiled BEAM module (e.g., `bt@counter_test`).
-    module_name: String,
+    pub(crate) module_name: String,
     /// Methods whose names start with `test`.
-    test_methods: Vec<String>,
+    pub(crate) test_methods: Vec<String>,
     /// Whether a `setUp` method is defined.
-    has_setup: bool,
+    pub(crate) has_setup: bool,
     /// Whether a `tearDown` method is defined.
-    has_teardown: bool,
+    pub(crate) has_teardown: bool,
 }
 
 /// Discover `TestCase` subclasses in a `.bt` file by parsing the AST.
 ///
 /// Returns discovered test classes and any `@load` directives.
-fn discover_test_classes(source_path: &Utf8Path) -> Result<(Vec<TestCaseClass>, Vec<String>)> {
+pub(crate) fn discover_test_classes(source_path: &Utf8Path) -> Result<(Vec<TestCaseClass>, Vec<String>)> {
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read '{source_path}'"))?;
@@ -138,7 +138,7 @@ fn discover_test_classes(source_path: &Utf8Path) -> Result<(Vec<TestCaseClass>, 
 /// 2. Call `Module:dispatch(setUp, [], Instance)` and capture return value if defined
 /// 3. Call `Module:dispatch(testMethod, [], SetUpInstance)`
 /// 4. Call `Module:dispatch(tearDown, [], SetUpInstance)` if defined
-fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> String {
+pub(crate) fn generate_eunit_wrapper(test_class: &TestCaseClass, source_file: &str) -> String {
     let eunit_module = format!("{}_tests", test_class.module_name);
     let bt_module = &test_class.module_name;
 

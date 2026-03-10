@@ -1,3 +1,8 @@
+<!-- btfixture: fixtures/point.bt -->
+<!-- btfixture: fixtures/money.bt -->
+<!-- btfixture: fixtures/ch10value_classes.bt -->
+<!-- btfixture: fixtures/ch10money_example.bt -->
+
 ## Value Classes
 
 A value class is an immutable object — like a record or struct. Once created,

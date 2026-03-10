@@ -37,6 +37,7 @@ Exponentiation (right-associative):
 
 ```beamtalk
 2 ** 10        // => 1024
+// Right-associative: 2 ** 3 ** 2 is the same as 2 ** (3 ** 2)
 2 ** 3 ** 2    // => 512
 ```
 

@@ -1,0 +1,86 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for docs/learning/10-value-classes.md (Point)
+
+TestCase subclass: Ch10ValueClasses
+
+  testDefaultConstruction =>
+    p := Point new
+    self assert: p x equals: 0
+    self assert: p y equals: 0
+
+  testMapConstruction =>
+    p := Point new: #{#x => 3, #y => 4}
+    self assert: p x equals: 3
+    self assert: p y equals: 4
+
+  testKeywordConstruction =>
+    p := Point x: 3 y: 4
+    self assert: p x equals: 3
+    self assert: p y equals: 4
+
+  testPartialConstruction =>
+    p := Point new: #{#x => 7}
+    self assert: p x equals: 7
+    self assert: p y equals: 0
+
+  testWithSetter =>
+    p := Point x: 1 y: 2
+    p2 := p withX: 10
+    self assert: p2 x equals: 10
+    self assert: p2 y equals: 2
+    self assert: p x equals: 1
+
+  testChainedWithSetters =>
+    p := Point new
+    p2 := (p withX: 5) withY: 7
+    self assert: p2 x equals: 5
+    self assert: p2 y equals: 7
+
+  testImmutableByDefault =>
+    p := Point x: 1 y: 2
+    self
+      should: [p fieldAt: #x put: 99]
+      raise: #immutable_value
+
+  testValueEquality =>
+    p1 := Point x: 3 y: 4
+    p2 := Point x: 3 y: 4
+    self assert: p1 =:= p2
+
+  testValueInequality =>
+    p1 := Point x: 3 y: 4
+    p2 := Point x: 9 y: 9
+    self deny: p1 =:= p2
+
+  testWithSetterEquality =>
+    p := Point x: 1 y: 2
+    self assert: (p withX: 10) =:= (Point x: 10 y: 2)
+
+  testDistanceSquared =>
+    p := Point x: 3 y: 4
+    self assert: p distanceSquared equals: 25
+
+  testTranslate =>
+    p := Point x: 1 y: 2
+    p2 := p translateBy: 3 and: -1
+    self assert: p2 x equals: 4
+    self assert: p2 y equals: 1
+    self assert: p x equals: 1
+
+  testPrintString =>
+    p := Point x: 3 y: 4
+    self assert: p printString equals: "Point(3, 4)"
+
+  testFieldAccess =>
+    p := Point x: 3 y: 4
+    self assert: (p fieldAt: #x) equals: 3
+    self assert: (p fieldAt: #y) equals: 4
+
+  testClass =>
+    p := Point x: 3 y: 4
+    self assert: p class equals: Point
+
+  testSuperclass =>
+    self assert: Point superclass equals: Value
