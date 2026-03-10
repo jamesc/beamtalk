@@ -915,6 +915,27 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 // Match on computed expression
 (3 + 4) match: [7 -> "correct"; _ -> "wrong"]
 
+// Array destructuring in match arms (BT-1296)
+#[10, 20] match: [
+  #[h, t] -> h + t;
+  _ -> 0
+]
+// => 30
+
+// Dict/map destructuring in match arms (BT-1296)
+#{#event => "click", #x => 5} match: [
+  #{#event => evName} -> evName;
+  _ -> "unknown"
+]
+// => "click"
+
+// Nested array patterns
+#[#[1, 2], 3] match: [
+  #[#[a, b], c] -> a + b + c;
+  _ -> 0
+]
+// => 6
+
 // Constructor patterns (Result ok:/error: only in this release)
 (Result ok: 42) match: [
   Result ok: v    -> v;
@@ -936,6 +957,8 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Negative number | `-1` | Negative integer/float match |
 | Variable | `x` | Binds matched value to name |
 | Tuple | `{a, b}` | Destructure tuple (patterns supported; tuple literals planned) |
+| Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported |
+| Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
 
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
