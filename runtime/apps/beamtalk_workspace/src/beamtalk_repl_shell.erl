@@ -158,7 +158,10 @@ init(SessionId) ->
 
     %% BT-1242: Join class-removed notification group so this session is notified
     %% when a class is removed via Beamtalk code (ClassName removeFromSystem).
-    catch pg:join(beamtalk_repl_shells, self()),
+    %% ensure_pg_started/0 mirrors beamtalk_object_class.erl — guarantees pg is
+    %% running before join so failures are real errors, not startup-race artefacts.
+    beamtalk_class_registry:ensure_pg_started(),
+    pg:join(beamtalk_repl_shells, self()),
 
     {ok, {SessionId, State1, undefined}}.
 
