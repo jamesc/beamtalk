@@ -265,9 +265,7 @@ fn extract_to_btscript_files(
 
         // Resolve fixture declarations to absolute `// @load` directives.
         let fixture_rel_paths = extract_fixture_paths(&content);
-        let md_dir = md_file
-            .parent()
-            .unwrap_or(Utf8Path::new("."));
+        let md_dir = md_file.parent().unwrap_or(Utf8Path::new("."));
 
         let mut load_preamble = String::new();
         for rel_path in &fixture_rel_paths {
@@ -369,27 +367,22 @@ fn generate_bunit_wrappers(
     compiled_files: &mut Vec<CompiledTestFile>,
 ) -> Result<()> {
     for fixture in bunit_fixtures {
-        let (test_classes, _loads) =
-            super::test::discover_test_classes(&fixture.fixture_path)
-                .wrap_err_with(|| {
-                    format!(
-                        "Failed to discover test classes in '{}'",
-                        fixture.fixture_path
-                    )
-                })?;
+        let (test_classes, _loads) = super::test::discover_test_classes(&fixture.fixture_path)
+            .wrap_err_with(|| {
+                format!(
+                    "Failed to discover test classes in '{}'",
+                    fixture.fixture_path
+                )
+            })?;
 
         for test_class in &test_classes {
             let eunit_module = format!("{}_tests", test_class.module_name);
-            let erl_source = super::test::generate_eunit_wrapper(
-                test_class,
-                fixture.fixture_path.as_str(),
-            );
+            let erl_source =
+                super::test::generate_eunit_wrapper(test_class, fixture.fixture_path.as_str());
             let erl_file = build_dir.join(format!("{eunit_module}.erl"));
             fs::write(&erl_file, &erl_source)
                 .into_diagnostic()
-                .wrap_err_with(|| {
-                    format!("Failed to write EUnit wrapper for '{eunit_module}'")
-                })?;
+                .wrap_err_with(|| format!("Failed to write EUnit wrapper for '{eunit_module}'"))?;
             all_erl_files.push(erl_file);
             compiled_files.push(CompiledTestFile {
                 source_file: fixture.source_md.clone(),

@@ -53,7 +53,9 @@ pub(crate) struct TestCaseClass {
 /// Discover `TestCase` subclasses in a `.bt` file by parsing the AST.
 ///
 /// Returns discovered test classes and any `@load` directives.
-pub(crate) fn discover_test_classes(source_path: &Utf8Path) -> Result<(Vec<TestCaseClass>, Vec<String>)> {
+pub(crate) fn discover_test_classes(
+    source_path: &Utf8Path,
+) -> Result<(Vec<TestCaseClass>, Vec<String>)> {
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read '{source_path}'"))?;
