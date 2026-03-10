@@ -624,7 +624,7 @@ pub(super) fn generate_learning_guide(
     }
 
     // Render chapter index
-    render_learning_index(&chapters, &learning_output)?;
+    render_learning_index(&chapters, &learning_source, &learning_output)?;
 
     println!("Generated {} learning guide chapter(s)", chapters.len());
     Ok(true)
@@ -687,8 +687,16 @@ fn rewrite_chapter_internal_links(content: &str, chapters: &[ChapterInfo]) -> St
     result
 }
 
-/// Render the learning guide index page listing all chapters.
-fn render_learning_index(chapters: &[ChapterInfo], learning_output: &Utf8Path) -> Result<()> {
+/// Render the learning guide index page from `docs/learning/README.md`.
+///
+/// If `README.md` exists, its content is rendered as the index page body (with
+/// internal `.md` links rewritten to `.html`). Otherwise, falls back to a simple
+/// ordered list of chapter links.
+fn render_learning_index(
+    chapters: &[ChapterInfo],
+    learning_source: &Utf8Path,
+    learning_output: &Utf8Path,
+) -> Result<()> {
     let mut html = String::new();
     html.push_str(&page_header(
         "Learn Beamtalk — Beamtalk",
@@ -703,21 +711,44 @@ fn render_learning_index(chapters: &[ChapterInfo], learning_output: &Utf8Path) -
     html.push_str("<a href=\"../\">Home</a> &rsaquo; ");
     html.push_str("Learn Beamtalk");
     html.push_str("</div>\n");
-    html.push_str("<h1>Learn Beamtalk</h1>\n");
-    html.push_str(
-        "<p>A progressive guide to the Beamtalk language. \
-         Read linearly — each chapter builds on the last.</p>\n",
-    );
-    html.push_str("<ol>\n");
-    for chapter in chapters {
-        let _ = writeln!(
-            html,
-            "<li><a href=\"{file}\">{title}</a></li>",
-            file = chapter.output_file,
-            title = html_escape(&chapter.title),
+
+    let readme_path = learning_source.join("README.md");
+    if readme_path.exists() {
+        let content = fs::read_to_string(&readme_path)
+            .into_diagnostic()
+            .wrap_err("Failed to read learning/README.md")?;
+        let content = rewrite_chapter_internal_links(&content, chapters);
+        // Rewrite cross-doc links: README uses repo-relative paths like
+        // ../beamtalk-language-features.md that need to point to the rendered
+        // docs/ pages on the site.
+        let content = content
+            .replace(
+                "../beamtalk-language-features.md",
+                "../docs/language-features.html",
+            )
+            .replace(
+                "../beamtalk-syntax-rationale.md",
+                "../docs/syntax-rationale.html",
+            );
+        html.push_str(&render_doc(&content));
+    } else {
+        html.push_str("<h1>Learn Beamtalk</h1>\n");
+        html.push_str(
+            "<p>A progressive guide to the Beamtalk language. \
+             Read linearly — each chapter builds on the last.</p>\n",
         );
+        html.push_str("<ol>\n");
+        for chapter in chapters {
+            let _ = writeln!(
+                html,
+                "<li><a href=\"{file}\">{title}</a></li>",
+                file = chapter.output_file,
+                title = html_escape(&chapter.title),
+            );
+        }
+        html.push_str("</ol>\n");
     }
-    html.push_str("</ol>\n");
+
     html.push_str("</main>\n");
     html.push_str(&page_footer_simple());
 
