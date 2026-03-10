@@ -10,7 +10,7 @@
 //! inline at every call site (BT-1288).
 
 use crate::ast::{Expression, MessageSelector, Module};
-use crate::semantic_analysis::block_facts::{analyze_block, BlockMutationAnalysis};
+use crate::semantic_analysis::block_facts::{BlockMutationAnalysis, analyze_block};
 use crate::source_analysis::Span;
 use std::collections::{HashMap, HashSet};
 

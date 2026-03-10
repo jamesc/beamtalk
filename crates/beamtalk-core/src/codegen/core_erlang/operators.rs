@@ -32,9 +32,7 @@ impl CoreErlangGenerator {
             // `self` refers to the current actor PID / value object — never a future.
             Expression::Identifier(id) if id.name == "self" => true,
             // BT-1288: Method parameters are always non-future (passed by value, not as futures).
-            Expression::Identifier(id) if self.current_sync_vars.contains(id.name.as_str()) => {
-                true
-            }
+            Expression::Identifier(id) if self.current_sync_vars.contains(id.name.as_str()) => true,
             _ => false,
         }
     }
