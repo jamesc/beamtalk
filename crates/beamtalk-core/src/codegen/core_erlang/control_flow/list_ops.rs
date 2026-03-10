@@ -842,19 +842,15 @@ impl CoreErlangGenerator {
             let acc_param_name = body.parameters.first().map(|p| p.name.to_string());
             let outer_acc_sync = acc_param_name
                 .as_ref()
-                .map(|name| self.current_sync_vars.remove(name.as_str()))
-                .unwrap_or(false);
-            let acc_sync_inserted = acc_param_name
-                .as_ref()
-                .map(|name| {
-                    if self.is_definitely_sync(initial) {
-                        self.current_sync_vars.insert(name.clone());
-                        true
-                    } else {
-                        false
-                    }
-                })
-                .unwrap_or(false);
+                .is_some_and(|name| self.current_sync_vars.remove(name.as_str()));
+            let acc_sync_inserted = acc_param_name.as_ref().is_some_and(|name| {
+                if self.is_definitely_sync(initial) {
+                    self.current_sync_vars.insert(name.clone());
+                    true
+                } else {
+                    false
+                }
+            });
             docs.extend(plan.generate_tuple_unpack_docs(self, &acc_state_var, 2));
 
             let (body_doc, _) =
@@ -940,19 +936,15 @@ impl CoreErlangGenerator {
         let map_acc_param_name = body.parameters.first().map(|p| p.name.to_string());
         let outer_map_acc_sync = map_acc_param_name
             .as_ref()
-            .map(|name| self.current_sync_vars.remove(name.as_str()))
-            .unwrap_or(false);
-        let map_acc_sync_inserted = map_acc_param_name
-            .as_ref()
-            .map(|name| {
-                if self.is_definitely_sync(initial) {
-                    self.current_sync_vars.insert(name.clone());
-                    true
-                } else {
-                    false
-                }
-            })
-            .unwrap_or(false);
+            .is_some_and(|name| self.current_sync_vars.remove(name.as_str()));
+        let map_acc_sync_inserted = map_acc_param_name.as_ref().is_some_and(|name| {
+            if self.is_definitely_sync(initial) {
+                self.current_sync_vars.insert(name.clone());
+                true
+            } else {
+                false
+            }
+        });
         docs.extend(plan.generate_unpack_at_iteration_start(self));
 
         let (body_doc, _) =
