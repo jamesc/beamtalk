@@ -39,6 +39,30 @@ TestCase subclass: ActorLocalMutationsTest
   // do: block iteration must not cause {unbound_var,'Doubled',{dispatch,4}} compile error.
   // The fix: compute_threaded_locals_for_loop uses captured_reads (not local_reads) for Actor,
   // so block-locally-defined vars are never packed into the pre-loop StateAcc map.
+  testHybridParamsCountedLoop =>
+    // BT-1326: counted loop with both local var AND field mutations uses hybrid mode.
+    // Locals as direct fun params, actor State as explicit parameter.
+    a := LocalMutationActor spawn
+    r := a sumAndCountToN: 5
+    self assert: (r at: #sum) equals: 15
+    self assert: (r at: #log) equals: 5
+    self assert: (a getLog) equals: 5
+    b := LocalMutationActor spawn
+    r2 := b sumAndCountTimesRepeat: 4
+    self assert: (r2 at: #sum) equals: 4
+    self assert: (r2 at: #log) equals: 4
+    self assert: (b getLog) equals: 4
+
+  testHybridReadonlyFieldOptimization =>
+    // BT-1326: Read-only field (self.step=1) is pre-extracted before the letrec.
+    // Verifies the optimization produces correct results at runtime.
+    a := LocalMutationActor spawn
+    r := a sumWithStep: 5
+    // sum = 1+1+1+1+1 = 5 (step=1 each iteration), log = 5 iterations
+    self assert: (r at: #sum) equals: 5
+    self assert: (r at: #log) equals: 5
+    self assert: (a getLog) equals: 5
+
   testBlockLocalVarInDoBody =>
     a := LocalMutationActor spawn
     self assert: (a doubleAndSum: #(1, 2, 3)) equals: 12

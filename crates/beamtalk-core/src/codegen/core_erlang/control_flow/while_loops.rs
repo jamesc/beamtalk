@@ -175,6 +175,9 @@ impl CoreErlangGenerator {
         if plan.use_direct_params {
             return self.generate_while_loop_direct(condition, body, &plan, negate);
         }
+        if plan.use_hybrid_params {
+            return self.generate_while_loop_hybrid(condition, body, &plan, negate);
+        }
 
         let cond_var = self.fresh_temp_var("CondFun");
 
@@ -389,6 +392,230 @@ impl CoreErlangGenerator {
 
         Ok(Document::Vec(docs))
     }
+
+    /// BT-1326: Hybrid direct-params + State threading variant of `generate_while_loop_with_mutations`.
+    ///
+    /// Uses `fun (Var1, ..., VarN, RField1, ..., State)` — locals and read-only fields as
+    /// direct params, actor state as an explicit `State` parameter.
+    /// Field mutations use `State*` naming (not `StateAcc*`).
+    #[allow(clippy::too_many_lines)]
+    fn generate_while_loop_hybrid(
+        &mut self,
+        condition: &Expression,
+        body: &Block,
+        plan: &ThreadingPlan,
+        negate: bool,
+    ) -> Result<Document<'static>> {
+        let initial_local_args = plan.initial_direct_args(self);
+        let initial_state = plan.initial_state_var.clone();
+
+        // BT-1326: Pre-extract read-only fields before the letrec.
+        let mut pre_extract_docs: Vec<Document<'static>> = Vec::new();
+        let readonly_params: Vec<(String, String)> = plan
+            .readonly_fields
+            .iter()
+            .map(|field| {
+                let var_name = self.fresh_temp_var(&format!(
+                    "{}Field",
+                    CoreErlangGenerator::to_core_erlang_var(field)
+                ));
+                pre_extract_docs.push(docvec![
+                    "let ",
+                    Document::String(var_name.clone()),
+                    " = call 'maps':'get'('",
+                    Document::String(field.clone()),
+                    "', ",
+                    Document::String(initial_state.clone()),
+                    ") in ",
+                ]);
+                (field.clone(), var_name)
+            })
+            .collect();
+
+        let local_param_names: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| CoreErlangGenerator::to_core_erlang_var(v))
+            .collect();
+        let readonly_param_names: Vec<String> =
+            readonly_params.iter().map(|(_, v)| v.clone()).collect();
+        let state_param_name = "State".to_string();
+        let arity = local_param_names.len() + readonly_param_names.len() + 1;
+
+        // Param list: (Var1, ..., VarN, RField1, ..., State)
+        let param_list_doc = || {
+            join(
+                local_param_names
+                    .iter()
+                    .map(|v| Document::String(v.clone()))
+                    .chain(
+                        readonly_param_names
+                            .iter()
+                            .map(|v| Document::String(v.clone())),
+                    )
+                    .chain(std::iter::once(Document::String(state_param_name.clone()))),
+                &Document::Str(", "),
+            )
+        };
+
+        let cond_var = self.fresh_temp_var("CondFun");
+
+        let mut docs: Vec<Document<'static>> = Vec::new();
+        docs.extend(pre_extract_docs);
+        docs.push(docvec![
+            "letrec 'while'/",
+            Document::String(arity.to_string()),
+            " = fun (",
+            param_list_doc(),
+            ") -> ",
+        ]);
+
+        self.push_scope();
+        // Register local var bindings — no unpack docs in hybrid mode.
+        let unpack_docs = plan.generate_unpack_at_iteration_start(self);
+        debug_assert!(
+            unpack_docs.is_empty(),
+            "hybrid while: unpack should emit no code"
+        );
+
+        // Condition closure captures local vars + readonly fields + State parameter.
+        docs.push(docvec![
+            "let ",
+            Document::String(cond_var.clone()),
+            " = fun (",
+            param_list_doc(),
+            ") -> ",
+        ]);
+
+        let prev_in_loop_body = self.in_loop_body;
+        let prev_hybrid = self.in_hybrid_loop;
+        let prev_state_version = self.state_version();
+        let prev_readonly_field_params = std::mem::replace(
+            &mut self.hybrid_readonly_field_params,
+            readonly_params.iter().cloned().collect(),
+        );
+        self.in_loop_body = true;
+        self.in_hybrid_loop = true;
+        self.set_state_version(0);
+
+        let cond_result = if let Expression::Block(cond_block) = condition {
+            self.generate_block_body(cond_block)
+        } else {
+            self.generate_expression(condition)
+        };
+
+        self.in_loop_body = prev_in_loop_body;
+        self.in_hybrid_loop = prev_hybrid;
+        self.set_state_version(prev_state_version);
+
+        let cond_doc = match cond_result {
+            Ok(doc) => doc,
+            Err(e) => {
+                self.hybrid_readonly_field_params = prev_readonly_field_params;
+                return Err(e);
+            }
+        };
+        docs.push(cond_doc);
+
+        let case_arm = if negate {
+            "<'false'> when 'true' -> "
+        } else {
+            "<'true'> when 'true' -> "
+        };
+        docs.push(docvec![
+            " in case apply ",
+            Document::String(cond_var),
+            " (",
+            param_list_doc(),
+            ") of ",
+            case_arm,
+        ]);
+
+        self.in_hybrid_loop = true;
+        // Re-set readonly params for body generation (they were modified during condition codegen).
+        self.hybrid_readonly_field_params = readonly_params.iter().cloned().collect();
+        let body_result = self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec);
+        self.hybrid_readonly_field_params = prev_readonly_field_params;
+        self.in_hybrid_loop = prev_hybrid;
+        let (body_doc, final_state_version) = body_result?;
+        docs.push(body_doc);
+
+        let final_state_var = if final_state_version == 0 {
+            Document::String(state_param_name.clone())
+        } else {
+            docvec![
+                Document::String(state_param_name.clone()),
+                Document::String(final_state_version.to_string()),
+            ]
+        };
+
+        let final_local_args: Vec<String> = plan
+            .threaded_locals
+            .iter()
+            .map(|v| {
+                self.lookup_var(v)
+                    .cloned()
+                    .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v))
+            })
+            .collect();
+
+        let exit_stateacc =
+            plan.generate_exit_stateacc_hybrid(&local_param_names, &state_param_name, self);
+
+        // Recursive call: updated locals, readonly fields (unchanged), updated state
+        let final_args_doc = join(
+            final_local_args
+                .into_iter()
+                .map(Document::String)
+                .chain(
+                    readonly_param_names
+                        .iter()
+                        .map(|v| Document::String(v.clone())),
+                )
+                .chain(std::iter::once(final_state_var)),
+            &Document::Str(", "),
+        );
+        let exit_arm = if negate {
+            "<'true'> when 'true' -> "
+        } else {
+            "<'false'> when 'true' -> "
+        };
+        docs.push(docvec![
+            " apply 'while'/",
+            Document::String(arity.to_string()),
+            " (",
+            final_args_doc,
+            ") ",
+            exit_arm,
+            exit_stateacc,
+            " end ",
+        ]);
+
+        self.pop_scope();
+
+        // Initial call: initial locals, initial readonly vals, initial state
+        let initial_args_doc = join(
+            initial_local_args
+                .into_iter()
+                .map(Document::String)
+                .chain(
+                    readonly_param_names
+                        .iter()
+                        .map(|v| Document::String(v.clone())),
+                )
+                .chain(std::iter::once(Document::String(initial_state))),
+            &Document::Str(", "),
+        );
+        docs.push(docvec![
+            "in apply 'while'/",
+            Document::String(arity.to_string()),
+            " (",
+            initial_args_doc,
+            ")",
+        ]);
+
+        Ok(Document::Vec(docs))
+    }
 }
 
 #[cfg(test)]
@@ -515,6 +742,71 @@ mod tests {
         assert!(
             code.contains("ExitSA"),
             "direct-params: whileFalse: exit StateAcc rebuild expected. Got:\n{code}"
+        );
+    }
+
+    // ── BT-1326: hybrid direct-params + State threading ──────────────────────
+
+    #[test]
+    fn test_while_true_field_plus_local_mutation_uses_hybrid_params() {
+        // whileTrue: with BOTH local var mutation AND field mutation uses hybrid mode:
+        // fun(LocalVar, State) — locals as direct params, actor State as explicit param.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + 1. self.n := self.n + 1]\n    sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("letrec"),
+            "hybrid: whileTrue: should generate a letrec. Got:\n{code}"
+        );
+        // Hybrid signature: fun (Sum, State) — local as direct param, State explicit
+        assert!(
+            code.contains("fun (Sum, State)"),
+            "hybrid: whileTrue: fun should take (Sum, State) as params. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("fun (StateAcc)"),
+            "hybrid: whileTrue: fun must not use StateAcc signature. Got:\n{code}"
+        );
+        // Field mutation uses maps:put on State (not StateAcc)
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "hybrid: whileTrue: field mutation should use maps:put. Got:\n{code}"
+        );
+        // Exit rebuilds StateAcc from State + local params
+        assert!(
+            code.contains("ExitSA"),
+            "hybrid: whileTrue: exit StateAcc rebuild expected. Got:\n{code}"
+        );
+        // Exit packs local into ExitSA via maps:put
+        assert!(
+            code.match_indices("maps':'put'('__local__sum'").count() <= 1,
+            "hybrid: whileTrue: at most one maps:put for local (exit rebuild). Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_while_true_readonly_field_pre_extracted_as_direct_param() {
+        // BT-1326: whileTrue: body reads self.step (never written) and writes self.n:
+        // self.step is pre-extracted before the letrec and passed as a direct param.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n\n  run =>\n    sum := 0\n    [sum < 10] whileTrue: [sum := sum + self.step. self.n := self.n + 1]\n    sum\n";
+        let code = codegen(src);
+        assert!(
+            !code.contains("fun (StateAcc)"),
+            "readonly field: whileTrue: must not use StateAcc signature. Got:\n{code}"
+        );
+        // 'step' is read-only — pre-extracted before letrec.
+        assert!(
+            code.contains("StepField"),
+            "readonly field: whileTrue: fun should have a StepField param. Got:\n{code}"
+        );
+        // Only one maps:get for 'step' (the pre-extraction).
+        assert!(
+            code.match_indices("maps':'get'('step'").count() == 1,
+            "readonly field: whileTrue: exactly one maps:get for 'step'. Got:\n{code}"
+        );
+        // Mutable field 'n' still uses maps:put for writes.
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "readonly field: whileTrue: 'n' writes should still use maps:put. Got:\n{code}"
         );
     }
 }

@@ -289,19 +289,115 @@ mod tests {
         );
     }
 
+    // ── BT-1326: hybrid direct-params + State threading ──────────────────────
+
     #[test]
-    fn test_to_do_field_plus_local_mutation_keeps_stateacc() {
-        // When both field AND local vars are mutated, must keep StateAcc (field mutations
-        // require it for actor state threading across iterations).
+    fn test_to_do_field_plus_local_mutation_uses_hybrid_params() {
+        // BT-1326: When both field AND local vars are mutated, hybrid mode uses
+        // fun(I, Sum, State) — locals as direct params, State as explicit parameter.
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
-            code.contains("fun (I, StateAcc)"),
-            "mixed mutations: letrec fun must use StateAcc. Got:\n{code}"
+            code.contains("letrec"),
+            "mixed mutations: should generate a letrec. Got:\n{code}"
+        );
+        // Fun signature must be (I, Sum, State), not (I, StateAcc).
+        assert!(
+            code.contains("fun (I, Sum, State)"),
+            "hybrid: letrec fun should have Sum + State as params. Got:\n{code}"
         );
         assert!(
-            code.contains("maps':'get'('__local__sum'"),
-            "mixed mutations: must unpack local sum from StateAcc. Got:\n{code}"
+            !code.contains("fun (I, StateAcc)"),
+            "hybrid: letrec fun must not use StateAcc signature. Got:\n{code}"
+        );
+        // Field mutation must use State (not StateAcc) as the base map.
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "hybrid: body should update 'n' via maps:put. Got:\n{code}"
+        );
+        // No per-iteration maps:get for local sum inside the loop body.
+        // The post-loop extract (maps:get after the loop) is still expected.
+        assert!(
+            code.match_indices("maps':'get'('__local__sum'").count() <= 1,
+            "hybrid: at most one maps:get for local sum (post-loop extract only). Got:\n{code}"
+        );
+        // Exit arm must pack locals back into StateAcc.
+        assert!(
+            code.contains("maps':'put'('__local__sum'"),
+            "hybrid: exit arm must pack sum into ExitSA. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_times_repeat_field_plus_local_mutation_uses_hybrid_params() {
+        // BT-1326: timesRepeat: with both field + local mutations uses hybrid mode.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    3 timesRepeat: [sum := sum + 1. self.n := self.n + 1]\n    self.n := sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("fun (I, Sum, State)"),
+            "timesRepeat: hybrid: letrec fun should have Sum + State as params. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("fun (I, StateAcc)"),
+            "timesRepeat: hybrid: must not use StateAcc signature. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('__local__sum'"),
+            "timesRepeat: hybrid: exit arm must pack sum into ExitSA. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_to_by_do_field_plus_local_mutation_uses_hybrid_params() {
+        // BT-1326: to:by:do: with both field + local mutations uses hybrid mode.
+        let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("fun (I, Sum, State)"),
+            "to:by:do: hybrid: letrec fun should have Sum + State as params. Got:\n{code}"
+        );
+        assert!(
+            !code.contains("fun (I, StateAcc)"),
+            "to:by:do: hybrid: must not use StateAcc signature. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'put'('__local__sum'"),
+            "to:by:do: hybrid: exit arm must pack sum into ExitSA. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_to_do_readonly_field_pre_extracted_as_direct_param() {
+        // BT-1326: When the loop body reads a field that it never writes, that field is
+        // pre-extracted before the letrec and passed as a direct fun parameter.
+        // Body reads self.step (readonly) and writes self.n + local sum (hybrid mode).
+        let src = "Actor subclass: Ctr\n  state: n = 0\n  state: step = 1\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + self.step. self.n := self.n + 1]\n    sum\n";
+        let code = codegen(src);
+        // Hybrid mode triggered (field write for n, local sum).
+        assert!(
+            !code.contains("fun (I, StateAcc)"),
+            "readonly field: must not use StateAcc signature. Got:\n{code}"
+        );
+        // Readonly field pre-extracted before the letrec with maps:get.
+        assert!(
+            code.contains("maps':'get'('step'"),
+            "readonly field: 'step' should be pre-extracted via maps:get. Got:\n{code}"
+        );
+        // The pre-extracted value used as a fun parameter (StepField1 or similar).
+        assert!(
+            code.contains("StepField"),
+            "readonly field: fun should have a StepField param. Got:\n{code}"
+        );
+        // Inside the loop, self.step should NOT generate additional maps:get for 'step'.
+        // The single maps:get is the pre-extraction; body uses the param directly.
+        assert!(
+            code.match_indices("maps':'get'('step'").count() == 1,
+            "readonly field: exactly one maps:get for 'step' (pre-extraction only). Got:\n{code}"
+        );
+        // Mutable field 'n' still uses maps:put for writes.
+        assert!(
+            code.contains("maps':'put'('n'"),
+            "readonly field: 'n' writes should still use maps:put. Got:\n{code}"
         );
     }
 }
