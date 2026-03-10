@@ -45,8 +45,8 @@ Module {
                                     42,
                                 ),
                                 Span {
-                                    start: 246,
-                                    end: 248,
+                                    start: 247,
+                                    end: 249,
                                 },
                             ),
                             preceding_blank_line: false,
@@ -61,8 +61,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 229,
-                        end: 248,
+                        start: 230,
+                        end: 249,
                     },
                 },
             ],
@@ -112,7 +112,7 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 203,
-                end: 248,
+                end: 249,
             },
         },
         ClassDefinition {
@@ -155,8 +155,8 @@ Module {
                                     99,
                                 ),
                                 Span {
-                                    start: 292,
-                                    end: 294,
+                                    start: 293,
+                                    end: 295,
                                 },
                             ),
                             preceding_blank_line: false,
@@ -171,8 +171,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 282,
-                        end: 294,
+                        start: 283,
+                        end: 295,
                     },
                 },
             ],
@@ -185,7 +185,7 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 250,
-                end: 294,
+                end: 295,
             },
         },
         ClassDefinition {
@@ -228,8 +228,8 @@ Module {
                                     99,
                                 ),
                                 Span {
-                                    start: 331,
-                                    end: 333,
+                                    start: 332,
+                                    end: 334,
                                 },
                             ),
                             preceding_blank_line: false,
@@ -244,8 +244,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 321,
-                        end: 333,
+                        start: 322,
+                        end: 334,
                     },
                 },
             ],
@@ -258,7 +258,7 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 296,
-                end: 333,
+                end: 334,
             },
         },
     ],
@@ -266,7 +266,7 @@ Module {
     expressions: [],
     span: Span {
         start: 203,
-        end: 333,
+        end: 334,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

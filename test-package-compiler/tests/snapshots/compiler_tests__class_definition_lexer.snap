@@ -20,10 +20,10 @@ Token { kind: Period, span: Span { start: 181, end: 182 }, leading_trivia: [], t
 Token { kind: Identifier("value"), span: Span { start: 182, end: 187 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: BinarySelector("+"), span: Span { start: 188, end: 189 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
 Token { kind: Integer("1"), span: Span { start: 190, end: 191 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("getValue"), span: Span { start: 194, end: 202 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
-Token { kind: FatArrow, span: Span { start: 203, end: 205 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
-Token { kind: Caret, span: Span { start: 206, end: 207 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("self"), span: Span { start: 207, end: 211 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Period, span: Span { start: 211, end: 212 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Identifier("value"), span: Span { start: 212, end: 217 }, leading_trivia: [], trailing_trivia: [] }
-Token { kind: Eof, span: Span { start: 218, end: 218 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
+Token { kind: Identifier("getValue"), span: Span { start: 195, end: 203 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 204, end: 206 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Caret, span: Span { start: 207, end: 208 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 208, end: 212 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 212, end: 213 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("value"), span: Span { start: 213, end: 218 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 219, end: 219 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

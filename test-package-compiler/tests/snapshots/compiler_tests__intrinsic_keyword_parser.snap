@@ -45,8 +45,8 @@ Module {
                                 is_quoted: false,
                                 is_intrinsic: true,
                                 span: Span {
-                                    start: 241,
-                                    end: 262,
+                                    start: 242,
+                                    end: 263,
                                 },
                             },
                             preceding_blank_line: false,
@@ -61,8 +61,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 227,
-                        end: 262,
+                        start: 228,
+                        end: 263,
                     },
                 },
                 MethodDefinition {
@@ -81,8 +81,8 @@ Module {
                                 is_quoted: true,
                                 is_intrinsic: true,
                                 span: Span {
-                                    start: 273,
-                                    end: 290,
+                                    start: 275,
+                                    end: 292,
                                 },
                             },
                             preceding_blank_line: false,
@@ -97,8 +97,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 265,
-                        end: 290,
+                        start: 267,
+                        end: 292,
                     },
                 },
             ],
@@ -148,7 +148,7 @@ Module {
             doc_comment: None,
             span: Span {
                 start: 204,
-                end: 290,
+                end: 292,
             },
         },
     ],
@@ -156,7 +156,7 @@ Module {
     expressions: [],
     span: Span {
         start: 204,
-        end: 290,
+        end: 292,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

@@ -74,8 +74,8 @@ Module {
                                             Identifier {
                                                 name: "future",
                                                 span: Span {
-                                                    start: 148,
-                                                    end: 154,
+                                                    start: 147,
+                                                    end: 153,
                                                 },
                                             },
                                         ),
@@ -85,13 +85,13 @@ Module {
                                         arguments: [],
                                         is_cast: false,
                                         span: Span {
-                                            start: 148,
-                                            end: 160,
+                                            start: 147,
+                                            end: 159,
                                         },
                                     },
                                     span: Span {
-                                        start: 147,
-                                        end: 160,
+                                        start: 146,
+                                        end: 159,
                                     },
                                 },
                                 preceding_blank_line: false,
@@ -99,13 +99,13 @@ Module {
                         ],
                         span: Span {
                             start: 145,
-                            end: 162,
+                            end: 160,
                         },
                     },
                 ),
                 span: Span {
                     start: 134,
-                    end: 162,
+                    end: 160,
                 },
             },
             preceding_blank_line: false,
@@ -113,7 +113,7 @@ Module {
     ],
     span: Span {
         start: 134,
-        end: 162,
+        end: 160,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

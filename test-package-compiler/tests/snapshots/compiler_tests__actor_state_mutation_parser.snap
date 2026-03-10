@@ -13,8 +13,8 @@ Module {
                     Comment {
                         content: "Copyright 2026 James Casey",
                         span: Span {
-                            start: 256,
-                            end: 261,
+                            start: 255,
+                            end: 260,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -22,8 +22,8 @@ Module {
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
-                            start: 256,
-                            end: 261,
+                            start: 255,
+                            end: 260,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -31,8 +31,8 @@ Module {
                     Comment {
                         content: "Test actor state mutation with proper state threading",
                         span: Span {
-                            start: 256,
-                            end: 261,
+                            start: 255,
+                            end: 260,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -40,8 +40,8 @@ Module {
                     Comment {
                         content: "",
                         span: Span {
-                            start: 256,
-                            end: 261,
+                            start: 255,
+                            end: 260,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -49,8 +49,8 @@ Module {
                     Comment {
                         content: "Each assignment to self.field should update the actor's state,",
                         span: Span {
-                            start: 256,
-                            end: 261,
+                            start: 255,
+                            end: 260,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -58,8 +58,8 @@ Module {
                     Comment {
                         content: "and the updated state should be returned to gen_server.",
                         span: Span {
-                            start: 256,
-                            end: 261,
+                            start: 255,
+                            end: 260,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -72,8 +72,8 @@ Module {
                     Identifier {
                         name: "value",
                         span: Span {
-                            start: 256,
-                            end: 261,
+                            start: 255,
+                            end: 260,
                         },
                     },
                 ),
@@ -82,13 +82,13 @@ Module {
                         0,
                     ),
                     Span {
-                        start: 265,
-                        end: 266,
+                        start: 264,
+                        end: 265,
                     },
                 ),
                 span: Span {
-                    start: 256,
-                    end: 266,
+                    start: 255,
+                    end: 265,
                 },
             },
             preceding_blank_line: false,
@@ -99,8 +99,8 @@ Module {
                     Comment {
                         content: "Single assignment - increments value by 1",
                         span: Span {
-                            start: 314,
-                            end: 323,
+                            start: 312,
+                            end: 321,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -113,8 +113,8 @@ Module {
                     Identifier {
                         name: "increment",
                         span: Span {
-                            start: 314,
-                            end: 323,
+                            start: 312,
+                            end: 321,
                         },
                     },
                 ),
@@ -211,40 +211,40 @@ Module {
                                             Identifier {
                                                 name: "self",
                                                 span: Span {
-                                                    start: 360,
-                                                    end: 364,
+                                                    start: 361,
+                                                    end: 365,
                                                 },
                                             },
                                         ),
                                         field: Identifier {
                                             name: "value",
                                             span: Span {
-                                                start: 365,
-                                                end: 370,
+                                                start: 366,
+                                                end: 371,
                                             },
                                         },
                                         span: Span {
-                                            start: 360,
-                                            end: 370,
+                                            start: 361,
+                                            end: 371,
                                         },
                                     },
                                     span: Span {
-                                        start: 359,
-                                        end: 370,
+                                        start: 360,
+                                        end: 371,
                                     },
                                 },
                                 preceding_blank_line: false,
                             },
                         ],
                         span: Span {
-                            start: 327,
-                            end: 372,
+                            start: 325,
+                            end: 373,
                         },
                     },
                 ),
                 span: Span {
-                    start: 314,
-                    end: 372,
+                    start: 312,
+                    end: 373,
                 },
             },
             preceding_blank_line: true,
@@ -289,26 +289,26 @@ Module {
                                             Identifier {
                                                 name: "self",
                                                 span: Span {
-                                                    start: 425,
-                                                    end: 429,
+                                                    start: 424,
+                                                    end: 428,
                                                 },
                                             },
                                         ),
                                         field: Identifier {
                                             name: "value",
                                             span: Span {
-                                                start: 430,
-                                                end: 435,
+                                                start: 429,
+                                                end: 434,
                                             },
                                         },
                                         span: Span {
-                                            start: 425,
-                                            end: 435,
+                                            start: 424,
+                                            end: 434,
                                         },
                                     },
                                     span: Span {
-                                        start: 424,
-                                        end: 435,
+                                        start: 423,
+                                        end: 434,
                                     },
                                 },
                                 preceding_blank_line: false,
@@ -316,38 +316,38 @@ Module {
                         ],
                         span: Span {
                             start: 422,
-                            end: 437,
+                            end: 435,
                         },
                     },
                 ),
                 span: Span {
                     start: 410,
-                    end: 437,
+                    end: 435,
                 },
             },
             preceding_blank_line: true,
         },
     ],
     span: Span {
-        start: 256,
-        end: 438,
+        start: 255,
+        end: 435,
     },
     file_leading_comments: [],
     file_trailing_comments: [
         Comment {
             content: "Note: Multi-statement blocks with parameters (e.g., [:n | self.value := n. ^self.value])",
             span: Span {
-                start: 680,
-                end: 680,
+                start: 676,
+                end: 676,
             },
             kind: Line,
-            preceding_blank_line: true,
+            preceding_blank_line: false,
         },
         Comment {
             content: "have a known parser limitation tracked for future work. The increment and getValue",
             span: Span {
-                start: 680,
-                end: 680,
+                start: 676,
+                end: 676,
             },
             kind: Line,
             preceding_blank_line: false,
@@ -355,8 +355,8 @@ Module {
         Comment {
             content: "methods above demonstrate state threading works correctly.",
             span: Span {
-                start: 680,
-                end: 680,
+                start: 676,
+                end: 676,
             },
             kind: Line,
             preceding_blank_line: false,

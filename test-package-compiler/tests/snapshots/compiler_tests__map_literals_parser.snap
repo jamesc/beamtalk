@@ -518,8 +518,8 @@ Module {
                                                 "name",
                                             ),
                                             Span {
-                                                start: 490,
-                                                end: 495,
+                                                start: 485,
+                                                end: 490,
                                             },
                                         ),
                                         value: Literal(
@@ -527,13 +527,13 @@ Module {
                                                 "Bob",
                                             ),
                                             Span {
-                                                start: 499,
-                                                end: 504,
+                                                start: 494,
+                                                end: 499,
                                             },
                                         ),
                                         span: Span {
-                                            start: 490,
-                                            end: 504,
+                                            start: 485,
+                                            end: 499,
                                         },
                                     },
                                     MapPair {
@@ -542,8 +542,8 @@ Module {
                                                 "email",
                                             ),
                                             Span {
-                                                start: 510,
-                                                end: 516,
+                                                start: 501,
+                                                end: 507,
                                             },
                                         ),
                                         value: Literal(
@@ -551,24 +551,24 @@ Module {
                                                 "bob@example.com",
                                             ),
                                             Span {
-                                                start: 520,
-                                                end: 537,
+                                                start: 511,
+                                                end: 528,
                                             },
                                         ),
                                         span: Span {
-                                            start: 510,
-                                            end: 537,
+                                            start: 501,
+                                            end: 528,
                                         },
                                     },
                                 ],
                                 span: Span {
                                     start: 483,
-                                    end: 541,
+                                    end: 529,
                                 },
                             },
                             span: Span {
                                 start: 474,
-                                end: 541,
+                                end: 529,
                             },
                         },
                         MapPair {
@@ -577,8 +577,8 @@ Module {
                                     "settings",
                                 ),
                                 Span {
-                                    start: 545,
-                                    end: 554,
+                                    start: 533,
+                                    end: 542,
                                 },
                             ),
                             value: MapLiteral {
@@ -589,8 +589,8 @@ Module {
                                                 "theme",
                                             ),
                                             Span {
-                                                start: 565,
-                                                end: 571,
+                                                start: 548,
+                                                end: 554,
                                             },
                                         ),
                                         value: Literal(
@@ -598,13 +598,13 @@ Module {
                                                 "dark",
                                             ),
                                             Span {
-                                                start: 575,
-                                                end: 581,
+                                                start: 558,
+                                                end: 564,
                                             },
                                         ),
                                         span: Span {
-                                            start: 565,
-                                            end: 581,
+                                            start: 548,
+                                            end: 564,
                                         },
                                     },
                                     MapPair {
@@ -613,8 +613,8 @@ Module {
                                                 "language",
                                             ),
                                             Span {
-                                                start: 587,
-                                                end: 596,
+                                                start: 566,
+                                                end: 575,
                                             },
                                         ),
                                         value: Literal(
@@ -622,35 +622,35 @@ Module {
                                                 "en",
                                             ),
                                             Span {
-                                                start: 600,
-                                                end: 604,
+                                                start: 579,
+                                                end: 583,
                                             },
                                         ),
                                         span: Span {
-                                            start: 587,
-                                            end: 604,
+                                            start: 566,
+                                            end: 583,
                                         },
                                     },
                                 ],
                                 span: Span {
-                                    start: 558,
-                                    end: 608,
+                                    start: 546,
+                                    end: 584,
                                 },
                             },
                             span: Span {
-                                start: 545,
-                                end: 608,
+                                start: 533,
+                                end: 584,
                             },
                         },
                     ],
                     span: Span {
                         start: 469,
-                        end: 610,
+                        end: 586,
                     },
                 },
                 span: Span {
                     start: 461,
-                    end: 610,
+                    end: 586,
                 },
             },
             preceding_blank_line: true,
@@ -661,8 +661,8 @@ Module {
                     Comment {
                         content: "Map with trailing comma",
                         span: Span {
-                            start: 639,
-                            end: 651,
+                            start: 615,
+                            end: 627,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -675,8 +675,8 @@ Module {
                     Identifier {
                         name: "withTrailing",
                         span: Span {
-                            start: 639,
-                            end: 651,
+                            start: 615,
+                            end: 627,
                         },
                     },
                 ),
@@ -688,8 +688,8 @@ Module {
                                     "a",
                                 ),
                                 Span {
-                                    start: 657,
-                                    end: 659,
+                                    start: 633,
+                                    end: 635,
                                 },
                             ),
                             value: Literal(
@@ -697,13 +697,13 @@ Module {
                                     1,
                                 ),
                                 Span {
-                                    start: 663,
-                                    end: 664,
+                                    start: 639,
+                                    end: 640,
                                 },
                             ),
                             span: Span {
-                                start: 657,
-                                end: 664,
+                                start: 633,
+                                end: 640,
                             },
                         },
                         MapPair {
@@ -712,8 +712,8 @@ Module {
                                     "b",
                                 ),
                                 Span {
-                                    start: 666,
-                                    end: 668,
+                                    start: 642,
+                                    end: 644,
                                 },
                             ),
                             value: Literal(
@@ -721,24 +721,24 @@ Module {
                                     2,
                                 ),
                                 Span {
-                                    start: 672,
-                                    end: 673,
+                                    start: 648,
+                                    end: 649,
                                 },
                             ),
                             span: Span {
-                                start: 666,
-                                end: 673,
+                                start: 642,
+                                end: 649,
                             },
                         },
                     ],
                     span: Span {
-                        start: 655,
-                        end: 675,
+                        start: 631,
+                        end: 650,
                     },
                 },
                 span: Span {
-                    start: 639,
-                    end: 675,
+                    start: 615,
+                    end: 650,
                 },
             },
             preceding_blank_line: true,
@@ -749,8 +749,8 @@ Module {
                     Comment {
                         content: "Single entry map",
                         span: Span {
-                            start: 697,
-                            end: 703,
+                            start: 672,
+                            end: 678,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -763,8 +763,8 @@ Module {
                     Identifier {
                         name: "single",
                         span: Span {
-                            start: 697,
-                            end: 703,
+                            start: 672,
+                            end: 678,
                         },
                     },
                 ),
@@ -776,8 +776,8 @@ Module {
                                     "only",
                                 ),
                                 Span {
-                                    start: 709,
-                                    end: 714,
+                                    start: 684,
+                                    end: 689,
                                 },
                             ),
                             value: Literal(
@@ -785,24 +785,24 @@ Module {
                                     "value",
                                 ),
                                 Span {
-                                    start: 718,
-                                    end: 725,
+                                    start: 693,
+                                    end: 700,
                                 },
                             ),
                             span: Span {
-                                start: 709,
-                                end: 725,
+                                start: 684,
+                                end: 700,
                             },
                         },
                     ],
                     span: Span {
-                        start: 707,
-                        end: 726,
+                        start: 682,
+                        end: 701,
                     },
                 },
                 span: Span {
-                    start: 697,
-                    end: 726,
+                    start: 672,
+                    end: 701,
                 },
             },
             preceding_blank_line: true,
@@ -810,7 +810,7 @@ Module {
     ],
     span: Span {
         start: 119,
-        end: 726,
+        end: 701,
     },
     file_leading_comments: [],
     file_trailing_comments: [],
